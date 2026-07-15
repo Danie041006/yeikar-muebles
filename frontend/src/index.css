@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply font-body bg-yeikar-tertiary text-yeikar-neutral min-h-screen;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-headline;
+  }
+}
+
+@media print {
+  /* Hide sidebar, navbar, and other UI buttons during print */
+  aside,
+  nav,
+  header,
+  button,
+  .print-hidden,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Reset layout structure to prevent clipping or horizontal scroll on paper */
+  body, html, #root {
+    background-color: white !important;
+    background-image: none !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: auto !important;
+    width: 100% !important;
+    overflow: visible !important;
+  }
+
+  /* Override flex layouts of main wrappers */
+  .flex, .flex-col, main, .max-w-7xl {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: none !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Force background graphics (like watermark logo and gray headers) to print */
+  .print-color-adjust {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Show only the printable section */
+  .print-only {
+    display: block !important;
+  }
+
+  @page {
+    size: letter;
+    margin: 12mm 15mm;
+  }
+}
+

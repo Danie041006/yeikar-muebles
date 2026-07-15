@@ -1,0 +1,136 @@
+﻿id,nombre,abreviatura,observaciones
+1,LITRO,LITRO,derivado_de_excel; frecuencia=337
+2,Unidades,unidades,derivado_de_excel; frecuencia=322
+3,UNIDADES,UNIDADES,derivado_de_excel; frecuencia=300
+4,METROS,METROS,derivado_de_excel; frecuencia=286
+5,UNIDAD,UNIDAD,derivado_de_excel; frecuencia=286
+6,PISTOLADA,PISTOLADA,derivado_de_excel; frecuencia=279
+7,CON EL 5%,CON EL 5%,derivado_de_excel; frecuencia=270
+8,Unidad,Unidad,derivado_de_excel; frecuencia=249
+9,LAMINA,LAMINA,derivado_de_excel; frecuencia=239
+10,PAR,PAR,derivado_de_excel; frecuencia=230
+11,Unidad,unidad,derivado_de_excel; frecuencia=215
+12,Galon,galon,derivado_de_excel; frecuencia=192
+13,PISTOLADAS,PISTOLADAS,derivado_de_excel; frecuencia=145
+14,TIRA,TIRA,derivado_de_excel; frecuencia=114
+15,GALON,GALON,derivado_de_excel; frecuencia=105
+16,APAMATE,APAMATE,derivado_de_excel; frecuencia=84
+17,CAJA,CAJA,derivado_de_excel; frecuencia=67
+18,CAJA DE GRAPAS,CAJA DE GR,derivado_de_excel; frecuencia=61
+19,TIRAS,TIRAS,derivado_de_excel; frecuencia=57
+20,Litro,litro,derivado_de_excel; frecuencia=57
+21,Litros,litros,derivado_de_excel; frecuencia=52
+22,ML,ML,derivado_de_excel; frecuencia=48
+23,MTS,MTS,derivado_de_excel; frecuencia=45
+24,"1 PEDASO DE 1,50X40=60",1 PEDASO D,derivado_de_excel; frecuencia=43
+25,JALADORES,JALADORES,derivado_de_excel; frecuencia=43
+26,LITROS,LITROS,derivado_de_excel; frecuencia=39
+27,CMS,CMS,derivado_de_excel; frecuencia=37
+28,MANO DE OBRA=,MANO DE OB,derivado_de_excel; frecuencia=34
+29,UNIIDAD,UNIIDAD,derivado_de_excel; frecuencia=24
+30,* UNIDADES,* UNIDADES,derivado_de_excel; frecuencia=23
+31,CM,CM,derivado_de_excel; frecuencia=23
+32,1 PEDAZO DE 1.00X46=46,1 PEDAZO D,derivado_de_excel; frecuencia=22
+33,"2,10X22X18= 832 2,10X20X15=630","2,10X22X18",derivado_de_excel; frecuencia=22
+34,ROLLO,ROLLO,derivado_de_excel; frecuencia=22
+35,1 PEDASO DE 1.50X40=60,1 PEDASO D,derivado_de_excel; frecuencia=21
+36,"1 PEDASO DE 1.25 X55=68,75",1 PEDASO D,derivado_de_excel; frecuencia=20
+37,"1 PEDAZO DE 1,20X45=54",1 PEDAZO D,derivado_de_excel; frecuencia=20
+38,CAMA,CAMA,derivado_de_excel; frecuencia=20
+39,DE 2X2,DE 2X2,derivado_de_excel; frecuencia=18
+40,METRO,METRO,derivado_de_excel; frecuencia=16
+41,*5%,*5%,derivado_de_excel; frecuencia=15
+42,UNITARIO,UNITARIO,derivado_de_excel; frecuencia=15
+43,* METRO,* METRO,derivado_de_excel; frecuencia=13
+44,2X25X15,2X25X15,derivado_de_excel; frecuencia=13
+45,3 PEASOS DE 49X49,3 PEASOS D,derivado_de_excel; frecuencia=13
+46,DE CIERRELENTO,DE CIERREL,derivado_de_excel; frecuencia=13
+47,KG,KG,derivado_de_excel; frecuencia=13
+48,CAJAS,CAJAS,derivado_de_excel; frecuencia=10
+49,LAMINAS,LAMINAS,derivado_de_excel; frecuencia=10
+50,PARES,PARES,derivado_de_excel; frecuencia=10
+51,* 5%,* 5%,derivado_de_excel; frecuencia=9
+52,PEOPLE,PEOPLE,derivado_de_excel; frecuencia=9
+53,UNIDAD 0,UNIDAD 0,derivado_de_excel; frecuencia=9
+54,TATI,TATI,derivado_de_excel; frecuencia=8
+55,* LITRO,* LITRO,derivado_de_excel; frecuencia=7
+56,16.0,16.0,derivado_de_excel; frecuencia=7
+57,187 CENTIMETROS,187 CENTIM,derivado_de_excel; frecuencia=6
+58,TIRA F30,TIRA F30,derivado_de_excel; frecuencia=6
+59,UNITARIOS,UNITARIOS,derivado_de_excel; frecuencia=6
+60,2X7X5+1X7X5=105,2X7X5+1X7X,derivado_de_excel; frecuencia=5
+61,50*80,50*80,derivado_de_excel; frecuencia=5
+62,KILO,KILO,derivado_de_excel; frecuencia=5
+63,KILOS,KILOS,derivado_de_excel; frecuencia=5
+64,MANO DE OBRA,MANO DE OB,derivado_de_excel; frecuencia=5
+65,"2,50*20*2,5","2,50*20*2,",derivado_de_excel; frecuencia=4
+66,"3*20*2,5","3*20*2,5",derivado_de_excel; frecuencia=4
+67,"3*30*2,5","3*30*2,5",derivado_de_excel; frecuencia=4
+68,AZUL,AZUL,derivado_de_excel; frecuencia=4
+69,3*31*25,3*31*25,derivado_de_excel; frecuencia=3
+70,LUIS ALFONSO,LUIS ALFON,derivado_de_excel; frecuencia=3
+71,TIRA F40,TIRA F40,derivado_de_excel; frecuencia=3
+72,1 PEDAZO 166X40=66.4,1 PEDAZO 1,derivado_de_excel; frecuencia=2
+73,1 PEDAZO 190X75=14250,1 PEDAZO 1,derivado_de_excel; frecuencia=2
+74,1 PEDAZO 45X50=2250,1 PEDAZO 4,derivado_de_excel; frecuencia=2
+75,1 PEDAZO 50X45=2250,1 PEDAZO 5,derivado_de_excel; frecuencia=2
+76,1 PEDAZO 90X120,1 PEDAZO 9,derivado_de_excel; frecuencia=2
+77,1 PEDAZO DE 2X1=2,1 PEDAZO D,derivado_de_excel; frecuencia=2
+78,"29*2,5*2","29*2,5*2",derivado_de_excel; frecuencia=2
+79,3*21*25,3*21*25,derivado_de_excel; frecuencia=2
+80,"30*2,5*3","30*2,5*3",derivado_de_excel; frecuencia=2
+81,30X30X2.5,30X30X2.5,derivado_de_excel; frecuencia=2
+82,6 PEDASOS DE 49X49,6 PEDASOS ,derivado_de_excel; frecuencia=2
+83,CON EL 5% CHAPERAS,CON EL 5% ,derivado_de_excel; frecuencia=2
+84,LAMINA ( 55*56),LAMINA ( 5,derivado_de_excel; frecuencia=2
+85,MDF,MDF,derivado_de_excel; frecuencia=2
+86,MELAMINA FLORMORADO,MELAMINA F,derivado_de_excel; frecuencia=2
+87,PATAS,PATAS,derivado_de_excel; frecuencia=2
+88,RETAL,RETAL,derivado_de_excel; frecuencia=2
+89,ROSADA,ROSADA,derivado_de_excel; frecuencia=2
+90,TIRA F15,TIRA F15,derivado_de_excel; frecuencia=2
+91,TIRA F50,TIRA F50,derivado_de_excel; frecuencia=2
+92,TIRAS DE 1.20 X 1,TIRAS DE 1,derivado_de_excel; frecuencia=2
+93,"TIRASDE 51X1,21",TIRASDE 51,derivado_de_excel; frecuencia=2
+94,UNI,UNI,derivado_de_excel; frecuencia=2
+95,UNIDAD DE 6,UNIDAD DE ,derivado_de_excel; frecuencia=2
+96,Unidad Bastidores,Unidad BAS,derivado_de_excel; frecuencia=2
+97,Metros,metros,derivado_de_excel; frecuencia=2
+98,*8%,*8%,derivado_de_excel; frecuencia=1
+99,"0,30X 1,90 DE MDF DE 3","0,30X 1,90",derivado_de_excel; frecuencia=1
+100,"0,90*2,44","0,90*2,44",derivado_de_excel; frecuencia=1
+101,0.05,0.05,derivado_de_excel; frecuencia=1
+102,1 PEDASO DE 1.80X40=72,1 PEDASO D,derivado_de_excel; frecuencia=1
+103,"1 PEDASO DE 100*2,24",1 PEDASO D,derivado_de_excel; frecuencia=1
+104,"1 PEDASO DE 15X0,80X1,83",1 PEDASO D,derivado_de_excel; frecuencia=1
+105,1 PEDASO DE 2.44X40=97.6,1 PEDASO D,derivado_de_excel; frecuencia=1
+106,1 PEDASO DE 50X50=2.500,1 PEDASO D,derivado_de_excel; frecuencia=1
+107,1 PEDAZO 1.50X80=120,1 PEDAZO 1,derivado_de_excel; frecuencia=1
+108,1 PEDAZO 1.90X1=19,1 PEDAZO 1,derivado_de_excel; frecuencia=1
+109,1 PEDAZO 140X190=26600,1 PEDAZO 1,derivado_de_excel; frecuencia=1
+110,1 PEDAZO 140X60=8400,1 PEDAZO 1,derivado_de_excel; frecuencia=1
+111,1 PEDAZO 60X240=144,1 PEDAZO 6,derivado_de_excel; frecuencia=1
+112,"1 PEDAZO DE 0,40*1,80",1 PEDAZO D,derivado_de_excel; frecuencia=1
+113,"1 PEDAZO DE 2,7X 1,83",1 PEDAZO D,derivado_de_excel; frecuencia=1
+114,1 PEDAZO DE 75X183=13725,1 PEDAZO D,derivado_de_excel; frecuencia=1
+115,1 PEDAZO DE 80X40=3.200,1 PEDAZO D,derivado_de_excel; frecuencia=1
+116,1 X 1,1 X 1,derivado_de_excel; frecuencia=1
+117,"2,10X21X25","2,10x21x25",derivado_de_excel; frecuencia=1
+118,"2,60*22*2,5","2,60*22*2,",derivado_de_excel; frecuencia=1
+119,"3*31*2,5","3*31*2,5",derivado_de_excel; frecuencia=1
+120,"30*31*2,5","30*31*2,5",derivado_de_excel; frecuencia=1
+121,"4 PEDASOS DE 38X0,45",4 PEDASOS ,derivado_de_excel; frecuencia=1
+122,DANIEL,DANIEL,derivado_de_excel; frecuencia=1
+123,DE 19,DE 19,derivado_de_excel; frecuencia=1
+124,DE 40,DE 40,derivado_de_excel; frecuencia=1
+125,DE 80*50,DE 80*50,derivado_de_excel; frecuencia=1
+126,JOTA LAMPARAS,JOTA LAMPA,derivado_de_excel; frecuencia=1
+127,JUEGO DE 4,JUEGO DE 4,derivado_de_excel; frecuencia=1
+128,LITRS,LITRS,derivado_de_excel; frecuencia=1
+129,MANO DE OBRA= TATI,MANO DE OB,derivado_de_excel; frecuencia=1
+130,MULTIUSOS,MULTIUSOS,derivado_de_excel; frecuencia=1
+131,"PEDASO DE 1.20 X 0,40",PEDASO DE ,derivado_de_excel; frecuencia=1
+132,PISTOLADAML,PISTOLADAM,derivado_de_excel; frecuencia=1
+133,TOMAS,TOMAS,derivado_de_excel; frecuencia=1
+134,UN POQUITO,UN POQUITO,derivado_de_excel; frecuencia=1
+135,Tablas,tablas,derivado_de_excel; frecuencia=1
