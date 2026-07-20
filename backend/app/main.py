@@ -20,6 +20,7 @@ from app.modules.purchases.router import router as compras_router
 from app.modules.reports.router import router as reportes_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.envios.router import router as envios_router
+from app.modules.quotes.intelligent_router import router as iqe_router
 app = FastAPI(title="YEIKAR API", version="0.0.1")
 origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
 app.add_middleware(
@@ -50,3 +51,4 @@ app.include_router(compras_router, prefix="/api/v1", tags=["compras"])
 app.include_router(reportes_router, prefix="/api/v1", tags=["reportes"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
 app.include_router(envios_router, prefix="/api/v1/envio", tags=["envios"])
+app.include_router(iqe_router, prefix="/api/v1/intelligent-quotation", tags=["cotización inteligente"])

@@ -128,7 +128,29 @@ export default function Productos() {
           pct_gastos: parseFloat(simGastos),
         },
       });
-      setPrecioSimulado(res.data);
+      
+      // Adaptar respuesta del backend al esquema PrecioSimulado del frontend
+      const data = res.data;
+      const costo_material = data.costo_materiales !== undefined ? data.costo_materiales : 0;
+      const costo_mano_obra = data.costo_mano_obra !== undefined ? data.costo_mano_obra : 0;
+      const costo_gastos = data.costo_gastos !== undefined ? data.costo_gastos : 0;
+      const costo_total = data.costo_total !== undefined ? data.costo_total : 0;
+      const precio_venta = data.precio_venta !== undefined ? data.precio_venta : 0;
+      
+      setPrecioSimulado({
+        costo_material,
+        costo_mano_obra,
+        costo_gastos,
+        costo_total,
+        precio_venta,
+        ganancia_monto: precio_venta - costo_total,
+        detalle: (data.materiales || []).map((m: any) => ({
+          nombre: m.nombre || m.material_nombre || "",
+          cantidad: m.cantidad_calculada || 0,
+          costo_unitario: m.costo_unitario || 0,
+          subtotal: m.costo_subtotal || 0
+        }))
+      });
     } catch (error) {
       console.error('Error simulating price:', error);
       alert('Error al calcular el precio. Verifique que el producto tenga materiales en la receta.');

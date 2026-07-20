@@ -20,7 +20,12 @@ class Producto(Base):
     ancho_base      = Column(Numeric(10, 2), default=1.60, nullable=True)
     largo_base      = Column(Numeric(10, 2), default=1.90, nullable=True)
     alto_base       = Column(Numeric(10, 2), nullable=True)
-    # -------------------------------------------------
+    # --- Precio fijo importado del Excel (estructura de costos) ---
+    precio_costo_base   = Column(Numeric(15, 2), nullable=True)   # TOTAL COSTO DE PRODUCCIÓN del Excel
+    precio_venta_base   = Column(Numeric(15, 2), nullable=True)   # Precio de Venta sin IVA (con ganancia)
+    precio_venta_con_iva= Column(Numeric(15, 2), nullable=True)   # Total a Pagar (con IVA 16%)
+    hoja_excel          = Column(String(150), nullable=True)       # Nombre de la hoja fuente en el Excel
+    # --------------------------------------------------------------
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, onupdate=func.now())
 
@@ -86,3 +91,72 @@ class ProductoMaterial(Base):
 
     producto  = relationship("Producto", back_populates="materiales")
     material  = relationship("Material")
+
+
+class CamaHistoricaAtributos(Base):
+    """
+    DEPRECATED: Tabla original solo para camas.
+    Mantenida para compatibilidad con los 63 registros históricos importados.
+    Para nuevos productos de CUALQUIER tipo, usar MuebleAtributos.
+    """
+    __tablename__ = "cama_historica_atributos"
+
+    id                  = Column(BigInteger, primary_key=True, index=True)
+    producto_id         = Column(BigInteger, ForeignKey("producto.id", ondelete="CASCADE"), unique=True, nullable=False)
+    tiene_tapiceria     = Column(Boolean, default=False, nullable=False)
+    tiene_nocheros      = Column(Boolean, default=False, nullable=False)
+    tiene_espejo        = Column(Boolean, default=False, nullable=False)
+    tiene_luces         = Column(Boolean, default=False, nullable=False)
+    tipo_patas          = Column(String(50), nullable=True)
+    estilo_general      = Column(String(50), nullable=True)
+    vector_similitud    = Column(JSON, nullable=True)
+
+    producto = relationship("Producto")
+
+
+class MuebleAtributos(Base):
+    """
+    Tabla GENÉRICA de atributos para CUALQUIER tipo de mueble.
+
+    Reemplaza a CamaHistoricaAtributos para todos los tipos nuevos.
+    Usa tres campos JSON para máxima flexibilidad:
+      - atributos_comunes : campos que aplican a cualquier mueble
+      - atributos_extra   : campos específicos del tipo (nocheros para camas,
+                            cantidad_puertas para closets, etc.)
+      - vector_similitud  : vector numérico de 8 posiciones para cosine similarity
+
+    Cómo se usa:
+      1. Cuando se importa un producto histórico (de cualquier tipo), se crea
+         un registro aquí con sus atributos y su vector.
+      2. El motor de similitud consulta esta tabla para encontrar el Top N.
+      3. Si el usuario valida un análisis de imagen, los atributos confirmados
+         se guardan también aquí para enriquecer el histórico.
+    """
+    __tablename__ = "mueble_atributos"
+
+    id                  = Column(BigInteger, primary_key=True, index=True)
+    producto_id         = Column(BigInteger, ForeignKey("producto.id", ondelete="CASCADE"), unique=True, nullable=False)
+    tipo_mueble         = Column(String(50), nullable=False, index=True)   # cama, closet, comedor...
+    familia_probable    = Column(String(50), nullable=True)
+    estilo_general      = Column(String(50), nullable=True)
+    tipo_patas          = Column(String(50), nullable=True)
+    tiene_tapiceria     = Column(Boolean, default=False, nullable=False)
+    tiene_luces         = Column(Boolean, default=False, nullable=False)
+    atributos_extra     = Column(JSON, nullable=True)   # {tiene_nocheros, tiene_espejo, ...}
+    vector_similitud    = Column(JSON, nullable=True)   # [float x 8]
+    created_at          = Column(DateTime, server_default=func.now())
+    updated_at          = Column(DateTime, onupdate=func.now())
+
+    producto = relationship("Producto")
+
+
+class MaterialSinonimo(Base):
+    __tablename__ = "material_sinonimo"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    material_id = Column(BigInteger, ForeignKey("material.id", ondelete="CASCADE"), nullable=False)
+    sinonimo    = Column(String(150), unique=True, nullable=False)
+    created_at  = Column(DateTime, server_default=func.now())
+
+    material = relationship("Material")
+

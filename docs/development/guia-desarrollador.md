@@ -1742,6 +1742,269 @@ cd backend
 | Jul 2026 | —       | Panel de Gestión de Usuarios y Roles (`/usuarios`)           |
 | Jul 2026 | —       | API de administración de usuarios (CRUD + roles)             |
 | Jul 2026 | —       | Suite de pruebas de integración (19 tests)                   |
+| Jul 2026 | —       | Motor de Cotización Inteligente (IQE) — MVP                  |
+
+---
+
+## 🤖 Motor de Cotización Inteligente (IQE)
+
+> **Módulo:** `backend/app/modules/quotes/intelligent_*`  
+> **Estado:** MVP funcional (Jul 2026)  
+> **Objetivo:** Reducir el tiempo de cotización de 1-3 días a 10-30 minutos.
+
+### Filosofía del sistema
+
+```
+La IA interpreta.   →   El ERP calcula.   →   El vendedor decide.
+```
+
+**La IA NUNCA calcula costos, cantidades, IVA ni márgenes.**  
+Solo extrae atributos visuales del mueble y devuelve un JSON estricto.  
+Todo cálculo financiero lo sigue haciendo `cost_service.py` con precios del inventario actual.
+
+---
+
+### Flujo completo
+
+```
+1. Vendedor sube foto del mueble
+          ↓
+2. VisionProvider (GPT-4o) → analiza imagen → devuelve JSON de atributos
+          ↓
+3. PAUSA OBLIGATORIA: vendedor revisa y confirma/corrige atributos
+          ↓
+4. SimilarityEngine (Python puro) → cosine similarity → Top 3 camas históricas
+          ↓
+5. Vendedor selecciona la más parecida
+          ↓
+6. cost_service.py → escala cantidades → precios del inventario actual → borrador editable
+          ↓
+7. Vendedor ajusta cantidades/opcionales → recálculo en tiempo real
+          ↓
+8. Genera cotización final
+```
+
+---
+
+### Estructura de archivos del módulo
+
+```
+backend/app/modules/quotes/
+├── vision_provider.py          ← Interfaz abstracta VisionProvider + FurnitureAttributes (GENÉRICO)
+├── gpt_vision_provider.py      ← Implementación concreta con OpenAI GPT-4o
+├── similarity_engine.py        ← Motor de similitud coseno para CUALQUIER tipo de mueble
+├── intelligent_schemas.py      ← Schemas Pydantic de entrada/salida del IQE
+├── intelligent_router.py       ← 5 endpoints FastAPI del IQE
+├── prompts/
+│   └── vision_prompt.md        ← System prompt (editable sin tocar código, soporta todos los tipos)
+│
+│── model.py                    ← Modelos existentes + CotizacionAnalisisIA + CotizacionDetalleMaterial
+backend/app/modules/productos/
+│── model.py                    ← Modelos existentes + CamaHistoricaAtributos (legacy) + MuebleAtributos (genérico) + MaterialSinonimo
+backend/scripts/
+├── importar_atributos_historicos.py   ← Clasifica las 63 camas históricas (legacy, solo camas)
+├── importar_sinonimos_materiales.py   ← Carga sinónimos de materiales
+```
+
+---
+
+### Tablas de base de datos creadas
+
+| Tabla | Propósito |
+|---|---|
+| `cama_historica_atributos` | **LEGACY**: 63 camas históricas importadas. Solo camas. Mantenida por compatibilidad. |
+| `mueble_atributos` | **GENÉRICA**: Atributos para CUALQUIER tipo de mueble. Nueva tabla desde Jul 2026. |
+| `cotizacion_analisis_ia` | Registro de cada análisis de imagen (trazabilidad completa) |
+| `material_sinonimo` | Normalización del catálogo: mapea variantes de nombres al material canónico |
+| `cotizacion_detalle_material` | Receta editable por cotización (editar cantidades sin tocar receta maestra) |
+
+Migraciones aplicadas:
+- `530ad3bcdb72_intelligent_quotes.py` — tablas originales
+- `a1b2c3d4e5f6_add_mueble_atributos.py` — tabla genérica (Jul 2026)
+
+---
+
+### Endpoints disponibles
+
+| Método | Ruta | Propósito |
+|---|---|---|
+| `GET` | `/api/v1/intelligent-quotation/health` | Estado del módulo y configuración activa |
+| `POST` | `/api/v1/intelligent-quotation/analyze-image` | Sube imagen → extrae atributos con IA |
+| `POST` | `/api/v1/intelligent-quotation/find-similar` | Atributos validados → Top 3 estructuras similares |
+| `POST` | `/api/v1/intelligent-quotation/create-draft` | Estructura seleccionada → borrador editable con costos actuales |
+| `POST` | `/api/v1/intelligent-quotation/recalculate` | Borrador modificado → recálculo instantáneo |
+
+---
+
+### Configuración de entorno (.env)
+
+```bash
+# Motor de Cotización Inteligente (IQE)
+OPENAI_API_KEY=sk-...           # API Key de OpenAI
+OPENAI_VISION_MODEL=gpt-4o      # Modelo de visión (gpt-4o, gpt-4o-mini, etc.)
+IQE_VISION_PROVIDER=gpt         # 'gpt' | 'gemini' (desacoplado por diseño)
+IQE_CONFIANZA_MINIMA=0.70       # Si la IA tiene < 70% confianza, se pide revisión humana
+```
+
+> [!IMPORTANT]
+> Nunca poner la `OPENAI_API_KEY` real en el `.env.example` ni en Git.  
+> El `.env` está en `.gitignore`. Usar el `.env.example` como plantilla.
+
+---
+
+### Cambiar el proveedor de IA
+
+El sistema está completamente desacoplado del proveedor. Para cambiar de GPT a Gemini:
+
+1. Cambiar en el `.env`:
+   ```
+   IQE_VISION_PROVIDER=gemini
+   ```
+2. Implementar `GeminiVisionProvider(VisionProvider)` en `gemini_vision_provider.py`.
+3. Registrarlo en `_get_vision_provider()` de `intelligent_router.py`.
+
+El ERP, la base de datos y el motor de costeo no se tocan.
+
+---
+
+### Cómo el motor de similitud decide el Top 3
+
+Cada cama histórica se representa como un vector de 6 dimensiones:
+
+```python
+[tapiceria, nocheros, espejo, luces, patas, estilo]
+# Ejemplo: cama tapizada moderna con nocheros, sin espejo, sin luces, patas madera:
+[1.0, 1.0, 0.0, 0.0, 0.5, 0.0]
+```
+
+El score es la **similitud de coseno** entre el vector del mueble nuevo y cada histórico.  
+No usa IA. No usa embeddings. Solo matemáticas básicas → resultado en milisegundos.
+
+Si el score más alto es `< 0.40`, el sistema muestra de todas formas las más cercanas y marca la cotización como **"estructura nueva"** para que el vendedor construya la receta manualmente.
+
+---
+
+### Scripts de datos
+
+#### Poblar atributos históricos
+
+```bash
+cd backend
+venv/bin/python3 scripts/importar_atributos_historicos.py
+```
+
+Clasifica automáticamente las camas existentes en la BD usando sus materiales y nombre.  
+**Debe correr cada vez que se importan nuevas camas.**
+
+#### Poblar sinónimos de materiales
+
+```bash
+cd backend
+venv/bin/python3 scripts/importar_sinonimos_materiales.py
+```
+
+Carga las variantes de nombres de materiales (ej. "MDF DE 9", "LAM MDF 9", "lamina de 9 mdf" → mismo material canónico).  
+**Agregar nuevas variantes directamente en el script antes de correrlo.**
+
+---
+
+### Reglas de negocio del IQE
+
+| Regla | Descripción |
+|---|---|
+| **R-001** | La IA no puede calcular precios ni cantidades. Nunca. |
+| **R-002** | Si `nivel_confianza < 0.70`, el sistema pide revisión humana obligatoria. |
+| **R-003** | Los precios históricos son ignorados. Solo se reutiliza la receta (materiales + tipo_escala). |
+| **R-004** | El vendedor puede desactivar materiales opcionales (tapicería, gavetas, luces) sin eliminar la receta. |
+| **R-005** | Si ninguna estructura supera 40% de similitud, se muestran las más cercanas igual y se registra como "estructura nueva". |
+| **R-006** | Cada análisis de imagen queda guardado en `cotizacion_analisis_ia` para auditoría. |
+
+---
+
+### Tipos de mueble soportados
+
+El sistema soporta análisis y cotización de CUALQUIER mueble que fabrica YEIKAR:
+
+| tipo_mueble | Descripción | Histórico disponible |
+|---|---|---|
+| `cama` | Camas de todos los tamaños y estilos | ✅ 63 registros |
+| `nochero` | Mesas de noche | ⬜ Agregar con script |
+| `closet` | Closets y roperos | ⬜ Agregar con script |
+| `tocador` | Tocadores | ⬜ Agregar con script |
+| `armario` | Armarios y alacenas | ⬜ Agregar con script |
+| `sala` | Juegos de sala | ⬜ Agregar con script |
+| `comedor` | Juegos de comedor | ⬜ Agregar con script |
+| `escritorio` | Escritorios y estaciones de trabajo | ⬜ Agregar con script |
+| `rack_tv` | Muebles para TV / rack | ⬜ Agregar con script |
+| `libreria` | Librerías y estanterías | ⬜ Agregar con script |
+| `mueble_bano` | Muebles de baño | ⬜ Agregar con script |
+| `otro` | Cualquier mueble no clasificado | ⬜ |
+
+> [!IMPORTANT]
+> Para los tipos sin histórico, cuando el vendedor busca similares el sistema responde
+> `hay_resultados: false` y el mensaje explica que debe construir la receta manualmente.
+> Esto es el comportamiento correcto y esperado.
+
+---
+
+### Cómo agregar históricos de un nuevo tipo de mueble
+
+Cuando YEIKAR tenga productos de otro tipo (ej. closets) en la BD con sus recetas definidas:
+
+```bash
+cd backend
+venv/bin/python3 -c "
+from app.db.session import session_local
+from app.modules.productos.model import Producto, MuebleAtributos
+from app.modules.quotes.vision_provider import FurnitureAttributes
+
+db = session_local()
+closets = db.query(Producto).join(Producto.tipo_producto).filter(...).all()
+
+for prod in closets:
+    attrs = FurnitureAttributes(
+        tipo_mueble='closet',
+        familia_probable='melamina',
+        estilo_general='moderno',
+        tipo_patas='sin_patas',
+        tiene_tapiceria=False,
+        tiene_luces=False,
+        atributos_extra={'tiene_espejo': False, 'tiene_cajones': True},
+        nivel_confianza=1.0,
+        observaciones=None,
+    )
+    row = MuebleAtributos(
+        producto_id=prod.id,
+        tipo_mueble='closet',
+        familia_probable=attrs.familia_probable,
+        estilo_general=attrs.estilo_general,
+        tipo_patas=attrs.tipo_patas,
+        tiene_tapiceria=attrs.tiene_tapiceria,
+        tiene_luces=attrs.tiene_luces,
+        atributos_extra=attrs.atributos_extra,
+        vector_similitud=attrs.to_vector(),
+    )
+    db.add(row)
+
+db.commit()
+print('Closets cargados exitosamente')
+"
+```
+
+---
+
+### Próximas fases del IQE
+
+| Fase | Contenido | Estado |
+|---|---|---|
+| **Fase 1-5 (MVP)** | Análisis imagen + similitud + borrador editable + recálculo + persistencia | ✅ Completado |
+| **Generalización** | Soporte para cualquier tipo de mueble (closets, comedores, salas...) | ✅ Completado |
+| **Fase siguiente** | Script de importación masiva para nuevos tipos de mueble | ⬜ Pendiente |
+| **Fase siguiente** | WhatsApp Business API integration | ⬜ Requiere cuenta aprobada |
+| **Fase siguiente** | GeminiVisionProvider + benchmark GPT vs Gemini | ⬜ Requiere 300+ cotizaciones |
+| **Futuro** | Modelo propio fine-tuned con muebles de YEIKAR | ⬜ Requiere 500+ imágenes |
+
+
 
 
 

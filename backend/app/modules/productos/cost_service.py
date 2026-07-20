@@ -30,15 +30,14 @@ from app.modules.productos.model import Producto, ProductoMaterial, Material
 # Utilidades internas
 # ---------------------------------------------------------------------------
 
-def _evaluar_condicion(condicion: dict, nuevo_ancho: Decimal, nuevo_largo: Decimal) -> bool:
+def _evaluar_condicion(condicion: dict, nuevo_ancho: Decimal, nuevo_largo: Decimal, atributos: dict = None) -> bool:
     """
     Evalúa una condición de activación de la forma:
         {"campo": "nuevo_largo", "op": ">", "valor": 2.0}
-    Campos admitidos: "nuevo_largo", "nuevo_ancho"
-    Operadores admitidos: ">", ">=", "<", "<=", "==", "!="
-
+    O de tipo lógico:
+        {"campo": "tiene_tapiceria", "op": "==", "valor": true}
+    
     Retorna True si el material debe incluirse, False si debe omitirse.
-    Si la condición está mal formada, incluye el material (fail-open para no silenciar datos).
     """
     if not condicion or not isinstance(condicion, dict):
         return True
@@ -48,16 +47,34 @@ def _evaluar_condicion(condicion: dict, nuevo_ancho: Decimal, nuevo_largo: Decim
     valor_referencia = condicion.get("valor")
 
     if campo is None or operador is None or valor_referencia is None:
-        return True  # condición mal formada → incluir
-
-    valor_referencia = Decimal(str(valor_referencia))
+        return True
 
     if campo == "nuevo_largo":
         valor_actual = nuevo_largo
+        valor_referencia = Decimal(str(valor_referencia))
     elif campo == "nuevo_ancho":
         valor_actual = nuevo_ancho
+        valor_referencia = Decimal(str(valor_referencia))
     else:
-        return True  # campo desconocido → incluir
+        # Evaluar contra atributos adicionales (ej. tiene_tapiceria, tiene_nocheros)
+        if atributos is None:
+            return True  # Sin atributos -> incluir para no silenciar
+        if campo not in atributos:
+            return True  # No especificado -> incluir
+        
+        valor_actual = atributos[campo]
+        if isinstance(valor_actual, bool):
+            # Normalizar valor de referencia si es booleano
+            if isinstance(valor_referencia, str):
+                valor_referencia = valor_referencia.lower() in ("true", "1", "yes")
+            else:
+                valor_referencia = bool(valor_referencia)
+        elif isinstance(valor_actual, (int, float, Decimal)):
+            valor_actual = Decimal(str(valor_actual))
+            valor_referencia = Decimal(str(valor_referencia))
+        else:
+            valor_actual = str(valor_actual)
+            valor_referencia = str(valor_referencia)
 
     ops = {
         ">":  valor_actual >  valor_referencia,
@@ -112,25 +129,11 @@ def calcular_costo_producto(
     iva_porcentaje: Decimal = Decimal("0"),        # En Colombia el IVA de muebles es 0% por defecto
     pct_mano_obra: Decimal = Decimal("15"),
     pct_gastos: Decimal = Decimal("10"),
+    atributos: dict = None,
 ) -> dict:
     """
     Calcula el costo total y el precio de venta sugerido para un producto
-    con dimensiones personalizadas.
-
-    Parámetros
-    ----------
-    db                  : Sesión de SQLAlchemy
-    producto_id         : ID del producto en la tabla `producto`
-    nuevo_ancho         : Ancho deseado en metros
-    nuevo_largo         : Largo deseado en metros
-    ganancia_porcentaje : Porcentaje de ganancia sobre el costo de producción (ej. 40 → 40%)
-    iva_porcentaje      : Porcentaje de IVA (ej. 19 → 19%)
-    pct_mano_obra       : Porcentaje de mano de obra sobre el costo de materiales
-    pct_gastos          : Porcentaje de gastos indirectos sobre el costo de materiales
-
-    Retorna
-    -------
-    dict con el desglose completo: materiales, costos parciales y precio de venta.
+    con dimensiones y atributos lógicos personalizados.
     """
     # --- 1. Cargar producto --------------------------------------------------
     producto = db.query(Producto).filter(Producto.id == producto_id).first()
@@ -141,6 +144,156 @@ def calcular_costo_producto(
     largo_base = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
     area_base  = ancho_base * largo_base
     area_nueva = nuevo_ancho * nuevo_largo
+
+    # Cargamos la receta de materiales del producto
+    receta: list[ProductoMaterial] = db.query(ProductoMaterial).filter(ProductoMaterial.producto_id == producto_id).all()
+
+    # Si hay una receta de materiales cargada, calculamos los costos dinámicamente.
+    # IMPORTANTE: Los materiales marcados con observaciones="NOCHERO" son componentes
+    # opcionales (mesa de noche) y NO se incluyen en el costo base de la cama.
+    if receta:
+        costo_total_materiales = Decimal("0")  # Solo materiales de la cama
+        costo_nochero = Decimal("0")            # Materiales del nochero (separado)
+        detalle_materiales = []
+        detalle_nochero = []
+
+        for pm in receta:
+            material = pm.material
+            costo_mat = pm.cantidad_base * material.costo_base
+            es_nochero = (pm.observaciones or "").strip().upper() == "NOCHERO"
+
+            item = {
+                "material_id": material.id,
+                "material_nombre": material.nombre,
+                "nombre": material.nombre,
+                "tipo_escala": pm.tipo_escala,
+                "condicion_activacion": pm.condicion_activacion,
+                "condicion_cumplida": True,
+                "cantidad_base": float(pm.cantidad_base),
+                "cantidad_calculada": float(pm.cantidad_base),
+                "unidad": material.unidad_medida.abreviatura if material.unidad_medida else "",
+                "costo_unitario": float(material.costo_base),
+                "costo_total": float(costo_mat),
+                "costo_subtotal": float(costo_mat),
+                "observaciones": pm.observaciones,
+                "es_nochero": es_nochero,
+            }
+
+            if es_nochero:
+                costo_nochero += costo_mat
+                detalle_nochero.append(item)
+            else:
+                costo_total_materiales += costo_mat
+                detalle_materiales.append(item)
+
+        # Si el producto tiene precio_venta_base del Excel (importado profesionalmente),
+        # usamos ese costo directamente. Es más confiable que recalcular desde cero
+        # porque el Excel ya tiene todo calculado correctamente (mano de obra incluida).
+        if producto.precio_costo_base is not None:
+            costo_produccion = Decimal(str(producto.precio_costo_base))
+            # El costo de materiales real es el del Excel menos los indirectos estimados
+            # (solo para mostrar el desglose en pantalla)
+            factor_indirectos = Decimal("1") + (pct_mano_obra + pct_gastos) / Decimal("100")
+            costo_total_materiales_display = costo_produccion / factor_indirectos
+            costo_mano_obra = costo_total_materiales_display * pct_mano_obra / Decimal("100")
+            costo_gastos = costo_total_materiales_display * pct_gastos / Decimal("100")
+            # El precio de venta lo aplicamos con el margen solicitado sobre el costo del Excel
+            precio_sin_iva = costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100"))
+        else:
+            # Fallback: calcular desde los materiales de la cama (excluyendo nochero)
+            costo_mano_obra = costo_total_materiales * pct_mano_obra / Decimal("100")
+            costo_gastos = costo_total_materiales * pct_gastos / Decimal("100")
+            costo_produccion = costo_total_materiales + costo_mano_obra + costo_gastos
+            precio_sin_iva = costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100"))
+            costo_total_materiales_display = costo_total_materiales
+
+        precio_con_iva = precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100"))
+
+        return {
+            "producto_id": producto.id,
+            "producto_nombre": producto.nombre,
+            "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
+            "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
+            "materiales": detalle_materiales,           # Solo materiales de la cama
+            "materiales_nochero": detalle_nochero,      # Materiales del nochero (opcional)
+            "materiales_detalle": detalle_materiales,
+            "resumen_costos": {
+                "costo_materiales": float(costo_total_materiales_display),
+                "costo_mano_obra": float(costo_mano_obra),
+                "pct_mano_obra": float(pct_mano_obra),
+                "costo_gastos": float(costo_gastos),
+                "costo_gastos_indirectos": float(costo_gastos),
+                "pct_gastos": float(pct_gastos),
+                "costo_produccion": float(costo_produccion),
+                "costo_total": float(costo_produccion),
+                "ganancia_porcentaje": float(ganancia_porcentaje),
+                "precio_sin_iva": float(precio_sin_iva),
+                "iva_porcentaje": float(iva_porcentaje),
+                "precio_con_iva": float(precio_con_iva),
+                "precio_sugerido": float(precio_con_iva),
+                "precio_venta": float(precio_con_iva),
+                "costo_nochero": float(costo_nochero),
+            },
+            "costo_materiales": float(costo_total_materiales_display),
+            "costo_mano_obra": float(costo_mano_obra),
+            "costo_gastos": float(costo_gastos),
+            "costo_gastos_indirectos": float(costo_gastos),
+            "costo_produccion": float(costo_produccion),
+            "costo_total": float(costo_produccion),
+            "ganancia_porcentaje": float(ganancia_porcentaje),
+            "precio_sin_iva": float(precio_sin_iva),
+            "iva_porcentaje": float(iva_porcentaje),
+            "precio_con_iva": float(precio_con_iva),
+            "precio_sugerido": float(precio_con_iva),
+            "precio_venta": float(precio_con_iva),
+            "costo_nochero": float(costo_nochero),
+        }
+
+    # Si por alguna razón el producto no tiene receta cargada, usamos los valores fijos del Excel como fallback
+    elif producto.precio_venta_base is not None:
+        precio_sin_iva = Decimal(str(producto.precio_venta_base))
+        precio_con_iva = Decimal(str(producto.precio_venta_con_iva)) if producto.precio_venta_con_iva else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")))
+        costo_produccion = Decimal(str(producto.precio_costo_base)) if producto.precio_costo_base else (precio_sin_iva / (Decimal("1") + ganancia_porcentaje / Decimal("100")))
+        costo_total_materiales = costo_produccion / (Decimal("1") + (pct_mano_obra + pct_gastos) / Decimal("100"))
+        costo_mano_obra = costo_total_materiales * pct_mano_obra / Decimal("100")
+        costo_gastos = costo_total_materiales * pct_gastos / Decimal("100")
+
+        return {
+            "producto_id": producto.id,
+            "producto_nombre": producto.nombre,
+            "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
+            "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
+            "materiales": [],
+            "materiales_detalle": [],
+            "resumen_costos": {
+                "costo_materiales": float(costo_total_materiales),
+                "costo_mano_obra": float(costo_mano_obra),
+                "pct_mano_obra": float(pct_mano_obra),
+                "costo_gastos": float(costo_gastos),
+                "costo_gastos_indirectos": float(costo_gastos),
+                "pct_gastos": float(pct_gastos),
+                "costo_produccion": float(costo_produccion),
+                "costo_total": float(costo_produccion),
+                "ganancia_porcentaje": float(ganancia_porcentaje),
+                "precio_sin_iva": float(precio_sin_iva),
+                "iva_porcentaje": float(iva_porcentaje),
+                "precio_con_iva": float(precio_con_iva),
+                "precio_sugerido": float(precio_con_iva),
+                "precio_venta": float(precio_con_iva),
+            },
+            "costo_materiales": float(costo_total_materiales),
+            "costo_mano_obra": float(costo_mano_obra),
+            "costo_gastos": float(costo_gastos),
+            "costo_gastos_indirectos": float(costo_gastos),
+            "costo_produccion": float(costo_produccion),
+            "costo_total": float(costo_produccion),
+            "ganancia_porcentaje": float(ganancia_porcentaje),
+            "precio_sin_iva": float(precio_sin_iva),
+            "iva_porcentaje": float(iva_porcentaje),
+            "precio_con_iva": float(precio_con_iva),
+            "precio_sugerido": float(precio_con_iva),
+            "precio_venta": float(precio_con_iva),
+        }
 
     # --- 2. Cargar receta de materiales ------------------------------------
     receta: list[ProductoMaterial] = (
@@ -178,7 +331,7 @@ def calcular_costo_producto(
 
         # 3a. Verificar condición de activación
         if pm.condicion_activacion:
-            if not _evaluar_condicion(pm.condicion_activacion, nuevo_ancho, nuevo_largo):
+            if not _evaluar_condicion(pm.condicion_activacion, nuevo_ancho, nuevo_largo, atributos):
                 # Material no aplica para estas dimensiones
                 detalle_materiales.append({
                     "material_id": material.id,

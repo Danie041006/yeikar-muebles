@@ -18,6 +18,19 @@ export interface Product {
   tipo_producto?: TipoProducto;
 }
 
+export interface Material {
+  id: number;
+  nombre: string;
+  unidad_medida_id: number;
+  costo_base: number;
+  activo?: boolean;
+  unidad_medida?: {
+    id: number;
+    nombre: string;
+    abreviatura: string;
+  };
+}
+
 export interface ProductoMaterial {
   id: number;
   producto_id: number;
@@ -86,5 +99,17 @@ export const productosService = {
 
   eliminarMaterialReceta: async (recetaId: number): Promise<void> => {
     await api.delete(`/receta/${recetaId}`);
+  },
+
+  getMateriales: async (search?: string): Promise<Material[]> => {
+    const response = await api.get<Material[]>('/material/', {
+      params: search ? { buscar: search } : {},
+    });
+    return response.data;
+  },
+
+  crearMaterial: async (material: Omit<Material, 'id' | 'unidad_medida'>): Promise<Material> => {
+    const response = await api.post<Material>('/material/', material);
+    return response.data;
   },
 };

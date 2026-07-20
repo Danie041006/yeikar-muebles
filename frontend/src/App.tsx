@@ -12,6 +12,7 @@ import Calculadora from './pages/Calculadora';
 import Ventas from './pages/Ventas';
 import Despachos from './pages/Despachos';
 import Usuarios from './pages/Usuarios';
+import CotizadorInteligente from './pages/CotizadorInteligente';
 import DashboardLayout from './components/Layout/DashboardLayout';
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('token');
@@ -50,6 +51,16 @@ function App() {
             <PrivateRoute>
               <DashboardLayout>
                 <Cotizaciones />
+              </DashboardLayout>
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/cotizaciones-ia"
+          element={
+            <PrivateRoute>
+              <DashboardLayout>
+                <CotizadorInteligente />
               </DashboardLayout>
             </PrivateRoute>
           }

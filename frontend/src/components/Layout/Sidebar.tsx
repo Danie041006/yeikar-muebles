@@ -133,16 +133,25 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
       ),
       adminOnly: true,
     },
+    {
+      name: 'Cotizador IA (Nuevo)',
+      path: '/cotizaciones-ia',
+      icon: (
+        <svg className="w-5 h-5 text-indigo-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+        </svg>
+      ),
+    },
   ];
 
   // Map roles to permitted menu paths
   const rolePaths: { [key: string]: string[] } = {
-    'Dueño': menuItems.map(item => item.path),
-    'Administrador': menuItems.map(item => item.path),
+    'Dueño': menuItems.map(item => item.path).concat(['/cotizaciones-ia']),
+    'Administrador': menuItems.map(item => item.path).concat(['/cotizaciones-ia']),
     'Fletes': ['/dashboard', '/pedidos', '/envios'],
     'Producción': ['/dashboard', '/produccion'],
     'Inventario': ['/dashboard', '/inventario', '/productos'],
-    'Ventas': ['/dashboard', '/clientes', '/cotizaciones', '/pedidos', '/ventas'],
+    'Ventas': ['/dashboard', '/clientes', '/cotizaciones', '/cotizaciones-ia', '/pedidos', '/ventas'],
   };
 
   const getAllowedPaths = () => {
