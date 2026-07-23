@@ -104,3 +104,61 @@ class ProductoMaterialResponse(ProductoMaterialBase):
 
     class Config:
         from_attributes = True
+
+
+# ------------------------------------------------------------
+# Esquemas para Recetas por Secciones (Jerárquicas)
+# ------------------------------------------------------------
+class PoliticaSeccionBase(BaseModel):
+    mano_obra_base: float = 0.0
+    pct_liquidacion_mo: float = 5.0
+    pct_gastos_seccion: float = 10.0
+
+class PoliticaSeccionCreate(PoliticaSeccionBase):
+    pass
+
+class PoliticaSeccionUpdate(BaseModel):
+    mano_obra_base: Optional[float] = None
+    pct_liquidacion_mo: Optional[float] = None
+    pct_gastos_seccion: Optional[float] = None
+
+class PoliticaSeccionResponse(PoliticaSeccionBase):
+    id: int
+    seccion_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class ElementoSeccionBase(BaseModel):
+    nombre_insumo_original: str
+    material_id_normalizado: Optional[int] = None
+    estado_resolucion: Optional[str] = "PENDIENTE"
+    cantidad: float = 1.0
+    unidad_medida: Optional[str] = None
+    observaciones: Optional[str] = None
+    precio_unitario: Optional[float] = None
+    costo_subtotal: Optional[float] = None
+
+class ElementoSeccionResponse(ElementoSeccionBase):
+    id: int
+    seccion_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class SeccionProductoResponse(BaseModel):
+    id: int
+    producto_id: int
+    nombre: str
+    orden: int
+    elementos: List[ElementoSeccionResponse] = []
+    politica: Optional[PoliticaSeccionResponse] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

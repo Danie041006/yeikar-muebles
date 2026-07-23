@@ -31,6 +31,7 @@ class Producto(Base):
 
     tipo_producto   = relationship("TipoProducto")
     materiales      = relationship("ProductoMaterial", back_populates="producto", cascade="all, delete-orphan")
+    secciones       = relationship("SeccionProducto", back_populates="producto", cascade="all, delete-orphan")
 
 
 class Material(Base):
@@ -173,4 +174,64 @@ class MaterialSinonimo(Base):
     created_at  = Column(DateTime, server_default=func.now())
 
     material = relationship("Material")
+
+
+class SeccionProducto(Base):
+    """
+    Sección / Área productiva dentro de un producto (ej: EBANISTERÍA, PINTURA, TERMINACIÓN, TAPICERÍA, NOCHEROS EN CRUDO).
+    """
+    __tablename__ = "seccion_producto"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre      = Column(String(100), nullable=False)
+    orden       = Column(Integer, default=1, nullable=False)
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, onupdate=func.now())
+
+    producto    = relationship("Producto", back_populates="secciones")
+    elementos   = relationship("ElementoSeccion", back_populates="seccion", cascade="all, delete-orphan")
+    politica    = relationship("PoliticaSeccion", uselist=False, back_populates="seccion", cascade="all, delete-orphan")
+
+
+class ElementoSeccion(Base):
+    """
+    Insumo físico perteneciente a una sección específica del producto.
+    Mantiene aislados los insumos por sección y desconectados de los precios unitarios históricos.
+    """
+    __tablename__ = "elemento_seccion"
+
+    id                      = Column(BigInteger, primary_key=True, index=True)
+    seccion_id              = Column(BigInteger, ForeignKey("seccion_producto.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre_insumo_original  = Column(String(150), nullable=False)
+    material_id_normalizado = Column(BigInteger, ForeignKey("material.id", ondelete="SET NULL"), nullable=True)
+    estado_resolucion       = Column(String(30), default="PENDIENTE", nullable=False)  # PENDIENTE | MAPEADO | AMBIGUO
+    cantidad                = Column(Numeric(14, 4), nullable=False, default=1.0)
+    unidad_medida           = Column(String(50), nullable=True)
+    observaciones           = Column(Text, nullable=True)
+    precio_unitario         = Column(Numeric(15, 2), nullable=True)  # Desactivado en receta pura
+    costo_subtotal          = Column(Numeric(15, 2), nullable=True)  # Desactivado en receta pura
+    created_at              = Column(DateTime, server_default=func.now())
+    updated_at              = Column(DateTime, onupdate=func.now())
+
+    seccion               = relationship("SeccionProducto", back_populates="elementos")
+    material_normalizado  = relationship("Material")
+
+
+class PoliticaSeccion(Base):
+    """
+    Reglas específicas de Mano de Obra y Porcentajes de Gastos para una sección del mueble.
+    Permite variación de % por área y por producto (ej. 10% en Ebanistería, 5% en Nocheros).
+    """
+    __tablename__ = "politica_seccion"
+
+    id                  = Column(BigInteger, primary_key=True, index=True)
+    seccion_id          = Column(BigInteger, ForeignKey("seccion_producto.id", ondelete="CASCADE"), unique=True, nullable=False)
+    mano_obra_base      = Column(Numeric(15, 2), default=0.0, nullable=False)
+    pct_liquidacion_mo  = Column(Numeric(5, 2), default=5.00, nullable=False)     # ej. 5% de liquidación sobre la mano de obra
+    pct_gastos_seccion  = Column(Numeric(5, 2), default=10.00, nullable=False)    # ej. 10% ó 5% sobre materiales de la sección
+    created_at          = Column(DateTime, server_default=func.now())
+    updated_at          = Column(DateTime, onupdate=func.now())
+
+    seccion             = relationship("SeccionProducto", back_populates="politica")
 

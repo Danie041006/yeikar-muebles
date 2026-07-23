@@ -228,3 +228,55 @@ def eliminar_material_receta(
     db.delete(db_obj)
     db.commit()
     return None
+
+
+# ------------------------------------------------------------
+# Recetas Jerárquicas por Secciones
+# ------------------------------------------------------------
+from app.modules.productos import model
+
+@router.get("/producto/{producto_id}/receta-estructurada", response_model=List[schemas.SeccionProductoResponse], tags=["receta-secciones"])
+def ver_receta_estructurada(
+    producto_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """
+    Retorna el árbol de receta del producto organizado por Secciones (EBANISTERÍA, PINTURA, etc.),
+    con sus insumos físicos aislados y sus políticas de mano de obra y porcentajes por área.
+    """
+    producto = service.obtener_producto(db, producto_id)
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+
+    secciones = (
+        db.query(model.SeccionProducto)
+        .filter(model.SeccionProducto.producto_id == producto_id)
+        .order_by(model.SeccionProducto.orden)
+        .all()
+    )
+    return secciones
+
+
+@router.put("/seccion/{seccion_id}/politica", response_model=schemas.PoliticaSeccionResponse, tags=["receta-secciones"])
+def actualizar_politica_seccion(
+    seccion_id: int,
+    esquema: schemas.PoliticaSeccionUpdate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """
+    Actualiza la tarifa de mano de obra base o los porcentajes de recargo (liquidación, gastos)
+    de una sección específica.
+    """
+    politica = db.query(model.PoliticaSeccion).filter(model.PoliticaSeccion.seccion_id == seccion_id).first()
+    if not politica:
+        raise HTTPException(status_code=404, detail="Política de sección no encontrada")
+
+    datos = esquema.model_dump(exclude_unset=True)
+    for campo, valor in datos.items():
+        setattr(politica, campo, valor)
+    db.commit()
+    db.refresh(politica)
+    return politica
+
