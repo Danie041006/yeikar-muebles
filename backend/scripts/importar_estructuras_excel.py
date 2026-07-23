@@ -306,17 +306,17 @@ def main():
     try:
         tipo_cama = db.query(TipoProducto).filter(TipoProducto.nombre.ilike("%cama%")).first()
         if not tipo_cama:
-            tipo_cama = TipoProducto(nombre="Cama", descripcion="Camas y muebles de dormitorio")
+            tipo_cama = TipoProducto(nombre="Cama")
             db.add(tipo_cama)
             db.flush()
 
-        # Limpiar importaciones previas asociadas al Excel
-        prev = db.query(Producto).filter(Producto.hoja_excel.isnot(None)).all()
-        for p in prev:
-            db.query(ProductoMaterial).filter(ProductoMaterial.producto_id == p.id).delete()
-            db.delete(p)
-        db.flush()
-        print(f"🧹 Eliminados {len(prev)} productos anteriores del Excel\n")
+        # Limpiar únicamente las recetas (ProductoMaterial) previas asociadas a productos del Excel
+        excel_prods = db.query(Producto).filter(Producto.hoja_excel.isnot(None)).all()
+        excel_prod_ids = [p.id for p in excel_prods]
+        if excel_prod_ids:
+            db.query(ProductoMaterial).filter(ProductoMaterial.producto_id.in_(excel_prod_ids)).delete(synchronize_session=False)
+            db.flush()
+        print(f"🧹 Recetas anteriores limpiadas para {len(excel_prods)} productos del Excel\n")
 
         creados = 0
         total_recetas_creadas = 0
@@ -339,19 +339,31 @@ def main():
             if not costo and pv:
                 costo = (pv / Decimal("1.30")).quantize(Decimal("0.01"))
 
-            producto = Producto(
-                nombre=nombre_prod,
-                tipo_producto_id=tipo_cama.id,
-                activo=True,
-                hoja_excel=sheet_name,
-                ancho_base=Decimal("1.60"),
-                largo_base=Decimal("1.90"),
-                precio_costo_base=costo,
-                precio_venta_base=pv,
-                precio_venta_con_iva=piva,
-            )
-            db.add(producto)
+            producto = db.query(Producto).filter(Producto.hoja_excel == sheet_name).first()
+            if not producto:
+                producto = db.query(Producto).filter(Producto.nombre == nombre_prod).first()
+
+            if producto:
+                producto.nombre = nombre_prod
+                producto.hoja_excel = sheet_name
+                producto.precio_costo_base = costo
+                producto.precio_venta_base = pv
+                producto.precio_venta_con_iva = piva
+            else:
+                producto = Producto(
+                    nombre=nombre_prod,
+                    tipo_producto_id=tipo_cama.id,
+                    activo=True,
+                    hoja_excel=sheet_name,
+                    ancho_base=Decimal("1.60"),
+                    largo_base=Decimal("1.90"),
+                    precio_costo_base=costo,
+                    precio_venta_base=pv,
+                    precio_venta_con_iva=piva,
+                )
+                db.add(producto)
             db.flush()
+
 
             insumos_insertados = 0
             for f in filas:
