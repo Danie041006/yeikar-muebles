@@ -2200,19 +2200,24 @@ SECCIÓN: EBANISTERÍA                                             SECCIÓN: NOC
 
 ### 3. Fases del Plan de Implementación
 
-- **Fase 1: Preparación del Modelo de Datos Interno (DB)**
-  - Creación de modelos SQLAlchemy y migraciones Alembic para `seccion_producto`, `elemento_seccion` y `politica_seccion`.
-- **Fase 2: Motor de Importación Estructurado (Sin Precios Fijos)**
-  - Parser de Excel que lee por bloques de sección.
-  - Guarda insumos físicos con cantidades e insumos libres sin persistir precios unitarios históricos.
-  - Clasifica automáticamente filas de mano de obra y porcentajes de gasto hacia la política de la sección.
-- **Fase 3: API & Endpoints Backend**
-  - Endpoints REST para consultar y gestionar el árbol de recetas por sección (`GET /productos/{id}/receta-estructurada`).
-- **Fase 4: Rediseño de la Interfaz Frontend**
+- **Fase 1: Preparación del Modelo de Datos Interno (DB) [✅ COMPLETADO]**
+  - Creadas las tablas `seccion_producto`, `elemento_seccion` y `politica_seccion` en SQLAlchemy (`backend/app/modules/productos/model.py`).
+  - Aplicada migración Alembic (`f1dcdf808d98_add_seccion_producto_elemento_seccion_...py`).
+- **Fase 2: Motor de Importación Estructurado (Sin Precios Fijos) [✅ COMPLETADO]**
+  - Creado script `backend/scripts/importar_recetas_secciones.py`.
+  - Importadas exitosamente todas las recetas del Excel histórico hacia el nuevo esquema por secciones.
+  - Se desvincularon los precios unitarios e importes fijos del Excel, dejando `precio_unitario = NULL` y extrayendo las políticas reales de mano de obra y porcentajes por área.
+- **Fase 3: API & Endpoints Backend [✅ COMPLETADO]**
+  - Creados esquemas Pydantic (`PoliticaSeccionResponse`, `ElementoSeccionResponse`, `SeccionProductoResponse`).
+  - Endpoints implementados:
+    - `GET /api/v1/producto/{producto_id}/receta-estructurada`: Devuelve el árbol completo por secciones.
+    - `PUT /api/v1/seccion/{seccion_id}/politica`: Permite editar mano de obra base o porcentajes de recargo por área.
+- **Fase 4: Rediseño de la Interfaz Frontend [⏳ EN PROGRESO]**
   - Presentación por tarjetas / bloques de sección en lugar de una lista plana.
   - Separación visual de Materiales Físicos vs. Mano de Obra y Gastos Indirectos.
 - **Fase 5: Conexión con Inventario (Valuación Dinámica Futura)**
   - Mapeo de `material_id_normalizado` con el módulo de Inventario para calcular costos en tiempo real en función de los precios vigentes.
 
 ---
+
 
