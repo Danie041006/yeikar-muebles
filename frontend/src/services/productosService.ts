@@ -55,6 +55,36 @@ export interface ProductoMaterial {
   };
 }
 
+export interface PoliticaSeccion {
+  id: number;
+  seccion_id: number;
+  mano_obra_base: number;
+  pct_liquidacion_mo: number;
+  pct_gastos_seccion: number;
+}
+
+export interface ElementoSeccion {
+  id: number;
+  seccion_id: number;
+  nombre_insumo_original: string;
+  material_id_normalizado?: number;
+  estado_resolucion: string;
+  cantidad: number;
+  unidad_medida?: string;
+  observaciones?: string;
+  precio_unitario?: number;
+  costo_subtotal?: number;
+}
+
+export interface SeccionProducto {
+  id: number;
+  producto_id: number;
+  nombre: string;
+  orden: number;
+  elementos: ElementoSeccion[];
+  politica?: PoliticaSeccion;
+}
+
 export const productosService = {
   getProductos: async (search?: string): Promise<Product[]> => {
     const response = await api.get<Product[]>('/producto/', {
@@ -87,6 +117,16 @@ export const productosService = {
     return response.data;
   },
 
+  getRecetaEstructurada: async (productoId: number): Promise<SeccionProducto[]> => {
+    const response = await api.get<SeccionProducto[]>(`/producto/${productoId}/receta-estructurada`);
+    return response.data;
+  },
+
+  actualizarPoliticaSeccion: async (seccionId: number, data: Partial<PoliticaSeccion>): Promise<PoliticaSeccion> => {
+    const response = await api.put<PoliticaSeccion>(`/seccion/${seccionId}/politica`, data);
+    return response.data;
+  },
+
   agregarMaterialReceta: async (productoId: number, item: Omit<ProductoMaterial, 'id' | 'producto_id'>): Promise<ProductoMaterial> => {
     const response = await api.post<ProductoMaterial>(`/producto/${productoId}/receta`, item);
     return response.data;
@@ -113,3 +153,4 @@ export const productosService = {
     return response.data;
   },
 };
+

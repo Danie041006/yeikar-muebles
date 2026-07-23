@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { productosService, Product, ProductoMaterial, TipoProducto } from '../services/productosService';
+import { productosService, Product, ProductoMaterial, TipoProducto, SeccionProducto } from '../services/productosService';
 import api from '../services/api';
 
 interface Material {
@@ -38,10 +38,12 @@ export default function Productos() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
-  // Selected product and its recipe
+  // Selected product, legacy recipe and structured section recipe
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [receta, setReceta] = useState<ProductoMaterial[]>([]);
+  const [secciones, setSecciones] = useState<SeccionProducto[]>([]);
   const [recetaLoading, setRecetaLoading] = useState(false);
+
 
   // Price simulator
   const [simAncho, setSimAncho] = useState('1.60');
@@ -105,14 +107,19 @@ export default function Productos() {
     setPrecioSimulado(null);
     try {
       setRecetaLoading(true);
-      const data = await productosService.getReceta(product.id);
-      setReceta(data);
+      const [legacyData, secData] = await Promise.all([
+        productosService.getReceta(product.id),
+        productosService.getRecetaEstructurada(product.id)
+      ]);
+      setReceta(legacyData);
+      setSecciones(secData);
     } catch (error) {
       console.error('Error fetching recipe:', error);
     } finally {
       setRecetaLoading(false);
     }
   }, []);
+
 
   const handleSimularPrecio = async () => {
     if (!selectedProduct) return;
@@ -462,6 +469,73 @@ export default function Productos() {
                   <div className="flex justify-center py-8">
                     <div className="w-6 h-6 border-3 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
                   </div>
+                ) : secciones.length > 0 ? (
+                  <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
+                    {secciones.map((sec) => (
+                      <div key={sec.id} className="border border-yeikar-secondary-light/15 rounded-xl overflow-hidden bg-white shadow-sm">
+                        {/* Header de la Sección */}
+                        <div className="bg-yeikar-secondary/5 border-b border-yeikar-secondary-light/10 px-4 py-2.5 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-yeikar-primary"></span>
+                            <span className="font-headline font-black text-xs text-yeikar-secondary uppercase tracking-wider">
+                              SECCIÓN: {sec.nombre}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold font-mono bg-yeikar-secondary/10 text-yeikar-secondary px-2 py-0.5 rounded-full">
+                            {sec.elementos.length} insumos
+                          </span>
+                        </div>
+
+                        {/* Política de Mano de Obra y Gastos de Sección */}
+                        {sec.politica && (
+                          <div className="bg-amber-50/70 border-b border-amber-100 px-4 py-2 flex flex-wrap items-center justify-between text-[11px] gap-2">
+                            <div className="flex items-center gap-2 font-bold text-amber-900">
+                              <span>👷 Mano de Obra Base:</span>
+                              <span className="font-mono text-amber-950">
+                                {sec.politica.mano_obra_base > 0 ? fmt(sec.politica.mano_obra_base) : 'Según acuerdo'}
+                              </span>
+                              <span className="text-[10px] bg-amber-200/70 text-amber-900 px-1.5 py-0.5 rounded font-mono">
+                                +{sec.politica.pct_liquidacion_mo}% Liquidación
+                              </span>
+                            </div>
+                            {sec.politica.pct_gastos_seccion > 0 && (
+                              <div className="font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded font-mono text-[10px]">
+                                +{sec.politica.pct_gastos_seccion}% Gastos Sección
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Insumos Físicos de la Sección */}
+                        <div className="p-3 space-y-1.5 divide-y divide-gray-100">
+                          {sec.elementos.length === 0 ? (
+                            <p className="text-[11px] text-yeikar-neutral/40 italic py-1">Sin insumos registrados en esta sección.</p>
+                          ) : (
+                            sec.elementos.map((el) => (
+                              <div key={el.id} className="flex items-center justify-between text-xs pt-1.5 first:pt-0 pb-1 px-1 hover:bg-yeikar-tertiary/20 rounded transition-colors">
+                                <div className="min-w-0 flex-1 pr-2">
+                                  <span className="font-semibold text-yeikar-secondary truncate block">
+                                    • {el.nombre_insumo_original}
+                                  </span>
+                                  {el.observaciones && (
+                                    <span className="text-[10px] text-yeikar-neutral/50 block truncate">{el.observaciones}</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="font-mono font-bold text-yeikar-secondary bg-gray-100 px-2 py-0.5 rounded text-[11px]">
+                                    {el.cantidad} {el.unidad_medida || ''}
+                                  </span>
+                                  <span className="text-[9px] font-mono text-yeikar-neutral/40 uppercase bg-gray-50 border border-gray-200 px-1.5 py-0.5 rounded">
+                                    Pendiente Inv.
+                                  </span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 ) : receta.length === 0 ? (
                   <div className="border border-dashed border-yeikar-secondary-light/15 rounded-xl p-8 text-center text-yeikar-neutral/40 text-xs italic">
                     Sin materiales — haz clic en "Agregar" para definir la receta.
@@ -491,32 +565,12 @@ export default function Productos() {
                               {subtotal > 0 && <span className="text-yeikar-secondary font-bold">≈ {fmt(subtotal)}</span>}
                             </div>
                           </div>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                            <button
-                              onClick={() => {
-                                setRecipeForm({ id: item.id, material_id: String(item.material_id), cantidad_base: String(item.cantidad_base), tipo_escala: item.tipo_escala, distancia_pauta_cm: item.distancia_pauta_cm ? String(item.distancia_pauta_cm) : '', tornillos_por_pieza: item.tornillos_por_pieza ? String(item.tornillos_por_pieza) : '', formula_personalizada: item.formula_personalizada || '', es_fijo_override: item.es_fijo_override || false, observaciones: item.observaciones || '' });
-                                setShowRecipeModal(true);
-                              }}
-                              className="text-yeikar-primary hover:bg-yeikar-primary/10 p-1.5 rounded-lg transition-colors"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteRecipeItem(item.id)}
-                              className="text-red-400 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </div>
                         </div>
                       );
                     })}
                   </div>
                 )}
+
               </div>
             </div>
 

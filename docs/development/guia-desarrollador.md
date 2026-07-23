@@ -2212,9 +2212,11 @@ SECCIÓN: EBANISTERÍA                                             SECCIÓN: NOC
   - Endpoints implementados:
     - `GET /api/v1/producto/{producto_id}/receta-estructurada`: Devuelve el árbol completo por secciones.
     - `PUT /api/v1/seccion/{seccion_id}/politica`: Permite editar mano de obra base o porcentajes de recargo por área.
-- **Fase 4: Rediseño de la Interfaz Frontend [⏳ EN PROGRESO]**
-  - Presentación por tarjetas / bloques de sección en lugar de una lista plana.
-  - Separación visual de Materiales Físicos vs. Mano de Obra y Gastos Indirectos.
+- **Fase 4: Rediseño de la Interfaz Frontend [✅ COMPLETADO]**
+  - Actualizado `productosService.ts` con interfaces y llamadas para `SeccionProducto`, `ElementoSeccion` y `PoliticaSeccion`.
+  - Rediseñada la pantalla de Productos (`Productos.tsx`) para renderizar tarjetas estructuradas por Secciones (`EBANISTERÍA`, `PINTURA`, `TERMINACIÓN`, `TENDIDO`, `TAPICERÍA`, etc.).
+  - Presentación limpia que separa los Insumos Físicos de las tarjetas de Política de Mano de Obra y Gastos por área.
+
 - **Fase 5: Conexión con Inventario (Valuación Dinámica Futura)**
   - Mapeo de `material_id_normalizado` con el módulo de Inventario para calcular costos en tiempo real en función de los precios vigentes.
 
