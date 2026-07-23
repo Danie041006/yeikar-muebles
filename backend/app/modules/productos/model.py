@@ -68,6 +68,7 @@ class ProductoMaterial(Base):
     material_id           = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=False)
     cantidad_base         = Column(Numeric(14, 4), nullable=False)
     tipo_escala           = Column(String(20), nullable=False)  # FIJO | LINEAL | AREA | ESPACIADO | POR_RANGO | FORMULA
+    seccion               = Column(String(30), nullable=False, default="EBANISTERIA")  # EBANISTERIA | TENDIDO | COLA_DE_PATO | TAPICERIA | PINTURA | TERMINACION | NOCHEROS | MANO_DE_OBRA
 
     # Solo para ESPACIADO
     distancia_pauta_cm    = Column(Numeric(8, 2), nullable=True)
@@ -91,6 +92,19 @@ class ProductoMaterial(Base):
 
     producto  = relationship("Producto", back_populates="materiales")
     material  = relationship("Material")
+
+
+class ReglaGastoSeccion(Base):
+    """
+    Reglas globales de % de recargo/gasto indirecto por sección del mueble.
+    Ej: EBANISTERIA -> 10.00%, NOCHEROS -> 5.00%, TAPICERIA -> 0.00%
+    """
+    __tablename__ = "regla_gasto_seccion"
+
+    id               = Column(BigInteger, primary_key=True, index=True)
+    seccion          = Column(String(30), unique=True, nullable=False)
+    porcentaje_gasto = Column(Numeric(5, 2), nullable=False)
+
 
 
 class CamaHistoricaAtributos(Base):
