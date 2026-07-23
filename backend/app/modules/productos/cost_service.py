@@ -23,7 +23,7 @@ Si la condición no se cumple, la cantidad del material es 0.
 
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session
-from app.modules.productos.model import Producto, ProductoMaterial, Material
+from app.modules.productos.model import Producto, ProductoMaterial, Material, ReglaGastoSeccion
 
 
 # ---------------------------------------------------------------------------
@@ -148,82 +148,128 @@ def calcular_costo_producto(
     # Cargamos la receta de materiales del producto
     receta: list[ProductoMaterial] = db.query(ProductoMaterial).filter(ProductoMaterial.producto_id == producto_id).all()
 
-    # Si hay una receta de materiales cargada, calculamos los costos dinámicamente.
-    # IMPORTANTE: Los materiales marcados con observaciones="NOCHERO" son componentes
-    # opcionales (mesa de noche) y NO se incluyen en el costo base de la cama.
+    # Si hay una receta de materiales cargada, calculamos los costos por SECCIÓN
+    # usando ReglaGastoSeccion para aplicar el % correcto por área del mueble.
     if receta:
-        costo_total_materiales = Decimal("0")  # Solo materiales de la cama
-        costo_nochero = Decimal("0")            # Materiales del nochero (separado)
+        # Cargar reglas de gasto por sección una sola vez
+        reglas_raw = db.query(ReglaGastoSeccion).all()
+        reglas_por_seccion: dict[str, Decimal] = {
+            r.seccion: Decimal(str(r.porcentaje_gasto)) for r in reglas_raw
+        }
+
+        # Acumular costo base por sección (suma bruta de materiales importados)
+        costo_por_seccion: dict[str, Decimal] = {}
         detalle_materiales = []
         detalle_nochero = []
 
         for pm in receta:
             material = pm.material
-            costo_mat = pm.cantidad_base * material.costo_base
-            es_nochero = (pm.observaciones or "").strip().upper() == "NOCHERO"
+            costo_linea = pm.cantidad_base * Decimal(str(material.costo_base))
+            seccion = (pm.seccion or "EBANISTERIA").upper()
+            es_nochero = seccion == "NOCHEROS"
 
             item = {
                 "material_id": material.id,
                 "material_nombre": material.nombre,
                 "nombre": material.nombre,
                 "tipo_escala": pm.tipo_escala,
+                "seccion": seccion,
                 "condicion_activacion": pm.condicion_activacion,
                 "condicion_cumplida": True,
                 "cantidad_base": float(pm.cantidad_base),
                 "cantidad_calculada": float(pm.cantidad_base),
                 "unidad": material.unidad_medida.abreviatura if material.unidad_medida else "",
                 "costo_unitario": float(material.costo_base),
-                "costo_total": float(costo_mat),
-                "costo_subtotal": float(costo_mat),
+                "costo_total": float(costo_linea),
+                "costo_subtotal": float(costo_linea),
                 "observaciones": pm.observaciones,
                 "es_nochero": es_nochero,
             }
 
             if es_nochero:
-                costo_nochero += costo_mat
                 detalle_nochero.append(item)
             else:
-                costo_total_materiales += costo_mat
                 detalle_materiales.append(item)
 
-        # Si el producto tiene precio_venta_base del Excel (importado profesionalmente),
-        # usamos ese costo directamente. Es más confiable que recalcular desde cero
-        # porque el Excel ya tiene todo calculado correctamente (mano de obra incluida).
-        if producto.precio_costo_base is not None:
+            costo_por_seccion.setdefault(seccion, Decimal("0"))
+            costo_por_seccion[seccion] += costo_linea
+
+        # --- Elegir fuente de costo de producción ---
+        # El precio_costo_base viene del Excel histórico de YEIKAR y es el TOTAL
+        # correcto calculado por la empresa (ya incluye materiales, mano de obra y gastos).
+        # Se usa siempre que las dimensiones solicitadas sean iguales a las dimensiones base.
+        # Si se piden dimensiones diferentes, escalamos proporcionalmente.
+        dimensiones_iguales = (
+            abs(nuevo_ancho - ancho_base) < Decimal("0.01") and
+            abs(nuevo_largo - largo_base) < Decimal("0.01")
+        )
+
+        if producto.precio_costo_base is not None and dimensiones_iguales:
+            # Usar el costo del Excel directamente — es la fuente de verdad
             costo_produccion = Decimal(str(producto.precio_costo_base))
-            # El costo de materiales real es el del Excel menos los indirectos estimados
-            # (solo para mostrar el desglose en pantalla)
-            factor_indirectos = Decimal("1") + (pct_mano_obra + pct_gastos) / Decimal("100")
-            costo_total_materiales_display = costo_produccion / factor_indirectos
-            costo_mano_obra = costo_total_materiales_display * pct_mano_obra / Decimal("100")
-            costo_gastos = costo_total_materiales_display * pct_gastos / Decimal("100")
-            # El precio de venta lo aplicamos con el margen solicitado sobre el costo del Excel
-            precio_sin_iva = costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100"))
+            # Desglose estimado por sección (para mostrar en UI, no para calcular)
+            costo_total_materiales = sum(
+                v for k, v in costo_por_seccion.items() if k not in ("NOCHEROS",)
+            )
+            costo_gastos_total = Decimal("0")
+            desglose_secciones = {
+                sec: {
+                    "costo_base": float(c),
+                    "porcentaje_gasto": float(reglas_por_seccion.get(sec, Decimal("0"))),
+                    "gasto_aplicado": 0.0,
+                    "total": float(c),
+                    "nota": "Costo tomado del Excel histórico",
+                }
+                for sec, c in costo_por_seccion.items()
+            }
         else:
-            # Fallback: calcular desde los materiales de la cama (excluyendo nochero)
-            costo_mano_obra = costo_total_materiales * pct_mano_obra / Decimal("100")
-            costo_gastos = costo_total_materiales * pct_gastos / Decimal("100")
-            costo_produccion = costo_total_materiales + costo_mano_obra + costo_gastos
-            precio_sin_iva = costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100"))
-            costo_total_materiales_display = costo_total_materiales
+            # Dimensiones distintas: escalar desde el Excel o calcular desde receta con % sección
+            if producto.precio_costo_base is not None:
+                # Escalar el costo del Excel según la variación de área
+                factor_area = (nuevo_ancho * nuevo_largo) / (ancho_base * largo_base) if area_base > 0 else Decimal("1")
+                costo_produccion = _redondear(Decimal(str(producto.precio_costo_base)) * factor_area, 2)
+            else:
+                # Fallback completo: sumar por sección con su % de gastos
+                costo_produccion = Decimal("0")
+                for seccion, costo_base_sec in costo_por_seccion.items():
+                    pct_gasto = reglas_por_seccion.get(seccion, Decimal("0"))
+                    gasto_sec = _redondear(costo_base_sec * pct_gasto / Decimal("100"), 2)
+                    costo_produccion += costo_base_sec + gasto_sec
 
-        precio_con_iva = precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100"))
+            costo_total_materiales = sum(
+                v for k, v in costo_por_seccion.items() if k not in ("NOCHEROS",)
+            )
+            costo_gastos_total = Decimal("0")
+            desglose_secciones = {
+                sec: {
+                    "costo_base": float(c),
+                    "porcentaje_gasto": float(reglas_por_seccion.get(sec, Decimal("0"))),
+                    "gasto_aplicado": 0.0,
+                    "total": float(c),
+                }
+                for sec, c in costo_por_seccion.items()
+            }
 
-        return {
+        costo_nochero = costo_por_seccion.get("NOCHEROS", Decimal("0"))
+
+        # Precio de venta con margen de ganancia e IVA sobre el costo de producción real
+        precio_sin_iva = _redondear(costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2)
+        precio_con_iva = _redondear(precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")), 2)
+
+        resultado = {
             "producto_id": producto.id,
             "producto_nombre": producto.nombre,
             "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
             "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
-            "materiales": detalle_materiales,           # Solo materiales de la cama
-            "materiales_nochero": detalle_nochero,      # Materiales del nochero (opcional)
+            "materiales": detalle_materiales,
+            "materiales_nochero": detalle_nochero,
             "materiales_detalle": detalle_materiales,
+            "desglose_por_seccion": desglose_secciones,
             "resumen_costos": {
-                "costo_materiales": float(costo_total_materiales_display),
-                "costo_mano_obra": float(costo_mano_obra),
-                "pct_mano_obra": float(pct_mano_obra),
-                "costo_gastos": float(costo_gastos),
-                "costo_gastos_indirectos": float(costo_gastos),
-                "pct_gastos": float(pct_gastos),
+                "costo_materiales": float(costo_total_materiales),
+                "costo_gastos_indirectos": float(costo_gastos_total),
+                "costo_gastos": float(costo_gastos_total),
+                "pct_gastos": "por sección (ver desglose_por_seccion)",
                 "costo_produccion": float(costo_produccion),
                 "costo_total": float(costo_produccion),
                 "ganancia_porcentaje": float(ganancia_porcentaje),
@@ -234,10 +280,10 @@ def calcular_costo_producto(
                 "precio_venta": float(precio_con_iva),
                 "costo_nochero": float(costo_nochero),
             },
-            "costo_materiales": float(costo_total_materiales_display),
-            "costo_mano_obra": float(costo_mano_obra),
-            "costo_gastos": float(costo_gastos),
-            "costo_gastos_indirectos": float(costo_gastos),
+            "costo_materiales": float(costo_total_materiales),
+            "costo_mano_obra": float(costo_por_seccion.get("MANO_DE_OBRA", Decimal("0"))),
+            "costo_gastos": float(costo_gastos_total),
+            "costo_gastos_indirectos": float(costo_gastos_total),
             "costo_produccion": float(costo_produccion),
             "costo_total": float(costo_produccion),
             "ganancia_porcentaje": float(ganancia_porcentaje),
@@ -248,6 +294,7 @@ def calcular_costo_producto(
             "precio_venta": float(precio_con_iva),
             "costo_nochero": float(costo_nochero),
         }
+        return resultado
 
     # Si por alguna razón el producto no tiene receta cargada, usamos los valores fijos del Excel como fallback
     elif producto.precio_venta_base is not None:
