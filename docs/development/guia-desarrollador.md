@@ -2008,4 +2008,211 @@ print('Closets cargados exitosamente')
 
 
 
-jejejejejeje
+---
+
+## 🧾 Módulo de Ventas, Facturación Fiscal (SENIAT) y Despachos
+
+> **Última actualización:** Julio 2026
+
+### 📌 Contexto
+
+La Comercializadora Yeikar opera en Venezuela bajo la normativa del **SENIAT** (Servicio Nacional Integrado de Administración Aduanera y Tributaria). Toda factura emitida debe cumplir con los requisitos de forma y fondo establecidos para documentos fiscales válidos.
+
+Dado que las ventas se pueden cotizar y cobrar en distintas monedas (USD, COP, Bs.), el sistema implementa una **capa de conversión a Bolívares (VES)** para la generación de la factura fiscal imprimible, sin alterar la moneda base de la venta interna.
+
+---
+
+### 🏗️ Arquitectura del Módulo de Ventas
+
+| Archivo | Propósito |
+|---|---|
+| `backend/app/modules/sales/model.py` | Modelos ORM: `Venta`, `DetalleVenta`, `Pago` |
+| `backend/app/modules/sales/schemas.py` | Schemas Pydantic para entrada/salida |
+| `backend/app/modules/sales/service.py` | Lógica de negocio: crear venta desde pedido, calcular saldos, registrar pagos |
+| `backend/app/modules/sales/router.py` | Endpoints REST: `/venta/`, `/pago/`, `/venta/{id}`, `/venta/cuentas-por-cobrar/` |
+| `frontend/src/pages/Ventas.tsx` | Página principal: lista facturas, gestiona cobros, genera PDF |
+| `frontend/src/services/ventaService.ts` | Tipos TypeScript + funciones de llamada a la API |
+
+---
+
+### 💡 Flujo de Facturación
+
+```
+Pedido aprobado
+    │
+    ▼
+[Tab "Pedidos sin Factura"] ──► ModalCrearFactura
+    │  • Seleccionar moneda base de la venta
+    │  • El backend crea Venta + DetalleVenta desde el pedido
+    ▼
+Factura PENDIENTE
+    │
+    ▼
+[Tab "Facturas Emitidas"] ──► ModalDetalle
+    │  • Ver resumen financiero (Total, Pagado, Saldo)
+    │  • Registrar cobros (multi-moneda con TRM)
+    │  • Ingresar Tasa de Cambio Bs. para PDF fiscal
+    │  • Descargar PDF (Factura Fiscal SENIAT)
+    ▼
+Estado: ABONADA / PAGADA
+```
+
+---
+
+### 📄 Plantilla PDF — Factura Fiscal Oficial SENIAT
+
+El PDF se genera **en el cliente** usando `jsPDF` + `html2canvas` sobre un contenedor HTML oculto (`#pdf-factura-container-{id}`).
+
+#### Estructura del documento:
+
+1. **Encabezado** — Logo, razón social, RIF, dirección, teléfonos, redes sociales (`@mueblesyeikar.fabricantes` / `Muebles Yeikar`)
+2. **Recuadro de control** — Tipo de documento ("FACTURA DE VENTA"), N° y N° de Control, fecha de emisión
+3. **Datos del Cliente** (SENIAT-conforme):
+   - Nombre y Apellido o Razón Social
+   - Identificación: `RIF ( )  C.I. ( )` ← **Sin Pasaporte**
+   - Domicilio Fiscal y Teléfono
+   - Forma de Pago: `Efectivo / Tarjeta de Débito / Tarjeta de Crédito / Otros` ← **Sin Cheque**
+4. **Tabla de Productos** — `Cant.` | `Concepto o Descripción` | `P. Unitario (Bs.)` | `Monto Total (Bs.)` ← precios convertidos via `tasaBs`
+5. **Desglose Fiscal (pie)** — Cálculos SENIAT en Bs.:
+   - Base Imponible al IVA (16%)
+   - IVA 16%
+   - Monto Total de la Venta
+   - IGTF 3%
+   - **Total a Pagar (Bs.)**
+
+#### Cálculo de impuestos (en `ModalDetalle`):
+
+```typescript
+const tasaBs = parseFloat(tasaBsInput) || 1;          // Tasa ingresada manualmente
+const totalBs = Number(detalle.total) * tasaBs;        // Total en Bs.
+const baseImponibleBs = totalBs / 1.16;               // Base imponible (sin IVA)
+const iva16Bs = totalBs - baseImponibleBs;            // IVA 16%
+const totalVentaBs = totalBs;                         // = Base + IVA
+const igtf3Bs = totalVentaBs * 0.03;                 // IGTF 3%
+const totalAPagarBs = totalVentaBs + igtf3Bs;        // Total final
+```
+
+> **Importante:** La tasa de cambio (`tasaBs`) se ingresa manualmente desde la interfaz. Si la moneda base de la venta ya es VES, el sistema auto-establece `tasaBs = 1`.
+
+---
+
+### 💳 Sistema de Pagos Multi-Moneda
+
+Un pedido puede tener cobros en distintas monedas. El sistema maneja la conversión con la **Tasa de Cambio (TRM)**:
+
+| Campo | Descripción |
+|---|---|
+| `moneda_id` | Moneda en que se realiza el pago |
+| `tasa_cambio` | Tasa de conversión respecto a la moneda base de la venta |
+| `monto_en_moneda_base` | `monto × tasa_cambio` — el valor normalizado para calcular saldos |
+
+El `saldo_pendiente` se calcula en el backend al consultar `GET /venta/{id}`:
+
+```python
+total_pagado = sum(float(p.monto_en_moneda_base) for p in db_obj.pagos)
+db_obj.saldo_pendiente = float(db_obj.total) - total_pagado
+```
+
+---
+
+### 🚚 Guía de Despacho (Despachos.tsx)
+
+El módulo de despachos también genera PDFs (`#pdf-guia-container-{id}`) con:
+
+1. Encabezado institucional idéntico al de la factura
+2. Datos del destinatario / cliente y dirección de entrega
+3. Recuadro de transporte (conductor, responsable)
+4. Tabla de productos a trasladar (desde `pedido.detalles`)
+5. **Resumen de saldo** ← Nuevo bloque:
+   - Pedido vinculado (#)
+   - Nombre del cliente
+   - Estado del pedido
+   - Aviso: *"Verificar factura antes de entregar"*
+6. Firmas: Conductor / Cliente Conforme / Comercializadora Yeikar
+
+---
+
+### 🔧 Tipos TypeScript relevantes
+
+**`ventaService.ts`**
+```typescript
+export interface ClienteInfo {
+  id: number;
+  nombre: string;
+  telefono?: string;   // Usado en la plantilla fiscal del PDF
+  direccion?: string;  // Domicilio Fiscal en el PDF
+}
+```
+
+**`pedidoService.ts`** — `Order` tiene `cotizacion_id` (número) pero **no** un objeto `cotizacion` embebido. Para acceder al total estimado, se necesita una llamada separada o enriquecer el schema de `Order` en el backend.
+
+---
+
+### ✅ Checklist para agregar un nuevo tipo de documento fiscal
+
+- [ ] Definir la plantilla HTML oculta con `id="pdf-{tipo}-container-{id}"`
+- [ ] Implementar `handleGeneratePdf` con `html2canvas` + `jsPDF`
+- [ ] Asegurarse de que el contenedor tenga `width: '215.9mm'` (carta US)
+- [ ] Incluir siempre: encabezado oficial, RIF, dirección, redes sociales
+- [ ] Para facturas: incluir el bloque de desglose fiscal SENIAT
+- [ ] Para guías de despacho: incluir el bloque de resumen de saldo
+
+---
+
+## 🏗️ Rediseño de Estructuras de Costos y Recetas por Secciones (En Diseño)
+
+> **Principio de Negocio Central:** *Adaptar el ERP a la estructura real de los Excel de YEIKAR, no forzar los Excel al ERP.*
+
+### 1. Contexto y Problema Detectado
+
+Históricamente el ERP importaba el Excel como una lista plana de insumos y trataba todas las filas como si fueran materiales con precios fijos. Esto ocasionaba dos grandes fallas:
+1. **Precios Congelados y Desactualizados:** Se persistían los costos históricos del Excel, impidiendo que el costo del producto se actualice cuando los insumos suben en el Inventario.
+2. **Mezcla de Rubros Heterogéneos:** Se trataba igual a un pliego de MDF que a un costo de mano de obra (hechura) o a un recargo porcentual (gastos indirectos o liquidación de mano de obra).
+3. **Pérdida de la Jerarquía de Fabricación:** Cada producto en la práctica está dividido en bloques o áreas productivas (`EBANISTERÍA`, `PINTURA`, `TERMINACIÓN`, `TENDIDO`, `TAPICERÍA`, `NOCHEROS EN CRUDO`, etc.).
+
+### 2. Arquitectura de Datos Propuesta
+
+La estructura del producto se organiza jerárquicamente:
+
+```
+                          PRODUCTO (ej. Cama Chamber 2x2)
+                                         │
+        ┌────────────────────────────────┴────────────────────────────────┐
+        ▼                                                                 ▼
+SECCIÓN: EBANISTERÍA                                             SECCIÓN: NOCHEROS EN CRUDO
+ ├── Insumos Físicos (MDF 3, Colbón, Grapas)                      ├── Insumos Físicos (Lam MDF 9, Colbón, Grapas)
+ ├── Mano de Obra Base (ej. $315.000 incluye M.O + % liquidación) ├── Hechura por Par (ej. $157.500)
+ └── Recargo de Gastos Sección (ej. 10% sobre materiales)         └── Recargo de Gastos Sección (ej. 5% sobre materiales)
+```
+
+#### Entidades Principales
+
+1. **`seccion_producto`**: Define los bloques productivos pertenecientes a un mueble (`producto_id`, `nombre`, `orden`).
+2. **`elemento_seccion`** (Insumos Físicos):
+   - `nombre_insumo_original`: Descripción tal cual viene del Excel.
+   - `material_id_normalizado`: FK opcional al catálogo de inventario (`NULL` en fase inicial de receta).
+   - `cantidad`, `unidad_medida`, `observaciones`.
+   - `precio_unitario` y `costo_subtotal`: Permanecen `NULL` / desactivados en la fase de receta pura.
+3. **`politica_seccion`** (Reglas de Mano de Obra y Gastos de Sección):
+   - `mano_obra_base`: Monto fijo o tarifa asignada a la mano de obra del operario en esa área.
+   - `pct_liquidacion_mo`: Porcentaje acumulativo para liquidación del trabajador (ej. 5% sobre M.O. base). *Nota: No es un porcentaje fijo global, varía según el acuerdo o área.*
+   - `pct_gastos_seccion`: Porcentaje de recargo de indirectos aplicado exclusivamente sobre la suma de materia prima de esa sección (ej. 10% en Ebanistería Cama, 5% en Nocheros).
+
+### 3. Fases del Plan de Implementación
+
+- **Fase 1: Preparación del Modelo de Datos Interno (DB)**
+  - Creación de modelos SQLAlchemy y migraciones Alembic para `seccion_producto`, `elemento_seccion` y `politica_seccion`.
+- **Fase 2: Motor de Importación Estructurado (Sin Precios Fijos)**
+  - Parser de Excel que lee por bloques de sección.
+  - Guarda insumos físicos con cantidades e insumos libres sin persistir precios unitarios históricos.
+  - Clasifica automáticamente filas de mano de obra y porcentajes de gasto hacia la política de la sección.
+- **Fase 3: API & Endpoints Backend**
+  - Endpoints REST para consultar y gestionar el árbol de recetas por sección (`GET /productos/{id}/receta-estructurada`).
+- **Fase 4: Rediseño de la Interfaz Frontend**
+  - Presentación por tarjetas / bloques de sección en lugar de una lista plana.
+  - Separación visual de Materiales Físicos vs. Mano de Obra y Gastos Indirectos.
+- **Fase 5: Conexión con Inventario (Valuación Dinámica Futura)**
+  - Mapeo de `material_id_normalizado` con el módulo de Inventario para calcular costos en tiempo real en función de los precios vigentes.
+
+---
+
