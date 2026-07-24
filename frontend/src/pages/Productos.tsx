@@ -35,6 +35,9 @@ export default function Productos() {
   const [productos, setProductos] = useState<Product[]>([]);
   const [tiposProducto, setTiposProducto] = useState<TipoProducto[]>([]);
   const [materiales, setMateriales] = useState<Material[]>([]);
+  // Material search state
+  const [materialSearch, setMaterialSearch] = useState('');
+  const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
 
@@ -78,6 +81,7 @@ export default function Productos() {
     formula_personalizada: '',
     es_fijo_override: false,
     observaciones: '',
+    seccion: 'EBANISTERÍA',
   });
 
   const fetchData = async () => {
@@ -240,6 +244,7 @@ export default function Productos() {
       formula_personalizada: recipeForm.formula_personalizada || undefined,
       es_fijo_override: recipeForm.es_fijo_override,
       observaciones: recipeForm.observaciones || undefined,
+      seccion: recipeForm.seccion,
     };
     try {
       if (recipeForm.id) {
@@ -451,18 +456,6 @@ export default function Productos() {
                   <span className="text-xs font-bold text-yeikar-neutral/50 uppercase tracking-wider">
                     {receta.length} {receta.length === 1 ? 'material' : 'materiales'} en receta
                   </span>
-                  <button
-                    onClick={() => {
-                      setRecipeForm({ id: null, material_id: '', cantidad_base: '', tipo_escala: 'FIJO', distancia_pauta_cm: '', tornillos_por_pieza: '', formula_personalizada: '', es_fijo_override: false, observaciones: '' });
-                      setShowRecipeModal(true);
-                    }}
-                    className="bg-yeikar-primary text-yeikar-neutral px-3 py-1.5 rounded-lg text-xs font-bold font-headline hover:bg-yeikar-primary-dark transition-colors flex items-center gap-1"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Agregar
-                  </button>
                 </div>
 
                 {recetaLoading ? (
@@ -784,21 +777,69 @@ export default function Productos() {
             </div>
 
             <form onSubmit={handleRecipeSubmit} className="space-y-4">
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">Material del Inventario *</label>
-                <select
-                  required
-                  value={recipeForm.material_id}
-                  onChange={(e) => setRecipeForm({ ...recipeForm, material_id: e.target.value })}
-                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
-                >
-                  <option value="">Selecciona material...</option>
-                  {materiales.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.nombre} — {fmt(m.costo_base)} / {m.unidad_medida?.abreviatura || 'und'}
-                    </option>
-                  ))}
-                </select>
+                {/* Buscador */}
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-sm">🔍</span>
+                  <input
+                    type="text"
+                    placeholder="Buscar material..."
+                    value={materialSearch}
+                    autoComplete="off"
+                    onFocus={() => setShowMaterialDropdown(true)}
+                    onChange={(e) => {
+                      setMaterialSearch(e.target.value);
+                      setShowMaterialDropdown(true);
+                      if (!e.target.value) setRecipeForm({ ...recipeForm, material_id: '' });
+                    }}
+                    className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
+                  />
+                  {recipeForm.material_id && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 text-sm">✓</span>
+                  )}
+                </div>
+                {/* Dropdown filtrado */}
+                {showMaterialDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-yeikar-secondary-light/15 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                    {[...materiales]
+                      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+                      .filter(m =>
+                        m.nombre.toLowerCase().includes(materialSearch.toLowerCase())
+                      )
+                      .map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            setRecipeForm({ ...recipeForm, material_id: String(m.id) });
+                            setMaterialSearch(m.nombre);
+                            setShowMaterialDropdown(false);
+                          }}
+                          className={`w-full text-left px-4 py-2.5 text-sm hover:bg-yeikar-tertiary/40 transition-colors border-b border-yeikar-secondary-light/5 last:border-0 ${
+                            recipeForm.material_id === String(m.id) ? 'bg-yeikar-primary/10 font-bold' : ''
+                          }`}
+                        >
+                          <span className="font-medium text-yeikar-secondary">{m.nombre}</span>
+                          <span className="text-yeikar-neutral/40 text-xs ml-2">({m.unidad_medida?.abreviatura || 'und'})</span>
+                          {m.costo_base > 0 && (
+                            <span className="text-emerald-600 font-mono text-xs ml-auto float-right mt-0.5">
+                              {fmt(m.costo_base)}
+                            </span>
+                          )}
+                        </button>
+                      ))
+                    }
+                    {materiales.filter(m => m.nombre.toLowerCase().includes(materialSearch.toLowerCase())).length === 0 && (
+                      <p className="text-center text-yeikar-neutral/40 text-xs py-4">Sin resultados para "{materialSearch}"</p>
+                    )}
+                  </div>
+                )}
+                {/* Clic fuera cierra el dropdown */}
+                {showMaterialDropdown && (
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMaterialDropdown(false)} />
+                )}
+                <input type="hidden" required value={recipeForm.material_id} />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
