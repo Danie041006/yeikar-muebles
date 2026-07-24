@@ -44,7 +44,7 @@ class ProductoResponse(ProductoBase):
 class MaterialBase(BaseModel):
     nombre: str
     unidad_medida_id: int
-    costo_base: float
+    costo_base: Optional[float] = 0.0
     activo: Optional[bool] = True
 
 class MaterialCreate(MaterialBase):

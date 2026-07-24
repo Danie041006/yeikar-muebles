@@ -155,7 +155,7 @@ export default function EstructuraCostosEditor({
   // Abrir modal para crear en inventario
   const openCreateMaterialModal = (seccionNombre: string, name?: string) => {
     setNewMatName(name || '');
-    setNewMatCost('0');
+    setNewMatCost(''); // vacío para que sea opcional
     setNewMatUnit(unidades[0]?.id.toString() || '');
     setModalSection(seccionNombre);
     setIsModalOpen(true);
@@ -566,12 +566,12 @@ export default function EstructuraCostosEditor({
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Costo Base ($) *</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Costo Base ($) <span className="text-gray-400 font-normal">(Opcional)</span></label>
                   <input
                     type="number"
-                    required
                     min="0"
                     step="0.01"
+                    placeholder="0.00"
                     value={newMatCost}
                     onChange={(e) => setNewMatCost(e.target.value)}
                     className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
