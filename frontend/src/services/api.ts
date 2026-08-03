@@ -1,6 +1,6 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
 
-const API_URL = (import.meta as any).env?.VITE_API_URL ?? 'http://localhost:8000';
+export const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '');
 
 // API principal para los módulos: /api/v1/*
 const api = axios.create({
