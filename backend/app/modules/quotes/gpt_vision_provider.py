@@ -15,9 +15,12 @@ Configuración requerida en .env:
 
 import json
 import base64
+import logging
 import os
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from app.modules.quotes.vision_provider import (
     VisionProvider,
@@ -206,9 +209,9 @@ class GPTVisionProvider(VisionProvider):
             )
 
             raw_text = response.choices[0].message.content
-            print(f"🔍 RAW RESPONSE DEL MODELO:\n{raw_text}\n{'='*50}")
-            print(f"🔍 FINISH REASON: {response.choices[0].finish_reason}")
-            print(f"🔍 USAGE: {response.usage}")
+            logger.debug("RAW RESPONSE DEL MODELO:\n%s\n%s", raw_text, "=" * 50)
+            logger.debug("FINISH REASON: %s", response.choices[0].finish_reason)
+            logger.debug("USAGE: %s", response.usage)
             raw_json = json.loads(raw_text)
             return _parse_attributes(raw_json)
 

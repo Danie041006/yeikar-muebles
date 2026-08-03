@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.core.rate_limit import RateLimitMiddleware
 from app.db.base import Base
 from app.db.session import engine
 from app.core.config import settings
@@ -18,11 +19,19 @@ from app.modules.tasas_cambio.router import router as tasas_router
 from app.modules.inventory.router import router as inventario_router
 from app.modules.purchases.router import router as compras_router
 from app.modules.reports.router import router as reportes_router
+from app.modules.reports.cuentas_router import router as cuentas_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.envios.router import router as envios_router
 from app.modules.quotes.intelligent_router import router as iqe_router
-app = FastAPI(title="YEIKAR API", version="0.0.1")
+app = FastAPI(
+    title="YEIKAR API",
+    version="0.0.1",
+    docs_url="/docs" if settings.DEBUG else None,
+    redoc_url=None if not settings.DEBUG else None,
+    openapi_url="/openapi.json" if settings.DEBUG else None,
+)
 origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -50,6 +59,7 @@ app.include_router(tasas_router, prefix="/api/v1/tasa", tags=["tasas de cambio"]
 app.include_router(inventario_router, prefix="/api/v1", tags=["inventario"])
 app.include_router(compras_router, prefix="/api/v1", tags=["compras"])
 app.include_router(reportes_router, prefix="/api/v1", tags=["reportes"])
+app.include_router(cuentas_router, prefix="/api/v1", tags=["cuentas"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
 app.include_router(envios_router, prefix="/api/v1/envio", tags=["envios"])
 app.include_router(iqe_router, prefix="/api/v1/intelligent-quotation", tags=["cotización inteligente"])

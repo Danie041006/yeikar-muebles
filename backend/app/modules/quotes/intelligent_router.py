@@ -25,6 +25,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.session import get_db
 from app.modules.users.deps import require_module
 from app.modules.quotes.vision_provider import FurnitureAttributes
@@ -131,18 +132,18 @@ async def analyze_image(
     El ERP NO usa estos atributos para calcular costos.
     Solo los usa para buscar estructuras similares.
     """
-    if file.content_type not in ("image/jpeg", "image/png", "image/webp", "image/jpg"):
+    if not file.content_type or file.content_type not in ("image/jpeg", "image/png", "image/webp"):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail="Formato de imagen no soportado. Use JPEG, PNG o WEBP.",
+            detail="Formato de imagen no soportado. Usa JPG, PNG o WebP.",
         )
 
     image_bytes = await file.read()
 
-    if len(image_bytes) > 10 * 1024 * 1024:  # 10 MB
+    if len(image_bytes) > settings.MAX_UPLOAD_MB * 1024 * 1024:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail="La imagen supera el tamaño máximo de 10 MB.",
+            detail=f"La imagen supera el límite de {settings.MAX_UPLOAD_MB} MB.",
         )
 
     # Llamar al proveedor de visión.

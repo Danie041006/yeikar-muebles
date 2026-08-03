@@ -11,8 +11,6 @@ services:
       POSTGRES_USER: ${DB_USER:-yeikar}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-yeikar123}
       POSTGRES_DB: ${DB_NAME:-yeikar_db}
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -29,11 +27,15 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       DATABASE_URL: postgresql://${DB_USER:-yeikar}:${DB_PASSWORD:-yeikar123}@db:5432/${DB_NAME:-yeikar_db}
-      SECRET_KEY: ${SECRET_KEY:-cambia-esto-en-produccion}
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-false}
+      RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-1200}
+      LOGIN_MAX_INTENTOS: ${LOGIN_MAX_INTENTOS:-5}
+      LOGIN_VENTANA_MINUTOS: ${LOGIN_VENTANA_MINUTOS:-15}
       ALGORITHM: HS256
       ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
@@ -51,6 +53,9 @@ services:
   # ──────────────────────────────────────────────────────────────
   # Frontend React (nginx en producción)
   # ──────────────────────────────────────────────────────────────
+  # ⚠️ nginx (:80) es el ÚNICO punto de entrada público. Los puertos
+  # :8000 (backend) y :5432 (postgres) ya NO se publican al host;
+  # solo son alcanzables desde la red interna de compose.
   frontend:
     build:
       context: ./frontend

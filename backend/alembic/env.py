@@ -16,6 +16,7 @@ import app.modules.orders.model     # noqa: F401
 import app.modules.production.model # noqa: F401
 import app.modules.inventory.model  # noqa: F401
 import app.modules.users.model      # noqa: F401
+from app.modules.users.model import LoginIntento, RefreshToken  # noqa: F401
 import app.modules.purchases.model  # noqa: F401
 import app.modules.sales.model      # noqa: F401
 import app.modules.gastos.model     # noqa: F401

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -39,14 +39,22 @@ def register(
 @router.post("/login", response_model=schemas.Token)
 def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """
     Autentica al usuario con nombre_usuario y password.
     Retorna un token JWT y un refresh token.
     """
+    ip = request.client.host if request and request.client else "unknown"
+    if service.usuario_bloqueado(db, form_data.username, ip):
+        raise HTTPException(
+            status_code=429,
+            detail="Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.",
+        )
     user = service.autenticar_usuario(db, form_data.username, form_data.password)
     if not user:
+        service.registrar_intento(db, form_data.username, ip, False)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario o contraseña incorrectos",
@@ -63,6 +71,8 @@ def login(
         data={"sub": user.nombre_usuario, "type": "refresh"}, expires_delta=refresh_token_expires
     )
     # Registrar el último acceso
+    service.registrar_intento(db, form_data.username, ip, True)
+    service.guardar_refresh_token(db, user.id, refresh_token)
     service.actualizar_ultimo_acceso(db, user.id)
     return {"access_token": access_token, "token_type": "bearer", "refresh_token": refresh_token}
 
@@ -73,6 +83,7 @@ def refresh_token(
 ):
     """
     Recibe un refresh token y retorna nuevos access y refresh tokens.
+    El token recibido se revoca (rotación) y el nuevo par queda registrado en BD.
     """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -81,14 +92,14 @@ def refresh_token(
     )
     try:
         payload = jwt.decode(payload_in.refresh_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        username: str = payload.get("sub")
+        sub: str = payload.get("sub")
         token_type: str = payload.get("type")
-        if username is None or token_type != "refresh":
+        if sub is None or token_type != "refresh":
             raise credentials_exception
     except JWTError:
         raise credentials_exception
 
-    user = service.obtener_usuario_por_nombre(db, username=username)
+    user = service.rotar_refresh_token(db, payload_in.refresh_token)
     if user is None or not user.activo:
         raise credentials_exception
 
@@ -100,6 +111,7 @@ def refresh_token(
     new_refresh_token = service.crear_token_acceso(
         data={"sub": user.nombre_usuario, "type": "refresh"}, expires_delta=new_refresh_token_expires
     )
+    service.guardar_refresh_token(db, user.id, new_refresh_token)
     return {"access_token": access_token, "token_type": "bearer", "refresh_token": new_refresh_token}
 
 # ------------------------------------------------------------

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Optional
 
@@ -7,7 +7,7 @@ class UsuarioBase(BaseModel):
     email: Optional[EmailStr] = None   # EmailStr valida formato
 
 class UsuarioCreate(UsuarioBase):
-    password: str
+    password: str = Field(min_length=8, max_length=128)
 
 class UsuarioLogin(BaseModel):
     nombre_usuario: str
