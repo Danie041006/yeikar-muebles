@@ -51,6 +51,7 @@ class CotizacionAnalisisIA(Base):
 
     id                  = Column(BigInteger, primary_key=True, index=True)
     cotizacion_id       = Column(BigInteger, ForeignKey("cotizacion.id", ondelete="SET NULL"), nullable=True)
+    producto_id         = Column(BigInteger, ForeignKey("producto.id", ondelete="SET NULL"), nullable=True)
     foto_url            = Column(Text, nullable=False)
     tipo_mueble         = Column(String(50), default="cama", nullable=False)
     familia_probable    = Column(String(50), nullable=True)
@@ -65,6 +66,7 @@ class CotizacionAnalisisIA(Base):
     created_at          = Column(DateTime, server_default=func.now())
 
     cotizacion = relationship("Cotizacion")
+    producto = relationship("Producto")
 
 class CotizacionDetalleMaterial(Base):
     __tablename__ = "cotizacion_detalle_material"

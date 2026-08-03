@@ -420,19 +420,24 @@ def recalculate(payload: RecalculateRequest, db: Session = Depends(get_db)):
 def _analisis_con_lock(db: Session, analisis_id):
     """
     Bloquea la fila del análisis de imagen (FOR UPDATE) y devuelve
-    (analisis, cotizacion_existente). Si el análisis ya generó una cotización,
-    devuelve esa cotización para NO duplicarla (idempotencia ante doble clic
-    o retry del mismo request).
+    (analisis, cotizacion_existente, producto_existente). Si el análisis ya
+    generó una cotización o un producto, devuelve ese registro para NO
+    duplicarlo (idempotencia ante doble clic o retry del mismo request).
     """
     if not analisis_id:
-        return None, None
+        return None, None, None
     analisis = db.query(CotizacionAnalisisIA).filter(
         CotizacionAnalisisIA.id == analisis_id
     ).with_for_update().first()
-    if not analisis or not analisis.cotizacion_id:
-        return analisis, None
-    cotizacion = db.query(Cotizacion).filter(Cotizacion.id == analisis.cotizacion_id).first()
-    return analisis, cotizacion
+    if not analisis:
+        return None, None, None
+    cotizacion = None
+    if analisis.cotizacion_id:
+        cotizacion = db.query(Cotizacion).filter(Cotizacion.id == analisis.cotizacion_id).first()
+    producto = None
+    if analisis.producto_id:
+        producto = db.query(Producto).filter(Producto.id == analisis.producto_id).first()
+    return analisis, cotizacion, producto
 
 
 @router.post("/finalize", response_model=FinalizeResponse, dependencies=[Depends(require_module('cotizaciones_ia'))])
@@ -446,7 +451,7 @@ def finalize(payload: FinalizeRequest, db: Session = Depends(get_db)):
     from decimal import Decimal as D
 
     # 0. Idempotencia: si este análisis ya generó una cotización, devolverla
-    analisis, cotizacion_existente = _analisis_con_lock(db, payload.analisis_id)
+    analisis, cotizacion_existente, _ = _analisis_con_lock(db, payload.analisis_id)
     if cotizacion_existente:
         return FinalizeResponse(
             cotizacion_id=cotizacion_existente.id,
@@ -661,6 +666,16 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
                 detail="El tipo de producto es requerido para guardar como Producto."
             )
 
+        # Idempotencia: si este análisis ya creó un producto, devolverlo
+        analisis, _, producto_existente = _analisis_con_lock(db, payload.analisis_id)
+        if producto_existente:
+            return FinalizeResponse(
+                cotizacion_id=0,
+                total_estimado=float(producto_existente.precio_venta_con_iva or producto_existente.precio_venta_base or 0),
+                pdf_url=f"/productos",
+                mensaje="El producto ya fue guardado a partir de este análisis. Se devuelve el existente."
+            )
+
         # Crear nuevo producto
         nuevo_prod = Producto(
             nombre=payload.nombre_producto,
@@ -729,6 +744,10 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
         db.add(mueble_attr)
         db.commit()
 
+        if analisis:
+            analisis.producto_id = nuevo_prod.id
+            db.commit()
+
         return FinalizeResponse(
             cotizacion_id=0,
             total_estimado=float(precio_con_iva),
@@ -745,7 +764,7 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
             )
 
         # Idempotencia: si este análisis ya generó una cotización, devolverla
-        analisis, cotizacion_existente = _analisis_con_lock(db, payload.analisis_id)
+        analisis, cotizacion_existente, _ = _analisis_con_lock(db, payload.analisis_id)
         if cotizacion_existente:
             return FinalizeResponse(
                 cotizacion_id=cotizacion_existente.id,
