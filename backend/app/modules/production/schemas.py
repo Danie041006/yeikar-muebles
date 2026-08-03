@@ -64,6 +64,21 @@ class ManoObraResponse(ManoObraBase):
         from_attributes = True
 
 # ------------------------------------------------------------
+# Asignado Adicional
+# ------------------------------------------------------------
+class AsignadoAdicionalResponse(BaseModel):
+    id: int
+    etapa_produccion_id: int
+    empleado_id: int
+    empleado: Optional[EmpleadoResponse] = None
+
+    class Config:
+        from_attributes = True
+
+class AsignadoAdicionalCreate(BaseModel):
+    empleado_id: int
+
+# ------------------------------------------------------------
 # Etapa de Producción
 # ------------------------------------------------------------
 class EtapaProduccionBase(BaseModel):
@@ -96,6 +111,7 @@ class EtapaProduccionResponse(EtapaProduccionBase):
     empleado_responsable: Optional[EmpleadoResponse] = None
     consumos: List[ConsumoMaterialResponse] = []
     mano_obras: List[ManoObraResponse] = []
+    asignados_adicionales: List[AsignadoAdicionalResponse] = []
     orden: Optional['OrdenProduccionMinima'] = None
 
     class Config:
@@ -152,9 +168,30 @@ class OrdenProduccionUpdate(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
+class ClienteBasicoResponse(BaseModel):
+    id: int
+    nombre: str
+    telefono: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class PedidoBasicoEnDetalle(BaseModel):
+    id: int
+    cliente: Optional[ClienteBasicoResponse] = None
+
+    class Config:
+        from_attributes = True
+
 class DetalleDePedidoBasico(BaseModel):
     id: int
+    ancho: Optional[float] = None
+    largo: Optional[float] = None
     producto: Optional[ProductoResponse] = None
+    pedido: Optional[PedidoBasicoEnDetalle] = None
+
+    class Config:
+        from_attributes = True
 
 class OrdenProduccionMinima(BaseModel):
     id: int
@@ -180,3 +217,32 @@ class OrdenProduccionResponse(OrdenProduccionBase):
         from_attributes = True
 
 EtapaProduccionResponse.model_rebuild()
+
+
+# ------------------------------------------------------------
+# Referencia de Receta (para visualización en Kanban)
+# ------------------------------------------------------------
+class MaterialReferencia(BaseModel):
+    material_id: int
+    nombre: str
+    seccion: str
+    cantidad_base: float
+    cantidad_esperada: float
+    unidad: str
+    costo_unitario: float
+
+class ReferenciaRecetaResponse(BaseModel):
+    producto_id: int
+    producto_nombre: str
+    dimensiones: dict
+    materiales: List[MaterialReferencia]
+
+
+# ------------------------------------------------------------
+# Pasar a Área (transición controlada)
+# ------------------------------------------------------------
+class PasarAAreaRequest(BaseModel):
+    area_id: int
+    empleado_responsable_id: int
+    empleados_adicionales_ids: List[int] = []
+    observaciones: Optional[str] = None

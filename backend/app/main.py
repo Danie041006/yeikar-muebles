@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.modules.clients.router import router as clientes_router
 from app.modules.users.router import router as auth_router
 from app.modules.catalogos.router import router as catalogos_router
-from app.modules.productos.router import router as productos_router
+from app.modules.productos.router import router as productos_router, material_router as materiales_router
 from app.modules.proveedores.router import router as proveedores_router
 from app.modules.empleados.router import router as empleados_router
 from app.modules.quotes.router import router as cotizaciones_router
@@ -37,6 +37,7 @@ app.include_router(clientes_router, prefix="/api/v1/cliente", tags=["cliente"])
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(catalogos_router, prefix="/api/v1/catalogos", tags=["catalogos"])
 app.include_router(productos_router, prefix="/api/v1", tags=["productos"])
+app.include_router(materiales_router, prefix="/api/v1/material", tags=["materiales"])
 app.include_router(proveedores_router, prefix="/api/v1/proveedor", tags=["proveedores"])
 app.include_router(empleados_router, prefix="/api/v1/empleado", tags=["empleados"])
 app.include_router(cotizaciones_router, prefix="/api/v1/cotizacion", tags=["cotizaciones"])

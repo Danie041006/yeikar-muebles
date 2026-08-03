@@ -29,22 +29,15 @@ EXCEL_PATH = (
     / "docs/info_para_usar/estructuras/CAMAS CON SUS MESAS DE NOCHE.xlsx"
 )
 
-HEADERS_SECCION = {
-    "SECCION TAPICERIA": "TAPICERÍA",
-    "SECCION TAPICERÍA": "TAPICERÍA",
-    "SECCION TERMINACION": "TERMINACIÓN",
-    "SECCION TERMINACIÓN": "TERMINACIÓN",
-    "SECCION PINTURA": "PINTURA",
-    "TENDIDO DE REJAS": "TENDIDO",
-    "TENDIDOS": "TENDIDO",
-    "TENDIDO": "TENDIDO",
-    "COLA DE PATO": "COLA DE PATO",
-    "NOCHEROS EN CRUDO": "NOCHEROS EN CRUDO",
-    "NOCHEROS": "NOCHEROS EN CRUDO",
-    "NOCHERO": "NOCHEROS EN CRUDO",
-    "SECCION EBANISTERIA": "EBANISTERÍA",
-    "SECCION EBANISTERÍA": "EBANISTERÍA",
-}
+HEADERS_SECCION = [
+    (r"TAPICER[IÍ]A", "TAPICERÍA"),
+    (r"TERMINACI[OÓ]N", "TERMINACIÓN"),
+    (r"PINTURA", "PINTURA"),
+    (r"TENDIDO", "TENDIDO"),
+    (r"COLA DE PATO", "COLA DE PATO"),
+    (r"EBANISTER[IÍ]A", "EBANISTERÍA"),
+    (r"MARCO", "MARCO"),
+]
 
 PREFIJOS_IGNORAR = (
     "TOTAL", "SUBTOTAL", "SUB TOTAL", "COSTO DE",
@@ -63,14 +56,35 @@ def limpiar_texto(val) -> str:
     return ' '.join(txt.split())
 
 
-def es_encabezado_seccion(celda_val: str) -> str | None:
-    txt_upper = celda_val.upper()
-    for header, sec_norm in HEADERS_SECCION.items():
-        if header in txt_upper:
-            return sec_norm
+def es_encabezado_seccion(texto_fila: str, componente_actual: str) -> tuple[str | None, str]:
+    """
+    Recibe el texto combinado de la fila.
+    Retorna (nombre_seccion_normalizado, nuevo_componente_actual)
+    Ej: ("EBANISTERÍA", "CAMA") ó ("EBANISTERÍA (NOCHEROS)", "NOCHEROS")
+    """
+    txt_upper = texto_fila.upper()
+
+    nuevo_comp = componente_actual
+    if "NOMBRE DEL PRODUCTO:" in txt_upper or "NOCHERO" in txt_upper:
+        if "NOCHERO" in txt_upper:
+            nuevo_comp = "NOCHEROS"
+        elif "NOMBRE DEL PRODUCTO:" in txt_upper:
+            nuevo_comp = "CAMA"
+
+    for pat, sec_norm in HEADERS_SECCION:
+        if re.search(pat, txt_upper):
+            # Si el texto de la fila o el contexto actual indica Nochero
+            is_nochero = (nuevo_comp == "NOCHEROS") or ("NOCHERO" in txt_upper)
+            if is_nochero:
+                return (f"{sec_norm} (NOCHEROS)", "NOCHEROS")
+            else:
+                return (sec_norm, "CAMA")
+
+    # Si es solo una fila de 'NOMBRE DEL PRODUCTO: NOCHEROS EN CRUDO' sin la palabra EBANISTERÍA explícita
     if "NOMBRE DEL PRODUCTO:" in txt_upper and "NOCHERO" in txt_upper:
-        return "NOCHEROS EN CRUDO"
-    return None
+        return ("EBANISTERÍA (NOCHEROS)", "NOCHEROS")
+
+    return (None, nuevo_comp)
 
 
 def extraer_porcentaje(texto: str) -> Decimal | None:
@@ -103,7 +117,7 @@ def procesar_hoja(sheet, db, dry_run=True):
     for r in range(1, 10):
         for c in range(1, 6):
             val = sheet.cell(row=r, column=c).value
-            if val and "NOMBRE DEL PRODUCTO:" in str(val).upper():
+            if val and "NOMBRE DEL PRODUCTO:" in str(val).upper() and "NOCHERO" not in str(val).upper():
                 val_prod = sheet.cell(row=r, column=c+2).value or sheet.cell(row=r, column=c+1).value
                 if val_prod:
                     nombre_prod = limpiar_texto(val_prod)
@@ -114,7 +128,32 @@ def procesar_hoja(sheet, db, dry_run=True):
     if not nombre_prod:
         nombre_prod = f"CAMA MODELO {nombre_hoja.upper()}"
 
-    producto = db.query(Producto).filter(Producto.nombre.ilike(f"%{nombre_prod}%")).first()
+    # Limpiar el nombre del Excel: quitar fechas y medidas para el matching
+    import re as _re
+    nombre_limpio = _re.sub(r'\d{1,2}[/\-]\d{1,2}[/\-]?\d{0,4}', '', nombre_prod)  # quitar fechas
+    nombre_limpio = _re.sub(r'\b\d+[xX*]\d+\b', '', nombre_limpio)  # quitar medidas como 2X2
+    nombre_limpio = ' '.join(nombre_limpio.split()).strip()
+
+    # Intento 1: nombre del Excel (limpio) dentro del nombre en BD
+    producto = None
+    if nombre_limpio:
+        producto = db.query(Producto).filter(Producto.nombre.ilike(f"%{nombre_limpio}%")).first()
+
+    # Intento 2: nombre completo del Excel dentro del nombre en BD
+    if not producto and nombre_prod != nombre_limpio:
+        producto = db.query(Producto).filter(Producto.nombre.ilike(f"%{nombre_prod}%")).first()
+
+    # Intento 3: nombre en BD dentro del nombre del Excel
+    # Solo si el nombre BD tiene al menos 8 caracteres (evita falsos positivos con "CAMA")
+    if not producto:
+        todos = db.query(Producto).filter(Producto.nombre.isnot(None)).all()
+        for p in todos:
+            nombre_bd = (p.nombre or "").strip().upper()
+            if len(nombre_bd) >= 8 and nombre_bd in nombre_prod.upper():
+                producto = p
+                break
+
+    # Intento 4: por hoja_excel exacta
     if not producto:
         producto = db.query(Producto).filter(Producto.hoja_excel == nombre_hoja).first()
 
@@ -136,6 +175,7 @@ def procesar_hoja(sheet, db, dry_run=True):
 
     # 2. Recorrer filas organizando por Sección
     seccion_actual = "EBANISTERÍA"
+    componente_actual = "CAMA"
     secciones_creadas = {}
     elementos_por_seccion = {}
     politica_por_seccion = {}
@@ -147,7 +187,7 @@ def procesar_hoja(sheet, db, dry_run=True):
             politica_por_seccion[sec_name] = {
                 "mano_obra_base": Decimal("0"),
                 "pct_liquidacion_mo": Decimal("5.00"),
-                "pct_gastos_seccion": Decimal("10.00") if sec_name == "EBANISTERÍA" else Decimal("0.00")
+                "pct_gastos_seccion": Decimal("10.00") if "EBANISTERÍA" in sec_name else Decimal("0.00")
             }
 
     asegurar_seccion(seccion_actual)
@@ -163,9 +203,10 @@ def procesar_hoja(sheet, db, dry_run=True):
             continue
 
         c1_upper = c1.upper()
+        texto_fila_completo = f"{c1} {c2 or ''} {c3} {c4 or ''}".strip()
 
-        # A. Verificar si es cambio de sección
-        nueva_sec = es_encabezado_seccion(c1)
+        # A. Verificar si es cambio de sección o nuevo componente (CAMA vs NOCHEROS)
+        nueva_sec, componente_actual = es_encabezado_seccion(texto_fila_completo, componente_actual)
         if nueva_sec:
             seccion_actual = nueva_sec
             asegurar_seccion(seccion_actual)
@@ -174,6 +215,8 @@ def procesar_hoja(sheet, db, dry_run=True):
         # B. Ignorar encabezados de tabla o títulos
         if "MATERIA PRIMA" in c1_upper and not c2:
             continue
+
+
 
         # C. Verificar si es fila de Gastos Indirectos (ej: "gastos de Ebanisteria e 10%")
         if "GASTOS DE" in c1_upper or ("GASTOS" in c1_upper and "%" in c1_upper):

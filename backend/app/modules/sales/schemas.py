@@ -15,11 +15,18 @@ class DetalleVentaBase(BaseModel):
 class DetalleVentaCreate(DetalleVentaBase):
     venta_id: int
     producto_id: int
+    costo_unitario: Optional[float] = None
+    porcentaje_ganancia: Optional[float] = None
+    descuento: Optional[float] = 0.0
 
 class DetalleVentaResponse(DetalleVentaBase):
     id: int
     venta_id: int
     producto_id: int
+    costo_unitario: Optional[float] = None
+    porcentaje_ganancia: Optional[float] = None
+    utilidad: Optional[float] = None
+    descuento: Optional[float] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     producto: Optional[ProductoResponse] = None
@@ -41,11 +48,18 @@ class PagoBase(BaseModel):
 class PagoCreate(PagoBase):
     venta_id: int
     moneda_id: int
+    # Tasa de cambio respecto a la moneda base de la venta.
+    # Debe indicarse cuando la moneda del pago difiere de la moneda de la venta.
+    # Ej: si la venta es en COP y el pago es en USD, tasa_cambio = TRM del día (ej: 4200.0)
+    # Si las monedas coinciden, se puede omitir (se asume 1.0).
+    tasa_cambio: Optional[float] = Field(None, gt=0, description="TRM/tasa de conversión. Requerido si moneda_id difiere de la moneda de la venta.")
 
 class PagoResponse(PagoBase):
     id: int
     venta_id: int
     moneda_id: int
+    tasa_cambio: float
+    monto_en_moneda_base: float
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     moneda: Optional[MonedaResponse] = None
@@ -78,6 +92,8 @@ class VentaResponse(VentaBase):
     moneda_id: int
     total: float
     estado: str  # PENDIENTE, ABONADA, PAGADA, CANCELADA
+    tasa_cambio: float
+    total_en_moneda_base: Optional[float] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     cliente: Optional[ClientResponse] = None

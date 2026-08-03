@@ -11,7 +11,7 @@ from app.modules.production.schemas import (
 from app.modules.orders.model import DetallePedido
 from app.modules.orders.model import DetallePedido, Pedido
 from app.modules.productos.model import Material
-from app.modules.catalogos.model import Ubicacion
+from app.modules.catalogos.model import Ubicacion, TipoGasto
 from app.modules.inventory.service import registrar_movimiento
 from app.modules.inventory.schemas import MovimientoCreate
 # ------------------------------------------------------------
@@ -50,8 +50,10 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate):
     db.refresh(db_orden)
     return db_orden
 def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int):
-    # Verificar que el detalle del pedido exista
-    detalle = db.query(DetallePedido).filter(DetallePedido.id == detalle_pedido_id).first()
+    # Verificar que el detalle del pedido exista.
+    # FOR UPDATE sobre el detalle: dos requests simultáneos para el mismo detalle
+    # se serializan y solo el primero crea la orden (evita IntegrityError 500).
+    detalle = db.query(DetallePedido).filter(DetallePedido.id == detalle_pedido_id).with_for_update().first()
     if not detalle:
         raise ValueError("El detalle de pedido especificado no existe.")
     
@@ -101,11 +103,14 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
             # Imprimir error pero no bloquear la finalización
             print(f"Error al calcular costos automáticos al finalizar orden {id_orden}: {e}")
             
-        # Sincronizar estado del Pedido a TERMINADO si todas sus órdenes de producción están en FINALIZADA
+        # Sincronizar estado del Pedido a TERMINADO si todas sus órdenes de producción están en FINALIZADA.
+        # FOR UPDATE sobre el pedido: dos finalizaciones simultáneas de órdenes del
+        # mismo pedido se serializan, evitando que ambas lean "no todas finalizadas"
+        # y que el pedido nunca pase a TERMINADO (o que se cree envío dos veces).
         try:
             detalle = db.query(DetallePedido).filter(DetallePedido.id == db_orden.detalle_pedido_id).first()
             if detalle:
-                pedido = db.query(Pedido).filter(Pedido.id == detalle.pedido_id).first()
+                pedido = db.query(Pedido).filter(Pedido.id == detalle.pedido_id).with_for_update().first()
                 if pedido:
                     # Cargar todas las órdenes de producción vinculadas a este pedido
                     detalles_ids = [d.id for d in pedido.detalles]
@@ -148,8 +153,9 @@ def crear_etapa_produccion(db: Session, esquema: EtapaProduccionCreate):
     )
     db.add(db_etapa)
     
-    # Si la orden está en estado PENDIENTE, cambiarla a EN_PRODUCCION al crear su primera etapa
-    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == esquema.orden_produccion_id).first()
+    # Si la orden está en estado PENDIENTE, cambiarla a EN_PRODUCCION al crear su primera etapa.
+    # FOR UPDATE: dos primeras etapas simultáneas se serializan y no pisan fecha/estado.
+    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == esquema.orden_produccion_id).with_for_update().first()
     if orden and orden.estado == "PENDIENTE":
         orden.estado = "EN_PRODUCCION"
         if not orden.fecha_inicio:
@@ -169,7 +175,9 @@ def actualizar_etapa_produccion(db: Session, id_etapa: int, esquema: EtapaProduc
     db.refresh(db_etapa)
     return db_etapa
 def cambiar_estado_etapa_produccion(db: Session, id_etapa: int, nuevo_estado: str):
-    db_etapa = obtener_etapa_produccion(db, id_etapa)
+    # FOR UPDATE: evita el lost-update cuando dos finalizaciones/cambios de estado
+    # concurrentes leen el mismo estado base y se pisan entre sí.
+    db_etapa = db.query(EtapaProduccion).filter(EtapaProduccion.id == id_etapa).with_for_update().first()
     if not db_etapa:
         return None
     
@@ -237,12 +245,82 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate):
     try:
         registrar_movimiento(db, movimiento)
     except ValueError as e:
-        # Si falla (por ejemplo, stock insuficiente), se hace rollback
         db.rollback()
         raise ValueError(f"Error al descontar inventario: {e}")
+
+    tipo_gasto_consumo = db.query(TipoGasto).filter(
+        TipoGasto.nombre == "Consumo de Materia Prima en Producción"
+    ).first()
+    if tipo_gasto_consumo:
+        costo_total = Decimal(str(esquema.cantidad)) * material.costo_base
+        from app.modules.gastos.model import Gasto
+        db_gasto = Gasto(
+            tipo_gasto_id=tipo_gasto_consumo.id,
+            moneda_id=1,
+            fecha=esquema.fecha or date.today(),
+            descripcion=f"Consumo {material.nombre} ({esquema.cantidad}) - Etapa #{esquema.etapa_produccion_id}",
+            monto=costo_total,
+            tasa_cambio=Decimal("1.0"),
+            monto_en_moneda_base=costo_total,
+            observaciones=f"Generado automáticamente al descontar inventario en producción (Etapa #{esquema.etapa_produccion_id})"
+        )
+        db.add(db_gasto)
+
     db.commit()
     db.refresh(db_consumo)
     return db_consumo
+def obtener_referencia_receta(db: Session, id_etapa: int) -> dict | None:
+    """
+    Retorna la receta completa del producto asociado a la etapa,
+    con cantidad_base como cantidad_esperada (sin escalar aún).
+    Incluye dimensiones del pedido para escalado futuro.
+    """
+    from app.modules.productos.model import ProductoMaterial, Material as MatModel
+
+    etapa = db.query(EtapaProduccion).options(
+        joinedload(EtapaProduccion.orden).joinedload(OrdenProduccion.detalle_pedido).joinedload(DetallePedido.producto)
+    ).filter(EtapaProduccion.id == id_etapa).first()
+
+    if not etapa or not etapa.orden or not etapa.orden.detalle_pedido:
+        return None
+
+    detalle = etapa.orden.detalle_pedido
+    producto = detalle.producto
+    if not producto:
+        return None
+
+    receta = (
+        db.query(ProductoMaterial)
+        .filter(ProductoMaterial.producto_id == producto.id)
+        .all()
+    )
+
+    materiales = []
+    for pm in receta:
+        mat = db.query(MatModel).filter(MatModel.id == pm.material_id).first()
+        if not mat:
+            continue
+        materiales.append({
+            "material_id": mat.id,
+            "nombre": mat.nombre,
+            "seccion": pm.seccion or "EBANISTERIA",
+            "cantidad_base": float(pm.cantidad_base),
+            "cantidad_esperada": float(pm.cantidad_base),
+            "unidad": mat.unidad_medida.abreviatura if mat.unidad_medida else "",
+            "costo_unitario": float(mat.costo_base),
+        })
+
+    return {
+        "producto_id": producto.id,
+        "producto_nombre": producto.nombre,
+        "dimensiones": {
+            "ancho": float(detalle.ancho) if detalle.ancho else None,
+            "largo": float(detalle.largo) if detalle.largo else None,
+        },
+        "materiales": materiales,
+    }
+
+
 def eliminar_consumo_material(db: Session, id_consumo: int):
     db_consumo = obtener_consumo_material(db, id_consumo)
     if not db_consumo:
@@ -292,7 +370,9 @@ def eliminar_mano_obra(db: Session, id_mano_obra: int):
 def obtener_costo_por_orden(db: Session, orden_id: int):
     return db.query(CostoProduccion).filter(CostoProduccion.orden_produccion_id == orden_id).first()
 def calcular_y_guardar_costo(db: Session, orden_id: int, ganancia_porcentaje: float = 0.0, costo_gastos: float = 0.0, precio_impuestos_base: float = 0.0):
-    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == orden_id).first()
+    # FOR UPDATE: serializa los cálculos concurrentes sobre la misma orden para
+    # que el get-or-create de CostoProduccion no genere duplicados.
+    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == orden_id).with_for_update().first()
     if not orden:
         raise ValueError("La orden de produccion especificada no existe.")
     # Calcular costo de materiales

@@ -1,12 +1,12 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from datetime import date, datetime
 from typing import Optional
 
 class ClientBase(BaseModel):
     nombre: str
-    telefono: Optional[str] = None
+    telefono: str
     direccion: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     ciudad: Optional[str] = None
     estado: Optional[str] = None
     observaciones: Optional[str] = None
@@ -19,7 +19,7 @@ class ClientUpdate(BaseModel):
     nombre: Optional[str] = None
     telefono: Optional[str] = None
     direccion: Optional[str] = None
-    email: Optional[EmailStr] = None
+    email: Optional[str] = None
     ciudad: Optional[str] = None
     estado: Optional[str] = None
     observaciones: Optional[str] = None

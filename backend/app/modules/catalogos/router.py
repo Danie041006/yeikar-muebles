@@ -5,9 +5,10 @@ from typing import List, Optional
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.catalogos import schemas, service
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module('catalogos', solo_escritura=True))])
 
 # ------------------------------------------------------------
 # TipoProducto
@@ -135,10 +136,11 @@ def listar_tipos_gasto(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),
     buscar: Optional[str] = Query(None, description="Buscar por nombre"),
+    categoria: Optional[str] = Query(None, description="Filtrar por categoria: OPERATIVO, PASIVO, PRODUCCION"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_tipos_gasto(db, salto=salto, limite=limite, buscar=buscar)
+    return service.obtener_tipos_gasto(db, salto=salto, limite=limite, buscar=buscar, categoria=categoria)
 
 @router.get("/tipo-gasto/{id_gasto}", response_model=schemas.TipoGastoResponse)
 def ver_tipo_gasto(
@@ -444,6 +446,11 @@ def eliminar_rol(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
+    db_obj = service.obtener_rol(db, id_rol)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Rol no encontrado")
+    if db_obj.nombre in ("Dueño", "Administrador"):
+        raise HTTPException(status_code=400, detail=f"El rol '{db_obj.nombre}' es de acceso total y no se puede eliminar")
     exito = service.eliminar_rol(db, id_rol)
     if not exito:
         raise HTTPException(status_code=404, detail="Rol no encontrado")

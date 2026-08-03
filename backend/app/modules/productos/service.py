@@ -83,3 +83,42 @@ def eliminar_material(db: Session, id_material: int):
     db.delete(db_obj)
     db.commit()
     return True
+
+
+# ------------------------------------------------------------
+# Secciones de Producto (Receta Estructurada)
+# ------------------------------------------------------------
+def crear_seccion_producto(db: Session, esquema: schemas.SeccionProductoCreate):
+    from app.modules.productos import model
+    seccion = model.SeccionProducto(
+        producto_id=esquema.producto_id,
+        nombre=esquema.nombre.upper().strip(),
+        orden=esquema.orden
+    )
+    db.add(seccion)
+    db.commit()
+    db.refresh(seccion)
+
+    politica = model.PoliticaSeccion(
+        seccion_id=seccion.id,
+        mano_obra_base=esquema.mano_obra_base if esquema.mano_obra_base is not None else 0.0,
+        pct_liquidacion_mo=esquema.pct_liquidacion_mo if esquema.pct_liquidacion_mo is not None else 5.0,
+        pct_gastos_seccion=esquema.pct_gastos_seccion if esquema.pct_gastos_seccion is not None else 10.0,
+        costo_fabricacion=esquema.costo_fabricacion,
+        pct_trabajadores=esquema.pct_trabajadores,
+        pct_negocio=esquema.pct_negocio,
+    )
+    db.add(politica)
+    db.commit()
+    db.refresh(seccion)
+    return seccion
+
+
+def eliminar_seccion_producto(db: Session, seccion_id: int):
+    from app.modules.productos import model
+    seccion = db.query(model.SeccionProducto).filter(model.SeccionProducto.id == seccion_id).first()
+    if not seccion:
+        return False
+    db.delete(seccion)
+    db.commit()
+    return True

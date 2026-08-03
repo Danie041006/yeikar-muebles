@@ -1,10 +1,13 @@
-from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Text, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
 
 class Inventario(Base):
     __tablename__ = "inventario"
+    __table_args__ = (
+        UniqueConstraint("material_id", "ubicacion_id", name="uq_inventario_material_ubicacion"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=False)

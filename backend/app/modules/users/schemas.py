@@ -36,3 +36,21 @@ class TokenData(BaseModel):
 
 class RefreshTokenRequest(BaseModel):
     refresh_token: str
+
+# ------------------------------------------------------------
+# Permisos por módulo
+# ------------------------------------------------------------
+class ModuloAcceso(BaseModel):
+    modulo: str
+    gestionar: bool = False
+
+class ModulosCatalogo(BaseModel):
+    clave: str
+    nombre: str
+    descripcion: Optional[str] = None
+
+class RolPermisosUpdate(BaseModel):
+    permisos: List[ModuloAcceso]
+
+class MeResponse(UsuarioResponse):
+    modulos: List[ModuloAcceso] = []

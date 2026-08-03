@@ -12,6 +12,8 @@ export interface MonedaInfo {
 export interface ClienteInfo {
   id: number;
   nombre: string;
+  telefono?: string;
+  direccion?: string;
 }
 
 export interface ProductoInfo {
@@ -34,6 +36,8 @@ export interface Pago {
   moneda_id: number;
   fecha: string;
   monto: number;
+  tasa_cambio: number;
+  monto_en_moneda_base: number;
   metodo_pago: string;
   referencia?: string;
   observaciones?: string;
@@ -85,6 +89,8 @@ export interface PagoCreate {
   metodo_pago: string;
   referencia?: string;
   observaciones?: string;
+  /** TRM / tasa de conversión. Requerido cuando moneda_id difiere de la moneda de la venta. */
+  tasa_cambio?: number;
 }
 
 // Métodos de pago disponibles

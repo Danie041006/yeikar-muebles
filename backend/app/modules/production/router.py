@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.production import schemas, service
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module('produccion'))])
 
 # ------------------------------------------------------------
 # Endpoints de Órdenes de Producción
@@ -30,6 +32,8 @@ def crear_orden_desde_pedido(
         return service.crear_orden_desde_detalle_pedido(db, detalle_pedido_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="Ya existe una orden de producción para este detalle de pedido")
 
 @router.get("/orden/", response_model=List[schemas.OrdenProduccionResponse])
 def listar_ordenes(
@@ -152,6 +156,127 @@ def eliminar_etapa(
     return None
 
 
+@router.post("/etapa/{id}/pasar-a-area", response_model=schemas.EtapaProduccionResponse, status_code=status.HTTP_201_CREATED)
+def pasar_a_area(
+    id: int,
+    payload: schemas.PasarAAreaRequest,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """
+    Completa la etapa actual (COMPLETADA) y crea una nueva etapa en el área destino.
+    Permite asignar un responsable principal y empleados adicionales opcionales.
+    """
+    from app.modules.catalogos.model import Area
+    from app.modules.empleados.model import Empleado
+    from app.modules.production.model import EtapaProduccion, EtapaAsignadoAdicional
+    from datetime import datetime
+
+    # FOR UPDATE: dos "pasar a área" simultáneos sobre la misma etapa se serializan;
+    # el segundo re-lee la etapa ya COMPLETADA y recibe 400 en vez de duplicar la etapa.
+    etapa_actual = db.query(EtapaProduccion).filter(EtapaProduccion.id == id).with_for_update().first()
+    if not etapa_actual:
+        raise HTTPException(status_code=404, detail="Etapa no encontrada")
+    if etapa_actual.estado == "COMPLETADA":
+        raise HTTPException(status_code=400, detail="La etapa ya esta completada")
+    if etapa_actual.area_id == payload.area_id:
+        raise HTTPException(status_code=400, detail="El area destino debe ser diferente al area actual")
+
+    if not db.query(Area).filter(Area.id == payload.area_id).first():
+        raise HTTPException(status_code=404, detail="Area destino no encontrada")
+    if not db.query(Empleado).filter(Empleado.id == payload.empleado_responsable_id).first():
+        raise HTTPException(status_code=404, detail="Responsable principal no encontrado")
+
+    empleados_adicionales = list(dict.fromkeys(payload.empleados_adicionales_ids))
+    if payload.empleado_responsable_id in empleados_adicionales:
+        raise HTTPException(status_code=400, detail="El responsable principal no puede ser adicional")
+    empleados_validos = db.query(Empleado.id).filter(Empleado.id.in_(empleados_adicionales)).all()
+    if len(empleados_validos) != len(empleados_adicionales):
+        raise HTTPException(status_code=404, detail="Uno o mas empleados adicionales no existen")
+
+    # 1. Completar la etapa actual
+    etapa_actual.estado = "COMPLETADA"
+    etapa_actual.fecha_fin = datetime.utcnow()
+    db.add(etapa_actual)
+
+    # 2. Crear nueva etapa en el área destino
+    nueva_etapa = EtapaProduccion(
+        orden_produccion_id=etapa_actual.orden_produccion_id,
+        area_id=payload.area_id,
+        empleado_responsable_id=payload.empleado_responsable_id,
+        estado="ASIGNADA",
+        observaciones=payload.observaciones,
+        fecha_inicio=datetime.utcnow(),
+    )
+    db.add(nueva_etapa)
+    db.flush()  # obtener ID de la nueva etapa
+
+    # 3. Asignar empleados adicionales (opcional)
+    for emp_id in empleados_adicionales:
+        adicional = EtapaAsignadoAdicional(
+            etapa_produccion_id=nueva_etapa.id,
+            empleado_id=emp_id,
+        )
+        db.add(adicional)
+
+    db.commit()
+    db.refresh(nueva_etapa)
+    return nueva_etapa
+
+
+@router.post("/etapa/{id}/asignados", response_model=schemas.AsignadoAdicionalResponse, status_code=status.HTTP_201_CREATED)
+def agregar_asignado_adicional(
+    id: int,
+    esquema: schemas.AsignadoAdicionalCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    from app.modules.empleados.model import Empleado
+    from app.modules.production.model import EtapaAsignadoAdicional, EtapaProduccion
+
+    etapa = db.query(EtapaProduccion).filter(EtapaProduccion.id == id).first()
+    if not etapa:
+        raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
+    empleado = db.query(Empleado).filter(Empleado.id == esquema.empleado_id).first()
+    if not empleado:
+        raise HTTPException(status_code=404, detail="Empleado no encontrado")
+    if etapa.empleado_responsable_id == esquema.empleado_id:
+        raise HTTPException(status_code=400, detail="El responsable principal no puede ser asignado como adicional")
+
+    existente = db.query(EtapaAsignadoAdicional).filter(
+        EtapaAsignadoAdicional.etapa_produccion_id == id,
+        EtapaAsignadoAdicional.empleado_id == esquema.empleado_id,
+    ).first()
+    if existente:
+        raise HTTPException(status_code=409, detail="El empleado ya esta asignado a esta etapa")
+
+    asignado = EtapaAsignadoAdicional(etapa_produccion_id=id, empleado_id=esquema.empleado_id)
+    db.add(asignado)
+    db.commit()
+    db.refresh(asignado)
+    return asignado
+
+
+@router.delete("/etapa/{id}/asignados/{empleado_id}", status_code=status.HTTP_204_NO_CONTENT)
+def quitar_asignado_adicional(
+    id: int,
+    empleado_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    from app.modules.production.model import EtapaAsignadoAdicional
+
+    asignado = db.query(EtapaAsignadoAdicional).filter(
+        EtapaAsignadoAdicional.etapa_produccion_id == id,
+        EtapaAsignadoAdicional.empleado_id == empleado_id,
+    ).first()
+    if not asignado:
+        raise HTTPException(status_code=404, detail="Asignado adicional no encontrado")
+    db.delete(asignado)
+    db.commit()
+    return None
+
+
 # ------------------------------------------------------------
 # Endpoints de Consumo de Material
 # ------------------------------------------------------------
@@ -208,6 +333,24 @@ def eliminar_mano_obra(
         raise HTTPException(status_code=404, detail="Mano de obra no encontrada")
     return None
 
+@router.get("/etapa/{id}/referencia-receta", response_model=schemas.ReferenciaRecetaResponse)
+def referencia_receta(
+    id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """
+    Retorna la receta del producto asociado a la etapa como referencia visual.
+    Cada material incluye su seccion, cantidad_base y costo_unitario.
+    """
+    from app.modules.production.service import obtener_referencia_receta
+
+    data = obtener_referencia_receta(db, id)
+    if not data:
+        raise HTTPException(status_code=404, detail="No se encontró receta de referencia para esta etapa")
+    return data
+
+
 @router.put("/mano-obra/{id}/pagar", response_model=schemas.ManoObraResponse)
 def marcar_mano_obra_pagada(
     id: int,
@@ -242,6 +385,8 @@ def calcular_costo(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="El costo de producción ya está siendo calculado por otra operación")
 
 @router.get("/costo/{orden_id}", response_model=schemas.CostoProduccionResponse)
 def ver_costo(

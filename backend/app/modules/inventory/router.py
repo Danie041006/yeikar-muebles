@@ -1,14 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from decimal import Decimal
 
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.inventory import service, schemas
 
-router = APIRouter(prefix="/inventario", tags=["Inventario"])
+router = APIRouter(prefix="/inventario", tags=["Inventario"], dependencies=[Depends(require_module('inventario'))])
 
 
 @router.get("/", response_model=List[schemas.InventarioResponse])
@@ -47,6 +49,8 @@ def crear_movimiento(
         return mov
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="El movimiento de inventario entró en conflicto con otra operación simultánea")
 
 
 @router.get("/movimientos/material/{material_id}", response_model=List[schemas.MovimientoResponse])

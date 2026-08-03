@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { authApi } from '../services/api';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 interface IngresoMesDetail {
   moneda: string;
@@ -33,7 +33,7 @@ interface StockAlerta {
 }
 
 export default function Dashboard() {
-  const [user, setUser] = useState<any>(null);
+  const { user, hasModulo } = useAuth();
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [stockAlerts, setStockAlerts] = useState<StockAlerta[]>([]);
@@ -43,36 +43,39 @@ export default function Dashboard() {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
+  const puedePedidos = hasModulo('pedidos');
+  const puedeInventario = hasModulo('inventario');
+
   useEffect(() => {
-    authApi.get('/me').then(r => setUser(r.data)).catch(() => {});
     api.get<DashboardMetrics>('/dashboard/metrics').then(r => setMetrics(r.data)).catch(() => {});
-    
-    // Recent orders (last 5)
-    api.get<RecentOrder[]>('/pedido/', { params: { limite: 5 } })
-      .then(r => setRecentOrders(r.data))
-      .catch(() => {});
+
+    if (puedePedidos) {
+      // Recent orders (last 5)
+      api.get<RecentOrder[]>('/pedido/', { params: { limite: 5 } })
+        .then(r => setRecentOrders(r.data))
+        .catch(() => {});
+
+      // Delayed orders count
+      api.get<RecentOrder[]>('/pedido/')
+        .then(r => {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const delayed = r.data.filter(p =>
+            (p.estado === 'PENDIENTE' || p.estado === 'EN_PROCESO') &&
+            p.fecha_entrega_estimada &&
+            p.fecha_entrega_estimada < todayStr
+          );
+          setDelayedOrdersCount(delayed.length);
+        })
+        .catch(() => {});
+    }
 
     // Stock alerts
-    api.get<StockAlerta[]>('/inventario/alertas', { params: { umbral: 5.0 } })
-      .then(r => setStockAlerts(r.data))
-      .catch(() => {});
-
-    // Delayed orders count
-    api.get<RecentOrder[]>('/pedido/')
-      .then(r => {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const delayed = r.data.filter(p => 
-          (p.estado === 'PENDIENTE' || p.estado === 'EN_PROCESO') && 
-          p.fecha_entrega_estimada && 
-          p.fecha_entrega_estimada < todayStr
-        );
-        setDelayedOrdersCount(delayed.length);
-      })
-      .catch(() => {});
-  }, []);
-
-  const roles = user?.roles?.map((r: any) => r.nombre) || [];
-  const isAdmin = roles.includes('Dueño') || roles.includes('Administrador');
+    if (puedeInventario) {
+      api.get<StockAlerta[]>('/inventario/alertas', { params: { umbral: 5.0 } })
+        .then(r => setStockAlerts(r.data))
+        .catch(() => {});
+    }
+  }, [puedePedidos, puedeInventario]);
 
   const cards = [
     {
@@ -133,33 +136,26 @@ export default function Dashboard() {
     },
   ];
 
+  const esAdmin = hasModulo('usuarios');
   const visibleCards = cards.filter(card => {
-    if (isAdmin || roles.length === 0) return true;
-    if (roles.includes('Fletes')) {
-      return card.label === 'Pedidos Activos';
-    }
-    if (roles.includes('Producción')) {
-      return card.label === 'En Producción';
-    }
-    if (roles.includes('Inventario')) {
-      return card.label === 'Alertas de Stock';
-    }
-    return card.label === 'Pedidos Activos' || card.label === 'Ingresos del Mes';
+    if (esAdmin) return true;
+    if (card.label === 'Pedidos Activos') return puedePedidos;
+    if (card.label === 'En Producción') return hasModulo('produccion');
+    if (card.label === 'Alertas de Stock') return puedeInventario;
+    if (card.label === 'Ingresos del Mes') return hasModulo('ventas');
+    return false;
   });
 
   const allQuickLinks = [
-    { label: 'Nueva Cotización', href: '/cotizaciones', color: 'bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral', roles: ['Dueño', 'Administrador', 'Ventas'] },
-    { label: 'Producción', href: '/produccion', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', roles: ['Dueño', 'Administrador', 'Producción'] },
-    { label: 'Ver Inventario', href: '/inventario', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', roles: ['Dueño', 'Administrador', 'Inventario'] },
-    { label: 'Ver Reportes', href: '/reportes', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', roles: ['Dueño', 'Administrador'] },
-    { label: 'Ver Envíos', href: '/envios', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', roles: ['Dueño', 'Administrador', 'Fletes'] },
-    { label: 'Ver Pedidos', href: '/pedidos', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', roles: ['Dueño', 'Administrador', 'Fletes'] },
+    { label: 'Nueva Cotización', href: '/cotizaciones', color: 'bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral', module: 'cotizaciones' },
+    { label: 'Producción', href: '/produccion', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', module: 'produccion' },
+    { label: 'Ver Inventario', href: '/inventario', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', module: 'inventario' },
+    { label: 'Ver Reportes', href: '/reportes', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', module: 'reportes' },
+    { label: 'Ver Envíos', href: '/envios', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', module: 'envios' },
+    { label: 'Ver Pedidos', href: '/pedidos', color: 'bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-tertiary', module: 'pedidos' },
   ];
 
-  const quickLinks = allQuickLinks.filter(link => {
-    if (isAdmin || roles.length === 0) return link.roles.includes('Dueño') || link.roles.includes('Administrador');
-    return link.roles.some(r => roles.includes(r));
-  });
+  const quickLinks = allQuickLinks.filter(link => hasModulo(link.module));
 
   return (
     <div className="space-y-8">
@@ -269,7 +265,7 @@ export default function Dashboard() {
           
           <div className="space-y-3">
             {/* Stock Alerts */}
-            {stockAlerts.length > 0 && (isAdmin || roles.includes('Inventario') || roles.length === 0) && (
+            {stockAlerts.length > 0 && (esAdmin || puedeInventario) && (
               <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex gap-3 text-xs">
                 <svg className="w-5 h-5 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -287,7 +283,7 @@ export default function Dashboard() {
             )}
 
             {/* Delayed Orders Alerts */}
-            {delayedOrdersCount > 0 && (isAdmin || roles.includes('Fletes') || roles.includes('Ventas') || roles.length === 0) && (
+            {delayedOrdersCount > 0 && (esAdmin || puedePedidos) && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3 text-xs">
                 <svg className="w-5 h-5 text-amber-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -305,8 +301,8 @@ export default function Dashboard() {
             )}
 
             {/* If no alerts */}
-            {((stockAlerts.length === 0 || !(isAdmin || roles.includes('Inventario') || roles.length === 0)) &&
-              (delayedOrdersCount === 0 || !(isAdmin || roles.includes('Fletes') || roles.includes('Ventas') || roles.length === 0))) && (
+            {((stockAlerts.length === 0 || !(esAdmin || puedeInventario)) &&
+              (delayedOrdersCount === 0 || !(esAdmin || puedePedidos))) && (
               <div className="bg-green-50 border border-green-200 rounded-2xl p-4 flex gap-3 text-xs">
                 <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />

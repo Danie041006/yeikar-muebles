@@ -4,6 +4,8 @@ from datetime import date
 from app.modules.quotes import model, schemas
 from app.modules.clients.model import Client
 
+MONEDA_BASE_ID = 1  # COP
+
 def obtener_cotizacion(db: Session, id_cotizacion: int):
     return db.query(model.Cotizacion).filter(model.Cotizacion.id == id_cotizacion).first()
 
@@ -44,18 +46,24 @@ def obtener_cotizaciones(
 def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate):
     datos = esquema.model_dump(exclude={"detalles"})
     detalles_datos = esquema.detalles
-    
+
+    if datos.get("moneda_id", MONEDA_BASE_ID) != MONEDA_BASE_ID:
+        datos["total_en_moneda_base"] = float(datos.get("total_estimado", 0)) * float(datos.get("tasa_cambio", 1))
+    else:
+        datos["tasa_cambio"] = 1.0
+        datos["total_en_moneda_base"] = datos.get("total_estimado", 0)
+
     db_obj = model.Cotizacion(**datos)
     db.add(db_obj)
-    db.flush()  # Obtener el ID de la cotización
-    
+    db.flush()
+
     for det in detalles_datos:
         db_det = model.DetalleCotizacion(
             cotizacion_id=db_obj.id,
             **det.model_dump()
         )
         db.add(db_det)
-        
+
     db.commit()
     db.refresh(db_obj)
     return db_obj

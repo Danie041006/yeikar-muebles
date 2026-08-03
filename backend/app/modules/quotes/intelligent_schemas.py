@@ -104,7 +104,7 @@ class CreateDraftRequest(BaseModel):
 class MaterialLineaOut(BaseModel):
     """Una línea de material en el borrador editable."""
     id: Optional[int] = None          # ID en cotizacion_detalle_material (si ya guardado)
-    material_id: int
+    material_id: Optional[int] = None
     nombre: str
     tipo_escala: str
     cantidad_base: float
@@ -138,9 +138,11 @@ class DraftOut(BaseModel):
 
 class MaterialLineaIn(BaseModel):
     """Línea de material enviada desde el frontend para recalcular."""
-    material_id: int
+    material_id: Optional[int] = None
     cantidad_calculada: float
     activo: bool = True
+    nombre: Optional[str] = None        # Para insumos libres sin material de inventario
+    costo_unitario: Optional[float] = None  # Para insumos libres (si no, se usa el del inventario)
 
 class RecalculateRequest(BaseModel):
     """Payload para recalcular el borrador con los cambios del vendedor."""

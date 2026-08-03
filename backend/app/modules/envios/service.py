@@ -35,6 +35,12 @@ def obtener_envios(db: Session, salto: int = 0, limite: int = 100, buscar: str =
         
     return query.offset(salto).limit(limite).all()
 def crear_envio(db: Session, esquema: schemas.EnvioCreate):
+    # Lock del pedido: dos creaciones simultáneas de envío para el mismo pedido
+    # quedan serializadas y una sola crea el registro (la otra recibe el existente).
+    pedido = db.query(Pedido).filter(Pedido.id == esquema.pedido_id).with_for_update().first()
+    if not pedido:
+        raise ValueError("El pedido especificado no existe.")
+
     # Verificar si ya existe envío para este pedido
     existente = db.query(Envio).filter(Envio.pedido_id == esquema.pedido_id).first()
     if existente:
@@ -47,9 +53,7 @@ def crear_envio(db: Session, esquema: schemas.EnvioCreate):
     # Asegurar que el estado del pedido esté sincronizado si se entrega
     if esquema.estado == "ENTREGADO":
         db_envio.fecha_entrega = datetime.now()
-        pedido = db.query(Pedido).filter(Pedido.id == esquema.pedido_id).first()
-        if pedido:
-            pedido.estado = "ENTREGADO"
+        pedido.estado = "ENTREGADO"
     elif esquema.estado == "EN_TRANSITO":
         db_envio.fecha_salida = datetime.now()
         
@@ -57,13 +61,16 @@ def crear_envio(db: Session, esquema: schemas.EnvioCreate):
     db.refresh(db_envio)
     return db_envio
 def crear_envio_automatico(db: Session, pedido_id: int):
-    # Verificar si ya existe envío
+    # Lock del pedido (re-entrante si el llamador ya lo tiene): garantiza que solo
+    # una finalización cree el envío automático del pedido.
+    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).with_for_update().first()
+
+    # Verificar si ya existe envío (tras adquirir el lock se ve el del ganador)
     existente = db.query(Envio).filter(Envio.pedido_id == pedido_id).first()
     if existente:
         return existente
         
     # Obtener el pedido y dirección del cliente
-    pedido = db.query(Pedido).filter(Pedido.id == pedido_id).first()
     direccion = ""
     if pedido and pedido.cliente:
         direccion = pedido.cliente.direccion or ""
@@ -84,7 +91,7 @@ def crear_envio_automatico(db: Session, pedido_id: int):
     db.refresh(db_envio)
     return db_envio
 def actualizar_envio(db: Session, id_envio: int, esquema: schemas.EnvioUpdate):
-    db_envio = db.query(Envio).filter(Envio.id == id_envio).first()
+    db_envio = db.query(Envio).filter(Envio.id == id_envio).with_for_update().first()
     if not db_envio:
         return None
         

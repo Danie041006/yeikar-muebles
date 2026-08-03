@@ -13,11 +13,15 @@ class Cotizacion(Base):
     fecha = Column(Date, nullable=False)
     estado = Column(String(50), nullable=False)
     total_estimado = Column(Numeric(15, 2), default=0.0, nullable=False)
+    moneda_id = Column(BigInteger, ForeignKey("moneda.id"), nullable=False, default=1)
+    tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
+    total_en_moneda_base = Column(Numeric(15, 2), nullable=True)
     observaciones = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
     cliente = relationship("Client")
+    moneda = relationship("Moneda")
     detalles = relationship("DetalleCotizacion", back_populates="cotizacion", cascade="all, delete-orphan")
 
 class DetalleCotizacion(Base):
@@ -36,6 +40,7 @@ class DetalleCotizacion(Base):
     costo_mano_obra = Column(Numeric(15, 2), nullable=True)
     costo_gastos = Column(Numeric(15, 2), nullable=True)
     costo_total = Column(Numeric(15, 2), nullable=True)
+    receta_personalizada = Column(JSON, nullable=True)
 
     cotizacion = relationship("Cotizacion", back_populates="detalles")
     producto = relationship("Producto")

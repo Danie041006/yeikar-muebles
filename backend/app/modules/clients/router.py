@@ -5,8 +5,9 @@ from app.modules.clients import schemas, service
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module('clientes'))])
 
 @router.post("/", response_model=schemas.ClientResponse, status_code=201)
 def create_client(

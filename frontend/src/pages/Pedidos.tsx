@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { pedidoService, Order } from '../services/pedidoService';
 
 export default function Pedidos() {
+  const navigate = useNavigate();
   const [orders, setOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
@@ -38,7 +40,11 @@ export default function Pedidos() {
     return () => clearTimeout(timer);
   }, [search, soloMesActual, selectedMonth, selectedYear]);
 
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+
   const handleUpdateStatus = async (orderId: number, currentObs: string | undefined, newStatus: string) => {
+    if (statusUpdatingId !== null) return; // evita PUTs concurrentes del estado
+    setStatusUpdatingId(orderId);
     try {
       console.log('Actualizando estado del pedido:', { orderId, estado: newStatus });
       await pedidoService.update(orderId, {
@@ -54,6 +60,8 @@ export default function Pedidos() {
     } catch (err) {
       console.error(err);
       alert('Error al actualizar el estado del pedido.');
+    } finally {
+      setStatusUpdatingId(null);
     }
   };
 
@@ -183,8 +191,9 @@ export default function Pedidos() {
                     <td className="px-6 py-4">
                       <select
                         value={order.estado === 'COTIZADO' ? 'APROBADO' : order.estado}
+                        disabled={statusUpdatingId !== null}
                         onChange={(e) => handleUpdateStatus(order.id, order.observaciones, e.target.value)}
-                        className={`px-2 py-1 rounded font-bold text-xs font-headline focus:outline-none ${
+                        className={`px-2 py-1 rounded font-bold text-xs font-headline focus:outline-none disabled:opacity-50 ${
                           order.estado === 'APROBADO' || order.estado === 'COTIZADO'
                             ? 'bg-blue-100 text-blue-800'
                             : order.estado === 'PRODUCCION'
@@ -209,8 +218,17 @@ export default function Pedidos() {
                           onClick={() => setSelectedOrder(order)}
                           className="px-3 py-1 bg-yeikar-secondary text-yeikar-tertiary hover:bg-yeikar-secondary-light rounded text-xs font-bold font-headline transition-colors"
                         >
-                          Ver detalles del pedido
+                          Ver detalles
                         </button>
+                        {['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(order.estado) && (
+                          <button
+                            onClick={() => navigate('/ventas')}
+                            className="px-3 py-1 bg-yeikar-primary text-white hover:bg-yeikar-primary/90 rounded text-xs font-bold font-headline transition-colors flex items-center gap-1"
+                            title="Ir a Facturas y Cobros"
+                          >
+                            <span>Factura / Cobros</span>
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDelete(order.id)}
                           className="p-1 text-red-600 hover:text-red-850"
@@ -294,6 +312,14 @@ export default function Pedidos() {
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-yeikar-secondary-light/10">
+                {['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(selectedOrder.estado) && (
+                  <button
+                    onClick={() => { setSelectedOrder(null); navigate('/ventas'); }}
+                    className="px-4 py-2 bg-yeikar-primary text-white font-bold rounded-lg shadow-sm hover:bg-yeikar-primary/90 transition-all text-sm font-headline"
+                  >
+                    Ver / Crear Factura y Cobros →
+                  </button>
+                )}
                 <button
                   onClick={() => setSelectedOrder(null)}
                   className="px-5 py-2 bg-yeikar-neutral text-yeikar-tertiary hover:bg-yeikar-neutral-light font-bold rounded-lg shadow-md transition-all text-sm font-headline"

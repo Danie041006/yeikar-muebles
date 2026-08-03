@@ -13,13 +13,36 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from datetime import datetime, timedelta
 from fastapi.testclient import TestClient
+from jose import jwt
 from app.main import app
+from app.core.config import settings
 from app.db.session import session_local
 from app.modules.clients.model import Client
 from app.modules.productos.model import Producto, CamaHistoricaAtributos, MuebleAtributos
 
 client = TestClient(app)
+
+# IQE ahora exige autenticación: obtenemos un token de un usuario con
+# el módulo cotizaciones_ia (carolina tiene Ventas + Producción + Inventario).
+def _get_headers() -> dict:
+    r_login = client.post("/api/auth/login", data={"username": "carolina", "password": "carolina2025$"})
+    assert r_login.status_code == 200, f"Login falló: {r_login.text}"
+    return {"Authorization": f"Bearer {r_login.json()['access_token']}"}
+
+
+def _auth_headers() -> dict:
+    """Token JWT de un usuario Dueño (acceso total) para los endpoints del IQE."""
+    token = jwt.encode(
+        {"sub": "daniel", "type": "access", "exp": datetime.utcnow() + timedelta(hours=1)},
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+HEADERS = _auth_headers()
 
 
 def _ensure_atributos_historicos(db) -> int:
@@ -44,6 +67,9 @@ def test_iqe_flow():
     assert r_health.status_code == 200
     assert r_health.json()["status"] == "ok"
     print("✅ GET /health funciona correctamente.")
+
+    # Resto de endpoints requieren autenticación
+    HEADERS = _get_headers()
 
     db = session_local()
     client_id: int | None = None
@@ -71,7 +97,7 @@ def test_iqe_flow():
     print(f"📌 Cliente ID: {client_id} | Cama ID: {cama_id} ('{cama_nombre}')")
 
     # 2. find-similar
-    r_similar = client.post("/api/v1/intelligent-quotation/find-similar", json={
+    r_similar = client.post("/api/v1/intelligent-quotation/find-similar", headers=HEADERS, json={
         "tipo_mueble": "cama",
         "tiene_tapiceria": True,
         "tiene_nocheros": True,
@@ -95,7 +121,7 @@ def test_iqe_flow():
     producto_base_id = data_similar["resultados"][0]["producto_id"]
 
     # 3. create-draft (flujo v1)
-    r_draft = client.post("/api/v1/intelligent-quotation/create-draft", json={
+    r_draft = client.post("/api/v1/intelligent-quotation/create-draft", headers=HEADERS, json={
         "producto_base_id": producto_base_id,
         "nuevo_ancho": 1.60,
         "nuevo_largo": 1.90,
@@ -116,7 +142,7 @@ def test_iqe_flow():
     ]
 
     # 4. recalculate (flujo v1)
-    r_recalc = client.post("/api/v1/intelligent-quotation/recalculate", json={
+    r_recalc = client.post("/api/v1/intelligent-quotation/recalculate", headers=HEADERS, json={
         "producto_base_id": producto_base_id,
         "nuevo_ancho": 1.80,
         "nuevo_largo": 1.90,
@@ -158,7 +184,7 @@ def test_iqe_flow():
         },
     ]
 
-    r_gen = client.post("/api/v1/intelligent-quotation/generate-structure", json={
+    r_gen = client.post("/api/v1/intelligent-quotation/generate-structure", headers=HEADERS, json={
         "tipo_mueble": "cama",
         "atributos": {
             "tiene_tapiceria": True,
@@ -185,7 +211,7 @@ def test_iqe_flow():
           f"base={data_gen.get('producto_base_nombre')}")
 
     # 6. recalculate-structure (flujo v2)
-    r_recalc_struct = client.post("/api/v1/intelligent-quotation/recalculate-structure", json={
+    r_recalc_struct = client.post("/api/v1/intelligent-quotation/recalculate-structure", headers=HEADERS, json={
         "secciones": data_gen["secciones"],
         "ganancia_porcentaje": 45.0,
         "iva_porcentaje": 0.0,
@@ -198,7 +224,7 @@ def test_iqe_flow():
     print("✅ POST /recalculate-structure funciona correctamente.")
 
     # 7. finalize (flujo v1)
-    r_finalize = client.post("/api/v1/intelligent-quotation/finalize", json={
+    r_finalize = client.post("/api/v1/intelligent-quotation/finalize", headers=HEADERS, json={
         "cliente_id": client_id,
         "producto_base_id": producto_base_id,
         "nuevo_ancho": 1.60,
@@ -216,7 +242,7 @@ def test_iqe_flow():
     print(f"✅ POST /finalize → Cotización #{cot_id}")
 
     # 8. finalize-structure como cotización (flujo v2)
-    r_fin_struct = client.post("/api/v1/intelligent-quotation/finalize-structure", json={
+    r_fin_struct = client.post("/api/v1/intelligent-quotation/finalize-structure", headers=HEADERS, json={
         "guardar_como": "cotizacion",
         "cliente_id": client_id,
         "producto_base_id": producto_base_id,

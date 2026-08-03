@@ -15,9 +15,10 @@ import {
   RentabilidadProductoResponse,
   ReportAlertaStockResponse,
 } from '../services/reportesService';
+import InformeMensual from '../components/InformeMensual';
 
 export default function Reportes() {
-  const [activeTab, setActiveTab] = useState<'pnl' | 'rentabilidad' | 'alertas'>('pnl');
+  const [activeTab, setActiveTab] = useState<'informe' | 'pnl' | 'rentabilidad' | 'alertas'>('informe');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const d = new Date();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -123,7 +124,9 @@ export default function Reportes() {
   };
 
   useEffect(() => {
-    if (activeTab === 'pnl') {
+    if (activeTab === 'informe') {
+      // InformeMensual se encarga de sus propios datos
+    } else if (activeTab === 'pnl') {
       fetchPnL();
       fetchChartData();
     } else if (activeTab === 'rentabilidad') {
@@ -146,10 +149,20 @@ export default function Reportes() {
       </div>
 
       {/* Tabs Menu */}
-      <div className="flex border-b border-yeikar-secondary-light/10">
+      <div className="flex border-b border-yeikar-secondary-light/10 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('informe')}
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
+            activeTab === 'informe'
+              ? 'border-yeikar-primary text-yeikar-primary'
+              : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
+          }`}
+        >
+          Informe Mensual
+        </button>
         <button
           onClick={() => setActiveTab('pnl')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all ${
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'pnl'
               ? 'border-yeikar-primary text-yeikar-primary'
               : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
@@ -159,7 +172,7 @@ export default function Reportes() {
         </button>
         <button
           onClick={() => setActiveTab('rentabilidad')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all ${
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'rentabilidad'
               ? 'border-yeikar-primary text-yeikar-primary'
               : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
@@ -169,7 +182,7 @@ export default function Reportes() {
         </button>
         <button
           onClick={() => setActiveTab('alertas')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all ${
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
             activeTab === 'alertas'
               ? 'border-yeikar-primary text-yeikar-primary'
               : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
@@ -178,6 +191,9 @@ export default function Reportes() {
           Alertas de Stock Crítico
         </button>
       </div>
+
+      {/* TAB: INFORME MENSUAL */}
+      {activeTab === 'informe' && <InformeMensual />}
 
       {/* TAB 1: P&L */}
       {activeTab === 'pnl' && (

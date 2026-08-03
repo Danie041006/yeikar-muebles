@@ -72,6 +72,7 @@ class ProductoMaterialBase(BaseModel):
     material_id: int
     cantidad_base: float
     tipo_escala: str  # FIJO | LINEAL | AREA | ESPACIADO | POR_RANGO | FORMULA
+    seccion: str = "EBANISTERIA"
     distancia_pauta_cm: Optional[float] = None
     tornillos_por_pieza: Optional[int] = None
     condicion_activacion: Optional[Dict[str, Any]] = None
@@ -113,6 +114,9 @@ class PoliticaSeccionBase(BaseModel):
     mano_obra_base: float = 0.0
     pct_liquidacion_mo: float = 5.0
     pct_gastos_seccion: float = 10.0
+    costo_fabricacion: Optional[float] = None
+    pct_trabajadores: Optional[float] = None
+    pct_negocio: Optional[float] = None
 
 class PoliticaSeccionCreate(PoliticaSeccionBase):
     pass
@@ -121,6 +125,9 @@ class PoliticaSeccionUpdate(BaseModel):
     mano_obra_base: Optional[float] = None
     pct_liquidacion_mo: Optional[float] = None
     pct_gastos_seccion: Optional[float] = None
+    costo_fabricacion: Optional[float] = None
+    pct_trabajadores: Optional[float] = None
+    pct_negocio: Optional[float] = None
 
 class PoliticaSeccionResponse(PoliticaSeccionBase):
     id: int
@@ -141,6 +148,9 @@ class ElementoSeccionBase(BaseModel):
     precio_unitario: Optional[float] = None
     costo_subtotal: Optional[float] = None
 
+class ElementoSeccionCreate(ElementoSeccionBase):
+    seccion_id: int
+
 class ElementoSeccionResponse(ElementoSeccionBase):
     id: int
     seccion_id: int
@@ -150,6 +160,43 @@ class ElementoSeccionResponse(ElementoSeccionBase):
     class Config:
         from_attributes = True
 
+# ------------------------------------------------------------
+# CostoProduccionSeccion — múltiples costos por sección
+# ------------------------------------------------------------
+class CostoProduccionSeccionBase(BaseModel):
+    nombre: str
+    porcentaje: Optional[float] = None
+    costo_base: float = 0.0
+
+class CostoProduccionSeccionCreate(CostoProduccionSeccionBase):
+    seccion_id: int
+
+class CostoProduccionSeccionUpdate(BaseModel):
+    nombre: Optional[str] = None
+    porcentaje: Optional[float] = None
+    costo_base: Optional[float] = None
+
+class CostoProduccionSeccionResponse(CostoProduccionSeccionBase):
+    id: int
+    seccion_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SeccionProductoCreate(BaseModel):
+    producto_id: int
+    nombre: str
+    orden: Optional[int] = 1
+    costo_fabricacion: Optional[float] = None
+    pct_trabajadores: Optional[float] = None
+    pct_negocio: Optional[float] = None
+    mano_obra_base: Optional[float] = None
+    pct_liquidacion_mo: Optional[float] = None
+    pct_gastos_seccion: Optional[float] = None
+
 class SeccionProductoResponse(BaseModel):
     id: int
     producto_id: int
@@ -157,8 +204,14 @@ class SeccionProductoResponse(BaseModel):
     orden: int
     elementos: List[ElementoSeccionResponse] = []
     politica: Optional[PoliticaSeccionResponse] = None
+    costos_produccion: List[CostoProduccionSeccionResponse] = []
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+class RecalculateCustomRecipeRequest(BaseModel):
+    ganancia: float = 40.0
+    secciones: List[SeccionProductoResponse]

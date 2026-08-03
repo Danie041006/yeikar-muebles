@@ -31,6 +31,9 @@ class DetallePedido(Base):
     producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=False)
     cantidad = Column(Numeric(10, 2), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
+    # Snapshot de costos al convertir cotización → pedido
+    costo_unitario = Column(Numeric(15, 2), nullable=True)
+    porcentaje_ganancia = Column(Numeric(5, 2), nullable=True)
     alto = Column(Numeric(10, 2), nullable=True)
     ancho = Column(Numeric(10, 2), nullable=True)
     largo = Column(Numeric(10, 2), nullable=True)

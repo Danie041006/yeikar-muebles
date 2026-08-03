@@ -49,12 +49,14 @@ class UnidadMedidaResponse(UnidadMedidaBase):
 # ------------------------------------------------------------
 class TipoGastoBase(BaseModel):
     nombre: str
+    categoria: str = "OPERATIVO"
 
 class TipoGastoCreate(TipoGastoBase):
     pass
 
 class TipoGastoUpdate(BaseModel):
     nombre: Optional[str] = None
+    categoria: Optional[str] = None
 
 class TipoGastoResponse(TipoGastoBase):
     id: int

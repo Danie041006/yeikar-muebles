@@ -1,7 +1,8 @@
 from pydantic import BaseModel
 from datetime import date, datetime
-from typing import Optional, List
+from typing import Optional, List, Any
 from app.modules.clients.schemas import ClientResponse
+from app.modules.catalogos.schemas import MonedaResponse
 
 class DetalleCotizacionBase(BaseModel):
     producto_id: int
@@ -15,6 +16,7 @@ class DetalleCotizacionBase(BaseModel):
     costo_mano_obra: Optional[float] = None
     costo_gastos: Optional[float] = None
     costo_total: Optional[float] = None
+    receta_personalizada: Optional[Any] = None
 
 class DetalleCotizacionCreate(DetalleCotizacionBase):
     pass
@@ -30,6 +32,9 @@ class CotizacionBase(BaseModel):
     fecha: date
     estado: str
     total_estimado: float
+    moneda_id: int = 1
+    tasa_cambio: float = 1.0
+    total_en_moneda_base: Optional[float] = None
     observaciones: Optional[str] = None
 
 class CotizacionCreate(CotizacionBase):
@@ -41,6 +46,9 @@ class CotizacionUpdate(BaseModel):
     fecha: Optional[date] = None
     estado: Optional[str] = None
     total_estimado: Optional[float] = None
+    moneda_id: Optional[int] = None
+    tasa_cambio: Optional[float] = None
+    total_en_moneda_base: Optional[float] = None
     observaciones: Optional[str] = None
 
 class CotizacionResponse(CotizacionBase):
@@ -49,6 +57,7 @@ class CotizacionResponse(CotizacionBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     cliente: Optional[ClientResponse] = None
+    moneda: Optional[MonedaResponse] = None
     detalles: List[DetalleCotizacionResponse] = []
 
     class Config:

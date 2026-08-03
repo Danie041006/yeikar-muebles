@@ -22,8 +22,8 @@ Si la condición no se cumple, la cantidad del material es 0.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
-from sqlalchemy.orm import Session
-from app.modules.productos.model import Producto, ProductoMaterial, Material, ReglaGastoSeccion
+from sqlalchemy.orm import Session, joinedload
+from app.modules.productos.model import Producto, ProductoMaterial, Material, ReglaGastoSeccion, SeccionProducto, ElementoSeccion, PoliticaSeccion, CostoProduccionSeccion
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +350,139 @@ def calcular_costo_producto(
     )
 
     if not receta:
+        # Intentar calcular desde ElementoSeccion (secciones con insumos)
+        secciones: list[SeccionProducto] = (
+            db.query(SeccionProducto)
+            .filter(SeccionProducto.producto_id == producto_id)
+            .options(joinedload(SeccionProducto.elementos), joinedload(SeccionProducto.politica), joinedload(SeccionProducto.costos_produccion))
+            .all()
+        )
+        if secciones:
+            costo_total_elementos = Decimal("0")
+            detalle_elementos = []
+            desglose_por_seccion = {}
+            for sec in secciones:
+                # --- Sumar insumos de la sección ---
+                costo_insumos = Decimal("0")
+                for el in sec.elementos:
+                    if el.precio_unitario:
+                        subtotal = Decimal(str(el.cantidad)) * Decimal(str(el.precio_unitario))
+                    else:
+                        subtotal = Decimal("0")
+                    costo_insumos += subtotal
+                    detalle_elementos.append({
+                        "seccion": sec.nombre,
+                        "material_id": el.material_id_normalizado,
+                        "nombre": el.nombre_insumo_original,
+                        "material_nombre": el.nombre_insumo_original,
+                        "nombre_insumo_original": el.nombre_insumo_original,
+                        "tipo_escala": "FIJO",
+                        "cantidad": float(el.cantidad),
+                        "cantidad_base": float(el.cantidad),
+                        "cantidad_calculada": float(el.cantidad),
+                        "unidad_medida": el.unidad_medida or "",
+                        "unidad": el.unidad_medida or "",
+                        "costo_unitario": float(el.precio_unitario or 0),
+                        "costo_subtotal": float(subtotal),
+                        "costo_total": float(subtotal),
+                    })
+
+                # --- Aplicar fórmula completa por sección ---
+                pol = sec.politica
+
+                # Base = insumos
+                base_seccion = costo_insumos
+
+                # + Costos de producción múltiples (PREPARADO CAMA, PINTURA CAMA, etc.)
+                total_costos_produccion = Decimal("0")
+                costos_produccion_detalle = []
+                for cp in sec.costos_produccion or []:
+                    cp_base = Decimal(str(cp.costo_base)) if cp.costo_base else Decimal("0")
+                    cp_pct = Decimal(str(cp.porcentaje)) if cp.porcentaje else Decimal("0")
+                    cp_aporte = cp_base + (_redondear(cp_base * cp_pct / Decimal("100"), 2) if cp_pct > 0 else Decimal("0"))
+                    total_costos_produccion += cp_aporte
+                    costos_produccion_detalle.append({
+                        "nombre": cp.nombre,
+                        "costo_base": float(cp_base),
+                        "porcentaje": float(cp_pct),
+                        "aporte": float(cp_aporte),
+                    })
+
+                # Subtotal = insumos + costos de producción
+                subtotal_seccion = base_seccion + total_costos_produccion
+
+                # + % gastos sección (existente)
+                pct_gastos_sec = Decimal(str(pol.pct_gastos_seccion)) if (pol and pol.pct_gastos_seccion) else Decimal("0")
+                gasto_seccion = _redondear(subtotal_seccion * pct_gastos_sec / Decimal("100"), 2) if pct_gastos_sec > 0 else Decimal("0")
+
+                # + % negocio sobre subtotal (opcional)
+                pct_neg = Decimal(str(pol.pct_negocio)) if (pol and pol.pct_negocio) else Decimal("0")
+                costo_negocio = _redondear(subtotal_seccion * pct_neg / Decimal("100"), 2) if pct_neg > 0 else Decimal("0")
+
+                # Total sección
+                total_seccion = subtotal_seccion + gasto_seccion + costo_negocio
+                costo_total_elementos += total_seccion
+
+                desglose_por_seccion[sec.nombre] = {
+                    "costo_insumos": float(base_seccion),
+                    "costos_produccion": costos_produccion_detalle,
+                    "total_costos_produccion": float(total_costos_produccion),
+                    "subtotal": float(subtotal_seccion),
+                    "pct_gastos_seccion": float(pct_gastos_sec),
+                    "gasto_seccion": float(gasto_seccion),
+                    "pct_negocio": float(pct_neg),
+                    "costo_negocio": float(costo_negocio),
+                    "total_seccion": float(total_seccion),
+                }
+
+            # El costo de producción es directamente la suma de secciones.
+            # Cada sección ya incorpora sus propios gastos (pct_gastos_seccion).
+            # NO se suman mano de obra ni gastos indirectos adicionales.
+            costo_produccion_el = costo_total_elementos
+
+            precio_sin_iva_el = _redondear(costo_produccion_el * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2)
+            precio_con_iva_el = _redondear(precio_sin_iva_el   * (Decimal("1") + iva_porcentaje      / Decimal("100")), 2)
+
+            return {
+                "producto_id": producto.id,
+                "producto_nombre": producto.nombre,
+                "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
+                "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
+                "materiales": detalle_elementos,
+                "materiales_detalle": detalle_elementos,
+                "desglose_por_seccion": desglose_por_seccion,
+                "resumen_costos": {
+                    "costo_materiales": float(costo_total_elementos),
+                    "costo_mano_obra": 0.0,
+                    "costo_gastos": 0.0,
+                    "costo_gastos_indirectos": 0.0,
+                    "costo_produccion": float(costo_produccion_el),
+                    "costo_total": float(costo_produccion_el),
+                    "ganancia_porcentaje": float(ganancia_porcentaje),
+                    "precio_sin_iva": float(precio_sin_iva_el),
+                    "iva_porcentaje": float(iva_porcentaje),
+                    "precio_con_iva": float(precio_con_iva_el),
+                    "precio_sugerido": float(precio_con_iva_el),
+                    "precio_venta": float(precio_con_iva_el),
+                },
+                "costo_materiales": float(costo_total_elementos),
+                "costo_mano_obra": 0.0,
+                "costo_gastos": 0.0,
+                "costo_gastos_indirectos": 0.0,
+                "costo_produccion": float(costo_produccion_el),
+                "costo_total": float(costo_produccion_el),
+                "ganancia_porcentaje": float(ganancia_porcentaje),
+                "precio_sin_iva": float(precio_sin_iva_el),
+                "iva_porcentaje": float(iva_porcentaje),
+                "precio_con_iva": float(precio_con_iva_el),
+                "precio_sugerido": float(precio_con_iva_el),
+                "precio_venta": float(precio_con_iva_el),
+            }
+
         return {
             "producto_id": producto.id,
             "producto_nombre": producto.nombre,
-            "advertencia": "Este producto no tiene receta de materiales definida. Cargue la receta en producto_material.",
+            "advertencia": "Este producto no tiene receta de materiales definida. Cargue la receta en producto_material o agregue insumos en las secciones.",
             "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
             "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
             "materiales": [],

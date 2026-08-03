@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.orders import schemas, service
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module('pedidos'))])
 
 @router.post("/", response_model=schemas.PedidoResponse, status_code=status.HTTP_201_CREATED)
 def crear_pedido(
@@ -91,3 +93,5 @@ def convertir_cotizacion_a_pedido(
         return service.convertir_cotizacion_a_pedido(db, id_cotizacion, fecha_entrega, detalles_dict)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="La cotización ya fue convertida a pedido")

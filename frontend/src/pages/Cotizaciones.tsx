@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, QuoteDetail } from '../services/cotizacionService';
+import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, QuoteDetail, Moneda } from '../services/cotizacionService';
 import { clienteService, Client } from '../services/clienteService';
 import { pedidoService } from '../services/pedidoService';
+import { ventaService, VentaDetalle, METODOS_PAGO } from '../services/ventaService';
+import { formatCurrency } from '../utils/format';
+
+import api from '../services/api';
+import { productosService } from '../services/productosService';
 
 interface CotizacionItemForm {
   producto_id: string;
@@ -14,12 +19,14 @@ interface CotizacionItemForm {
   observaciones: string;
   calcResult: CalculationResult | null;
   calcLoading: boolean;
+  receta_personalizada?: any[] | null;
 }
 
 export default function Cotizaciones() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [materiales, setMateriales] = useState<any[]>([]);
   
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
@@ -44,26 +51,60 @@ export default function Cotizaciones() {
   const [printCompanyAddress, setPrintCompanyAddress] = useState('AV. INTERCOMUNAL CON CALLE 16 LOCAL Nro 15-205, BARRIO SIMÓN BOLÍVAR, UREÑA, TÁCHIRA');
   const [printCompanyPhone, setPrintCompanyPhone] = useState('+58 412-1234567');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [associatedVenta, setAssociatedVenta] = useState<VentaDetalle | null>(null);
 
   // Convert Form state
   const [deliveryDate, setDeliveryDate] = useState('');
+  const [isConverting, setIsConverting] = useState(false);
 
   // Create/Edit Form state (multi-item)
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [items, setItems] = useState<CotizacionItemForm[]>([
-    { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false }
+    { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
   ]);
+
+  // Modal de personalización de receta ad-hoc por renglón
+  const [showPersonalizarModal, setShowPersonalizarModal] = useState(false);
+  const [personalizarIndex, setPersonalizarIndex] = useState<number | null>(null);
+  const [personalizarSecciones, setPersonalizarSecciones] = useState<any[]>([]);
+  const [modalPreviewCalc, setModalPreviewCalc] = useState<CalculationResult | null>(null);
+  const [modalPreviewLoading, setModalPreviewLoading] = useState(false);
+
+  // Para agregar un insumo ad-hoc en el modal
+  const [addMaterialSearch, setAddMaterialSearch] = useState('');
+  const [showAddMaterialDropdown, setShowAddMaterialDropdown] = useState(false);
+  const [addMaterialSeccionIndex, setAddMaterialSeccionIndex] = useState<number | null>(null);
+
+  // Para agregar un costo de producción ad-hoc
+  const [showAddCostModal, setShowAddCostModal] = useState(false);
+  const [addCostSeccionIndex, setAddCostSeccionIndex] = useState<number | null>(null);
+  const [addCostForm, setAddCostForm] = useState({ nombre: '', porcentaje: '', costo_base: '' });
+
+  // Rango/mueble seleccionado para ver desglose detallado de secciones en la barra lateral
+  const [desgloseIndex, setDesgloseIndex] = useState<number>(0);
+
+  // Currency state
+  const [currencies, setCurrencies] = useState<Moneda[]>([]);
+  const [selectedMonedaId, setSelectedMonedaId] = useState<number>(1);
+  const [tasaCambio, setTasaCambio] = useState<number>(1);
+
+  const selectedMoneda = currencies.find(c => c.id === selectedMonedaId);
+  const currencyCode = selectedMoneda?.codigo || 'COP';
 
   const fetchInitialData = async () => {
     try {
-      const [cls, prds] = await Promise.all([
+      const [cls, prds, mats, currs] = await Promise.all([
         clienteService.getAll(),
         cotizacionService.getProducts(),
+        productosService.getMateriales(),
+        cotizacionService.fetchCurrencies(),
       ]);
       setClients(cls);
       setProducts(prds);
+      setMateriales(mats);
+      setCurrencies(currs);
     } catch (err) {
       console.error('Error fetching initial data:', err);
     }
@@ -100,11 +141,13 @@ export default function Cotizaciones() {
   }, [search, soloMesActual, selectedMonth, selectedYear]);
 
   // Trigger calculation individually for each item
-  const calculateItemPrice = async (index: number, pId: string, w: string, l: string, g: string) => {
+  const calculateItemPrice = async (index: number, pId: string, w: string, l: string, g: string, overrideReceta?: any[] | null) => {
     if (!pId) {
       updateItemField(index, 'calcResult', null);
       return;
     }
+    
+    const customRecipe: any[] | null = overrideReceta !== undefined ? overrideReceta : null;
     setItems((prevItems) => {
       const newItems = [...prevItems];
       newItems[index] = { ...newItems[index], calcLoading: true };
@@ -112,11 +155,17 @@ export default function Cotizaciones() {
     });
 
     try {
-      const res = await cotizacionService.calculatePrice(Number(pId), {
-        ancho: Number(w) || 1.0,
-        largo: Number(l) || 1.0,
-        ganancia: Number(g) || 40.0,
-      });
+      let res;
+      if (customRecipe && customRecipe.length > 0) {
+        res = await cotizacionService.recalculateCustomRecipe(Number(g) || 40.0, customRecipe);
+      } else {
+        res = await cotizacionService.calculatePrice(Number(pId), {
+          ancho: Number(w) || 1.0,
+          largo: Number(l) || 1.0,
+          ganancia: Number(g) || 40.0,
+        });
+      }
+      
       setItems((prevItems) => {
         const newItems = [...prevItems];
         newItems[index] = { ...newItems[index], calcResult: res, calcLoading: false };
@@ -144,6 +193,7 @@ export default function Cotizaciones() {
           newItems[index].ancho = selectedProd.ancho_base.toString();
           newItems[index].largo = selectedProd.largo_base.toString();
         }
+        newItems[index].receta_personalizada = null;
       }
       
       return newItems;
@@ -153,16 +203,187 @@ export default function Cotizaciones() {
     if (['producto_id', 'ancho', 'largo', 'ganancia'].includes(field)) {
       setItems((prevItems) => {
         const current = prevItems[index];
-        calculateItemPrice(index, current.producto_id, current.ancho, current.largo, current.ganancia);
+        calculateItemPrice(index, current.producto_id, current.ancho, current.largo, current.ganancia, current.receta_personalizada);
         return prevItems;
       });
     }
   };
 
+  const handleOpenPersonalizarReceta = async (index: number) => {
+    const item = items[index];
+    if (!item.producto_id) {
+      alert('Por favor selecciona un mueble primero.');
+      return;
+    }
+    
+    setPersonalizarIndex(index);
+    
+    if (item.receta_personalizada) {
+      setPersonalizarSecciones(JSON.parse(JSON.stringify(item.receta_personalizada)));
+      setModalPreviewCalc(item.calcResult || null);
+      setShowPersonalizarModal(true);
+    } else {
+      try {
+        setItems(prev => {
+          const newItems = [...prev];
+          newItems[index].calcLoading = true;
+          return newItems;
+        });
+        const res = await api.get(`/producto/${item.producto_id}/receta-estructurada`);
+        setPersonalizarSecciones(res.data);
+        setShowPersonalizarModal(true);
+      } catch (err) {
+        console.error('Error al cargar la receta estructurada:', err);
+        alert('Error al cargar la estructura del mueble.');
+      } finally {
+        setItems(prev => {
+          const newItems = [...prev];
+          newItems[index].calcLoading = false;
+          return newItems;
+        });
+      }
+    }
+  };
+
+  const handleUpdateSeccionPolitica = (seccionIndex: number, field: string, value: string) => {
+    setPersonalizarSecciones(prev => {
+      const newSecs = [...prev];
+      if (!newSecs[seccionIndex].politica) {
+        newSecs[seccionIndex].politica = { pct_gastos_seccion: 10, pct_trabajadores: 8, costo_fabricacion: 0 };
+      }
+      newSecs[seccionIndex].politica[field] = value ? parseFloat(value) : 0;
+      return newSecs;
+    });
+  };
+
+  const handleUpdateInsumoField = (seccionIndex: number, elementoIndex: number, field: string, value: string) => {
+    setPersonalizarSecciones(prev => {
+      const newSecs = [...prev];
+      newSecs[seccionIndex].elementos[elementoIndex][field] = value ? parseFloat(value) : 0;
+      return newSecs;
+    });
+  };
+
+  const handleRemoveInsumo = (seccionIndex: number, elementoIndex: number) => {
+    setPersonalizarSecciones(prev => {
+      const newSecs = [...prev];
+      newSecs[seccionIndex].elementos = newSecs[seccionIndex].elementos.filter((_: any, i: number) => i !== elementoIndex);
+      return newSecs;
+    });
+  };
+
+  const handleOpenAddMaterial = (seccionIndex: number) => {
+    setAddMaterialSeccionIndex(seccionIndex);
+    setAddMaterialSearch('');
+    setShowAddMaterialDropdown(true);
+  };
+
+  const handleAddMaterialToSeccion = (material: any) => {
+    if (addMaterialSeccionIndex === null) return;
+    setPersonalizarSecciones(prev => {
+      const newSecs = [...prev];
+      const newEl = {
+        id: Date.now(), // ID temporal
+        seccion_id: newSecs[addMaterialSeccionIndex].id,
+        nombre_insumo_original: material.nombre,
+        material_id_normalizado: material.id,
+        cantidad: 1,
+        unidad_medida: material.unidad_medida?.abreviatura || 'un',
+        precio_unitario: material.costo_base,
+      };
+      newSecs[addMaterialSeccionIndex].elementos.push(newEl);
+      return newSecs;
+    });
+    setShowAddMaterialDropdown(false);
+    setAddMaterialSeccionIndex(null);
+  };
+
+  const handleOpenAddCost = (seccionIndex: number) => {
+    setAddCostSeccionIndex(seccionIndex);
+    setAddCostForm({ nombre: '', porcentaje: '', costo_base: '' });
+    setShowAddCostModal(true);
+  };
+
+  const handleAddCostToSeccion = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (addCostSeccionIndex === null || !addCostForm.nombre.trim()) return;
+    setPersonalizarSecciones(prev => {
+      const newSecs = [...prev];
+      const newCost = {
+        id: Date.now(), // ID temporal
+        seccion_id: newSecs[addCostSeccionIndex].id,
+        nombre: addCostForm.nombre.trim(),
+        porcentaje: addCostForm.porcentaje ? parseFloat(addCostForm.porcentaje) : null,
+        costo_base: parseFloat(addCostForm.costo_base) || 0,
+      };
+      if (!newSecs[addCostSeccionIndex].costos_produccion) {
+        newSecs[addCostSeccionIndex].costos_produccion = [];
+      }
+      newSecs[addCostSeccionIndex].costos_produccion.push(newCost);
+      return newSecs;
+    });
+    setShowAddCostModal(false);
+    setAddCostSeccionIndex(null);
+  };
+
+  const handleRemoveCost = (seccionIndex: number, costIndex: number) => {
+    setPersonalizarSecciones(prev => {
+      const newSecs = [...prev];
+      newSecs[seccionIndex].costos_produccion = newSecs[seccionIndex].costos_produccion.filter((_: any, i: number) => i !== costIndex);
+      return newSecs;
+    });
+  };
+
+  // Recalcular el preview en vivo dentro del modal cuando cambia personalizarSecciones
+  useEffect(() => {
+    if (!showPersonalizarModal || personalizarIndex === null || !personalizarSecciones || personalizarSecciones.length === 0) {
+      return;
+    }
+    const item = items[personalizarIndex];
+    const ganancia = item ? (Number(item.ganancia) || 40.0) : 40.0;
+    
+    setModalPreviewLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await cotizacionService.recalculateCustomRecipe(ganancia, personalizarSecciones);
+        setModalPreviewCalc(res);
+      } catch (err) {
+        console.error('Error recalculando preview en modal:', err);
+      } finally {
+        setModalPreviewLoading(false);
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [personalizarSecciones, showPersonalizarModal, personalizarIndex]);
+
+  const handleSavePersonalizacion = () => {
+    if (personalizarIndex === null) return;
+    const index = personalizarIndex;
+    const recetaNueva = JSON.parse(JSON.stringify(personalizarSecciones));
+    const calcFinal = modalPreviewCalc;
+
+    // Aplicar directamente al renglón la receta y el resultado ya calculado
+    setItems(prev => {
+      const newItems = [...prev];
+      newItems[index] = {
+        ...newItems[index],
+        receta_personalizada: recetaNueva,
+        calcResult: calcFinal || newItems[index].calcResult,
+        calcLoading: false,
+      };
+      return newItems;
+    });
+
+    setShowPersonalizarModal(false);
+    setPersonalizarIndex(null);
+    setModalPreviewCalc(null);
+  };
+
   const addItem = () => {
     setItems((prev) => [
       ...prev,
-      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false }
+      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
     ]);
   };
 
@@ -175,8 +396,10 @@ export default function Cotizaciones() {
     setEditingQuote(null);
     setSelectedClientId('');
     setObservaciones('');
+    setSelectedMonedaId(1);
+    setTasaCambio(1);
     setItems([
-      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false }
+      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
     ]);
     setIsFormOpen(true);
   };
@@ -211,6 +434,7 @@ export default function Cotizaciones() {
         costo_mano_obra: (item.calcResult?.costo_mano_obra || 0.0) * item.cantidad,
         costo_gastos: (item.calcResult?.costo_gastos_indirectos || 0.0) * item.cantidad,
         costo_total: (item.calcResult?.costo_total || 0.0) * item.cantidad,
+        receta_personalizada: item.receta_personalizada || null,
       };
     });
 
@@ -224,11 +448,17 @@ export default function Cotizaciones() {
       ? `Productos: ${itemsDescription}\nNota: ${observaciones}`
       : `Productos: ${itemsDescription}`;
 
+    const totalEstimado = selectedMonedaId !== 1
+      ? Math.round(globalTotal / tasaCambio)
+      : Math.round(globalTotal);
+
     const quoteData: QuoteCreate = {
       cliente_id: Number(selectedClientId),
       fecha: new Date().toISOString().split('T')[0],
       estado: editingQuote ? editingQuote.estado : 'BORRADOR',
-      total_estimado: globalTotal,
+      total_estimado: totalEstimado,
+      moneda_id: selectedMonedaId,
+      tasa_cambio: tasaCambio,
       observaciones: finalObs,
       detalles
     };
@@ -281,8 +511,9 @@ export default function Cotizaciones() {
     setIsConvertOpen(true);
   };
 
-  const handleOpenPrintPreview = (quote: Quote) => {
+  const handleOpenPrintPreview = async (quote: Quote) => {
     setSelectedQuoteForPrint(quote);
+    setAssociatedVenta(null);
     
     // Load Client RIF from localStorage, or default to empty
     const savedClientRif = localStorage.getItem(`rif_client_${quote.cliente_id}`) || '';
@@ -292,11 +523,29 @@ export default function Cotizaciones() {
     setPrintCompanyRif(localStorage.getItem('print_company_rif') || 'J-50146039-3');
     setPrintCompanyAddress(localStorage.getItem('print_company_address') || 'AV. INTERCOMUNAL CON CALLE 16 LOCAL Nro 15-205, BARRIO SIMÓN BOLÍVAR, UREÑA, TÁCHIRA');
     setPrintCompanyPhone(localStorage.getItem('print_company_phone') || '+58 412-1234567');
-    setPrintExchangeRate(localStorage.getItem('print_exchange_rate') || '4000');
+    // Use quote's exchange rate if not COP, otherwise use saved/default
+    const defaultRate = quote.tasa_cambio && quote.moneda_id !== 1 ? String(quote.tasa_cambio) : (localStorage.getItem('print_exchange_rate') || '4000');
+    setPrintExchangeRate(defaultRate);
     setPrintDiscount('0');
     setPrintIva('0');
     
     setIsPrintModalOpen(true);
+
+    // Buscar si existe un pedido y factura/abonos asociados a esta cotización
+    try {
+      const ventas = await ventaService.getAll();
+      const responsePedidos = await pedidoService.getAll();
+      const pedidoVinculado = responsePedidos.find((p: any) => p.cotizacion_id === quote.id || p.cotizacion?.id === quote.id);
+      if (pedidoVinculado) {
+        const ventaVinculada = ventas.find((v: any) => v.pedido_id === pedidoVinculado.id);
+        if (ventaVinculada) {
+          const detalleVenta = await ventaService.getById(ventaVinculada.id);
+          setAssociatedVenta(detalleVenta);
+        }
+      }
+    } catch (err) {
+      console.error('Error al cargar ventas/abonos vinculados a la cotización:', err);
+    }
   };
 
   const handleGeneratePdf = async () => {
@@ -346,7 +595,8 @@ export default function Cotizaciones() {
   };
 
   const handleConvertQuote = async () => {
-    if (!selectedQuoteForConvert) return;
+    if (!selectedQuoteForConvert || isConverting) return;
+    setIsConverting(true);
     try {
       let convertDetails;
       if (selectedQuoteForConvert.detalles && selectedQuoteForConvert.detalles.length > 0) {
@@ -388,6 +638,8 @@ export default function Cotizaciones() {
     } catch (err) {
       console.error(err);
       alert('Error al convertir la cotización a pedido.');
+    } finally {
+      setIsConverting(false);
     }
   };
 
@@ -528,7 +780,12 @@ export default function Cotizaciones() {
                       {quote.observaciones}
                     </td>
                     <td className="px-6 py-4 font-mono font-bold text-yeikar-secondary">
-                      ${Number(quote.total_estimado).toLocaleString('es-CO', { minimumFractionDigits: 2 })} COP
+                      {formatCurrency(Number(quote.total_estimado), quote.moneda?.codigo)}
+                      {quote.moneda && quote.moneda_id !== 1 && (
+                        <span className="block text-[10px] text-yeikar-neutral/40 font-normal">
+                          ≈ {formatCurrency(Number(quote.total_en_moneda_base || 0), 'COP')}
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2.5 py-1 rounded-full text-xs font-bold font-headline inline-block ${
@@ -647,6 +904,49 @@ export default function Cotizaciones() {
                 </select>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                    Moneda de Cotización *
+                  </label>
+                  <select
+                    value={selectedMonedaId}
+                    onChange={(e) => {
+                      const mId = Number(e.target.value);
+                      setSelectedMonedaId(mId);
+                      if (mId === 1) setTasaCambio(1);
+                    }}
+                    className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm font-bold"
+                  >
+                    {currencies.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.codigo} — {m.nombre} ({m.simbolo})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedMonedaId !== 1 && (
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                      Tasa de Cambio (1 {currencyCode} = X COP) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min="0.000001"
+                      value={tasaCambio}
+                      onChange={(e) => setTasaCambio(Number(e.target.value) || 1)}
+                      required
+                      className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm font-mono"
+                    />
+                    <p className="mt-1 text-[11px] text-stone-500 font-mono">
+                      {formatCurrency(Math.round(globalTotalCalc / tasaCambio), currencyCode)} → {(Math.round(globalTotalCalc)).toLocaleString('es-CO')} COP
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="border-t border-yeikar-secondary-light/15 my-4 pt-4">
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-headline font-black text-sm text-yeikar-secondary tracking-tight">
@@ -689,7 +989,7 @@ export default function Cotizaciones() {
                             <option value="">Seleccione mueble...</option>
                             {products.map((p) => (
                               <option key={p.id} value={p.id}>
-                                {p.nombre} (${Number(p.precio_base).toLocaleString()} base)
+                                {p.nombre} ({formatCurrency(Number(p.precio_base) / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)} base)
                               </option>
                             ))}
                           </select>
@@ -748,7 +1048,7 @@ export default function Cotizaciones() {
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
-                        <div className="sm:col-span-3">
+                        <div className="sm:col-span-2">
                           <input
                             type="text"
                             placeholder="Observación de este mueble (ej: Tela gris, patas madera)"
@@ -757,13 +1057,31 @@ export default function Cotizaciones() {
                             className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
                           />
                         </div>
-                        <div className="text-right font-mono text-xs font-bold text-yeikar-secondary">
+                        <div className="sm:col-span-1 flex items-center gap-1.5 justify-start">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenPersonalizarReceta(index)}
+                            className="bg-amber-100/70 hover:bg-amber-100 text-amber-900 border border-amber-200/50 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 leading-none"
+                            title="Personalizar materiales, insumos y políticas para esta cotización"
+                          >
+                            <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+                            </svg>
+                            <span>Estructura / Secciones</span>
+                          </button>
+                          {item.receta_personalizada && (
+                            <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full font-sans uppercase shrink-0 leading-none">
+                              Personalizado
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right font-mono text-xs font-bold text-yeikar-secondary sm:col-span-1">
                           {item.calcLoading ? (
                             <span className="text-yeikar-neutral/40">Calculando...</span>
                           ) : item.calcResult ? (
-                            <span>Subt: ${(item.calcResult.precio_venta * item.cantidad).toLocaleString('es-CO')}</span>
+                            <span>Subt: {formatCurrency(item.calcResult.precio_venta * item.cantidad, currencyCode)}</span>
                           ) : (
-                            <span>$0.00</span>
+                            <span>{formatCurrency(0, currencyCode)}</span>
                           )}
                         </div>
                       </div>
@@ -803,31 +1121,88 @@ export default function Cotizaciones() {
             </form>
 
             {/* Calculations Breakdown */}
-            <div className="w-full md:w-80 bg-yeikar-neutral text-yeikar-tertiary p-6 flex flex-col justify-between border-t md:border-t-0 md:border-l border-yeikar-secondary/20">
-              <div>
-                <h4 className="font-headline font-bold text-sm text-yeikar-primary tracking-wider uppercase mb-4">
-                  Totales de Cotización
-                </h4>
-                <div className="space-y-4">
-                  <div className="space-y-1">
+            <div className="w-full md:w-80 bg-yeikar-neutral text-yeikar-tertiary p-6 flex flex-col justify-between border-t md:border-t-0 md:border-l border-yeikar-secondary/20 overflow-y-auto max-h-[85vh]">
+              <div className="space-y-6">
+                <div>
+                  <h4 className="font-headline font-bold text-sm text-yeikar-primary tracking-wider uppercase mb-3">
+                    Totales de Cotización
+                  </h4>
+                  <div className="space-y-2">
                     <div className="flex justify-between text-xs text-yeikar-tertiary/60">
-                      <span>Costo Materiales:</span>
-                      <span className="font-mono">${Number(globalMaterialCost).toLocaleString('es-CO')}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-yeikar-tertiary/60">
-                      <span>Costo Mano Obra:</span>
-                      <span className="font-mono">${Number(globalManoObraCost).toLocaleString('es-CO')}</span>
-                    </div>
-                    <div className="flex justify-between text-xs text-yeikar-tertiary/60">
-                      <span>Costo Indirecto:</span>
-                      <span className="font-mono">${Number(globalGastosCost).toLocaleString('es-CO')}</span>
-                    </div>
-                    <div className="border-t border-yeikar-secondary-light/10 my-2" />
-                    <div className="flex justify-between text-xs text-yeikar-primary font-bold">
                       <span>Costo Total Fábrica:</span>
-                      <span className="font-mono">${Number(globalCostoTotal).toLocaleString('es-CO')}</span>
+                      <span className="font-mono font-bold">{formatCurrency(Math.round(globalCostoTotal / (selectedMonedaId === 1 ? 1 : tasaCambio)), currencyCode)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-green-500">
+                      <span>Ganancia Estimada:</span>
+                      <span className="font-mono font-bold">+ {formatCurrency(Math.round((globalTotalCalc - globalCostoTotal) / (selectedMonedaId === 1 ? 1 : tasaCambio)), currencyCode)}</span>
                     </div>
                   </div>
+                </div>
+
+                {/* Selector de renglón si hay múltiples */}
+                {items.length > 1 && (
+                  <div className="border-t border-yeikar-secondary-light/10 pt-3">
+                    <label className="block text-[10px] font-bold text-yeikar-tertiary/50 uppercase mb-1">
+                      Ver Desglose de:
+                    </label>
+                    <select
+                      value={desgloseIndex}
+                      onChange={(e) => setDesgloseIndex(Number(e.target.value))}
+                      className="w-full p-1.5 bg-yeikar-secondary/20 border border-yeikar-secondary-light/20 rounded-lg text-xs text-yeikar-tertiary focus:outline-none"
+                    >
+                      {items.map((item, idx) => {
+                        const prod = products.find(p => p.id === Number(item.producto_id));
+                        return (
+                          <option key={idx} value={idx} className="bg-yeikar-neutral text-yeikar-tertiary">
+                            Renglón {idx + 1}: {prod?.nombre || 'Mueble'} ({item.ancho}x{item.largo}m)
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+
+                {/* Desglose Detallado de Secciones de ese Renglón */}
+                <div className="border-t border-yeikar-secondary-light/10 pt-3 space-y-3">
+                  <h5 className="text-[10px] font-bold text-yeikar-primary uppercase tracking-widest">
+                    Desglose de Secciones (Renglón {desgloseIndex + 1})
+                  </h5>
+                  {items[desgloseIndex]?.calcResult?.desglose_por_seccion ? (
+                    <div className="space-y-3">
+                      {Object.entries(items[desgloseIndex].calcResult.desglose_por_seccion).map(([seccionNombre, datosSec]: [string, any]) => (
+                        <div key={seccionNombre} className="bg-yeikar-secondary/10 rounded-lg p-2.5 space-y-1.5 border border-yeikar-secondary-light/5">
+                          <div className="flex justify-between font-bold text-[11px] text-yeikar-primary border-b border-yeikar-secondary-light/15 pb-1">
+                            <span className="uppercase truncate pr-1">{seccionNombre}</span>
+                            <span className="font-mono text-yeikar-primary-light">{formatCurrency(Number(datosSec.total_seccion), currencyCode)}</span>
+                          </div>
+                          <div className="space-y-0.5 text-[10px] text-yeikar-tertiary/75 font-mono">
+                            {datosSec.costo_insumos > 0 && (
+                              <div className="flex justify-between">
+                                <span>Insumos</span>
+                                <span>{formatCurrency(Number(datosSec.costo_insumos), currencyCode)}</span>
+                              </div>
+                            )}
+                            {datosSec.total_costos_produccion > 0 && (
+                              <div className="flex justify-between text-amber-500 font-medium">
+                                <span>C. Producción</span>
+                                <span>+{formatCurrency(Number(datosSec.total_costos_produccion), currencyCode)}</span>
+                              </div>
+                            )}
+                            {datosSec.gasto_seccion > 0 && (
+                              <div className="flex justify-between">
+                                <span>Gastos ({datosSec.pct_gastos_seccion}%)</span>
+                                <span>+{formatCurrency(Number(datosSec.gasto_seccion), currencyCode)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-yeikar-tertiary/40 italic">
+                      Selecciona un mueble válido para ver su desglose.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -836,7 +1211,7 @@ export default function Cotizaciones() {
                   PRECIO TOTAL SUGERIDO:
                 </span>
                 <div className="text-2xl font-black text-yeikar-primary font-mono">
-                  ${Number(globalTotalCalc).toLocaleString('es-CO', { maximumFractionDigits: 0 })}
+                  {formatCurrency(globalTotalCalc, currencyCode)}
                 </div>
               </div>
             </div>
@@ -879,9 +1254,10 @@ export default function Cotizaciones() {
                 </button>
                 <button
                   onClick={handleConvertQuote}
-                  className="px-5 py-2 bg-yeikar-primary text-yeikar-neutral font-bold rounded-lg shadow-md hover:bg-yeikar-primary-light transition-all text-sm font-headline"
+                  disabled={isConverting}
+                  className="px-5 py-2 bg-yeikar-primary text-yeikar-neutral font-bold rounded-lg shadow-md hover:bg-yeikar-primary-light disabled:opacity-50 disabled:cursor-not-allowed transition-all text-sm font-headline"
                 >
-                  Confirmar Conversión
+                  {isConverting ? 'Convirtiendo...' : 'Confirmar Conversión'}
                 </button>
               </div>
             </div>
@@ -942,7 +1318,7 @@ export default function Cotizaciones() {
                     <h4 className="text-[10px] uppercase tracking-widest font-bold text-stone-400">Tasas & Ajustes</h4>
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { label: 'Tasa COP/USD', val: printExchangeRate, set: setPrintExchangeRate },
+                        { label: `Tasa COP/${selectedQuoteForPrint.moneda?.codigo || 'USD'}`, val: printExchangeRate, set: setPrintExchangeRate },
                         { label: 'Descuento %',  val: printDiscount,     set: setPrintDiscount     },
                         { label: 'IVA %',         val: printIva,          set: setPrintIva          },
                       ].map(({ label, val, set }) => (
@@ -1068,7 +1444,7 @@ export default function Cotizaciones() {
                         <table className="w-full border-collapse text-[9.5px]">
                           <thead>
                             <tr className="bg-stone-900 text-stone-100">
-                              {['Modelo', 'Cant.', 'Descripción / Medidas', 'P. Unitario', 'Total (COP)'].map((h, i) => (
+                              {['Modelo', 'Cant.', 'Descripción / Medidas', 'P. Unitario', `Total (${selectedQuoteForPrint.moneda?.codigo || 'COP'})`].map((h, i) => (
                                 <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[8px]
                                   ${i === 0 ? 'text-left w-[20%]' : i === 1 ? 'text-center w-[8%]' : i === 2 ? 'text-left' : 'text-right w-[13%]'}`}>{h}</th>
                               ))}
@@ -1087,8 +1463,8 @@ export default function Cotizaciones() {
                                     <td className="px-3 py-2 font-serif font-bold text-stone-950">{modelName}</td>
                                     <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{Number(det.cantidad).toFixed(0)}</td>
                                     <td className="px-3 py-2 text-stone-700 italic font-medium">{desc}</td>
-                                    <td className="px-3 py-2 text-right font-mono text-stone-850 font-medium">${Number(det.precio).toLocaleString('es-CO')}</td>
-                                    <td className="px-3 py-2 text-right font-mono font-extrabold text-stone-950">${rowTotal.toLocaleString('es-CO')}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-stone-850 font-medium">{formatCurrency(Number(det.precio), selectedQuoteForPrint.moneda?.codigo || 'COP')}</td>
+                                    <td className="px-3 py-2 text-right font-mono font-extrabold text-stone-950">{formatCurrency(rowTotal, selectedQuoteForPrint.moneda?.codigo || 'COP')}</td>
                                   </tr>
                                 );
                               })
@@ -1098,6 +1474,50 @@ export default function Cotizaciones() {
                           </tbody>
                         </table>
                       </div>
+
+                      {/* ── Dynamic Payments History (Seguimiento de Abonos) ── */}
+                      {associatedVenta && associatedVenta.pagos && associatedVenta.pagos.length > 0 && (
+                        <div className="my-1">
+                          <div className="text-[8.5px] font-serif font-bold uppercase tracking-wider text-stone-800 mb-1 flex items-center justify-between">
+                            <span>Historial de Abonos / Pagos Realizados</span>
+                            <span className="font-mono text-stone-600 font-normal">({associatedVenta.pagos.length} registros)</span>
+                          </div>
+                          <div className="border border-stone-300 rounded-lg overflow-hidden shadow-sm">
+                            <table className="w-full border-collapse text-[8.5px]">
+                              <thead>
+                                <tr className="bg-stone-100 text-stone-800 font-bold uppercase text-[7.5px] tracking-wider border-b border-stone-300">
+                                  <th className="px-2 py-1 text-left">Fecha</th>
+                                  <th className="px-2 py-1 text-left">Método</th>
+                                  <th className="px-2 py-1 text-left">Ref.</th>
+                                  <th className="px-2 py-1 text-right">Monto Recibido</th>
+                                  <th className="px-2 py-1 text-right">Equivalente en COP</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-stone-200 font-mono">
+                                {associatedVenta.pagos.map((p, idx) => {
+                                  const metodoLabel = METODOS_PAGO.find((m) => m.value === p.metodo_pago)?.label ?? p.metodo_pago;
+                                  return (
+                                    <tr key={p.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/50'}>
+                                      <td className="px-2 py-1 text-stone-700">{new Date(p.fecha).toLocaleDateString('es-ES')}</td>
+                                      <td className="px-2 py-1 font-bold text-stone-900">{metodoLabel}</td>
+                                      <td className="px-2 py-1 text-stone-600">{p.referencia || '—'}</td>
+                                      <td className="px-2 py-1 text-right font-bold text-stone-800">
+                                        {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
+                                      </td>
+                                      <td className="px-2 py-1 text-right font-bold text-emerald-800">
+                                        {formatCurrency(Number(p.monto_en_moneda_base || p.monto), 'COP')}
+                                        {p.tasa_cambio && p.tasa_cambio !== 1 && (
+                                          <span className="block text-[7px] text-stone-500 font-normal">Tasa: {p.tasa_cambio}</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
 
                       {/* ── Totals: Left=breakdown, Right=grand total card ── */}
                       <div className="grid grid-cols-2 gap-4 pt-1">
@@ -1113,28 +1533,49 @@ export default function Cotizaciones() {
                             <div key={label} className={`flex justify-between items-center ${i === arr.length - 1 ? 'border-t border-stone-300 pt-1' : ''}`}>
                               <span className="text-[7.5px] uppercase tracking-wider font-bold text-stone-500">{label}</span>
                               <span className={`font-mono font-extrabold ${color}`}>
-                                {value < 0 ? '-' : ''}${Math.abs(value).toLocaleString('es-CO')} COP
+                                {value < 0 ? '-' : ''}{formatCurrency(Math.abs(value), selectedQuoteForPrint.moneda?.codigo || 'COP')}
                               </span>
                             </div>
                           ))}
                         </div>
 
                         {/* Right — grand total card */}
-                        <div className="bg-stone-900 rounded-xl p-3 flex flex-col gap-1.5 shadow-md border-t-2 border-amber-600">
+                        <div className="bg-amber-50/60 rounded-xl p-3 flex flex-col gap-1.5 border border-amber-300/80 shadow-sm">
                           <div className="flex justify-between items-baseline">
-                            <span className="text-[7.5px] tracking-[0.18em] font-bold text-stone-300 uppercase">Total a Pagar</span>
-                            <span className="text-sm font-bold text-amber-400 font-mono">
-                              ${Number(grandTotal).toLocaleString('es-CO')} COP
+                            <span className="text-[8px] tracking-[0.15em] font-bold text-stone-700 uppercase">Total Cotización</span>
+                            <span className="text-base font-black text-amber-900 font-mono">
+                              {formatCurrency(grandTotal, selectedQuoteForPrint.moneda?.codigo || 'COP')}
                             </span>
                           </div>
-                          <div className="border-t border-stone-850 pt-1.5 space-y-0.5 text-[8.5px]">
-                            <div className="flex justify-between text-stone-200 font-mono font-extrabold">
-                              <span>BASE USD:</span>
-                              <span className="text-amber-300">${usdTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span>
+
+                          {selectedQuoteForPrint.moneda && selectedQuoteForPrint.moneda_id !== 1 && (
+                            <div className="flex justify-between items-baseline text-[8.5px] text-stone-600 font-mono font-medium border-t border-amber-200/60 pt-1">
+                              <span>EQUIVALENTE EN COP:</span>
+                              <span>{formatCurrency(grandTotal * (Number(printExchangeRate) || 1), 'COP')}</span>
                             </div>
-                            <div className="flex justify-between text-stone-400 font-medium">
+                          )}
+
+                          {associatedVenta && Number(associatedVenta.total_pagado) > 0 && (
+                            <div className="flex justify-between items-baseline text-[8.5px] text-emerald-800 font-mono font-extrabold border-t border-amber-200/60 pt-1">
+                              <span>TOTAL ABONADO:</span>
+                              <span>-{formatCurrency(Number(associatedVenta.total_pagado), 'COP')}</span>
+                            </div>
+                          )}
+
+                          <div className="border-t border-amber-200/80 pt-1.5 space-y-0.5 text-[8.5px]">
+                            {associatedVenta && (
+                              <div className="flex justify-between text-amber-900 font-mono font-black text-[9.5px]">
+                                <span>SALDO PENDIENTE:</span>
+                                <span>{formatCurrency(Number(associatedVenta.saldo_pendiente), 'COP')}</span>
+                              </div>
+                            )}
+                            <div className="flex justify-between text-stone-900 font-mono font-extrabold">
+                              <span>BASE ({selectedQuoteForPrint.moneda?.codigo || 'USD'}):</span>
+                              <span className="text-amber-800 font-bold">{formatCurrency(usdTotal, selectedQuoteForPrint.moneda?.codigo || 'USD')}</span>
+                            </div>
+                            <div className="flex justify-between text-stone-600 font-medium">
                               <span>TASA:</span>
-                              <span className="font-mono">{Number(printExchangeRate).toLocaleString('es-CO')} COP/USD</span>
+                              <span className="font-mono text-stone-800">{Number(printExchangeRate).toLocaleString('es-CO')} COP/{selectedQuoteForPrint.moneda?.codigo || 'USD'}</span>
                             </div>
                           </div>
                         </div>
@@ -1170,6 +1611,377 @@ export default function Cotizaciones() {
         );
       })()}
 
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* Modal de Personalización de Receta Ad-Hoc */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {showPersonalizarModal && personalizarIndex !== null && (
+        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-yeikar-secondary-light/10 max-w-4xl w-full h-[90vh] flex flex-col overflow-hidden animate-fade-in">
+            {/* Header del Modal */}
+            <div className="bg-yeikar-neutral p-4 text-yeikar-tertiary flex flex-col md:flex-row md:items-center justify-between shrink-0 gap-3 border-b border-yeikar-secondary/20">
+              <div>
+                <h3 className="font-headline font-bold text-base text-yeikar-primary flex items-center gap-2">
+                  <span>Personalizar Estructura y Secciones del Mueble</span>
+                  {modalPreviewLoading && (
+                    <span className="text-[10px] text-amber-400 font-mono animate-pulse">
+                      (Calculando nuevo precio...)
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-yeikar-tertiary/50">
+                  Esta configuración se aplicará únicamente a este renglón de la cotización actual.
+                </p>
+              </div>
+
+              {/* Banner de Precio en Tiempo Real */}
+              <div className="flex items-center gap-4 bg-yeikar-secondary/40 px-3.5 py-1.5 rounded-xl border border-yeikar-secondary-light/15 shrink-0">
+                <div className="text-right">
+                  <span className="text-[9px] uppercase tracking-wider text-yeikar-tertiary/60 font-bold block">
+                    Costo Fábrica
+                  </span>
+                  <span className="font-mono text-xs font-bold text-yeikar-tertiary">
+                    ${modalPreviewCalc ? Number(modalPreviewCalc.costo_total).toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '...'}
+                  </span>
+                </div>
+                <div className="h-6 w-px bg-yeikar-secondary-light/20" />
+                <div className="text-right">
+                  <span className="text-[9px] uppercase tracking-wider text-amber-400 font-bold block">
+                    Nuevo Precio Sugerido
+                  </span>
+                  <span className="font-mono text-base font-black text-yeikar-primary">
+                    ${modalPreviewCalc ? Number(modalPreviewCalc.precio_venta).toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '...'}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => { setShowPersonalizarModal(false); setPersonalizarIndex(null); setModalPreviewCalc(null); }}
+                className="text-yeikar-tertiary/60 hover:text-yeikar-primary text-sm font-bold font-headline self-start md:self-auto"
+              >
+                ✕ Cerrar
+              </button>
+            </div>
+
+            {/* Cuerpo del Modal */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {personalizarSecciones && personalizarSecciones.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {personalizarSecciones.map((sec, secIdx) => {
+                    const secInfo = modalPreviewCalc?.desglose_por_seccion?.[sec.nombre];
+                    return (
+                      <div key={sec.id || secIdx} className="border border-yeikar-secondary-light/10 rounded-xl overflow-hidden bg-white shadow-sm flex flex-col">
+                        {/* Cabecera Sección */}
+                        <div className="bg-yeikar-secondary/5 border-b border-yeikar-secondary-light/10 px-4 py-2.5 flex items-center justify-between">
+                          <span className="font-headline font-black text-xs text-yeikar-secondary uppercase tracking-wider">
+                            Sección: {sec.nombre}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {secInfo && (
+                              <span className="text-[10px] font-bold font-mono bg-green-50 text-green-700 border border-green-200/80 px-2 py-0.5 rounded-full">
+                                Subtotal: ${Number(secInfo.total_seccion).toLocaleString('es-CO', { maximumFractionDigits: 0 })}
+                              </span>
+                            )}
+                            <span className="text-[10px] font-bold font-mono bg-yeikar-secondary/10 text-yeikar-secondary px-2 py-0.5 rounded-full">
+                              {sec.elementos?.length || 0} insumos
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Política de la Sección */}
+                        <div className="bg-amber-50/50 border-b border-amber-100/50 px-4 py-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Política de Sección</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[9px] font-bold text-yeikar-neutral/50 mb-1">% GASTOS SECCIÓN</label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                value={sec.politica?.pct_gastos_seccion ?? 10}
+                                onChange={(e) => handleUpdateSeccionPolitica(secIdx, 'pct_gastos_seccion', e.target.value)}
+                                className="w-full p-1.5 border border-amber-250 bg-white rounded-lg text-xs font-mono"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[9px] font-bold text-yeikar-neutral/50 mb-1">% TRABAJADORES</label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                value={sec.politica?.pct_trabajadores ?? 8}
+                                onChange={(e) => handleUpdateSeccionPolitica(secIdx, 'pct_trabajadores', e.target.value)}
+                                className="w-full p-1.5 border border-amber-250 bg-white rounded-lg text-xs font-mono"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Costos de Producción Avanzados (Pintura, etc.) */}
+                        <div className="border-b border-stone-100 px-4 py-3 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-yeikar-neutral/40 uppercase tracking-wider">Costos de Producción</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAddCost(secIdx)}
+                              className="text-[10px] font-bold text-yeikar-primary hover:underline flex items-center gap-1"
+                            >
+                              + Agregar Costo
+                            </button>
+                          </div>
+
+                          {sec.costos_produccion && sec.costos_produccion.length > 0 ? (
+                            <div className="divide-y divide-amber-100">
+                              {sec.costos_produccion.map((cp: any, cpIdx: number) => (
+                                <div key={cp.id || cpIdx} className="flex items-center justify-between text-[11px] py-1.5 hover:bg-amber-50/30 px-1 -mx-1 rounded">
+                                  <span className="font-semibold text-amber-900">{cp.nombre}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-amber-800 bg-amber-100/60 px-1.5 py-0.5 rounded text-[10px]">
+                                      ${Number(cp.costo_base).toLocaleString()} {cp.porcentaje ? `(+${cp.porcentaje}%)` : ''}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveCost(secIdx, cpIdx)}
+                                      className="text-red-500 hover:text-red-700"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-yeikar-neutral/40 italic">Sin costos de producción.</p>
+                          )}
+                        </div>
+
+                        {/* Insumos */}
+                        <div className="p-4 flex-1 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold text-yeikar-neutral/40 uppercase tracking-wider">Insumos Físicos</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAddMaterial(secIdx)}
+                              className="text-[10px] font-bold text-yeikar-primary hover:underline"
+                            >
+                              + Agregar Insumo
+                            </button>
+                          </div>
+
+                          {sec.elementos && sec.elementos.length > 0 ? (
+                            <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
+                              {sec.elementos.map((el: any, elIdx: number) => (
+                                <div key={el.id || elIdx} className="bg-stone-50 p-2.5 rounded-lg border border-stone-100 relative space-y-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveInsumo(secIdx, elIdx)}
+                                    className="absolute top-1 right-2 text-stone-400 hover:text-red-650 text-xs"
+                                    title="Quitar"
+                                  >
+                                    ✕
+                                  </button>
+                                  <div className="font-bold text-xs text-yeikar-secondary truncate pr-4">
+                                    {el.nombre_insumo_original}
+                                  </div>
+                                  <div className="grid grid-cols-2 gap-2 pt-1">
+                                    <div>
+                                      <label className="block text-[8px] font-semibold text-stone-400 mb-0.5">CANTIDAD ({el.unidad_medida})</label>
+                                      <input
+                                        type="number"
+                                        step="0.001"
+                                        min="0"
+                                        value={el.cantidad}
+                                        onChange={(e) => handleUpdateInsumoField(secIdx, elIdx, 'cantidad', e.target.value)}
+                                        className="w-full p-1 border border-stone-200 bg-white rounded text-xs font-mono"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[8px] font-semibold text-stone-400 mb-0.5">PRECIO UNITARIO ($)</label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        value={el.precio_unitario ?? 0}
+                                        onChange={(e) => handleUpdateInsumoField(secIdx, elIdx, 'precio_unitario', e.target.value)}
+                                        className="w-full p-1 border border-stone-200 bg-white rounded text-xs font-mono"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[10px] text-yeikar-neutral/40 italic">No hay insumos agregados.</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 text-yeikar-neutral/45">
+                  <svg className="w-12 h-12 mb-3 animate-spin text-yeikar-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  <span>Cargando receta estructurada...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer del Modal */}
+            <div className="bg-yeikar-neutral/5 p-4 border-t border-yeikar-secondary-light/10 flex items-center justify-between shrink-0">
+              <div className="text-xs">
+                {modalPreviewCalc ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-yeikar-secondary font-headline font-bold">
+                      Precio Nuevo Sugerido:
+                    </span>
+                    <span className="text-yeikar-primary text-base font-black font-mono">
+                      ${Number(modalPreviewCalc.precio_venta).toLocaleString('es-CO', { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-yeikar-tertiary/50 italic text-[11px]">Calculando precio en tiempo real...</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setShowPersonalizarModal(false); setPersonalizarIndex(null); setModalPreviewCalc(null); }}
+                  className="px-4 py-2 border border-yeikar-secondary-light/15 hover:bg-stone-50 rounded-xl text-xs font-bold font-headline"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePersonalizacion}
+                  disabled={modalPreviewLoading}
+                  className="px-5 py-2 bg-yeikar-primary text-yeikar-neutral font-bold rounded-xl shadow-md hover:bg-yeikar-primary-light transition-all text-xs font-headline flex items-center gap-2 disabled:opacity-50"
+                >
+                  <span>Guardar Personalización</span>
+                  {modalPreviewCalc && (
+                    <span className="bg-yeikar-neutral/20 text-yeikar-neutral font-mono text-[10px] px-1.5 py-0.5 rounded">
+                      ${Number(modalPreviewCalc.precio_venta).toLocaleString('es-CO', { maximumFractionDigits: 0 })}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* Modal / Buscador para Agregar Insumo */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {showAddMaterialDropdown && addMaterialSeccionIndex !== null && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl shadow-2xl border border-stone-150 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="font-headline font-bold text-sm text-yeikar-secondary">Buscar Material en Inventario</h4>
+              <button
+                type="button"
+                onClick={() => { setShowAddMaterialDropdown(false); setAddMaterialSeccionIndex(null); }}
+                className="text-stone-400 hover:text-stone-600 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <input
+              type="text"
+              placeholder="Buscar madera, tela, tornillos..."
+              value={addMaterialSearch}
+              onChange={(e) => setAddMaterialSearch(e.target.value)}
+              className="w-full p-2 border border-stone-250 rounded-lg focus:ring-2 focus:ring-yeikar-primary text-xs"
+              autoFocus
+            />
+            <div className="max-h-[220px] overflow-y-auto divide-y divide-stone-100 pr-1 text-xs">
+              {materiales
+                .filter(m => m.nombre.toLowerCase().includes(addMaterialSearch.toLowerCase()))
+                .slice(0, 15)
+                .map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => handleAddMaterialToSeccion(m)}
+                    className="w-full text-left p-2.5 hover:bg-yeikar-tertiary/20 rounded transition-colors flex justify-between items-center"
+                  >
+                    <span className="font-semibold text-stone-900">{m.nombre}</span>
+                    <span className="font-mono text-stone-500 bg-stone-100 px-2 py-0.5 rounded text-[10px]">
+                      ${Number(m.costo_base).toLocaleString()}
+                    </span>
+                  </button>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* Modal Agregar Costo de Producción */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {showAddCostModal && addCostSeccionIndex !== null && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white rounded-2xl shadow-2xl border border-stone-150 max-w-sm w-full p-6 space-y-4">
+            <div>
+              <h4 className="font-headline font-bold text-sm text-yeikar-secondary">Agregar Costo de Producción</h4>
+            </div>
+            <form onSubmit={handleAddCostToSeccion} className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-stone-500 mb-1">Nombre del Costo *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej: PREPARADO, PINTURA"
+                  value={addCostForm.nombre}
+                  onChange={(e) => setAddCostForm({ ...addCostForm, nombre: e.target.value })}
+                  className="w-full p-2 border border-stone-250 rounded-lg text-xs"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-stone-500 mb-1">Costo Base ($) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    placeholder="0.00"
+                    value={addCostForm.costo_base}
+                    onChange={(e) => setAddCostForm({ ...addCostForm, costo_base: e.target.value })}
+                    className="w-full p-2 border border-stone-250 rounded-lg text-xs font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-stone-500 mb-1">% Incremental (Opcional)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="5"
+                    value={addCostForm.porcentaje}
+                    onChange={(e) => setAddCostForm({ ...addCostForm, porcentaje: e.target.value })}
+                    className="w-full p-2 border border-stone-250 rounded-lg text-xs font-mono"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => { setShowAddCostModal(false); setAddCostSeccionIndex(null); }}
+                  className="px-4 py-2 hover:bg-stone-50 rounded-lg"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-yeikar-primary text-yeikar-neutral font-bold rounded-lg"
+                >
+                  Agregar Costo
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

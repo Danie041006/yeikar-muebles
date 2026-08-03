@@ -61,6 +61,9 @@ export interface PoliticaSeccion {
   mano_obra_base: number;
   pct_liquidacion_mo: number;
   pct_gastos_seccion: number;
+  costo_fabricacion?: number | null;
+  pct_trabajadores?: number | null;
+  pct_negocio?: number | null;
 }
 
 export interface ElementoSeccion {
@@ -83,6 +86,15 @@ export interface SeccionProducto {
   orden: number;
   elementos: ElementoSeccion[];
   politica?: PoliticaSeccion;
+  costos_produccion: CostoProduccionSeccion[];
+}
+
+export interface CostoProduccionSeccion {
+  id: number;
+  seccion_id: number;
+  nombre: string;
+  porcentaje?: number | null;
+  costo_base: number;
 }
 
 export const productosService = {
@@ -151,6 +163,47 @@ export const productosService = {
   crearMaterial: async (material: Omit<Material, 'id' | 'unidad_medida'>): Promise<Material> => {
     const response = await api.post<Material>('/material/', material);
     return response.data;
+  },
+
+  crearSeccion: async (seccion: { producto_id: number; nombre: string; orden?: number; pct_gastos_seccion?: number | null }): Promise<SeccionProducto> => {
+    const response = await api.post<SeccionProducto>('/seccion/', seccion);
+    return response.data;
+  },
+
+  eliminarSeccion: async (seccionId: number): Promise<void> => {
+    await api.delete(`/seccion/${seccionId}`);
+  },
+
+  crearElementoSeccion: async (elemento: {
+    seccion_id: number;
+    nombre_insumo_original: string;
+    material_id_normalizado?: number | null;
+    cantidad?: number;
+    unidad_medida?: string;
+    precio_unitario?: number | null;
+    observaciones?: string;
+  }): Promise<ElementoSeccion> => {
+    const response = await api.post<ElementoSeccion>(`/seccion/${elemento.seccion_id}/elemento`, elemento);
+    return response.data;
+  },
+
+  eliminarElementoSeccion: async (elementoId: number): Promise<void> => {
+    await api.delete(`/elemento/${elementoId}`);
+  },
+
+  // Costos de producción por sección
+  crearCostoProduccion: async (data: { seccion_id: number; nombre: string; porcentaje?: number | null; costo_base: number }): Promise<CostoProduccionSeccion> => {
+    const response = await api.post<CostoProduccionSeccion>(`/seccion/${data.seccion_id}/costo-produccion`, data);
+    return response.data;
+  },
+
+  actualizarCostoProduccion: async (itemId: number, data: Partial<CostoProduccionSeccion>): Promise<CostoProduccionSeccion> => {
+    const response = await api.put<CostoProduccionSeccion>(`/costo-produccion/${itemId}`, data);
+    return response.data;
+  },
+
+  eliminarCostoProduccion: async (itemId: number): Promise<void> => {
+    await api.delete(`/costo-produccion/${itemId}`);
   },
 };
 

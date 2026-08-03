@@ -8,6 +8,7 @@ class CompraBase(BaseModel):
     moneda_id: int
     fecha: date
     estado: str = "BORRADOR"
+    tipo_pago: str = "CREDITO"  # CONTADO | CREDITO
     observaciones: Optional[str] = None
 
 class CompraCreate(BaseModel):
@@ -15,12 +16,15 @@ class CompraCreate(BaseModel):
     moneda_id: int
     fecha: date
     estado: Optional[str] = "BORRADOR"
+    tipo_pago: Optional[str] = "CREDITO"
     observaciones: Optional[str] = None
     detalle: List["DetalleCompraCreate"]
 
 class CompraResponse(CompraBase):
     id: int
     total: Decimal
+    tasa_cambio: Decimal
+    total_en_moneda_base: Optional[Decimal]
     created_at: datetime
     updated_at: datetime
     detalle: List["DetalleCompraResponse"]

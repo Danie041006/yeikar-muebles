@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, List
@@ -62,20 +63,34 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate) -> m
     if movimiento.cantidad <= 0:
         raise ValueError("La cantidad debe ser positiva")
 
-    # Obtener o crear el registro de inventario para ese material y ubicación
+    # Obtener o crear el registro de inventario para ese material y ubicación.
+    # FOR UPDATE bloquea la fila para que dos SALIDAS concurrentes no lean el
+    # mismo stock y descuenten dos veces (race condition).
     inventario = db.query(model.Inventario).filter(
         model.Inventario.material_id == movimiento.material_id,
         model.Inventario.ubicacion_id == movimiento.ubicacion_id
-    ).first()
+    ).with_for_update().first()
 
     if not inventario:
-        inventario = model.Inventario(
-            material_id=movimiento.material_id,
-            ubicacion_id=movimiento.ubicacion_id,
-            cantidad=Decimal(0)
-        )
-        db.add(inventario)
-        db.flush()   # esto puede ayudarnos a obtener el id en caso de ser necesario
+        try:
+            # Savepoint: si dos requests crean la fila a la vez, el único
+            # constraint (uq_inventario_material_ubicacion) permite capturar el
+            # conflicto y re-leer la fila del ganador en vez de lanzar 500.
+            with db.begin_nested():
+                inventario = model.Inventario(
+                    material_id=movimiento.material_id,
+                    ubicacion_id=movimiento.ubicacion_id,
+                    cantidad=Decimal(0)
+                )
+                db.add(inventario)
+                db.flush()
+        except IntegrityError:
+            inventario = db.query(model.Inventario).filter(
+                model.Inventario.material_id == movimiento.material_id,
+                model.Inventario.ubicacion_id == movimiento.ubicacion_id
+            ).with_for_update().first()
+            if not inventario:
+                raise
 
     # Aplicar cambio según tipo de movimiento
     if movimiento.tipo == "ENTRADA":

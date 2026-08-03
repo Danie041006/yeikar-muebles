@@ -6,6 +6,7 @@ from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate
 from app.modules.orders.model import Pedido, DetallePedido
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
+from app.modules.tasas_cambio import service as tasa_cambio_service
 
 # ------------------------------------------------------------
 # Servicios para Ventas (Facturas)
@@ -27,7 +28,7 @@ def obtener_ventas(db: Session, salto: int = 0, limite: int = 100, buscar: str =
 
 def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
     
-    pedido = db.query(Pedido).filter(Pedido.id == esquema.pedido_id).first()
+    pedido = db.query(Pedido).filter(Pedido.id == esquema.pedido_id).with_for_update().first()
     if not pedido:
         raise ValueError("El pedido especificado no existe.")
 
@@ -45,6 +46,7 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
         raise ValueError("Ya existe una factura de venta para este pedido.")
 
     # 4. Crear cabecera de la venta
+    tasa_cambio = tasa_cambio_service.obtener_tasa_moneda_a_cop(db, esquema.moneda_id, esquema.fecha or date.today())
     db_venta = Venta(
         pedido_id=esquema.pedido_id,
         cliente_id=pedido.cliente_id,
@@ -52,6 +54,8 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
         fecha=esquema.fecha or date.today(),
         total=0.0,
         estado="PENDIENTE",
+        tasa_cambio=tasa_cambio,
+        total_en_moneda_base=0.0,
         observaciones=esquema.observaciones
     )
     db.add(db_venta)
@@ -62,16 +66,28 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
     for dp in pedido.detalles:
         subtotal = float(dp.cantidad) * float(dp.precio)
         total += subtotal
+        costo_unit = float(dp.costo_unitario) if dp.costo_unitario is not None else None
+        if costo_unit is None:
+            # Fallback: costo del producto
+            costo_unit = float(dp.producto.precio_costo_base) if dp.producto and dp.producto.precio_costo_base is not None else 0.0
+        pct_ganancia = float(dp.porcentaje_ganancia) if dp.porcentaje_ganancia is not None else (
+            round(((float(dp.precio) - costo_unit) / costo_unit) * 100, 2) if costo_unit > 0 else 0.0
+        )
         db_detalle = DetalleVenta(
             venta_id=db_venta.id,
             producto_id=dp.producto_id,
             cantidad=dp.cantidad,
-            precio=dp.precio
+            precio=dp.precio,
+            costo_unitario=costo_unit,
+            porcentaje_ganancia=pct_ganancia,
+            utilidad=round(float(dp.precio) - costo_unit, 2),
+            descuento=0.0,
         )
         db.add(db_detalle)
 
     # 6. Actualizar el total de la venta
     db_venta.total = total
+    db_venta.total_en_moneda_base = round(total * float(tasa_cambio), 2)
     db.commit()
     db.refresh(db_venta)
     return db_venta
@@ -105,8 +121,9 @@ def obtener_pago(db: Session, id_pago: int):
     return db.query(Pago).filter(Pago.id == id_pago).first()
 
 def crear_pago(db: Session, esquema: PagoCreate):
-    # 1. Obtener la venta
-    venta = obtener_venta(db, esquema.venta_id)
+    # 1. Obtener la venta con FOR UPDATE para serializar pagos concurrentes:
+    #    dos abonos simultáneos no pueden validar el saldo al mismo tiempo.
+    venta = db.query(Venta).filter(Venta.id == esquema.venta_id).with_for_update().first()
     if not venta:
         raise ValueError("La venta especificada no existe.")
 
@@ -116,24 +133,37 @@ def crear_pago(db: Session, esquema: PagoCreate):
     if venta.estado == "PAGADA":
         raise ValueError("La venta ya se encuentra totalmente pagada.")
 
-    # 3. Validar coincidencia de monedas
-    if esquema.moneda_id != venta.moneda_id:
-        raise ValueError("La moneda del pago debe coincidir con la moneda de la factura.")
+    # 3. Determinar tasa de cambio y calcular monto en moneda base
+    misma_moneda = esquema.moneda_id == venta.moneda_id
+    if misma_moneda:
+        # Mismo tipo de moneda: tasa 1:1, no se requiere TRM
+        tasa_cambio = 1.0
+        monto_en_moneda_base = float(esquema.monto)
+    else:
+        # Moneda diferente: la tasa_cambio es obligatoria
+        if not esquema.tasa_cambio or float(esquema.tasa_cambio) <= 0:
+            raise ValueError(
+                "La moneda del pago difiere de la moneda de la factura. "
+                "Debes proporcionar la tasa de cambio (TRM) para realizar la conversión."
+            )
+        tasa_cambio = float(esquema.tasa_cambio)
+        monto_en_moneda_base = round(float(esquema.monto) * tasa_cambio, 2)
 
     # 4. Validar metodo de pago valido
     metodos_validos = ['EFECTIVO_COP', 'EFECTIVO_USD', 'EFECTIVO_VES', 'BANCOLOMBIA', 'BANCARIBE', 'ZELLE']
     if esquema.metodo_pago not in metodos_validos:
         raise ValueError(f"Metodo de pago invalido. Debe ser uno de: {metodos_validos}")
 
-    # 5. Debemos comprobar que el dinero que se va a abonar no supere el saldo pendiente
+    # 5. Validar que el monto (en moneda base) no supere el saldo pendiente
     pagos_previos = db.query(Pago).filter(Pago.venta_id == venta.id).all()
-    total_pagado = sum(float(p.monto) for p in pagos_previos)
-    if total_pagado + float(esquema.monto) > float(venta.total):
-        raise ValueError("El monto del pago excede el saldo pendiente de la factura. revisa de nuevo el monto que deseas registrar")
-        
-    
+    total_ya_pagado_base = sum(float(p.monto_en_moneda_base) for p in pagos_previos)
+    saldo_pendiente_base = float(venta.total) - total_ya_pagado_base
 
-
+    if monto_en_moneda_base > saldo_pendiente_base + 0.01:  # margen de redondeo de 1 centavo
+        raise ValueError(
+            f"El monto del pago ({monto_en_moneda_base:,.2f} en moneda base) excede el saldo "
+            f"pendiente de la factura ({saldo_pendiente_base:,.2f}). Revisa el monto o la tasa de cambio."
+        )
 
     # 6. Crear el pago
     db_pago = Pago(
@@ -141,6 +171,8 @@ def crear_pago(db: Session, esquema: PagoCreate):
         moneda_id=esquema.moneda_id,
         fecha=esquema.fecha,
         monto=esquema.monto,
+        tasa_cambio=tasa_cambio,
+        monto_en_moneda_base=monto_en_moneda_base,
         metodo_pago=esquema.metodo_pago,
         referencia=esquema.referencia,
         observaciones=esquema.observaciones
@@ -148,14 +180,14 @@ def crear_pago(db: Session, esquema: PagoCreate):
     db.add(db_pago)
     db.flush()
 
-    # 7. Recalcular estado de la venta
-    pagos = db.query(Pago).filter(Pago.venta_id == venta.id).all()
-    total_pagado = sum(float(p.monto) for p in pagos)
+    # 7. Recalcular estado de la venta usando monto_en_moneda_base
+    todos_pagos = db.query(Pago).filter(Pago.venta_id == venta.id).all()
+    total_pagado_base = sum(float(p.monto_en_moneda_base) for p in todos_pagos)
     total_venta = float(venta.total)
 
-    if total_pagado >= total_venta:
+    if total_pagado_base >= total_venta - 0.01:  # margen de redondeo
         venta.estado = "PAGADA"
-    elif total_pagado > 0.0:
+    elif total_pagado_base > 0.0:
         venta.estado = "ABONADA"
     else:
         venta.estado = "PENDIENTE"
@@ -177,7 +209,8 @@ def obtener_cuentas_por_cobrar(db: Session):
     cuentas = []
     for v in ventas:
         pagos = db.query(Pago).filter(Pago.venta_id == v.id).all()
-        total_pagado = sum(float(p.monto) for p in pagos)
+        # Usar monto_en_moneda_base para calcular el total pagado en la moneda base de la venta
+        total_pagado = sum(float(p.monto_en_moneda_base) for p in pagos)
         saldo_pendiente = float(v.total) - total_pagado
 
         if saldo_pendiente > 0.0:

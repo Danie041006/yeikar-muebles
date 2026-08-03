@@ -5,9 +5,10 @@ from datetime import date
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.tasas_cambio import service, schemas
 
-router = APIRouter(prefix="/tasas-cambio", tags=["Tasas de Cambio"])
+router = APIRouter(prefix="/tasas-cambio", tags=["Tasas de Cambio"], dependencies=[Depends(require_module('tasas'))])
 
 @router.post("/", response_model=schemas.TasaCambioResponse, status_code=201)
 def crear_tasa(

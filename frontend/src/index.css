@@ -12,7 +12,7 @@
 }
 
 @media print {
-  /* Hide sidebar, navbar, and other UI buttons during print */
+  /* Hide sidebar, navbar, buttons and other web UI during print */
   aside,
   nav,
   header,
@@ -34,19 +34,18 @@
     overflow: visible !important;
   }
 
-  /* Override flex layouts of main wrappers */
-  .flex, .flex-col, main, .max-w-7xl {
-    display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
+  main {
     padding: 0 !important;
-    margin: 0 !important;
     background: none !important;
-    border: none !important;
-    box-shadow: none !important;
   }
 
-  /* Force background graphics (like watermark logo and gray headers) to print */
+  .max-w-7xl {
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Force background graphics (watermark logo, gray headers) to print */
   .print-color-adjust {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -59,7 +58,7 @@
 
   @page {
     size: letter;
-    margin: 12mm 15mm;
+    margin: 12mm 14mm;
   }
 }
 

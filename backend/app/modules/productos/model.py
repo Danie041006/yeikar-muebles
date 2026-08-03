@@ -192,6 +192,7 @@ class SeccionProducto(Base):
     producto    = relationship("Producto", back_populates="secciones")
     elementos   = relationship("ElementoSeccion", back_populates="seccion", cascade="all, delete-orphan")
     politica    = relationship("PoliticaSeccion", uselist=False, back_populates="seccion", cascade="all, delete-orphan")
+    costos_produccion = relationship("CostoProduccionSeccion", back_populates="seccion", cascade="all, delete-orphan")
 
 
 class ElementoSeccion(Base):
@@ -228,10 +229,35 @@ class PoliticaSeccion(Base):
     id                  = Column(BigInteger, primary_key=True, index=True)
     seccion_id          = Column(BigInteger, ForeignKey("seccion_producto.id", ondelete="CASCADE"), unique=True, nullable=False)
     mano_obra_base      = Column(Numeric(15, 2), default=0.0, nullable=False)
-    pct_liquidacion_mo  = Column(Numeric(5, 2), default=5.00, nullable=False)     # ej. 5% de liquidación sobre la mano de obra
-    pct_gastos_seccion  = Column(Numeric(5, 2), default=10.00, nullable=False)    # ej. 10% ó 5% sobre materiales de la sección
+    pct_liquidacion_mo  = Column(Numeric(5, 2), default=5.00, nullable=False)     # % de liquidación sobre la mano de obra
+    pct_gastos_seccion  = Column(Numeric(5, 2), default=10.00, nullable=False)    # % de gastos sobre materiales de la sección
+
+    # --- Costos avanzados por sección (todo opcional) ---
+    costo_fabricacion   = Column(Numeric(15, 2), nullable=True)   # Costo base de fabricación (de la hoja Excel)
+    pct_trabajadores    = Column(Numeric(5, 2), nullable=True)    # % extra que cobran los trabajadores sobre costo_fabricacion
+    pct_negocio         = Column(Numeric(5, 2), nullable=True)    # % de decisión del negocio sobre el subtotal de la sección
+
     created_at          = Column(DateTime, server_default=func.now())
     updated_at          = Column(DateTime, onupdate=func.now())
 
     seccion             = relationship("SeccionProducto", back_populates="politica")
+
+
+class CostoProduccionSeccion(Base):
+    """
+    Costos de producción específicos de una sección.
+    Cada sección puede tener N costos (ej: PREPARADO CAMA, PINTURA CAMA, etc.)
+    con su propio costo_base y porcentaje opcional.
+    """
+    __tablename__ = "costo_produccion_seccion"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    seccion_id  = Column(BigInteger, ForeignKey("seccion_producto.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre      = Column(String(200), nullable=False)
+    porcentaje  = Column(Numeric(5, 2), nullable=True)
+    costo_base  = Column(Numeric(15, 2), default=0.0, nullable=False)
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, onupdate=func.now())
+
+    seccion     = relationship("SeccionProducto", back_populates="costos_produccion")
 

@@ -3,7 +3,7 @@ import api from './api';
 export interface Client {
   id: number;
   nombre: string;
-  telefono?: string;
+  telefono: string;
   direccion?: string;
   email?: string;
   ciudad?: string;
@@ -16,12 +16,12 @@ export interface Client {
 
 export interface ClientCreate {
   nombre: string;
-  telefono?: string;
-  direccion?: string;
-  email?: string;
-  ciudad?: string;
-  estado?: string;
-  observaciones?: string;
+  telefono: string;
+  direccion?: string | null;
+  email?: string | null;
+  ciudad?: string | null;
+  estado?: string | null;
+  observaciones?: string | null;
 }
 
 export const clienteService = {

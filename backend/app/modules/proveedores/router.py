@@ -5,9 +5,10 @@ from typing import List, Optional
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.proveedores import schemas, service
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module('proveedores'))])
 
 @router.post("/", response_model=schemas.ProveedorResponse, status_code=status.HTTP_201_CREATED)
 def crear_proveedor(

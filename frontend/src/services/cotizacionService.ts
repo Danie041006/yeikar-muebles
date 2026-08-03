@@ -1,6 +1,14 @@
 import api from './api';
 import { Client } from './clienteService';
 
+export interface Moneda {
+  id: number;
+  codigo: string;
+  nombre: string;
+  simbolo: string;
+  activo?: boolean;
+}
+
 export interface Product {
   id: number;
   codigo: string;
@@ -27,6 +35,7 @@ export interface QuoteDetail {
   costo_mano_obra?: number | null;
   costo_gastos?: number | null;
   costo_total?: number | null;
+  receta_personalizada?: any;
 }
 
 export interface Quote {
@@ -35,10 +44,14 @@ export interface Quote {
   fecha: string;
   estado: string; // "Borrador", "Enviada", "Aprobada", "Rechazada"
   total_estimado: number;
+  moneda_id: number;
+  tasa_cambio: number;
+  total_en_moneda_base?: number;
   observaciones?: string;
   created_at?: string;
   updated_at?: string;
   cliente?: Client;
+  moneda?: Moneda;
   detalles: QuoteDetail[];
 }
 
@@ -47,6 +60,8 @@ export interface QuoteCreate {
   fecha: string;
   estado: string;
   total_estimado: number;
+  moneda_id?: number;
+  tasa_cambio?: number;
   observaciones?: string;
   detalles: QuoteDetail[];
 }
@@ -65,6 +80,7 @@ export interface CalculationResult {
     unidad: string;
     costo_subtotal: number;
   }>;
+  desglose_por_seccion?: any;
 }
 
 export const cotizacionService = {
@@ -172,5 +188,41 @@ export const cotizacionService = {
       precio_venta,
       materiales_detalle,
     };
+  },
+
+  fetchCurrencies: async (): Promise<Moneda[]> => {
+    const response = await api.get<Moneda[]>('/catalogos/moneda/');
+    return response.data;
+  },
+
+  recalculateCustomRecipe: async (
+    ganancia: number,
+    secciones: any[]
+  ): Promise<CalculationResult> => {
+    const response = await api.post<any>('/recalculate-custom-recipe', {
+      ganancia,
+      secciones,
+    });
+    const data = response.data;
+    
+    const rawMateriales = data.materiales || [];
+    const materiales_detalle = rawMateriales.map((mat: any) => ({
+      material_id: mat.material_id,
+      nombre: mat.nombre || '',
+      cantidad_calculada: mat.cantidad || 0,
+      unidad: mat.unidad || '',
+      costo_subtotal: mat.costo_subtotal || 0,
+    }));
+
+    return {
+      costo_materiales: data.costo_materiales || 0,
+      costo_mano_obra: 0,
+      costo_gastos_indirectos: 0,
+      costo_total: data.costo_total || 0,
+      precio_sugerido: data.precio_venta || 0,
+      precio_venta: data.precio_venta || 0,
+      materiales_detalle,
+      desglose_por_seccion: data.desglose_por_seccion,
+    } as any;
   },
 };

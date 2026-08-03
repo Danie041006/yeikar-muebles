@@ -51,6 +51,13 @@ export interface ManoObra {
   empleado?: Empleado;
 }
 
+export interface AsignadoAdicional {
+  id: number;
+  etapa_produccion_id: number;
+  empleado_id: number;
+  empleado?: Empleado;
+}
+
 export interface EtapaProduccion {
   id: number;
   orden_produccion_id: number;
@@ -64,6 +71,7 @@ export interface EtapaProduccion {
   empleado_responsable?: Empleado;
   consumos: ConsumoMaterial[];
   mano_obras: ManoObra[];
+  asignados_adicionales: AsignadoAdicional[];
   orden?: OrdenProduccion;
 }
 
@@ -100,9 +108,40 @@ export interface ProductoBasico {
   activo?: boolean;
 }
 
-interface DetallePedidoBasico {
+export interface ClienteBasico {
   id: number;
+  nombre: string;
+  telefono?: string;
+}
+
+export interface PedidoBasico {
+  id: number;
+  cliente?: ClienteBasico;
+}
+
+export interface DetallePedidoBasico {
+  id: number;
+  ancho?: number;
+  largo?: number;
   producto?: ProductoBasico;
+  pedido?: PedidoBasico;
+}
+
+export interface MaterialReferencia {
+  material_id: number;
+  nombre: string;
+  seccion: string;
+  cantidad_base: number;
+  cantidad_esperada: number;
+  unidad: string;
+  costo_unitario: number;
+}
+
+export interface ReferenciaReceta {
+  producto_id: number;
+  producto_nombre: string;
+  dimensiones: { ancho: number | null; largo: number | null };
+  materiales: MaterialReferencia[];
 }
 
 export const produccionService = {
@@ -123,11 +162,43 @@ export const produccionService = {
     return response.data;
   },
 
+  getReferenciaReceta: async (etapaId: number): Promise<ReferenciaReceta> => {
+    const response = await api.get<ReferenciaReceta>(`/produccion/etapa/${etapaId}/referencia-receta`);
+    return response.data;
+  },
+
   updateEstadoEtapa: async (id: number, estado: string): Promise<EtapaProduccion> => {
     const response = await api.put<EtapaProduccion>(`/produccion/etapa/${id}/estado`, null, {
       params: { estado },
     });
     return response.data;
+  },
+
+  pasarAArea: async (
+    etapaId: number,
+    payload: {
+      area_id: number;
+      empleado_responsable_id: number;
+      empleados_adicionales_ids: number[];
+      observaciones?: string;
+    },
+  ): Promise<EtapaProduccion> => {
+    const response = await api.post<EtapaProduccion>(
+      `/produccion/etapa/${etapaId}/pasar-a-area`,
+      payload,
+    );
+    return response.data;
+  },
+
+  agregarAsignadoAdicional: async (etapaId: number, empleadoId: number): Promise<AsignadoAdicional> => {
+    const response = await api.post<AsignadoAdicional>(`/produccion/etapa/${etapaId}/asignados`, {
+      empleado_id: empleadoId,
+    });
+    return response.data;
+  },
+
+  quitarAsignadoAdicional: async (etapaId: number, empleadoId: number): Promise<void> => {
+    await api.delete(`/produccion/etapa/${etapaId}/asignados/${empleadoId}`);
   },
 
   registrarConsumo: async (consumo: {

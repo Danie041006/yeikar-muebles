@@ -44,9 +44,10 @@ class EtapaProduccion(Base):
 
     orden = relationship("OrdenProduccion", back_populates="etapas")
     area = relationship("Area")
-    empleado_responsable = relationship("Empleado")
+    empleado_responsable = relationship("Empleado", foreign_keys=[empleado_responsable_id])
     consumos = relationship("ConsumoMaterial", back_populates="etapa", cascade="all, delete-orphan")
     mano_obras = relationship("ManoObra", back_populates="etapa", cascade="all, delete-orphan")
+    asignados_adicionales = relationship("EtapaAsignadoAdicional", back_populates="etapa", cascade="all, delete-orphan")
 
 class ConsumoMaterial(Base):
     __tablename__ = "consumo_material"
@@ -99,3 +100,21 @@ class CostoProduccion(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     orden = relationship("OrdenProduccion", back_populates="costo")
+
+
+class EtapaAsignadoAdicional(Base):
+    """Empleados adicionales asignados a una etapa de producción (opcional, multi-empleado)."""
+    __tablename__ = "etapa_asignado_adicional"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    etapa_produccion_id = Column(
+        BigInteger,
+        ForeignKey("etapa_produccion.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    empleado_id = Column(BigInteger, ForeignKey("empleado.id"), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    etapa = relationship("EtapaProduccion", back_populates="asignados_adicionales")
+    empleado = relationship("Empleado")

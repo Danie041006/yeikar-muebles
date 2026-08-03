@@ -13,6 +13,11 @@ class Compra(Base):
     moneda_id = Column(BigInteger, ForeignKey("moneda.id"), nullable=False)
     fecha = Column(Date, nullable=False)
     estado = Column(String(50), default="BORRADOR", nullable=False)
+    tipo_pago = Column(String(50), default="CREDITO", nullable=False)  # CONTADO | CREDITO
+    # Tasa de cambio al momento de la compra (COP por 1 unidad de moneda de la compra).
+    tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
+    # Total convertido a moneda base (COP) con la tasa del día de la compra.
+    total_en_moneda_base = Column(Numeric(15, 2), nullable=True)
     observaciones = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

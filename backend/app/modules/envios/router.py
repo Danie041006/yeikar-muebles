@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.envios import schemas, service
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module('envios'))])
 @router.post("/", response_model=schemas.EnvioResponse, status_code=status.HTTP_201_CREATED)
 def crear_envio(
     esquema: schemas.EnvioCreate,
@@ -16,6 +18,8 @@ def crear_envio(
         return service.crear_envio(db, esquema)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail="Ya existe un envío registrado para este pedido")
 @router.get("/", response_model=List[schemas.EnvioResponse])
 def listar_envios(
     salto: int = Query(0, ge=0),

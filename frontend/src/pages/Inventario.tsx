@@ -17,10 +17,17 @@ interface Material {
 }
 
 export default function Inventario() {
+  interface UnidadMedida {
+    id: number;
+    nombre: string;
+    abreviatura: string;
+  }
+
   const [inventario, setInventario] = useState<InventarioItem[]>([]);
   const [alertas, setAlertas] = useState<AlertaStock[]>([]);
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
+  const [unidades, setUnidades] = useState<UnidadMedida[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
@@ -38,14 +45,22 @@ export default function Inventario() {
     observaciones: '',
   });
 
+  const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [newMaterial, setNewMaterial] = useState({
+    nombre: '',
+    costo_base: '',
+    unidad_medida_id: '',
+  });
+
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [invData, alertsData, matData, ubiData] = await Promise.all([
+      const [invData, alertsData, matData, ubiData, uniData] = await Promise.all([
         inventarioService.getInventario(),
         inventarioService.getAlertas(5.0), // umbral 5.0
-        api.get<Material[]>('/material/'),
+        api.get<Material[]>('/material/?limite=1000'),
         api.get<Ubicacion[]>('/catalogos/ubicacion/'),
+        api.get<UnidadMedida[]>('/catalogos/unidad-medida/'),
       ]);
 
       // Mapear material a inventario
@@ -59,10 +74,36 @@ export default function Inventario() {
       setAlertas(alertsData);
       setMateriales(matData.data);
       setUbicaciones(ubiData.data);
+      setUnidades(uniData.data);
     } catch (error) {
       console.error('Error fetching inventory data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateMaterial = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newMaterial.nombre.trim() || !newMaterial.unidad_medida_id) return;
+
+    try {
+      await api.post('/material/', {
+        nombre: newMaterial.nombre.toUpperCase().trim(),
+        costo_base: newMaterial.costo_base ? parseFloat(newMaterial.costo_base) : 0.0,
+        unidad_medida_id: parseInt(newMaterial.unidad_medida_id),
+        activo: true,
+      });
+
+      setShowMaterialModal(false);
+      setNewMaterial({
+        nombre: '',
+        costo_base: '',
+        unidad_medida_id: '',
+      });
+      // Recargar datos
+      fetchData();
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Error al crear el insumo.');
     }
   };
 
@@ -116,14 +157,19 @@ export default function Inventario() {
     }
   };
 
-  // Filtrar inventario por búsqueda
-  const filteredInv = inventario.filter((item) => {
-    const term = search.toLowerCase();
-    return (
-      item.material_nombre?.toLowerCase().includes(term) ||
-      item.ubicacion_nombre?.toLowerCase().includes(term)
-    );
+  // Construir vista unificada: todos los materiales + datos de stock si existen
+  const stockMap = new Map<number, InventarioItem>();
+  inventario.forEach(item => {
+    // Guardamos el primer item de stock por material (puede haber varios por ubicación)
+    if (!stockMap.has(item.material_id)) stockMap.set(item.material_id, item);
   });
+
+  const filteredInv = [...materiales]
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+    .filter((mat) => {
+      const term = search.toLowerCase();
+      return mat.nombre.toLowerCase().includes(term);
+    });
 
   return (
     <div className="space-y-8">
@@ -140,6 +186,12 @@ export default function Inventario() {
 
         <div className="flex items-center gap-3">
           <button
+            onClick={() => setShowMaterialModal(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
+          >
+            ➕ Nuevo Material
+          </button>
+          <button
             onClick={() => setShowMoveModal(true)}
             className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
           >
@@ -155,8 +207,8 @@ export default function Inventario() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl p-5 shadow-sm relative overflow-hidden">
           <div className="absolute top-0 left-0 right-0 h-1 bg-amber-400" />
-          <p className="text-xs font-mono uppercase tracking-widest text-yeikar-neutral/50 mb-1">Items Totales</p>
-          <p className="text-3xl font-black font-headline text-yeikar-secondary">{inventario.length}</p>
+          <p className="text-xs font-mono uppercase tracking-widest text-yeikar-neutral/50 mb-1">Materiales Registrados</p>
+          <p className="text-3xl font-black font-headline text-yeikar-secondary">{materiales.length}</p>
         </div>
 
         <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl p-5 shadow-sm relative overflow-hidden">
@@ -207,6 +259,7 @@ export default function Inventario() {
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Ubicación</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Actual</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Unidad</th>
+                    <th className="p-4 border-b border-yeikar-secondary-light/5">Precio Unitario</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5 text-right">Acciones</th>
                   </tr>
                 </thead>
@@ -214,47 +267,57 @@ export default function Inventario() {
                   {filteredInv.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-8 text-center text-yeikar-neutral/40 italic">
-                        No se encontraron existencias.
+                        {search ? `Sin resultados para "${search}"` : 'No hay materiales registrados. Haz clic en ➕ Nuevo Material para comenzar.'}
                       </td>
                     </tr>
                   ) : (
-                    filteredInv.map((item) => {
-                      const isLowStock = item.cantidad <= 5.0; // Umbral por defecto
+                    filteredInv.map((mat) => {
+                      const stockItem = stockMap.get(mat.id);
+                      const tieneStock = !!stockItem;
+                      const cantidad = tieneStock ? parseFloat(stockItem!.cantidad.toString()) : 0;
+                      const isLowStock = tieneStock && cantidad <= 5.0;
                       return (
                         <tr
-                          key={item.id}
+                          key={mat.id}
                           className={`hover:bg-yeikar-tertiary/25 transition-colors cursor-pointer ${
-                            selectedMaterialId === item.material_id ? 'bg-yeikar-primary/5' : ''
+                            selectedMaterialId === mat.id ? 'bg-yeikar-primary/5' : ''
                           }`}
-                          onClick={() => handleOpenKardex(item.material_id, item.material_nombre || '')}
+                          onClick={() => handleOpenKardex(mat.id, mat.nombre)}
                         >
                           <td className="p-4 font-semibold text-yeikar-secondary">
-                            {item.material_nombre}
+                            {mat.nombre}
                           </td>
-                          <td className="p-4 text-yeikar-neutral/75">{item.ubicacion_nombre}</td>
+                          <td className="p-4 text-yeikar-neutral/75">
+                            {stockItem?.ubicacion_nombre || <span className="text-yeikar-neutral/30 italic text-xs">Sin stock</span>}
+                          </td>
                           <td className="p-4 font-mono font-bold">
                             <span
                               className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                isLowStock
+                                !tieneStock
+                                  ? 'bg-slate-100 text-slate-400'
+                                  : isLowStock
                                   ? 'bg-red-50 text-red-700 border border-red-200'
                                   : 'text-yeikar-secondary'
                               }`}
                             >
-                              {parseFloat(item.cantidad.toString()).toLocaleString('es-ES')}
+                              {tieneStock ? cantidad.toLocaleString('es-ES') : '0'}
                             </span>
                           </td>
                           <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
-                            {item.material?.unidad_medida?.abreviatura || 'Unid'}
+                            {mat.unidad_medida?.abreviatura || 'Unid'}
+                          </td>
+                          <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
+                            {mat.costo_base > 0 ? mat.costo_base.toLocaleString('es-ES') : <span className="text-yeikar-neutral/30 italic">Sin precio</span>}
                           </td>
                           <td className="p-4 text-right">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleOpenKardex(item.material_id, item.material_nombre || '');
+                                handleOpenKardex(mat.id, mat.nombre);
                               }}
                               className="text-yeikar-primary hover:text-yeikar-primary-dark font-bold font-headline text-xs bg-yeikar-primary/10 hover:bg-yeikar-primary/20 px-3 py-1.5 rounded-lg transition-colors"
                             >
-                              Ver Movimientos del Insumo
+                              Ver Movimientos
                             </button>
                           </td>
                         </tr>
@@ -463,6 +526,78 @@ export default function Inventario() {
                   className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl text-sm font-bold font-headline transition-colors"
                 >
                   Registrar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Crear Material/Insumo */}
+      {showMaterialModal && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10">
+            <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
+              <h3 className="font-headline font-black text-lg">Nuevo Insumo</h3>
+              <p className="text-xs text-white/70">Registra un material en el inventario</p>
+            </div>
+            <form onSubmit={handleCreateMaterial} className="p-6 space-y-4 font-body">
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre del Material *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. MADERA APAMATE, TELA, etc."
+                  value={newMaterial.nombre}
+                  onChange={(e) => setNewMaterial(prev => ({ ...prev, nombre: e.target.value }))}
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={newMaterial.costo_base}
+                    onChange={(e) => setNewMaterial(prev => ({ ...prev, costo_base: e.target.value }))}
+                    className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Unidad de Medida *</label>
+                  <select
+                    required
+                    value={newMaterial.unidad_medida_id}
+                    onChange={(e) => setNewMaterial(prev => ({ ...prev, unidad_medida_id: e.target.value }))}
+                    className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-3 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary bg-white"
+                  >
+                    <option value="">Seleccionar...</option>
+                    {unidades.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.nombre} ({u.abreviatura})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                <button
+                  type="button"
+                  onClick={() => setShowMaterialModal(false)}
+                  className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all"
+                >
+                  Crear Insumo
                 </button>
               </div>
             </form>

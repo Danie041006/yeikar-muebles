@@ -201,11 +201,14 @@ class GPTVisionProvider(VisionProvider):
                         ],
                     },
                 ],
-                max_tokens=500,
-                temperature=0,
+                max_completion_tokens=4000,
+                
             )
 
             raw_text = response.choices[0].message.content
+            print(f"🔍 RAW RESPONSE DEL MODELO:\n{raw_text}\n{'='*50}")
+            print(f"🔍 FINISH REASON: {response.choices[0].finish_reason}")
+            print(f"🔍 USAGE: {response.usage}")
             raw_json = json.loads(raw_text)
             return _parse_attributes(raw_json)
 

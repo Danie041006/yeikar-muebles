@@ -1,16 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import {
-  DndContext,
-  useSensor,
-  useSensors,
-  PointerSensor,
-  KeyboardSensor,
-  DragEndEvent,
-  useDroppable,
-  useDraggable,
-} from '@dnd-kit/core';
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
-import { produccionService, OrdenProduccion, EtapaProduccion, Area } from '../services/produccionService';
+import { produccionService, OrdenProduccion, EtapaProduccion, Area, ReferenciaReceta } from '../services/produccionService';
 import api from '../services/api';
 
 // Empleado interface for selection
@@ -20,33 +9,35 @@ interface Empleado {
   apellido: string;
 }
 
-// Material interface for selection
+// Material interface for selection (extended for cost display)
 interface Material {
   id: number;
   nombre: string;
+  costo_base: number;
+  unidad_medida?: {
+    id: number;
+    nombre: string;
+    abreviatura: string;
+  };
 }
 
-// Droppable Column Component
+const fmt = (n: number) =>
+  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
+
+// Kanban column component
 interface ColumnProps {
   area: Area;
   stages: EtapaProduccion[];
   onCardClick: (stage: EtapaProduccion) => void;
   onStatusChange: (stageId: number, newStatus: string) => void;
+  onPassToArea: (stage: EtapaProduccion) => void;
+  updatingStageId: number | null;
 }
 
-function KanbanColumn({ area, stages, onCardClick, onStatusChange }: ColumnProps) {
-  const { setNodeRef, isOver } = useDroppable({
-    id: `column-${area.id}`,
-  });
-
+function KanbanColumn({ area, stages, onCardClick, onStatusChange, onPassToArea, updatingStageId }: ColumnProps) {
   return (
     <div
-      ref={setNodeRef}
-      className={`flex flex-col min-h-[500px] w-72 bg-yeikar-tertiary/40 border rounded-2xl p-4 transition-all duration-200 ${
-        isOver
-          ? 'border-yeikar-primary bg-yeikar-primary/5 shadow-inner scale-[1.01]'
-          : 'border-yeikar-secondary-light/10 shadow-sm'
-      }`}
+      className="flex flex-col min-h-[500px] w-72 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-2xl p-4 shadow-sm"
     >
       {/* Column Header */}
       <div className="flex items-center justify-between mb-4 border-b border-yeikar-secondary-light/5 pb-2">
@@ -61,8 +52,8 @@ function KanbanColumn({ area, stages, onCardClick, onStatusChange }: ColumnProps
       {/* Card List */}
       <div className="flex-1 space-y-3 overflow-y-auto max-h-[600px] pr-1">
         {stages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 border border-dashed border-yeikar-secondary-light/10 rounded-xl p-4 text-center text-xs text-yeikar-neutral/40">
-            <span>Arrastra el producto aquí</span>
+            <div className="flex flex-col items-center justify-center h-32 border border-dashed border-yeikar-secondary-light/10 rounded-xl p-4 text-center text-xs text-yeikar-neutral/40">
+            <span>No hay etapas en esta área</span>
           </div>
         ) : (
           stages.map((stage) => (
@@ -71,6 +62,8 @@ function KanbanColumn({ area, stages, onCardClick, onStatusChange }: ColumnProps
               stage={stage}
               onClick={() => onCardClick(stage)}
               onStatusChange={onStatusChange}
+              onPassToArea={onPassToArea}
+              statusUpdating={updatingStageId === stage.id}
             />
           ))
         )}
@@ -79,25 +72,16 @@ function KanbanColumn({ area, stages, onCardClick, onStatusChange }: ColumnProps
   );
 }
 
-// Draggable Card Component
+// Kanban card component
 interface CardProps {
   stage: EtapaProduccion;
   onClick: () => void;
   onStatusChange: (stageId: number, newStatus: string) => void;
+  onPassToArea: (stage: EtapaProduccion) => void;
+  statusUpdating?: boolean;
 }
 
-function KanbanCard({ stage, onClick, onStatusChange }: CardProps) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `card-${stage.id}`,
-  });
-
-  const style = transform
-    ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
-        zIndex: 50,
-      }
-    : undefined;
-
+function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdating = false }: CardProps) {
   const statusColors = {
     ASIGNADA: 'bg-blue-50 text-blue-700 border-blue-200',
     EN_PROCESO: 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse',
@@ -107,11 +91,7 @@ function KanbanCard({ stage, onClick, onStatusChange }: CardProps) {
 
   return (
     <div
-      ref={setNodeRef}
-      style={style}
-      className={`border rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow cursor-default group relative overflow-hidden ${
-        isDragging ? 'opacity-40 border-yeikar-primary' : ''
-      } ${stage.estado === 'COMPLETADA' ? 'bg-gray-50 border-gray-200 opacity-75' : 'bg-white border-yeikar-secondary-light/10'}`}
+      className={`border rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow cursor-default group relative overflow-hidden ${stage.estado === 'COMPLETADA' ? 'bg-gray-50 border-gray-200 opacity-75' : 'bg-white border-yeikar-secondary-light/10'}`}
     >
       {/* Top accent tag based on status */}
       <div
@@ -134,11 +114,12 @@ function KanbanCard({ stage, onClick, onStatusChange }: CardProps) {
         {/* Status selector */}
         <select
           value={stage.estado}
+          disabled={statusUpdating}
           onChange={(e) => {
             e.stopPropagation();
             onStatusChange(stage.id, e.target.value);
           }}
-          className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+          className={`text-[10px] font-bold px-2 py-0.5 rounded border disabled:opacity-50 disabled:cursor-wait ${
             statusColors[stage.estado]
           } focus:outline-none focus:ring-1 focus:ring-yeikar-primary cursor-pointer`}
         >
@@ -149,23 +130,41 @@ function KanbanCard({ stage, onClick, onStatusChange }: CardProps) {
         </select>
       </div>
 
-      {/* Product Name & Description */}
-      <div onClick={onClick} className="cursor-pointer space-y-1">
-        <h4 className="font-headline font-bold text-yeikar-secondary text-sm group-hover:text-yeikar-primary transition-colors">
+      {/* Client Name & Product Name */}
+      <div onClick={onClick} className="cursor-pointer space-y-1.5">
+        {stage.orden?.detalle_pedido?.pedido?.cliente?.nombre && (
+          <div className="text-[11px] font-bold text-yeikar-primary bg-yeikar-primary/10 px-2 py-0.5 rounded-md w-fit flex items-center gap-1">
+            <svg className="w-3 h-3 text-yeikar-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <span className="truncate max-w-[180px]">
+              {stage.orden.detalle_pedido.pedido.cliente.nombre}
+            </span>
+          </div>
+        )}
+
+        <h4 className="font-headline font-bold text-yeikar-secondary text-sm group-hover:text-yeikar-primary transition-colors leading-tight">
           {stage.orden?.detalle_pedido?.producto?.nombre 
             ? stage.orden.detalle_pedido.producto.nombre 
             : stage.orden_produccion_id 
             ? `Orden de Producción #${stage.orden_produccion_id}` 
             : 'Producto en Fabricación'}
         </h4>
+
+        {stage.orden?.detalle_pedido?.ancho && stage.orden?.detalle_pedido?.largo && (
+          <p className="text-[10px] font-mono text-yeikar-neutral/50">
+            {stage.orden.detalle_pedido.ancho}m × {stage.orden.detalle_pedido.largo}m
+          </p>
+        )}
+
         {stage.observaciones && (
-          <p className="text-xs text-yeikar-neutral/60 line-clamp-2">
+          <p className="text-xs text-yeikar-neutral/60 line-clamp-2 italic">
             {stage.observaciones}
           </p>
         )}
       </div>
 
-      {/* Drag handle area & Footer */}
+      {/* Footer */}
       <div className="flex items-center justify-between mt-3 pt-3 border-t border-yeikar-secondary-light/5">
         <div className="flex items-center gap-1.5 text-xs text-yeikar-neutral/50">
           <svg className="w-3.5 h-3.5 text-yeikar-neutral/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -178,18 +177,26 @@ function KanbanCard({ stage, onClick, onStatusChange }: CardProps) {
           </span>
         </div>
 
-        {/* Drag handle icon */}
-        <div
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing p-1 hover:bg-yeikar-tertiary rounded text-yeikar-neutral/30 hover:text-yeikar-neutral/60 transition-colors"
-          title="Arrastrar para mover de área"
-        >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M7 2a2 2 0 10.001 4.001A2 2 0 007 2zm0 6a2 2 0 10.001 4.001A2 2 0 007 8zm0 6a2 2 0 10.001 4.001A2 2 0 007 14zm6-12a2 2 0 10.001 4.001A2 2 0 0013 2zm0 6a2 2 0 10.001 4.001A2 2 0 0013 8zm0 6a2 2 0 10.001 4.001A2 2 0 0013 14z" />
-          </svg>
-        </div>
+        {stage.estado !== 'COMPLETADA' && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onPassToArea(stage);
+            }}
+            className="bg-yeikar-primary/10 text-yeikar-primary hover:bg-yeikar-primary hover:text-yeikar-neutral px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors"
+          >
+            → Pasar a Área
+          </button>
+        )}
       </div>
+      {stage.asignados_adicionales?.length > 0 && (
+        <div className="mt-2 text-[10px] text-yeikar-neutral/50">
+          Adicionales: {stage.asignados_adicionales.map((asignado) =>
+            asignado.empleado ? `${asignado.empleado.nombre} ${asignado.empleado.apellido}` : `#${asignado.empleado_id}`
+          ).join(', ')}
+        </div>
+      )}
     </div>
   );
 }
@@ -204,6 +211,15 @@ export default function ProduccionKanban() {
   const [showCompleted, setShowCompleted] = useState(false);
   const [selectedStage, setSelectedStage] = useState<EtapaProduccion | null>(null);
 
+  // Controlled area transition modal state
+  const [showPasarModal, setShowPasarModal] = useState(false);
+  const [pasarStage, setPasarStage] = useState<EtapaProduccion | null>(null);
+  const [pasarAreaId, setPasarAreaId] = useState('');
+  const [pasarEmpleadoPrincipal, setPasarEmpleadoPrincipal] = useState('');
+  const [pasarEmpleadosAdicionales, setPasarEmpleadosAdicionales] = useState<number[]>([]);
+  const [pasarObservaciones, setPasarObservaciones] = useState('');
+  const [pasarSubmitting, setPasarSubmitting] = useState(false);
+
   // New stage modal state
   const [ordenParaNuevaEtapa, setOrdenParaNuevaEtapa] = useState<number | null>(null);
   const [nuevaEtapaForm, setNuevaEtapaForm] = useState({ area_id: '', empleado_id: '', observaciones: '' });
@@ -212,18 +228,31 @@ export default function ProduccionKanban() {
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [newConsumo, setNewConsumo] = useState({ material_id: '', cantidad: '', observaciones: '' });
+  const [materialSearch, setMaterialSearch] = useState('');
+  const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
   const [newManoObra, setNewManoObra] = useState({ empleado_id: '', monto: '', observaciones: '' });
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 8,
-      },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  );
+  // Referencia receta
+  const [referenciaReceta, setReferenciaReceta] = useState<ReferenciaReceta | null>(null);
+  const [loadingReceta, setLoadingReceta] = useState(false);
+
+  // Protección contra doble clic / doble submit
+  const [finalizandoOrdenId, setFinalizandoOrdenId] = useState<number | null>(null);
+  const [consumoSubmitting, setConsumoSubmitting] = useState(false);
+  const [nuevaEtapaSubmitting, setNuevaEtapaSubmitting] = useState(false);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (selectedStage?.orden?.detalle_pedido?.producto?.id) {
+      setLoadingReceta(true);
+      produccionService.getReferenciaReceta(selectedStage.id)
+        .then(setReferenciaReceta)
+        .catch(() => setReferenciaReceta(null))
+        .finally(() => setLoadingReceta(false));
+    } else {
+      setReferenciaReceta(null);
+    }
+  }, [selectedStage]);
 
   const fetchKanbanData = async () => {
     try {
@@ -272,58 +301,9 @@ export default function ProduccionKanban() {
     api.get('/material/').then((r) => setMateriales(r.data)).catch(() => {});
   }, []);
 
-  const handleDragEnd = async (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (!over) return;
-
-    const cardId = active.id.toString().replace('card-', '');
-    const columnId = over.id.toString().replace('column-', '');
-
-    const stageId = parseInt(cardId);
-    const targetAreaId = parseInt(columnId);
-
-    const draggedStage = stages.find((s) => s.id === stageId);
-    if (!draggedStage || draggedStage.area_id === targetAreaId) return;
-
-    try {
-      // Optimistic update in frontend
-      setStages((prev) =>
-        prev.map((s) => (s.id === stageId ? { ...s, area_id: targetAreaId } : s))
-      );
-
-      // En el backend, actualizar la etapa actual
-      // 1. Completar la etapa actual
-      await produccionService.updateEstadoEtapa(stageId, 'COMPLETADA');
-
-      // 2. Crear o actualizar la siguiente etapa en la nueva área
-      // Consultar la orden de producción para ver si ya tiene etapa en esa área
-      const orden = await produccionService.getOrdenById(draggedStage.orden_produccion_id);
-      const existingNextStage = orden.etapas.find((e) => e.area_id === targetAreaId);
-
-      if (existingNextStage) {
-        // Si ya existe la etapa en esa área, la pasamos a EN_PROCESO
-        await produccionService.updateEstadoEtapa(existingNextStage.id, 'EN_PROCESO');
-      } else {
-        // Si no existe, creamos una nueva etapa para esa área
-        await api.post('/produccion/etapa/', {
-          orden_produccion_id: draggedStage.orden_produccion_id,
-          area_id: targetAreaId,
-          empleado_responsable_id: draggedStage.empleado_responsable_id || 1, // Fallback
-          estado: 'EN_PROCESO',
-          observaciones: 'Creado por transición en Kanban',
-          fecha_inicio: new Date().toISOString(),
-        });
-      }
-
-      // Volver a cargar para sincronizar
-      fetchKanbanData();
-    } catch (error) {
-      console.error('Error transitioning stage:', error);
-      fetchKanbanData(); // Revert on error
-    }
-  };
-
   const handleStatusChange = async (stageId: number, newStatus: string) => {
+    if (statusUpdatingId !== null) return; // evita PUTs concurrentes sobre estados
+    setStatusUpdatingId(stageId);
     try {
       await produccionService.updateEstadoEtapa(stageId, newStatus);
       fetchKanbanData();
@@ -334,12 +314,60 @@ export default function ProduccionKanban() {
       }
     } catch (error) {
       console.error('Error changing stage status:', error);
+    } finally {
+      setStatusUpdatingId(null);
     }
+  };
+
+  const openPasarModal = (stage: EtapaProduccion) => {
+    setPasarStage(stage);
+    setPasarAreaId('');
+    setPasarEmpleadoPrincipal('');
+    setPasarEmpleadosAdicionales([]);
+    setPasarObservaciones('');
+    setShowPasarModal(true);
+  };
+
+  const closePasarModal = () => {
+    setShowPasarModal(false);
+    setPasarStage(null);
+  };
+
+  const handlePasarAArea = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!pasarStage || !pasarAreaId || !pasarEmpleadoPrincipal) return;
+
+    setPasarSubmitting(true);
+    try {
+      await produccionService.pasarAArea(pasarStage.id, {
+        area_id: Number(pasarAreaId),
+        empleado_responsable_id: Number(pasarEmpleadoPrincipal),
+        empleados_adicionales_ids: pasarEmpleadosAdicionales,
+        observaciones: pasarObservaciones || undefined,
+      });
+      closePasarModal();
+      await fetchKanbanData();
+    } catch (error: any) {
+      console.error('Error pasando etapa a otra area:', error);
+      alert(error.response?.data?.detail || 'No fue posible pasar la etapa al area seleccionada.');
+    } finally {
+      setPasarSubmitting(false);
+    }
+  };
+
+  const togglePasarEmpleadoAdicional = (empleadoId: number) => {
+    setPasarEmpleadosAdicionales((actuales) =>
+      actuales.includes(empleadoId)
+        ? actuales.filter((id) => id !== empleadoId)
+        : [...actuales, empleadoId],
+    );
   };
 
   const handleAddConsumo = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (consumoSubmitting) return; // evita doble descuento de stock
     if (!selectedStage || !newConsumo.material_id || !newConsumo.cantidad) return;
+    setConsumoSubmitting(true);
     try {
       await produccionService.registrarConsumo({
         etapa_produccion_id: selectedStage.id,
@@ -352,9 +380,12 @@ export default function ProduccionKanban() {
       const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${selectedStage.id}`);
       setSelectedStage(updated.data);
       setNewConsumo({ material_id: '', cantidad: '', observaciones: '' });
+      setMaterialSearch('');
       fetchKanbanData();
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Error al registrar consumo. Verifique el inventario.');
+    } finally {
+      setConsumoSubmitting(false);
     }
   };
 
@@ -418,7 +449,9 @@ export default function ProduccionKanban() {
   };
 
   const handleFinalizarOrden = async (ordenId: number) => {
+    if (finalizandoOrdenId !== null) return; // evita doble finalización
     if (!window.confirm(`¿Estás seguro de finalizar la orden #${ordenId}? Esto calculará sus costos definitivos y la cerrará.`)) return;
+    setFinalizandoOrdenId(ordenId);
     try {
       // Una sola petición: el backend calcula costos al pasar a FINALIZADA
       await api.put(`/produccion/orden/${ordenId}/estado?estado=FINALIZADA`);
@@ -427,13 +460,17 @@ export default function ProduccionKanban() {
     } catch (error) {
       console.error('Error finalizing order:', error);
       alert('Error al finalizar la orden.');
+    } finally {
+      setFinalizandoOrdenId(null);
     }
   };
 
 
   const handleSubmitNuevaEtapa = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (nuevaEtapaSubmitting) return;
     if (!ordenParaNuevaEtapa || !nuevaEtapaForm.area_id || !nuevaEtapaForm.empleado_id) return;
+    setNuevaEtapaSubmitting(true);
     try {
       await api.post('/produccion/etapa/', {
         orden_produccion_id: ordenParaNuevaEtapa,
@@ -449,6 +486,8 @@ export default function ProduccionKanban() {
     } catch (error) {
       console.error('Error creating stage:', error);
       alert('Error al crear la etapa.');
+    } finally {
+      setNuevaEtapaSubmitting(false);
     }
   };
 
@@ -465,7 +504,9 @@ export default function ProduccionKanban() {
       stage.empleado_responsable
         ? `${stage.empleado_responsable.nombre} ${stage.empleado_responsable.apellido}`.toLowerCase().includes(term)
         : false;
-    return idMatch || obsMatch || empMatch;
+    const clientMatch = stage.orden?.detalle_pedido?.pedido?.cliente?.nombre?.toLowerCase().includes(term) || false;
+    const prodMatch = stage.orden?.detalle_pedido?.producto?.nombre?.toLowerCase().includes(term) || false;
+    return idMatch || obsMatch || empMatch || clientMatch || prodMatch;
   });
 
   return (
@@ -499,7 +540,7 @@ export default function ProduccionKanban() {
           <div className="relative w-full md:w-72">
             <input
               type="text"
-              placeholder="Buscar por orden o responsable..."
+              placeholder="Buscar por cliente, producto, orden o responsable..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full bg-white border border-yeikar-secondary-light/10 rounded-xl pl-10 pr-4 py-2 text-sm text-yeikar-neutral placeholder-yeikar-neutral/40 focus:outline-none focus:border-yeikar-primary shadow-sm"
@@ -536,24 +577,50 @@ export default function ProduccionKanban() {
                 Puedes añadir una etapa para iniciarla/continuarla o finalizar la orden.
               </p>
 
-              <div className="flex flex-wrap gap-2 mt-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3">
                 {ordenesSinEtapaActiva.map((o) => (
-                  <div key={o.id} className="bg-amber-100 text-amber-800 font-mono text-xs font-bold px-3 py-1.5 rounded-lg border border-amber-200 flex items-center gap-3">
-                    <span>Orden #{o.id}</span>
-                    <div className="flex items-center gap-1 border-l border-amber-300 pl-2">
+                  <div key={o.id} className="bg-white border border-amber-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-mono text-amber-700 font-bold">ORDEN #{o.id}</span>
+                        <p className="text-sm font-bold text-amber-900 leading-tight">
+                          {o.detalle_pedido?.producto?.nombre || `Producto #${o.detalle_pedido_id}`}
+                        </p>
+                      </div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
+                        o.estado === 'PENDIENTE' ? 'bg-blue-100 text-blue-700' :
+                        o.estado === 'EN_PRODUCCION' ? 'bg-amber-100 text-amber-700' :
+                        'bg-red-100 text-red-700'
+                      }`}>
+                        {o.estado.replace('_', ' ')}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-amber-700/70 font-medium mb-2">
+                      {o.detalle_pedido?.pedido?.cliente?.nombre && (
+                        <span className="flex items-center gap-1">
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                          {o.detalle_pedido.pedido.cliente.nombre}
+                        </span>
+                      )}
+                      {o.detalle_pedido?.ancho && o.detalle_pedido?.largo && (
+                        <span className="font-mono">
+                          {o.detalle_pedido.ancho}m × {o.detalle_pedido.largo}m
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 pt-2 border-t border-amber-100">
                       <button
                         onClick={() => setOrdenParaNuevaEtapa(o.id)}
-                        className="px-2 py-0.5 bg-amber-200 hover:bg-amber-300 rounded text-[10px] transition-colors"
-                        title="Añadir Etapa"
+                        className="flex-1 text-center px-2 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-[10px] font-bold transition-colors"
                       >
-                        Añadir Etapa
+                        + Añadir Etapa
                       </button>
                       <button
                         onClick={() => handleFinalizarOrden(o.id)}
-                        className="px-2 py-0.5 bg-green-500 hover:bg-green-600 text-white rounded text-[10px] transition-colors"
-                        title="Finalizar Orden"
+                        disabled={finalizandoOrdenId !== null}
+                        className="flex-1 text-center px-2 py-1.5 bg-green-500 hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-[10px] font-bold transition-colors"
                       >
-                        Finalizar
+                        {finalizandoOrdenId === o.id ? 'Finalizando...' : 'Finalizar'}
                       </button>
                     </div>
                   </div>
@@ -574,46 +641,63 @@ export default function ProduccionKanban() {
           <p className="text-sm font-mono text-yeikar-neutral/60">Cargando datos de fábrica...</p>
         </div>
       ) : (
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <div className="flex gap-5 overflow-x-auto pb-4 pt-1">
-            {areas.map((area) => {
-              const areaStages = filteredStages.filter((s) => s.area_id === area.id);
-              return (
-                <KanbanColumn
-                  key={area.id}
-                  area={area}
-                  stages={areaStages}
-                  onCardClick={setSelectedStage}
-                  onStatusChange={handleStatusChange}
-                />
-              );
-            })}
-          </div>
-        </DndContext>
+        <div className="flex gap-5 overflow-x-auto pb-4 pt-1">
+          {areas.map((area) => {
+            const areaStages = filteredStages.filter((s) => s.area_id === area.id);
+            return (
+              <KanbanColumn
+                key={area.id}
+                area={area}
+                stages={areaStages}
+                onCardClick={setSelectedStage}
+                onStatusChange={handleStatusChange}
+                onPassToArea={openPasarModal}
+                updatingStageId={statusUpdatingId}
+              />
+            );
+          })}
+        </div>
       )}
 
       {/* Details Modal */}
       {selectedStage && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-4xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto relative">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto relative">
             
             {/* Modal Header */}
-            <div className="flex items-start justify-between border-b border-yeikar-secondary-light/5 pb-4">
-              <div>
-                <span className="text-xs font-mono font-bold text-yeikar-neutral/40">
-                  DETALLE DE ETAPA #{selectedStage.id}
+            <div className="flex items-start justify-between border-b border-yeikar-secondary-light/10 pb-4">
+              <div className="space-y-1">
+                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40 tracking-wider uppercase block">
+                  ETAPA #{selectedStage.id} — ÁREA: {selectedStage.area?.nombre} ({selectedStage.estado})
                 </span>
                 <h2 className="text-2xl font-black font-headline text-yeikar-secondary tracking-tight">
-                  Orden de Producción #{selectedStage.orden_produccion_id}
+                  {selectedStage.orden?.detalle_pedido?.producto?.nombre
+                    ? selectedStage.orden.detalle_pedido.producto.nombre
+                    : `Orden de Producción #${selectedStage.orden_produccion_id}`}
                 </h2>
-                <p className="text-sm text-yeikar-neutral/60 mt-1">
-                  Área: <span className="font-bold text-yeikar-primary">{selectedStage.area?.nombre}</span> | Estado:{' '}
-                  <span className="font-bold">{selectedStage.estado}</span>
-                </p>
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  {selectedStage.orden?.detalle_pedido?.pedido?.cliente?.nombre && (
+                    <span className="bg-yeikar-primary/10 text-yeikar-primary font-bold text-xs px-2.5 py-1 rounded-lg border border-yeikar-primary/20 flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      Cliente: {selectedStage.orden.detalle_pedido.pedido.cliente.nombre}
+                    </span>
+                  )}
+                  <span className="bg-yeikar-tertiary text-yeikar-secondary font-mono text-xs font-bold px-2.5 py-1 rounded-lg border border-yeikar-secondary-light/10">
+                    Orden #{selectedStage.orden_produccion_id}
+                  </span>
+                  {selectedStage.orden?.detalle_pedido?.ancho && selectedStage.orden?.detalle_pedido?.largo && (
+                    <span className="bg-stone-100 text-stone-600 font-mono text-xs font-bold px-2.5 py-1 rounded-lg border border-stone-200">
+                      {selectedStage.orden.detalle_pedido.ancho}m × {selectedStage.orden.detalle_pedido.largo}m
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={() => setSelectedStage(null)}
                 className="p-2 hover:bg-yeikar-tertiary rounded-xl text-yeikar-neutral/40 hover:text-yeikar-neutral/80 transition-colors"
+                title="Cerrar modal"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -621,154 +705,133 @@ export default function ProduccionKanban() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Left Column: Materials consumption */}
-              <div className="space-y-4">
-                <h3 className="text-base font-bold font-headline text-yeikar-secondary border-b border-yeikar-secondary-light/5 pb-2">
-                  Materiales que se usarán en esta etapa
-                </h3>
-                
-                {/* Consumption form */}
-                <form onSubmit={handleAddConsumo} className="flex gap-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
-                  <div className="flex-1 space-y-2">
-                    <select
-                      value={newConsumo.material_id}
-                      onChange={(e) => setNewConsumo(prev => ({ ...prev, material_id: e.target.value }))}
-                      required
-                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-lg p-2 focus:outline-none focus:border-yeikar-primary"
-                    >
-                      <option value="">Escoja el material a usar</option>
-                      {materiales.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.nombre}
-                        </option>
-                      ))}
-                    </select>
+            {/* Materials consumption (Full Width) */}
+            <div className="space-y-4">
+              <h3 className="text-base font-bold font-headline text-yeikar-secondary border-b border-yeikar-secondary-light/5 pb-2 flex items-center justify-between">
+                <span>Materiales que se usarán en esta etapa</span>
+                <span className="text-xs font-mono font-normal text-yeikar-neutral/50">
+                  ({selectedStage.consumos?.length || 0} registrados)
+                </span>
+              </h3>
+
+              {/* Consumption form */}
+              <form onSubmit={handleAddConsumo} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
+                <div className="sm:col-span-7 relative">
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-xs">🔍</span>
                     <input
-                      type="number"
-                      step="0.01"
-                      placeholder="Cantidad"
-                      value={newConsumo.cantidad}
-                      onChange={(e) => setNewConsumo(prev => ({ ...prev, cantidad: e.target.value }))}
+                      type="text"
+                      placeholder="Buscar material..."
+                      value={materialSearch}
+                      autoComplete="off"
                       required
-                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-lg p-2 focus:outline-none focus:border-yeikar-primary"
+                      onFocus={() => setShowMaterialDropdown(true)}
+                      onChange={(e) => {
+                        setMaterialSearch(e.target.value);
+                        setShowMaterialDropdown(true);
+                        if (!e.target.value) setNewConsumo(prev => ({ ...prev, material_id: '' }));
+                      }}
+                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl pl-7 pr-3 py-2.5 focus:outline-none focus:border-yeikar-primary"
                     />
+                    {newConsumo.material_id && (
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-green-500 text-xs">✓</span>
+                    )}
                   </div>
+                  {showMaterialDropdown && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-yeikar-secondary-light/15 rounded-xl shadow-lg max-h-52 overflow-y-auto">
+                      {[...materiales]
+                        .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+                        .filter(m => m.nombre.toLowerCase().includes(materialSearch.toLowerCase()))
+                        .map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              setNewConsumo(prev => ({ ...prev, material_id: String(m.id) }));
+                              setMaterialSearch(m.nombre);
+                              setShowMaterialDropdown(false);
+                            }}
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-yeikar-tertiary/40 transition-colors border-b border-yeikar-secondary-light/5 last:border-0 ${
+                              newConsumo.material_id === String(m.id) ? 'bg-yeikar-primary/10 font-bold' : ''
+                            }`}
+                          >
+                            <span className="font-medium text-yeikar-secondary">{m.nombre}</span>
+                            {m.unidad_medida?.abreviatura && (
+                              <span className="text-yeikar-neutral/40 ml-1">({m.unidad_medida.abreviatura})</span>
+                            )}
+                            {m.costo_base > 0 && (
+                              <span className="text-emerald-600 font-mono ml-auto float-right">
+                                {fmt(m.costo_base)}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      {materiales.filter(m => m.nombre.toLowerCase().includes(materialSearch.toLowerCase())).length === 0 && (
+                        <p className="text-center text-yeikar-neutral/40 text-xs py-4">Sin resultados</p>
+                      )}
+                    </div>
+                  )}
+                  {showMaterialDropdown && (
+                    <div className="fixed inset-0 z-40" onClick={() => setShowMaterialDropdown(false)} />
+                  )}
+                  <input type="hidden" required value={newConsumo.material_id} />
+                </div>
+                <div className="sm:col-span-3">
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Cantidad"
+                    value={newConsumo.cantidad}
+                    onChange={(e) => setNewConsumo(prev => ({ ...prev, cantidad: e.target.value }))}
+                    required
+                    className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                  />
+                </div>
+                <div className="sm:col-span-2">
                   <button
                     type="submit"
-                    className="bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline px-4 rounded-xl hover:bg-yeikar-primary-dark transition-colors"
+                    disabled={consumoSubmitting}
+                    className="w-full h-full bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2 px-3 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
                   >
-                    Agregar
+                    {consumoSubmitting ? 'Guardando...' : '+ Agregar'}
                   </button>
-                </form>
+                </div>
+              </form>
 
-                {/* Consumption List */}
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {selectedStage.consumos && selectedStage.consumos.length > 0 ? (
-                    selectedStage.consumos.map((c) => {
-                      const costo = c.costo_unitario !== undefined && c.costo_unitario !== null ? c.costo_unitario : (c.material?.costo_base || 0);
-                      const subtotal = c.cantidad * costo;
-                      return (
-                        <div key={c.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/5 p-3 rounded-xl shadow-xs text-xs">
-                          <div>
-                            <p className="font-bold text-yeikar-secondary">{c.material?.nombre}</p>
-                            <p className="text-[10px] text-yeikar-neutral/50">
-                              Cant: <span className="font-mono font-bold">{c.cantidad}</span> | Costo: <span className="font-mono">${costo.toLocaleString('es-CO')}</span> | Subtot: <span className="font-mono font-bold text-yeikar-primary">${subtotal.toLocaleString('es-CO')}</span>
-                            </p>
-                          </div>
+              {/* Consumption List */}
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {selectedStage.consumos && selectedStage.consumos.length > 0 ? (
+                  selectedStage.consumos.map((c) => {
+                    const costo = c.costo_unitario !== undefined && c.costo_unitario !== null ? c.costo_unitario : (c.material?.costo_base || 0);
+                    const subtotal = c.cantidad * costo;
+                    return (
+                      <div key={c.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/10 p-3.5 rounded-xl shadow-xs text-xs hover:border-yeikar-primary/30 transition-colors">
+                        <div>
+                          <p className="font-bold text-yeikar-secondary text-sm">{c.material?.nombre}</p>
+                          <p className="text-xs text-yeikar-neutral/60 font-mono mt-0.5">
+                            Cantidad: <span className="font-bold text-yeikar-secondary">{c.cantidad}</span> | Costo unitario: <span className="font-bold">${costo.toLocaleString('es-CO')}</span>
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="font-mono font-bold text-sm text-yeikar-primary">
+                            ${subtotal.toLocaleString('es-CO')}
+                          </span>
                           <button
                             onClick={() => handleDeleteConsumo(c.id)}
-                            className="text-red-500 hover:text-red-700 transition-colors p-1"
+                            className="text-red-500 hover:text-red-700 font-medium text-xs p-1 transition-colors"
+                            title="Quitar material"
                           >
                             Eliminar
                           </button>
                         </div>
-                      );
-                    })
-                  ) : (
-                    <p className="text-xs text-yeikar-neutral/40 italic">No se han registrado aún materiales para esta etapa.</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Right Column: Labor / Employees */}
-              <div className="space-y-4">
-                <h3 className="text-base font-bold font-headline text-yeikar-secondary border-b border-yeikar-secondary-light/5 pb-2">
-                  Mano de Obra / Operarios
-                </h3>
-
-                {/* Labor form */}
-                <form onSubmit={handleAddManoObra} className="flex gap-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
-                  <div className="flex-1 space-y-2">
-                    <select
-                      value={newManoObra.empleado_id}
-                      onChange={(e) => setNewManoObra(prev => ({ ...prev, empleado_id: e.target.value }))}
-                      required
-                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-lg p-2 focus:outline-none focus:border-yeikar-primary"
-                    >
-                      <option value="">Seleccione Operario</option>
-                      {empleados.map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.nombre} {emp.apellido}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      step="0.01"
-                      placeholder="Monto Mano Obra ($)"
-                      value={newManoObra.monto}
-                      onChange={(e) => setNewManoObra(prev => ({ ...prev, monto: e.target.value }))}
-                      required
-                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-lg p-2 focus:outline-none focus:border-yeikar-primary"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="bg-yeikar-secondary text-yeikar-tertiary text-xs font-bold font-headline px-4 rounded-xl hover:bg-yeikar-secondary-light transition-colors"
-                  >
-                    Registrar
-                  </button>
-                </form>
-
-                {/* Labor List */}
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {selectedStage.mano_obras && selectedStage.mano_obras.length > 0 ? (
-                    selectedStage.mano_obras.map((mo) => (
-                      <div key={mo.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/5 p-3 rounded-xl shadow-xs text-xs">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="font-bold text-yeikar-secondary">
-                              {mo.empleado ? `${mo.empleado.nombre} ${mo.empleado.apellido}` : 'Empleado'}
-                            </p>
-                            <button
-                              type="button"
-                              onClick={() => handleTogglePagoManoObra(mo.id, !!mo.pagado)}
-                              className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded transition-all ${
-                                mo.pagado
-                                  ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                                  : 'bg-red-100 text-red-800 hover:bg-red-200'
-                              }`}
-                            >
-                              {mo.pagado ? 'PAGADA' : 'PENDIENTE'}
-                            </button>
-                          </div>
-                          <p className="text-[10px] text-yeikar-neutral/50 font-mono mt-0.5">
-                            Monto: ${mo.monto.toLocaleString('es-CO')}
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleDeleteManoObra(mo.id)}
-                          className="text-red-500 hover:text-red-700 transition-colors p-1 ml-2"
-                        >
-                          Eliminar
-                        </button>
                       </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-yeikar-neutral/40 italic">No se ha registrado mano de obra.</p>
-                  )}
-                </div>
+                    );
+                  })
+                ) : (
+                  <div className="p-8 text-center border border-dashed border-yeikar-secondary-light/15 rounded-2xl text-yeikar-neutral/40 text-xs">
+                    No se han registrado aún materiales consumidos para esta etapa.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -778,49 +841,220 @@ export default function ProduccionKanban() {
                 const costo = c.costo_unitario !== undefined && c.costo_unitario !== null ? c.costo_unitario : (c.material?.costo_base || 0);
                 return acc + (c.cantidad * costo);
               }, 0) || 0;
-              const totalMo = selectedStage.mano_obras?.reduce((acc, mo) => acc + mo.monto, 0) || 0;
-              const totalMoPagada = selectedStage.mano_obras?.reduce((acc, mo) => acc + (mo.pagado ? mo.monto : 0), 0) || 0;
-              const totalMoPendiente = totalMo - totalMoPagada;
-              const totalEtapa = totalMat + totalMo;
 
               return (
-                <div className="bg-yeikar-tertiary/20 border border-yeikar-secondary-light/5 rounded-2xl p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-                  <div>
-                    <span className="text-[10px] font-bold text-yeikar-neutral/50 block">TOTAL MATERIALES</span>
-                    <span className="text-base font-black text-yeikar-secondary font-mono">${totalMat.toLocaleString('es-CO')}</span>
+                <div className="bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-2xl p-4 flex justify-between items-center text-center">
+                  <div className="text-left">
+                    <span className="text-[10px] font-bold text-yeikar-neutral/50 block uppercase tracking-wider">TOTAL MATERIALES EN ESTA ETAPA</span>
+                    <span className="text-xl font-black text-yeikar-secondary font-mono">${totalMat.toLocaleString('es-CO')}</span>
                   </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-yeikar-neutral/50 block">MANO DE OBRA PAGADA</span>
-                    <span className="text-base font-black text-green-700 font-mono">${totalMoPagada.toLocaleString('es-CO')}</span>
+                  <div className="text-right border-l border-yeikar-secondary-light/10 pl-6">
+                    <span className="text-[10px] font-bold text-yeikar-primary block uppercase tracking-wider">COSTO REGISTRADO ETAPA</span>
+                    <span className="text-2xl font-black text-yeikar-primary font-mono">${totalMat.toLocaleString('es-CO')}</span>
                   </div>
-                  <div>
-                    <span className="text-[10px] font-bold text-yeikar-neutral/50 block">MANO DE OBRA PENDIENTE</span>
-                    <span className="text-base font-black text-red-700 font-mono">${totalMoPendiente.toLocaleString('es-CO')}</span>
+                </div>
+              );
+            })()}
+
+            {/* Referencia de Componentes del Producto */}
+            {(() => {
+              const SECCION_COLORS: Record<string, string> = {
+                EBANISTERIA: 'bg-amber-100 text-amber-800 border-amber-200',
+                TAPICERIA: 'bg-purple-100 text-purple-800 border-purple-200',
+                PINTURA: 'bg-sky-100 text-sky-800 border-sky-200',
+                TERMINACION: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+                NOCHEROS: 'bg-rose-100 text-rose-800 border-rose-200',
+                MANO_DE_OBRA: 'bg-blue-100 text-blue-800 border-blue-200',
+              };
+              const badge = (s: string) =>
+                `text-[10px] font-bold px-2 py-0.5 rounded-md border ${SECCION_COLORS[s] || 'bg-stone-100 text-stone-600 border-stone-200'}`;
+
+              if (loadingReceta) {
+                return (
+                  <div className="border border-dashed border-yeikar-secondary-light/10 rounded-2xl p-4 text-center text-xs text-yeikar-neutral/40">
+                    Cargando receta de referencia...
                   </div>
-                  <div className="border-l border-yeikar-secondary-light/10 pl-2">
-                    <span className="text-[10px] font-bold text-yeikar-primary block">COSTO TOTAL ETAPA</span>
-                    <span className="text-lg font-black text-yeikar-primary font-mono">${totalEtapa.toLocaleString('es-CO')}</span>
+                );
+              }
+
+              if (!referenciaReceta || referenciaReceta.materiales.length === 0) {
+                return null;
+              }
+
+              return (
+                <div className="border border-dashed border-yeikar-primary/20 bg-yeikar-primary/5 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-yeikar-primary/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <h3 className="text-xs font-bold font-headline text-yeikar-neutral/60 uppercase tracking-wider">
+                      Componentes del producto
+                    </h3>
+                    <span className="text-[10px] font-mono text-yeikar-neutral/40 ml-auto">
+                      {referenciaReceta.producto_nombre}
+                      {referenciaReceta.dimensiones.ancho && referenciaReceta.dimensiones.largo
+                        ? ` · ${referenciaReceta.dimensiones.ancho}m × ${referenciaReceta.dimensiones.largo}m`
+                        : ''}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+                    {referenciaReceta.materiales.map((m, i) => (
+                      <div key={`${m.material_id}-${i}`} className="flex items-center justify-between bg-white/70 border border-yeikar-secondary-light/5 p-2.5 rounded-xl text-xs">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <span className={badge(m.seccion)}>{m.seccion}</span>
+                          <span className="font-semibold text-yeikar-secondary truncate">{m.nombre}</span>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0 ml-2">
+                          <span className="font-mono font-bold text-yeikar-neutral/70">
+                            {m.cantidad_base}
+                          </span>
+                          <span className="text-yeikar-neutral/40 w-6 text-right">{m.unidad}</span>
+                          <span className="font-mono text-yeikar-neutral/50 w-20 text-right">
+                            ${m.costo_unitario.toLocaleString('es-CO')}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               );
             })()}
 
             {/* Modal Footer */}
-            <div className="flex justify-between pt-4 border-t border-yeikar-secondary-light/5">
+            <div className="flex items-center justify-end pt-4 border-t border-yeikar-secondary-light/10">
               <button
-                onClick={() => handleFinalizarOrden(selectedStage.orden_produccion_id)}
-                className="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-bold font-headline transition-colors"
-              >
-                Finalizar Orden Completa
-              </button>
-              <button
+                type="button"
                 onClick={() => setSelectedStage(null)}
-                className="bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary px-6 py-2.5 rounded-xl text-sm font-bold font-headline transition-colors"
+                className="bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary-light px-8 py-2.5 rounded-xl text-sm font-bold font-headline shadow-md transition-all"
               >
                 Cerrar
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Modal Pasar a Area */}
+      {showPasarModal && pasarStage && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <p className="text-[10px] font-mono font-bold text-yeikar-neutral/40 uppercase">
+                  Etapa #{pasarStage.id} · Área actual: {pasarStage.area?.nombre || 'Sin área'}
+                </p>
+                <h2 className="text-xl font-black font-headline text-yeikar-secondary tracking-tight mt-1">
+                  Mover a Nueva Área
+                </h2>
+                <p className="text-sm text-yeikar-neutral/60 mt-1">
+                  {pasarStage.orden?.detalle_pedido?.producto?.nombre || `Orden #${pasarStage.orden_produccion_id}`}
+                  {pasarStage.orden?.detalle_pedido?.pedido?.cliente?.nombre
+                    ? ` / ${pasarStage.orden.detalle_pedido.pedido.cliente.nombre}`
+                    : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closePasarModal}
+                className="p-2 hover:bg-yeikar-tertiary rounded-xl text-yeikar-neutral/40"
+                title="Cerrar modal"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handlePasarAArea} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Área destino</label>
+                <select
+                  value={pasarAreaId}
+                  onChange={(event) => setPasarAreaId(event.target.value)}
+                  required
+                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
+                >
+                  <option value="">Seleccione área...</option>
+                  {areas.filter((area) => area.id !== pasarStage.area_id).map((area) => (
+                    <option key={area.id} value={area.id}>{area.nombre}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Responsable principal</label>
+                <select
+                  value={pasarEmpleadoPrincipal}
+                  onChange={(event) => {
+                    const empleadoId = Number(event.target.value);
+                    setPasarEmpleadoPrincipal(event.target.value);
+                    setPasarEmpleadosAdicionales((actuales) => actuales.filter((id) => id !== empleadoId));
+                  }}
+                  required
+                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
+                >
+                  <option value="">Seleccione empleado...</option>
+                  {empleados.filter((empleado) => empleado.id !== pasarStage.empleado_responsable_id).map((empleado) => (
+                    <option key={empleado.id} value={empleado.id}>{empleado.nombre} {empleado.apellido}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-yeikar-neutral/60 mb-2">
+                  Empleados adicionales <span className="font-normal">(opcional)</span>
+                </label>
+                <div className="border border-yeikar-secondary-light/10 rounded-xl p-3 max-h-40 overflow-y-auto space-y-2">
+                  {empleados.filter((empleado) => empleado.id.toString() !== pasarEmpleadoPrincipal).map((empleado) => (
+                    <label key={empleado.id} className="flex items-center gap-2 text-sm text-yeikar-neutral cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={pasarEmpleadosAdicionales.includes(empleado.id)}
+                        onChange={() => togglePasarEmpleadoAdicional(empleado.id)}
+                        className="rounded border-yeikar-secondary-light/30 text-yeikar-primary focus:ring-yeikar-primary"
+                      />
+                      {empleado.nombre} {empleado.apellido}
+                    </label>
+                  ))}
+                  {empleados.length === 0 && <span className="text-xs text-yeikar-neutral/40">No hay empleados disponibles.</span>}
+                </div>
+                {pasarEmpleadosAdicionales.length > 0 && (
+                  <p className="text-[11px] text-yeikar-primary mt-1">
+                    {pasarEmpleadosAdicionales.length} empleado(s) adicional(es) seleccionado(s)
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Observaciones</label>
+                <textarea
+                  value={pasarObservaciones}
+                  onChange={(event) => setPasarObservaciones(event.target.value)}
+                  rows={3}
+                  placeholder="Indicaciones para la nueva etapa..."
+                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={closePasarModal}
+                  disabled={pasarSubmitting}
+                  className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={pasarSubmitting}
+                  className="bg-yeikar-primary text-yeikar-neutral px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow transition-all disabled:opacity-50"
+                >
+                  {pasarSubmitting ? 'Pasando...' : 'Confirmar y pasar'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -883,9 +1117,10 @@ export default function ProduccionKanban() {
                 </button>
                 <button
                   type="submit"
-                  className="bg-yeikar-primary text-yeikar-neutral px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow transition-all"
+                  disabled={nuevaEtapaSubmitting}
+                  className="bg-yeikar-primary text-yeikar-neutral px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 >
-                  Crear Etapa
+                  {nuevaEtapaSubmitting ? 'Creando...' : 'Crear Etapa'}
                 </button>
               </div>
             </form>

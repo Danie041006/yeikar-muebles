@@ -4,6 +4,8 @@ YEIKAR API - Suite de Pruebas de Integración
 Tests automáticos para: Auth, Filtros de Fecha, Endpoints de Usuarios Admin
 """
 import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import requests
 import json
 from datetime import datetime
@@ -27,6 +29,51 @@ def section(title):
     RESULTS.append(f"\n{'─'*55}")
     RESULTS.append(f"  {title}")
     RESULTS.append(f"{'─'*55}")
+
+def borrar_admin_temporal():
+    """Borra el admin temporal directamente en BD (el API impide auto-eliminarse)."""
+    from app.db.session import session_local
+    from app.modules.users.model import Usuario
+    db = session_local()
+    try:
+        u = db.query(Usuario).filter(Usuario.nombre_usuario == "test_admin_tmp").first()
+        if u:
+            db.delete(u)
+            db.commit()
+            return True
+        return False
+    finally:
+        db.close()
+
+def crear_admin_temporal():
+    """Crea /borra un usuario Dueño temporal para probar la gestión de usuarios."""
+    from app.db.session import session_local
+    from app.modules.users.model import Usuario
+    from app.modules.users import service as user_service
+    from app.modules.catalogos.model import Rol
+    db = session_local()
+    try:
+        roll = db.query(Rol).filter(Rol.nombre == "Dueño").first()
+        if not roll:
+            roll = Rol(nombre="Dueño", descripcion="Acceso total", activo=True)
+            db.add(roll)
+            db.commit()
+            db.refresh(roll)
+        usuario = Usuario(
+            nombre_usuario="test_admin_tmp",
+            email="test_admin_tmp@yeikar.com",
+            password_hash=user_service.obtener_password_hash("TestAdmin123"),
+            activo=True,
+        )
+        db.add(usuario)
+        db.commit()
+        db.refresh(usuario)
+        usuario.roles.append(roll)
+        db.commit()
+        uid = usuario.id
+    finally:
+        db.close()
+    return uid
 
 # ─── Auth ──────────────────────────────────────────────────────────────────────
 section("1. AUTENTICACIÓN")
@@ -54,6 +101,26 @@ if not ACCESS:
 
 H = {"Authorization": f"Bearer {ACCESS}"}
 
+# ─── Admin temporal (Dueño) ───────────────────────────────────────────────────
+ADMIN_UID = None
+HADMIN = None
+r_admin_login = requests.post(f"{BASE}/api/auth/login", data={"username": "test_admin_tmp", "password": "TestAdmin123"})
+if r_admin_login.status_code == 200:
+    HADMIN = {"Authorization": f"Bearer {r_admin_login.json()['access_token']}"}
+    ok("Login admin temporal  →  Token de Dueño obtenido")
+else:
+    ADMIN_UID = crear_admin_temporal()
+    r2 = requests.post(f"{BASE}/api/auth/login", data={"username": "test_admin_tmp", "password": "TestAdmin123"})
+    if r2.status_code == 200:
+        HADMIN = {"Authorization": f"Bearer {r2.json()['access_token']}"}
+        ok("Login admin temporal (creado)  →  Token de Dueño obtenido")
+    else:
+        fail("Login admin temporal", r2.text[:120])
+
+if not HADMIN:
+    print("\n".join(RESULTS))
+    sys.exit(1)
+
 # GET /me
 r = requests.get(f"{BASE}/api/auth/me", headers=H)
 if r.status_code == 200 and r.json().get("nombre_usuario") == "carolina":
@@ -79,7 +146,7 @@ else:
 section("2. GESTIÓN DE USUARIOS (Admin)")
 
 # List all users
-r = requests.get(f"{BASE}/api/auth/users", headers=H)
+r = requests.get(f"{BASE}/api/auth/users", headers=HADMIN)
 if r.status_code == 200 and isinstance(r.json(), list):
     users = r.json()
     ok(f"GET /api/auth/users  →  {len(users)} usuarios listados")
@@ -88,7 +155,7 @@ else:
     users = []
 
 # List roles
-r = requests.get(f"{BASE}/api/auth/roles", headers=H)
+r = requests.get(f"{BASE}/api/auth/roles", headers=HADMIN)
 if r.status_code == 200 and isinstance(r.json(), list):
     roles = r.json()
     ok(f"GET /api/auth/roles  →  {len(roles)} roles listados: {[rr['nombre'] for rr in roles]}")
@@ -99,7 +166,7 @@ else:
 # Create a test user
 ts = int(datetime.now().timestamp())
 TEST_USER = f"test_user_{ts}"
-r = requests.post(f"{BASE}/api/auth/users", headers=H, json={
+r = requests.post(f"{BASE}/api/auth/users", headers=HADMIN, json={
     "nombre_usuario": TEST_USER,
     "email": f"{TEST_USER}@yeikar.com",
     "password": "TestPass123"
@@ -114,14 +181,14 @@ else:
 
 if new_uid:
     # Toggle status to inactive
-    r = requests.put(f"{BASE}/api/auth/users/{new_uid}/status", headers=H, params={"activo": "false"})
+    r = requests.put(f"{BASE}/api/auth/users/{new_uid}/status", headers=HADMIN, params={"activo": "false"})
     if r.status_code == 200 and r.json()["activo"] == False:
         ok(f"PUT /api/auth/users/{new_uid}/status  →  Usuario desactivado")
     else:
         fail(f"PUT /api/auth/users/{new_uid}/status", r.text[:80])
 
     # Toggle status back to active
-    r = requests.put(f"{BASE}/api/auth/users/{new_uid}/status", headers=H, params={"activo": "true"})
+    r = requests.put(f"{BASE}/api/auth/users/{new_uid}/status", headers=HADMIN, params={"activo": "true"})
     if r.status_code == 200 and r.json()["activo"] == True:
         ok(f"PUT /api/auth/users/{new_uid}/status  →  Usuario reactivado")
     else:
@@ -130,21 +197,21 @@ if new_uid:
     # Assign role (use first available role)
     if roles:
         rid = roles[0]["id"]
-        r = requests.post(f"{BASE}/api/auth/usuario/{new_uid}/roles/{rid}", headers=H)
+        r = requests.post(f"{BASE}/api/auth/usuario/{new_uid}/roles/{rid}", headers=HADMIN)
         if r.status_code == 200:
             ok(f"POST /api/auth/usuario/{new_uid}/roles/{rid}  →  Rol '{roles[0]['nombre']}' asignado")
         else:
             fail(f"POST /api/auth/usuario/{new_uid}/roles/{rid}", r.text[:80])
 
         # Remove role
-        r = requests.delete(f"{BASE}/api/auth/usuario/{new_uid}/roles/{rid}", headers=H)
+        r = requests.delete(f"{BASE}/api/auth/usuario/{new_uid}/roles/{rid}", headers=HADMIN)
         if r.status_code == 200:
             ok(f"DELETE /api/auth/usuario/{new_uid}/roles/{rid}  →  Rol revocado")
         else:
             fail(f"DELETE /api/auth/usuario/{new_uid}/roles/{rid}", r.text[:80])
 
     # Delete test user
-    r = requests.delete(f"{BASE}/api/auth/users/{new_uid}", headers=H)
+    r = requests.delete(f"{BASE}/api/auth/users/{new_uid}", headers=HADMIN)
     if r.status_code == 204:
         ok(f"DELETE /api/auth/users/{new_uid}  →  Usuario de prueba eliminado")
     else:
@@ -200,6 +267,13 @@ if r.status_code == 200:
     ok(f"GET /pedido/?mes={now.month}&anio={now.year}  →  Filtro por mes/año funciona")
 else:
     fail(f"GET /pedido/?mes={now.month}&anio={now.year}", r.text[:80])
+
+# ─── Cleanup admin temporal ───────────────────────────────────────────────────
+if HADMIN:
+    if borrar_admin_temporal():
+        ok("Cleanup  →  Admin temporal eliminado")
+    else:
+        fail("Cleanup admin temporal", "usuario no encontrado")
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 RESULTS.append(f"\n{'═'*55}")

@@ -1,25 +1,23 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../../context/AuthContext';
 
-interface SidebarProps {
-  roles?: string[];
-  nombreUsuario?: string;
-}
-
-export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: SidebarProps) {
+export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user, hasModulo, logout } = useAuth();
+  const roles = user?.roles?.map((r) => r.nombre) || [];
+  const nombreUsuario = user?.nombre_usuario || 'Usuario';
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
+    logout();
     navigate('/login');
   };
-
-  const isAdmin = roles.includes('Dueño') || roles.includes('Administrador');
 
   const menuItems = [
     {
       name: 'Panel principal',
       path: '/dashboard',
+      module: 'dashboard',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2H6a2 2 0 01-2-2v-4zM14 16a2 2 0 012-2h2a2 2 0 012 2v4a2 2 0 01-2 2h-2a2 2 0 01-2-2v-4z" />
@@ -29,6 +27,7 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
     {
       name: 'Clientes',
       path: '/clientes',
+      module: 'clientes',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
@@ -38,6 +37,7 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
     {
       name: 'Cotizaciones',
       path: '/cotizaciones',
+      module: 'cotizaciones',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -47,6 +47,7 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
     {
       name: 'Pedidos',
       path: '/pedidos',
+      module: 'pedidos',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
@@ -56,6 +57,7 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
     {
       name: 'Producción',
       path: '/produccion',
+      module: 'produccion',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
@@ -65,6 +67,7 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
     {
     name: 'Ventas y Cobros',
       path: '/ventas',
+      module: 'ventas',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -75,16 +78,29 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
     {
       name: 'Inventario',
       path: '/inventario',
+      module: 'inventario',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
         </svg>
       ),
     },
-    {
 
+    {
+      name: 'Egresos y Gastos',
+      path: '/gastos',
+      module: 'gastos',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      ),
+    },
+
+    {
       name: 'Envíos',
       path: '/envios',
+      module: 'envios',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 17a2 2 0 11-4 0 2 2 0 014 0zM19 17a2 2 0 11-4 0 2 2 0 014 0z" />
@@ -96,46 +112,47 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
 
       name: 'Gestión de Productos',
       path: '/productos',
+      module: 'productos',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
         </svg>
       ),
-      adminOnly: true,
     },
     {
       name: 'Calculadora de Costos',
       path: '/costos',
+      module: 'productos',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 11h.01M12 7h.01M15 11h.01M12 14h.01M15 14h.01M4 19h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v10a2 2 0 002 2z" />
         </svg>
       ),
-      adminOnly: true,
     },
     {
       name: 'Reportes Financieros',
       path: '/reportes',
+      module: 'reportes',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 002 2h2a2 2 0 002-2z" />
         </svg>
       ),
-      adminOnly: true,
     },
     {
       name: 'Gestión de Usuarios',
       path: '/usuarios',
+      module: 'usuarios',
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
         </svg>
       ),
-      adminOnly: true,
     },
     {
       name: 'Cotizador IA (Nuevo)',
       path: '/cotizaciones-ia',
+      module: 'cotizaciones_ia',
       icon: (
         <svg className="w-5 h-5 text-indigo-500 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -144,35 +161,12 @@ export default function Sidebar({ roles = [], nombreUsuario = 'Usuario' }: Sideb
     },
   ];
 
-  // Map roles to permitted menu paths
-  const rolePaths: { [key: string]: string[] } = {
-    'Dueño': menuItems.map(item => item.path).concat(['/cotizaciones-ia']),
-    'Administrador': menuItems.map(item => item.path).concat(['/cotizaciones-ia']),
-    'Fletes': ['/dashboard', '/pedidos', '/envios'],
-    'Producción': ['/dashboard', '/produccion'],
-    'Inventario': ['/dashboard', '/inventario', '/productos'],
-    'Ventas': ['/dashboard', '/clientes', '/cotizaciones', '/cotizaciones-ia', '/pedidos', '/ventas'],
-  };
-
-  const getAllowedPaths = () => {
-    // If no roles are loaded yet (e.g. initial fetch loading), return an empty array
-    if (roles.length === 0) return ['/dashboard'];
-    
-    if (isAdmin) {
-      return menuItems.map(item => item.path);
-    }
-    
-    const allowed = new Set<string>();
-    roles.forEach(role => {
-      const paths = rolePaths[role] || rolePaths['Ventas'];
-      paths.forEach(p => allowed.add(p));
-    });
-    
-    return Array.from(allowed);
-  };
-
-  const allowedPaths = getAllowedPaths();
-  const visibleMenuItems = menuItems.filter(item => allowedPaths.includes(item.path));
+  // El menú se filtra por los módulos que el usuario tiene asignados
+  // (definidos desde el panel de Gestión de Usuarios → Roles y módulos).
+  const visibleMenuItems = menuItems.filter((item) => {
+    if (item.path === '/dashboard') return true;
+    return hasModulo(item.module);
+  });
 
   return (
     <aside className="w-64 bg-yeikar-neutral text-yeikar-tertiary flex flex-col min-h-screen border-r border-yeikar-secondary/20 shadow-xl">

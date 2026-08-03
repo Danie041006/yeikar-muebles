@@ -84,18 +84,34 @@ export default function Clientes() {
       setError('El nombre del cliente es obligatorio');
       return;
     }
+    if (!formData.telefono.trim()) {
+      setError('El número de teléfono es obligatorio');
+      return;
+    }
+
+    // Limpiar campos opcionales vacíos para no enviar strings vacíos al backend
+    const payload: any = {
+      nombre: formData.nombre.trim(),
+      telefono: formData.telefono.trim(),
+      email: formData.email?.trim() || null,
+      direccion: formData.direccion?.trim() || null,
+      ciudad: formData.ciudad?.trim() || null,
+      estado: formData.estado?.trim() || null,
+      observaciones: formData.observaciones?.trim() || null,
+    };
 
     try {
       if (editingClient) {
-        await clienteService.update(editingClient.id, formData);
+        await clienteService.update(editingClient.id, payload);
       } else {
-        await clienteService.create(formData);
+        await clienteService.create(payload);
       }
       setIsModalOpen(false);
       fetchClients(search);
     } catch (err: any) {
       console.error(err);
-      setError('Ocurrió un error al guardar el cliente.');
+      const detail = err?.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Ocurrió un error al guardar el cliente.');
     }
   };
 
@@ -266,13 +282,15 @@ export default function Clientes() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
-                    Teléfono
+                    Teléfono *
                   </label>
                   <input
                     type="text"
                     name="telefono"
                     value={formData.telefono}
                     onChange={handleInputChange}
+                    required
+                    placeholder="Ej: 300 123 4567"
                     className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono"
                   />
                 </div>
@@ -283,7 +301,7 @@ export default function Clientes() {
                   <input
                     type="email"
                     name="email"
-                    value={formData.email}
+                    value={formData.email ?? ''}
                     onChange={handleInputChange}
                     className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20"
                   />
@@ -297,7 +315,7 @@ export default function Clientes() {
                 <input
                   type="text"
                   name="direccion"
-                  value={formData.direccion}
+                  value={formData.direccion ?? ''}
                   onChange={handleInputChange}
                   className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20"
                 />
@@ -311,7 +329,7 @@ export default function Clientes() {
                   <input
                     type="text"
                     name="ciudad"
-                    value={formData.ciudad}
+                    value={formData.ciudad ?? ''}
                     onChange={handleInputChange}
                     className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20"
                   />
@@ -323,7 +341,7 @@ export default function Clientes() {
                   <input
                     type="text"
                     name="estado"
-                    value={formData.estado}
+                    value={formData.estado ?? ''}
                     onChange={handleInputChange}
                     className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20"
                   />
@@ -336,7 +354,7 @@ export default function Clientes() {
                 </label>
                 <textarea
                   name="observaciones"
-                  value={formData.observaciones}
+                  value={formData.observaciones ?? ''}
                   onChange={handleInputChange}
                   rows={3}
                   className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20"

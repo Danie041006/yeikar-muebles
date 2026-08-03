@@ -31,11 +31,20 @@ def obtener_compras(
 
 def crear_compra(db: Session, compra: schemas.CompraCreate) -> model.Compra:
     # Crear registro de compra y sus detalles
+    from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+    tasa_cambio = obtener_tasa_moneda_a_cop(db, compra.moneda_id, compra.fecha)
+    total_en_base = sum(
+        float(d.cantidad) * float(d.costo_unitario) for d in compra.detalle
+    ) * float(tasa_cambio)
+
     db_compra = model.Compra(
         proveedor_id=compra.proveedor_id,
         moneda_id=compra.moneda_id,
         fecha=compra.fecha,
         estado=compra.estado or "BORRADOR",
+        tipo_pago=compra.tipo_pago or "CREDITO",
+        tasa_cambio=tasa_cambio,
+        total_en_moneda_base=round(total_en_base, 2),
         observaciones=compra.observaciones,
     )
     db.add(db_compra)

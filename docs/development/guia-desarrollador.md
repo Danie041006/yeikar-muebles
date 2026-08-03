@@ -2222,4 +2222,65 @@ SECCIÓN: EBANISTERÍA                                             SECCIÓN: NOC
 
 ---
 
+## 🏗️ Sistema de Recetas por Secciones (Julio 2026)
+
+### Arquitectura
+
+Cada producto tiene una receta organizada en **secciones/áreas productivas**. Cada sección contiene:
+
+| Componente | Tabla | Descripción |
+|------------|-------|-------------|
+| **Sección** | `seccion_producto` | Área productiva (EBANISTERÍA, PINTURA, TAPICERÍA, etc.) |
+| **Insumos** | `elemento_seccion` | Materiales/insumos propios de la sección, con cantidad y precio opcional |
+| **Política** | `politica_seccion` | % de gastos de la sección, mano de obra base (1:1 con la sección) |
+| **Costos Producción** | `costo_produccion_seccion` | Múltiples costos base con % opcional (ej: PREPARADO CAMA +5%) |
+
+### Modelo `CostoProduccionSeccion`
+
+Cada sección puede tener **N** costos de producción. Cada uno representa una partida específica (PREPARADO CAMA, PINTURA CAMA, PREPARADO BURRO, etc.) con:
+
+- `nombre`: Nombre descriptivo (ej. "PREPARADO CAMA")
+- `costo_base`: Monto base del costo
+- `porcentaje`: % opcional que se aplica sobre el `costo_base`
+  - Aporte individual = `costo_base + (costo_base × porcentaje / 100)`
+  - Si el porcentaje es NULL o 0, el aporte es solo `costo_base`
+
+El `total_costos_produccion` de la sección es la suma de todos los aportes individuales.
+
+### Cálculo de Costo por Sección
+
+```
+costo_sección = insumos + total_costos_produccion + gastos_sección(%)
+```
+
+Donde:
+- `insumos` = suma de `cantidad × precio_unitario` de los elementos
+- `total_costos_produccion` = suma de cada `costo_base + (costo_base × % / 100)`
+- `gastos_sección` = % sobre el subtotal (insumos + costos producción)
+
+### Endpoints de Costos de Producción
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `POST` | `/api/v1/seccion/{seccion_id}/costo-produccion` | Crear costo de producción |
+| `PUT` | `/api/v1/costo-produccion/{item_id}` | Actualizar costo de producción |
+| `DELETE` | `/api/v1/costo-produccion/{item_id}` | Eliminar costo de producción |
+
+### Frontend
+
+- Cada tarjeta de sección muestra la lista de costos de producción con su nombre, costo base, % y total calculado.
+- Botón "Agregar" abre un modal para crear/editar costos.
+- Al eliminar sección, los costos de producción se borran en cascada.
+- El simulador de precio muestra en el desglose por sección cada costo de producción individual y su total.
+
+### Migraciones
+
+Se requieren 2 migraciones aplicadas en orden:
+
+1. `c510a2c6c2df` — Agrega columnas `costo_fabricacion`, `pct_trabajadores`, `pct_negocio` a `politica_seccion` (ahora no utilizadas)
+2. `d862d3fbe748` — Crea tabla `costo_produccion_seccion` con FK a `seccion_producto`
+
+---
+
+
 

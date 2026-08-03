@@ -62,7 +62,9 @@ def crear_pedido(db: Session, esquema: schemas.PedidoCreate):
     return db_pedido
 
 def actualizar_pedido(db: Session, id_pedido: int, esquema: schemas.PedidoUpdate):
-    db_pedido = obtener_pedido(db, id_pedido)
+    # FOR UPDATE: dos transiciones simultáneas a PRODUCCION se serializan; el
+    # segundo request ve el estado ya cambiado y no duplica las órdenes.
+    db_pedido = db.query(model.Pedido).filter(model.Pedido.id == id_pedido).with_for_update().first()
     if not db_pedido:
         return None
     datos = esquema.model_dump(exclude_unset=True)
@@ -72,10 +74,10 @@ def actualizar_pedido(db: Session, id_pedido: int, esquema: schemas.PedidoUpdate
     
     for campo, valor in datos.items():
         setattr(db_pedido, campo, valor)
-    db.commit()
-    db.refresh(db_pedido)
     
     # If transitioning to PRODUCCION, generate production orders and stages
+    # Todo en la MISMA transacción: un crash no puede dejar el pedido en
+    # PRODUCCION sin sus órdenes de producción.
     if estado_anterior != "PRODUCCION" and nuevo_estado == "PRODUCCION":
         from app.modules.production.model import OrdenProduccion
         from datetime import date
@@ -90,9 +92,9 @@ def actualizar_pedido(db: Session, id_pedido: int, esquema: schemas.PedidoUpdate
                     fecha_fin=None
                 )
                 db.add(db_orden)
-                db.flush()
-        db.commit()
-        
+
+    db.commit()
+    db.refresh(db_pedido)
     return db_pedido
 
 def eliminar_pedido(db: Session, id_pedido: int):
@@ -104,10 +106,16 @@ def eliminar_pedido(db: Session, id_pedido: int):
     return True
 
 def convertir_cotizacion_a_pedido(db: Session, id_cotizacion: int, fecha_entrega_estimada = None, detalles = []):
-    # Buscar la cotización
-    db_cotizacion = db.query(Cotizacion).filter(Cotizacion.id == id_cotizacion).first()
+    # Buscar la cotización con FOR UPDATE: dos conversiones simultáneas quedan
+    # serializadas; la segunda detecta el pedido ya creado en vez de lanzar 500.
+    db_cotizacion = db.query(Cotizacion).filter(Cotizacion.id == id_cotizacion).with_for_update().first()
     if not db_cotizacion:
         raise ValueError("Cotizacion no encontrada")
+
+    # Idempotencia: si la cotización ya fue convertida, devolver el pedido existente
+    pedido_existente = db.query(model.Pedido).filter(model.Pedido.cotizacion_id == id_cotizacion).first()
+    if pedido_existente:
+        raise ValueError("Esta cotización ya fue convertida a pedido")
 
     # Cambiar estado de la cotización a APROBADA
     db_cotizacion.estado = "APROBADA"
@@ -129,9 +137,23 @@ def convertir_cotizacion_a_pedido(db: Session, id_cotizacion: int, fecha_entrega
         raise ValueError("El pedido requiere al menos un detalle de producto")
 
     for detalle in detalles:
+        # Si el detalle no trae costo, intentar completarlo desde la cotización
+        detalle_dict = dict(detalle) if isinstance(detalle, dict) else detalle.model_dump()
+        if not detalle_dict.get("costo_unitario"):
+            for dc in (db_cotizacion.detalles or []):
+                if dc.producto_id == detalle_dict.get("producto_id"):
+                    detalle_dict["costo_unitario"] = float(dc.costo_total or 0.0)
+                    break
+        if not detalle_dict.get("porcentaje_ganancia"):
+            costo = detalle_dict.get("costo_unitario")
+            precio = detalle_dict.get("precio", 0.0)
+            if costo:
+                detalle_dict["porcentaje_ganancia"] = round(
+                    ((float(precio) - float(costo)) / float(costo)) * 100, 2
+                )
         db_detalle = model.DetallePedido(
             pedido_id=db_pedido.id,
-            **detalle
+            **detalle_dict
         )
         db.add(db_detalle)
 

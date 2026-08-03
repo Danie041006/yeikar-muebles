@@ -8,6 +8,8 @@ class DetallePedidoBase(BaseModel):
     producto_id: int
     cantidad: float
     precio: float
+    costo_unitario: Optional[float] = None
+    porcentaje_ganancia: Optional[float] = None
     alto: Optional[float] = None
     ancho: Optional[float] = None
     largo: Optional[float] = None

@@ -89,10 +89,12 @@ def eliminar_unidad_medida(db: Session, id_unidad: int):
 def obtener_tipo_gasto(db: Session, id_gasto: int):
     return db.query(model.TipoGasto).filter(model.TipoGasto.id == id_gasto).first()
 
-def obtener_tipos_gasto(db: Session, salto: int = 0, limite: int = 100, buscar: str = None):
+def obtener_tipos_gasto(db: Session, salto: int = 0, limite: int = 100, buscar: str = None, categoria: str = None):
     query = db.query(model.TipoGasto)
     if buscar:
         query = query.filter(model.TipoGasto.nombre.ilike(f"%{buscar}%"))
+    if categoria:
+        query = query.filter(model.TipoGasto.categoria == categoria.upper())
     return query.offset(salto).limit(limite).all()
 
 def crear_tipo_gasto(db: Session, esquema: schemas.TipoGastoCreate):

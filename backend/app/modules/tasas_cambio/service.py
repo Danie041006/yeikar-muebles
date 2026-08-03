@@ -1,7 +1,32 @@
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import date
+from decimal import Decimal
 from app.modules.tasas_cambio import model, schemas
+
+def obtener_tasa_moneda_a_cop(db: Session, moneda_id: int, fecha: date = None):
+    """
+    Devuelve cuántos COP vale 1 unidad de la moneda indicada en la fecha dada.
+    Usa la tasa registrada exactamente en esa fecha, o la más reciente anterior.
+    Para COP devuelve 1.0. Si no hay tasa registrada, devuelve 1.0.
+    """
+    if moneda_id in (None, 1):
+        return Decimal("1.0")
+    fecha = fecha or date.today()
+    query = db.query(model.TasaCambio).filter(
+        model.TasaCambio.moneda_origen_id == moneda_id,
+        model.TasaCambio.moneda_destino_id == 1,
+        model.TasaCambio.fecha <= fecha,
+    ).order_by(model.TasaCambio.fecha.desc())
+    tasa = query.first()
+    if not tasa:
+        # Buscar hacia el futuro (si solo hay tasas posteriores)
+        tasa = db.query(model.TasaCambio).filter(
+            model.TasaCambio.moneda_origen_id == moneda_id,
+            model.TasaCambio.moneda_destino_id == 1,
+        ).order_by(model.TasaCambio.fecha.asc()).first()
+    return Decimal(str(tasa.valor)) if tasa else Decimal("1.0")
+
 
 def obtener_tasa(db: Session, tasa_id: int):
     return db.query(model.TasaCambio).filter(model.TasaCambio.id == tasa_id).first()

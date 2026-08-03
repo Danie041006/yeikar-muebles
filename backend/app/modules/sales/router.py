@@ -5,10 +5,11 @@ from typing import List, Optional
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
+from app.modules.users.deps import require_module
 from app.modules.sales import schemas, service
 
-router = APIRouter()
-pago_router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_module('ventas'))])
+pago_router = APIRouter(dependencies=[Depends(require_module('ventas'))])
 
 # ------------------------------------------------------------
 # Endpoints de Ventas (Facturas)
@@ -52,7 +53,8 @@ def ver_factura_venta(
         raise HTTPException(status_code=404, detail="Factura de venta no encontrada")
     
     # Calcular y asignar campos acumulados para la respuesta
-    total_pagado = sum(float(p.monto) for p in db_obj.pagos)
+    # Usar monto_en_moneda_base para reflejar correctamente abonos en otra moneda
+    total_pagado = sum(float(p.monto_en_moneda_base) for p in db_obj.pagos)
     db_obj.total_pagado = total_pagado
     db_obj.saldo_pendiente = float(db_obj.total) - total_pagado
     return db_obj

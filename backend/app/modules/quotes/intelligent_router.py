@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.modules.users.deps import require_module
 from app.modules.quotes.vision_provider import FurnitureAttributes
 import datetime
 from app.modules.quotes.similarity_engine import buscar_similares
@@ -91,7 +92,29 @@ def health():
 # POST /analyze-image
 # ---------------------------------------------------------------------------
 
-@router.post("/analyze-image", response_model=FurnitureAttributesOut)
+def _persistir_analisis(db: Session, file: UploadFile, attrs: FurnitureAttributes, contexto_adicional: Optional[str]):
+    """Persistencia síncrona del análisis de imagen (corre en un thread)."""
+    analisis = CotizacionAnalisisIA(
+        cotizacion_id=None,
+        foto_url=file.filename or "upload",
+        tipo_mueble=attrs.tipo_mueble,
+        familia_probable=attrs.familia_probable,
+        tiene_tapiceria=attrs.tiene_tapiceria,
+        tiene_nocheros=attrs.atributos_extra.get("tiene_nocheros", False),
+        tiene_espejo=attrs.atributos_extra.get("tiene_espejo", False),
+        tiene_luces=attrs.tiene_luces,
+        tipo_patas=attrs.tipo_patas,
+        estilo_general=attrs.estilo_general,
+        nivel_confianza=attrs.nivel_confianza,
+        observaciones=f"[Contexto: {contexto_adicional[:50]}...] {attrs.observaciones}" if (contexto_adicional and attrs.observaciones) else (attrs.observaciones or contexto_adicional),
+    )
+    db.add(analisis)
+    db.commit()
+    db.refresh(analisis)
+    return analisis
+
+
+@router.post("/analyze-image", response_model=FurnitureAttributesOut, dependencies=[Depends(require_module('cotizaciones_ia'))])
 async def analyze_image(
     file: UploadFile = File(...),
     contexto_adicional: Optional[str] = Form(None),
@@ -122,9 +145,12 @@ async def analyze_image(
             detail="La imagen supera el tamaño máximo de 10 MB.",
         )
 
-    # Llamar al proveedor de visión
+    # Llamar al proveedor de visión.
+    # La creación del provider (lectura síncrona del prompt) se mueve a un
+    # thread para no bloquear el event loop.
+    import asyncio
     try:
-        provider = _get_vision_provider()
+        provider = await asyncio.to_thread(_get_vision_provider)
         attrs: FurnitureAttributes = await provider.analyze(
             image_bytes=image_bytes,
             mime_type=file.content_type,
@@ -143,24 +169,12 @@ async def analyze_image(
 
     requiere_revision = attrs.nivel_confianza < CONFIANZA_MINIMA
 
-    # Guardar el análisis en la BD para trazabilidad
-    analisis = CotizacionAnalisisIA(
-        cotizacion_id=None,
-        foto_url=file.filename or "upload",
-        tipo_mueble=attrs.tipo_mueble,
-        familia_probable=attrs.familia_probable,
-        tiene_tapiceria=attrs.tiene_tapiceria,
-        tiene_nocheros=attrs.atributos_extra.get("tiene_nocheros", False),
-        tiene_espejo=attrs.atributos_extra.get("tiene_espejo", False),
-        tiene_luces=attrs.tiene_luces,
-        tipo_patas=attrs.tipo_patas,
-        estilo_general=attrs.estilo_general,
-        nivel_confianza=attrs.nivel_confianza,
-        observaciones=f"[Contexto: {contexto_adicional[:50]}...] {attrs.observaciones}" if (contexto_adicional and attrs.observaciones) else (attrs.observaciones or contexto_adicional),
+    # Guardar el análisis en la BD para trazabilidad.
+    # SQLAlchemy aquí es síncrono: la persistencia se ejecuta en un thread
+    # (asyncio.to_thread) para no bloquear el event loop con I/O de red a PG.
+    analisis = await asyncio.to_thread(
+        _persistir_analisis, db, file, attrs, contexto_adicional,
     )
-    db.add(analisis)
-    db.commit()
-    db.refresh(analisis)
 
     return FurnitureAttributesOut(
         tipo_mueble=attrs.tipo_mueble,
@@ -182,7 +196,7 @@ async def analyze_image(
 # POST /find-similar
 # ---------------------------------------------------------------------------
 
-@router.post("/find-similar", response_model=FindSimilarResponse)
+@router.post("/find-similar", response_model=FindSimilarResponse, dependencies=[Depends(require_module('cotizaciones_ia'))])
 def find_similar(payload: FindSimilarRequest, db: Session = Depends(get_db)):
     """
     Paso 2: Busca las estructuras históricas más similares.
@@ -241,7 +255,7 @@ def find_similar(payload: FindSimilarRequest, db: Session = Depends(get_db)):
 # POST /create-draft
 # ---------------------------------------------------------------------------
 
-@router.post("/create-draft", response_model=DraftOut)
+@router.post("/create-draft", response_model=DraftOut, dependencies=[Depends(require_module('cotizaciones_ia'))])
 def create_draft(payload: CreateDraftRequest, db: Session = Depends(get_db)):
     """
     Paso 3: Genera el borrador de cotización editable.
@@ -276,7 +290,7 @@ def create_draft(payload: CreateDraftRequest, db: Session = Depends(get_db)):
 
     materiales_out = [
         MaterialLineaOut(
-            material_id=m["material_id"],
+            material_id=m.get("material_id"),
             nombre=m["nombre"],
             tipo_escala=m["tipo_escala"],
             cantidad_base=m["cantidad_base"],
@@ -311,7 +325,7 @@ def create_draft(payload: CreateDraftRequest, db: Session = Depends(get_db)):
 # POST /recalculate
 # ---------------------------------------------------------------------------
 
-@router.post("/recalculate", response_model=DraftOut)
+@router.post("/recalculate", response_model=DraftOut, dependencies=[Depends(require_module('cotizaciones_ia'))])
 def recalculate(payload: RecalculateRequest, db: Session = Depends(get_db)):
     """
     Paso 4 (opcional): Recalcula los costos del borrador con cambios manuales.
@@ -330,39 +344,40 @@ def recalculate(payload: RecalculateRequest, db: Session = Depends(get_db)):
     materiales_out = []
 
     for linea in payload.materiales:
+        mat = db.query(Material).filter(Material.id == linea.material_id).first() if linea.material_id else None
+
         if not linea.activo:
             # Material desactivado: incluirlo en la lista pero con costo 0
-            mat = db.query(Material).filter(Material.id == linea.material_id).first()
-            if mat:
-                materiales_out.append(MaterialLineaOut(
-                    material_id=linea.material_id,
-                    nombre=mat.nombre,
-                    tipo_escala="FIJO",
-                    cantidad_base=linea.cantidad_calculada,
-                    cantidad_calculada=linea.cantidad_calculada,
-                    unidad=mat.unidad_medida.abreviatura if mat.unidad_medida else "",
-                    costo_unitario=float(mat.costo_base),
-                    costo_total=0.0,
-                    activo=False,
-                ))
-            continue
-
-        mat = db.query(Material).filter(Material.id == linea.material_id).first()
-        if not mat:
+            materiales_out.append(MaterialLineaOut(
+                material_id=linea.material_id,
+                nombre=(mat.nombre if mat else linea.nombre) or "Insumo libre",
+                tipo_escala="FIJO",
+                cantidad_base=linea.cantidad_calculada,
+                cantidad_calculada=linea.cantidad_calculada,
+                unidad=mat.unidad_medida.abreviatura if (mat and mat.unidad_medida) else "",
+                costo_unitario=float(mat.costo_base) if mat else 0.0,
+                costo_total=0.0,
+                activo=False,
+            ))
             continue
 
         cantidad = D(str(linea.cantidad_calculada))
-        costo_unit = D(str(mat.costo_base))
+        if mat:
+            costo_unit = D(str(mat.costo_base))
+        elif linea.costo_unitario is not None:
+            costo_unit = D(str(linea.costo_unitario))
+        else:
+            costo_unit = D("0")
         costo_total = cantidad * costo_unit
         total_materiales += costo_total
 
         materiales_out.append(MaterialLineaOut(
             material_id=linea.material_id,
-            nombre=mat.nombre,
+            nombre=(mat.nombre if mat else linea.nombre) or "Insumo libre",
             tipo_escala="FIJO",  # el tipo_escala no cambia en recálculo manual
             cantidad_base=linea.cantidad_calculada,
             cantidad_calculada=linea.cantidad_calculada,
-            unidad=mat.unidad_medida.abreviatura if mat.unidad_medida else "",
+            unidad=mat.unidad_medida.abreviatura if (mat and mat.unidad_medida) else "",
             costo_unitario=float(costo_unit),
             costo_total=float(costo_total),
             activo=True,
@@ -402,7 +417,25 @@ def recalculate(payload: RecalculateRequest, db: Session = Depends(get_db)):
 # POST /finalize
 # ---------------------------------------------------------------------------
 
-@router.post("/finalize", response_model=FinalizeResponse)
+def _analisis_con_lock(db: Session, analisis_id):
+    """
+    Bloquea la fila del análisis de imagen (FOR UPDATE) y devuelve
+    (analisis, cotizacion_existente). Si el análisis ya generó una cotización,
+    devuelve esa cotización para NO duplicarla (idempotencia ante doble clic
+    o retry del mismo request).
+    """
+    if not analisis_id:
+        return None, None
+    analisis = db.query(CotizacionAnalisisIA).filter(
+        CotizacionAnalisisIA.id == analisis_id
+    ).with_for_update().first()
+    if not analisis or not analisis.cotizacion_id:
+        return analisis, None
+    cotizacion = db.query(Cotizacion).filter(Cotizacion.id == analisis.cotizacion_id).first()
+    return analisis, cotizacion
+
+
+@router.post("/finalize", response_model=FinalizeResponse, dependencies=[Depends(require_module('cotizaciones_ia'))])
 def finalize(payload: FinalizeRequest, db: Session = Depends(get_db)):
     """
     Paso 5: Guarda definitivamente la cotización y su receta detallada en la BD.
@@ -412,23 +445,37 @@ def finalize(payload: FinalizeRequest, db: Session = Depends(get_db)):
     """
     from decimal import Decimal as D
 
+    # 0. Idempotencia: si este análisis ya generó una cotización, devolverla
+    analisis, cotizacion_existente = _analisis_con_lock(db, payload.analisis_id)
+    if cotizacion_existente:
+        return FinalizeResponse(
+            cotizacion_id=cotizacion_existente.id,
+            total_estimado=float(cotizacion_existente.total_estimado or 0),
+            pdf_url=f"/api/v1/cotizacion/{cotizacion_existente.id}/imprimir",
+            mensaje="La cotización ya fue guardada a partir de este análisis. Se devuelve la existente."
+        )
+
     # 1. Recalcular costos finales basados en los materiales actuales del inventario
     total_materiales = D("0")
     materiales_validos = []
 
     for linea in payload.materiales:
-        mat = db.query(Material).filter(Material.id == linea.material_id).first()
-        if not mat:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Material con ID {linea.material_id} no existe."
-            )
+        mat = db.query(Material).filter(Material.id == linea.material_id).first() if linea.material_id else None
 
-        if linea.activo:
+        if not linea.activo:
+            # Material desactivado: se conserva en la receta (activo=False) si existe
+            if mat:
+                materiales_validos.append((mat, linea))
+            continue
+
+        if mat:
             costo_linea = D(str(linea.cantidad_calculada)) * D(str(mat.costo_base))
             total_materiales += costo_linea
-
-        materiales_validos.append((mat, linea))
+            materiales_validos.append((mat, linea))
+        elif linea.costo_unitario is not None:
+            # Insumo libre sin material de inventario: aporta su costo pero no se
+            # persiste en cotizacion_detalle_material (requiere material_id)
+            total_materiales += D(str(linea.cantidad_calculada)) * D(str(linea.costo_unitario))
 
     pct_mo = payload.pct_mano_obra / D("100")
     pct_g = payload.pct_gastos / D("100")
@@ -480,10 +527,9 @@ def finalize(payload: FinalizeRequest, db: Session = Depends(get_db)):
         db.add(detalle_material)
 
     # 5. Si hay un análisis de imagen previo, asociarlo a esta cotización
-    if payload.analisis_id:
-        analisis = db.query(CotizacionAnalisisIA).filter(CotizacionAnalisisIA.id == payload.analisis_id).first()
-        if analisis:
-            analisis.cotizacion_id = cotizacion.id
+    #    (la fila ya está bloqueada con FOR UPDATE desde la idempotencia)
+    if analisis:
+        analisis.cotizacion_id = cotizacion.id
 
     db.commit()
 
@@ -499,7 +545,7 @@ def finalize(payload: FinalizeRequest, db: Session = Depends(get_db)):
 # Estructura de Costos Editable con IA (v2)
 # ---------------------------------------------------------------------------
 
-@router.post("/generate-structure", response_model=GenerateStructureOut)
+@router.post("/generate-structure", response_model=GenerateStructureOut, dependencies=[Depends(require_module('cotizaciones_ia'))])
 def generate_structure(payload: GenerateStructureRequest, db: Session = Depends(get_db)):
     """
     Paso 3 (Inteligente): Genera la estructura de costos a partir de
@@ -540,7 +586,7 @@ def generate_structure(payload: GenerateStructureRequest, db: Session = Depends(
         )
 
 
-@router.post("/recalculate-structure", response_model=GenerateStructureOut)
+@router.post("/recalculate-structure", response_model=GenerateStructureOut, dependencies=[Depends(require_module('cotizaciones_ia'))])
 def recalculate_structure_endpoint(payload: RecalculateStructureRequest, db: Session = Depends(get_db)):
     """
     Recalcula subtotales, totales y desgloses de la estructura de costos editada.
@@ -563,7 +609,7 @@ def recalculate_structure_endpoint(payload: RecalculateStructureRequest, db: Ses
         )
 
 
-@router.post("/finalize-structure", response_model=FinalizeResponse)
+@router.post("/finalize-structure", response_model=FinalizeResponse, dependencies=[Depends(require_module('cotizaciones_ia'))])
 def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(get_db)):
     """
     Paso 5: Guarda la cotización terminada (Opción B) o la registra como
@@ -698,6 +744,16 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
                 detail="El cliente es requerido para guardar como Cotización."
             )
 
+        # Idempotencia: si este análisis ya generó una cotización, devolverla
+        analisis, cotizacion_existente = _analisis_con_lock(db, payload.analisis_id)
+        if cotizacion_existente:
+            return FinalizeResponse(
+                cotizacion_id=cotizacion_existente.id,
+                total_estimado=float(cotizacion_existente.total_estimado or 0),
+                pdf_url=f"/api/v1/cotizacion/{cotizacion_existente.id}/imprimir",
+                mensaje="La cotización ya fue guardada a partir de este análisis. Se devuelve la existente."
+            )
+
         cotizacion = Cotizacion(
             cliente_id=payload.cliente_id,
             fecha=datetime.date.today(),
@@ -740,10 +796,8 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
                 )
                 db.add(detalle_material)
 
-        if payload.analisis_id:
-            analisis = db.query(CotizacionAnalisisIA).filter(CotizacionAnalisisIA.id == payload.analisis_id).first()
-            if analisis:
-                analisis.cotizacion_id = cotizacion.id
+        if analisis:
+            analisis.cotizacion_id = cotizacion.id
 
         db.commit()
 
