@@ -75,22 +75,30 @@ def eliminar_pedido(
 @router.post("/convertir/{id_cotizacion}", response_model=schemas.PedidoResponse, status_code=status.HTTP_201_CREATED)
 def convertir_cotizacion_a_pedido(
     id_cotizacion: int,
-    detalles: List[schemas.DetallePedidoCreate],
-    fecha_entrega_estimada: Optional[str] = Query(None, description="Fecha estimada de entrega (YYYY-MM-DD)"),
+    body: schemas.ConvertirCotizacionBody,
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     from datetime import date as fecha_tipo
     fecha_entrega = None
-    if fecha_entrega_estimada:
+    if body.fecha_entrega_estimada:
         try:
-            fecha_entrega = fecha_tipo.fromisoformat(fecha_entrega_estimada)
+            fecha_entrega = fecha_tipo.fromisoformat(body.fecha_entrega_estimada)
         except ValueError:
             raise HTTPException(status_code=400, detail="Formato de fecha invalido, use YYYY-MM-DD")
 
-    detalles_dict = [d.model_dump() for d in detalles]
+    detalles_dict = [d.model_dump() for d in body.detalles]
     try:
-        return service.convertir_cotizacion_a_pedido(db, id_cotizacion, fecha_entrega, detalles_dict)
+        return service.convertir_cotizacion_a_pedido(
+            db,
+            id_cotizacion,
+            fecha_entrega,
+            detalles_dict,
+            adelanto=body.adelanto,
+            moneda_adelanto_id=body.moneda_adelanto_id,
+            tasa_cambio_adelanto=body.tasa_cambio_adelanto,
+            metodo_pago=body.metodo_pago,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except IntegrityError:

@@ -26,7 +26,7 @@ def obtener_ventas(db: Session, salto: int = 0, limite: int = 100, buscar: str =
         )
     return query.offset(salto).limit(limite).all()
 
-def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
+def crear_venta_desde_pedido(db: Session, esquema: VentaCreate, permitir_estado_cotizado: bool = False, commit: bool = True):
     
     pedido = db.query(Pedido).filter(Pedido.id == esquema.pedido_id).with_for_update().first()
     if not pedido:
@@ -34,7 +34,7 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
 
     # 2. Validar estado del pedido
     estados_facturables = ["APROBADO", "PRODUCCION", "TERMINADO", "ENTREGADO"]
-    if pedido.estado not in estados_facturables:
+    if pedido.estado not in estados_facturables and not (permitir_estado_cotizado and pedido.estado == "COTIZADO"):
         raise ValueError(
             f"El pedido debe estar en estado {', '.join(estados_facturables)} para poder ser facturado. "
             f"Estado actual: {pedido.estado}"
@@ -45,12 +45,25 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
     if venta_existente:
         raise ValueError("Ya existe una factura de venta para este pedido.")
 
-    # 4. Crear cabecera de la venta
-    tasa_cambio = tasa_cambio_service.obtener_tasa_moneda_a_cop(db, esquema.moneda_id, esquema.fecha or date.today())
+    # 4. Determinar la moneda: si no viene en el request, usar la moneda de la cotización
+    moneda_id = esquema.moneda_id or (pedido.cotizacion.moneda_id if pedido.cotizacion else None)
+    if not moneda_id:
+        raise ValueError("No se pudo determinar la moneda de la factura. Especifica una moneda.")
+
+    # 4b. Tasa de cambio: respetar la fijada en la cotización (la TRM se congela al cotizar).
+    #     Solo si el pedido no tiene cotización (o la moneda difiere) se refetchea la tasa vigente.
+    tasa_cambio = None
+    cot = pedido.cotizacion if pedido.cotizacion else None
+    if cot and moneda_id == cot.moneda_id and cot.tasa_cambio:
+        tasa_cambio = float(cot.tasa_cambio)
+    if not tasa_cambio:
+        tasa_cambio = tasa_cambio_service.obtener_tasa_moneda_a_cop(db, moneda_id, esquema.fecha or date.today())
+
+    # Crear cabecera de la venta
     db_venta = Venta(
         pedido_id=esquema.pedido_id,
         cliente_id=pedido.cliente_id,
-        moneda_id=esquema.moneda_id,
+        moneda_id=moneda_id,
         fecha=esquema.fecha or date.today(),
         total=0.0,
         estado="PENDIENTE",
@@ -88,7 +101,11 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate):
     # 6. Actualizar el total de la venta
     db_venta.total = total
     db_venta.total_en_moneda_base = round(total * float(tasa_cambio), 2)
-    db.commit()
+    # commit=False: el llamador mantiene la transacción atómica (p.ej. conversión de cotización)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(db_venta)
     return db_venta
 
@@ -107,8 +124,15 @@ def eliminar_venta(db: Session, id_venta: int):
     db_venta = obtener_venta(db, id_venta)
     if not db_venta:
         return False
-    # La eliminacion en cascada eliminara detalle_venta, pero pago tiene ON DELETE RESTRICT
-    # por lo que si hay pagos asociados, fallara a nivel de BD de forma segura.
+    # No permitir eliminar una factura con abonos: el FK pago.venta_id es
+    # NOT NULL y SQLAlchemy intentaría anularlo (500). Exigir su anulación previa.
+    if db_venta.pagos:
+        raise ValueError(
+            "No se puede eliminar una factura con pagos registrados. "
+            "Anula o elimina los pagos asociados primero."
+        )
+    # La eliminacion en cascada eliminara detalle_venta (ondelete=CASCADE); pago
+    # tiene ON DELETE RESTRICT, de modo que sin pagos asociados la BD falla de forma segura.
     db.delete(db_venta)
     db.commit()
     return True
@@ -120,7 +144,7 @@ def eliminar_venta(db: Session, id_venta: int):
 def obtener_pago(db: Session, id_pago: int):
     return db.query(Pago).filter(Pago.id == id_pago).first()
 
-def crear_pago(db: Session, esquema: PagoCreate):
+def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True):
     # 1. Obtener la venta con FOR UPDATE para serializar pagos concurrentes:
     #    dos abonos simultáneos no pueden validar el saldo al mismo tiempo.
     venta = db.query(Venta).filter(Venta.id == esquema.venta_id).with_for_update().first()
@@ -192,7 +216,9 @@ def crear_pago(db: Session, esquema: PagoCreate):
     else:
         venta.estado = "PENDIENTE"
 
-    db.commit()
+    # commit=False: el llamador mantiene la transacción atómica (p.ej. conversión de cotización)
+    if commit:
+        db.commit()
     db.refresh(db_pago)
     return db_pago
 

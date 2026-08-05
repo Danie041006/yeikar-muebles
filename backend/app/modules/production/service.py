@@ -96,14 +96,28 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
         db_orden.fecha_inicio = date.today()
     elif nuevo_estado == 'FINALIZADA':
         db_orden.fecha_fin = date.today()
-        # Calcular y guardar costos al finalizar orden
-        try:
-            calcular_y_guardar_costo(db, id_orden)
-        except Exception as e:
-            # Imprimir error pero no bloquear la finalización
-            print(f"Error al calcular costos automáticos al finalizar orden {id_orden}: {e}")
-            
-        # Sincronizar estado del Pedido a TERMINADO si todas sus órdenes de producción están en FINALIZADA.
+
+        # C2: no se puede finalizar una orden sin ninguna etapa creada
+        n_etapas = db.query(EtapaProduccion).filter(
+            EtapaProduccion.orden_produccion_id == id_orden
+        ).count()
+        if n_etapas == 0:
+            raise ValueError(
+                "No se puede finalizar una orden de producción sin etapas. "
+                "Cree al menos una etapa antes de finalizar."
+            )
+
+        # C4: calcular y guardar costos al finalizar SOLO si no existe un costo
+        # ya calculado manualmente (no pisar la ganancia/gastos del supervisor).
+        if not obtener_costo_por_orden(db, id_orden):
+            try:
+                calcular_y_guardar_costo(db, id_orden)
+            except Exception as e:
+                # Imprimir error pero no bloquear la finalización
+                print(f"Error al calcular costos automáticos al finalizar orden {id_orden}: {e}")
+
+        # Sincronizar estado del Pedido a TERMINADO si TODAS las líneas del pedido
+        # tienen una orden de producción FINALIZADA (no solo las que tienen orden).
         # FOR UPDATE sobre el pedido: dos finalizaciones simultáneas de órdenes del
         # mismo pedido se serializan, evitando que ambas lean "no todas finalizadas"
         # y que el pedido nunca pase a TERMINADO (o que se cree envío dos veces).
@@ -112,12 +126,19 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
             if detalle:
                 pedido = db.query(Pedido).filter(Pedido.id == detalle.pedido_id).with_for_update().first()
                 if pedido:
-                    # Cargar todas las órdenes de producción vinculadas a este pedido
-                    detalles_ids = [d.id for d in pedido.detalles]
-                    ordenes = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id.in_(detalles_ids)).all()
-                    
-                    # Verificar si todas están FINALIZADA
-                    todas_finalizadas = all(o.estado == "FINALIZADA" for o in ordenes)
+                    # C3: TODAS las líneas del pedido deben tener su orden FINALIZADA.
+                    # Si alguna línea no tiene orden de producción, el pedido NO termina.
+                    n_detalles = db.query(DetallePedido).filter(
+                        DetallePedido.pedido_id == pedido.id
+                    ).count()
+                    n_ordenes_finalizadas = db.query(OrdenProduccion).join(
+                        DetallePedido, DetallePedido.id == OrdenProduccion.detalle_pedido_id
+                    ).filter(
+                        DetallePedido.pedido_id == pedido.id,
+                        OrdenProduccion.estado == "FINALIZADA",
+                    ).count()
+                    todas_finalizadas = n_detalles > 0 and n_ordenes_finalizadas == n_detalles
+
                     if todas_finalizadas:
                         pedido.estado = "TERMINADO"
                         # Generar envío automático
@@ -125,7 +146,7 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
                         crear_envio_automatico(db, pedido.id)
         except Exception as e:
             print(f"Error al verificar estado del pedido e iniciar envío para orden {id_orden}: {e}")
-        
+
     db.commit()
     db.refresh(db_orden)
     return db_orden
@@ -207,9 +228,15 @@ def eliminar_etapa_produccion(db: Session, id_etapa: int):
 def obtener_consumo_material(db: Session, id_consumo: int):
     return db.query(ConsumoMaterial).filter(ConsumoMaterial.id == id_consumo).first()
 def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate):
-    # 1. Validar que la cantidad sea positiva
+    # 0. Validar que la cantidad sea positiva
     if esquema.cantidad <= 0:
         raise ValueError("La cantidad debe ser mayor que cero")
+    # 1. Validar que la etapa exista (evita IntegrityError 500 por FK)
+    etapa = db.query(EtapaProduccion).filter(
+        EtapaProduccion.id == esquema.etapa_produccion_id
+    ).first()
+    if not etapa:
+        raise ValueError("La etapa de producción especificada no existe.")
     # 2. Obtener la ubicación del depósito principal (búsqueda dinámica)
     ubicacion = db.query(Ubicacion).filter(Ubicacion.nombre == "Depósito Principal").first()
     if not ubicacion:
@@ -325,6 +352,39 @@ def eliminar_consumo_material(db: Session, id_consumo: int):
     db_consumo = obtener_consumo_material(db, id_consumo)
     if not db_consumo:
         return False
+
+    etapa_id = db_consumo.etapa_produccion_id
+    material_id = db_consumo.material_id
+    cantidad = db_consumo.cantidad
+
+    # C6: reponer el stock descontado por el consumo (movimiento inverso ENTRADA)
+    try:
+        from app.modules.inventory.schemas import MovimientoCreate
+        ubicacion = db.query(Ubicacion).filter(Ubicacion.nombre == "Depósito Principal").first()
+        movimiento = MovimientoCreate(
+            material_id=material_id,
+            ubicacion_id=ubicacion.id if ubicacion else 1,
+            tipo="ENTRADA",
+            cantidad=cantidad,
+            referencia_tipo="produccion",
+            referencia_id=db_consumo.id,
+            observaciones=f"Reversa de consumo en etapa {etapa_id}",
+        )
+        registrar_movimiento(db, movimiento)
+    except Exception as e:  # noqa: BLE001 — no romper la eliminación si la reversa falla
+        print(f"Error al reponer stock al eliminar consumo {id_consumo}: {e}")
+
+    # Revertir el gasto generado automáticamente por el consumo
+    from app.modules.gastos.model import Gasto
+    material = db.query(Material).filter(Material.id == material_id).first()
+    if material:
+        descripcion = (
+            f"Consumo {material.nombre} ({cantidad}) - Etapa #{etapa_id}"
+        )
+        db.query(Gasto).filter(Gasto.descripcion == descripcion).delete(
+            synchronize_session=False
+        )
+
     db.delete(db_consumo)
     db.commit()
     return True

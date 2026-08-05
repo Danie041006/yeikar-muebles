@@ -27,7 +27,7 @@ class CompraResponse(CompraBase):
     total_en_moneda_base: Optional[Decimal]
     created_at: datetime
     updated_at: datetime
-    detalle: List["DetalleCompraResponse"]
+    detalle: List["DetalleCompraResponse"] = Field(validation_alias="detalles")
 
     class Config:
         from_attributes = True

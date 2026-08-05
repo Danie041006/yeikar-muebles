@@ -966,7 +966,7 @@ CREATE TABLE public.pago (
     observaciones text,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT pago_metodo_pago_check CHECK (((metodo_pago)::text = ANY ((ARRAY['EFECTIVO_COP'::character varying, 'EFECTIVO_USD'::character varying, 'BANCOLOMBIA'::character varying, 'BANCARIBE'::character varying, 'ZELLE'::character varying])::text[]))),
+    CONSTRAINT pago_metodo_pago_check CHECK (((metodo_pago)::text = ANY ((ARRAY['EFECTIVO_COP'::character varying, 'EFECTIVO_USD'::character varying, 'EFECTIVO_VES'::character varying, 'BANCOLOMBIA'::character varying, 'BANCARIBE'::character varying, 'ZELLE'::character varying])::text[]))),
     CONSTRAINT pago_monto_check CHECK ((monto > (0)::numeric))
 );
 

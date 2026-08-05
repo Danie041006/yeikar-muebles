@@ -65,7 +65,10 @@ def eliminar_factura_venta(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_venta(db, id)
+    try:
+        exito = service.eliminar_venta(db, id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not exito:
         raise HTTPException(status_code=404, detail="Factura de venta no encontrada")
     return None

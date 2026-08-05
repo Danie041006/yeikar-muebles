@@ -77,7 +77,8 @@ class VentaBase(BaseModel):
 
 class VentaCreate(BaseModel):
     pedido_id: int
-    moneda_id: int
+    # Si no se indica, se usa la moneda de la cotización que originó el pedido.
+    moneda_id: Optional[int] = None
     fecha: Optional[date] = None
     observaciones: Optional[str] = None
 

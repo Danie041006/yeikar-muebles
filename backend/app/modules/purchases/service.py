@@ -108,7 +108,30 @@ def actualizar_compra(db: Session, compra_id: int, compra_update: schemas.Compra
                     observaciones="Entrada por compra (actualizada a recibida)",
                 )
                 inventory_service.registrar_movimiento(db, movimiento)
-                
+
+    # Revertir stock si la compra SALIÓ de RECIBIDA (CANCELADA, BORRADOR, EMITIDA).
+    # La entrada de inventario solo tiene validez mientras la compra siga RECIBIDA.
+    if viejo_estado == "RECIBIDA" and db_compra.estado != "RECIBIDA":
+        from app.modules.inventory.model import MovimientoInventario
+        movimientos = db.query(MovimientoInventario).filter(
+            MovimientoInventario.referencia_tipo == "COMPRA",
+            MovimientoInventario.referencia_id == db_compra.id
+        ).all()
+        for mov in movimientos:
+            if mov.tipo == "ENTRADA":
+                for detalle in db_compra.detalles:
+                    if detalle.material_id == mov.material_id:
+                        salida = inventory_schemas.MovimientoCreate(
+                            material_id=mov.material_id,
+                            ubicacion_id=mov.ubicacion_id,
+                            tipo="SALIDA",
+                            cantidad=mov.cantidad,
+                            referencia_tipo="COMPRA",
+                            referencia_id=db_compra.id,
+                            observaciones=f"Reversa de entrada por compra ({db_compra.estado})",
+                        )
+                        inventory_service.registrar_movimiento(db, salida)
+
     db.commit()
     db.refresh(db_compra)
     return db_compra

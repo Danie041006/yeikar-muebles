@@ -116,6 +116,83 @@ def _redondear(valor: Decimal, decimales: int = 4) -> Decimal:
     return valor.quantize(cuantificador, rounding=ROUND_HALF_UP)
 
 
+def _calcular_cantidad_material(
+    pm: ProductoMaterial,
+    nuevo_ancho: Decimal,
+    nuevo_largo: Decimal,
+    ancho_base: Decimal,
+    largo_base: Decimal,
+    area_base: Decimal,
+    area_nueva: Decimal,
+    atributos: dict = None,
+) -> Decimal:
+    """
+    Calcula la cantidad escalada de un material según su tipo_escala y dimensiones.
+    Incluye verificación de condicion_activacion y es_fijo_override.
+    """
+    tipo = pm.tipo_escala
+    cantidad_base = Decimal(str(pm.cantidad_base))
+
+    # Verificar condición de activación
+    if pm.condicion_activacion:
+        if not _evaluar_condicion(pm.condicion_activacion, nuevo_ancho, nuevo_largo, atributos):
+            return Decimal("0")
+
+    # Override fijo
+    if pm.es_fijo_override:
+        return _redondear(cantidad_base)
+
+    # Aplicar fórmula según tipo_escala
+    if tipo == "FIJO":
+        cantidad = cantidad_base
+
+    elif tipo == "LINEAL":
+        if largo_base == 0:
+            cantidad = cantidad_base
+        else:
+            cantidad = cantidad_base * (nuevo_largo / largo_base)
+
+    elif tipo == "AREA":
+        if area_base == 0:
+            cantidad = cantidad_base
+        else:
+            cantidad = cantidad_base * (area_nueva / area_base)
+
+    elif tipo == "ESPACIADO":
+        distancia = (
+            Decimal(str(pm.distancia_pauta_cm))
+            if pm.distancia_pauta_cm
+            else Decimal("30")
+        )
+        por_pieza = pm.tornillos_por_pieza or 1
+
+        perimetro_base = 2 * (largo_base + ancho_base)
+        perimetro_nuevo = 2 * (nuevo_largo + nuevo_ancho)
+
+        perimetro_nuevo_cm = perimetro_nuevo * 100
+        perimetro_base_cm = perimetro_base * 100
+
+        piezas_base = perimetro_base_cm / distancia + 1
+        piezas_nuevas = perimetro_nuevo_cm / distancia + 1
+
+        if piezas_base == 0:
+            cantidad = cantidad_base
+        else:
+            cantidad = (piezas_nuevas / piezas_base) * cantidad_base * Decimal(str(por_pieza))
+
+    elif tipo == "POR_RANGO":
+        resultado = _calcular_por_rango(pm.rangos, nuevo_largo)
+        cantidad = resultado if resultado is not None else cantidad_base
+
+    elif tipo == "FORMULA":
+        cantidad = cantidad_base
+
+    else:
+        cantidad = cantidad_base
+
+    return max(Decimal("0"), _redondear(cantidad))
+
+
 # ---------------------------------------------------------------------------
 # Función principal
 # ---------------------------------------------------------------------------
@@ -164,7 +241,11 @@ def calcular_costo_producto(
 
         for pm in receta:
             material = pm.material
-            costo_linea = pm.cantidad_base * Decimal(str(material.costo_base))
+            cantidad_calculada = _calcular_cantidad_material(
+                pm, nuevo_ancho, nuevo_largo, ancho_base, largo_base,
+                area_base, area_nueva, atributos,
+            )
+            costo_linea = cantidad_calculada * Decimal(str(material.costo_base))
             seccion = (pm.seccion or "EBANISTERIA").upper()
             es_nochero = seccion == "NOCHEROS"
 
@@ -175,9 +256,9 @@ def calcular_costo_producto(
                 "tipo_escala": pm.tipo_escala,
                 "seccion": seccion,
                 "condicion_activacion": pm.condicion_activacion,
-                "condicion_cumplida": True,
+                "condicion_cumplida": cantidad_calculada > 0 or not pm.condicion_activacion,
                 "cantidad_base": float(pm.cantidad_base),
-                "cantidad_calculada": float(pm.cantidad_base),
+                "cantidad_calculada": float(cantidad_calculada),
                 "unidad": material.unidad_medida.abreviatura if material.unidad_medida else "",
                 "costo_unitario": float(material.costo_base),
                 "costo_total": float(costo_linea),
@@ -295,52 +376,6 @@ def calcular_costo_producto(
             "costo_nochero": float(costo_nochero),
         }
         return resultado
-
-    # Si por alguna razón el producto no tiene receta cargada, usamos los valores fijos del Excel como fallback
-    elif producto.precio_venta_base is not None:
-        precio_sin_iva = Decimal(str(producto.precio_venta_base))
-        precio_con_iva = Decimal(str(producto.precio_venta_con_iva)) if producto.precio_venta_con_iva else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")))
-        costo_produccion = Decimal(str(producto.precio_costo_base)) if producto.precio_costo_base else (precio_sin_iva / (Decimal("1") + ganancia_porcentaje / Decimal("100")))
-        costo_total_materiales = costo_produccion / (Decimal("1") + (pct_mano_obra + pct_gastos) / Decimal("100"))
-        costo_mano_obra = costo_total_materiales * pct_mano_obra / Decimal("100")
-        costo_gastos = costo_total_materiales * pct_gastos / Decimal("100")
-
-        return {
-            "producto_id": producto.id,
-            "producto_nombre": producto.nombre,
-            "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
-            "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
-            "materiales": [],
-            "materiales_detalle": [],
-            "resumen_costos": {
-                "costo_materiales": float(costo_total_materiales),
-                "costo_mano_obra": float(costo_mano_obra),
-                "pct_mano_obra": float(pct_mano_obra),
-                "costo_gastos": float(costo_gastos),
-                "costo_gastos_indirectos": float(costo_gastos),
-                "pct_gastos": float(pct_gastos),
-                "costo_produccion": float(costo_produccion),
-                "costo_total": float(costo_produccion),
-                "ganancia_porcentaje": float(ganancia_porcentaje),
-                "precio_sin_iva": float(precio_sin_iva),
-                "iva_porcentaje": float(iva_porcentaje),
-                "precio_con_iva": float(precio_con_iva),
-                "precio_sugerido": float(precio_con_iva),
-                "precio_venta": float(precio_con_iva),
-            },
-            "costo_materiales": float(costo_total_materiales),
-            "costo_mano_obra": float(costo_mano_obra),
-            "costo_gastos": float(costo_gastos),
-            "costo_gastos_indirectos": float(costo_gastos),
-            "costo_produccion": float(costo_produccion),
-            "costo_total": float(costo_produccion),
-            "ganancia_porcentaje": float(ganancia_porcentaje),
-            "precio_sin_iva": float(precio_sin_iva),
-            "iva_porcentaje": float(iva_porcentaje),
-            "precio_con_iva": float(precio_con_iva),
-            "precio_sugerido": float(precio_con_iva),
-            "precio_venta": float(precio_con_iva),
-        }
 
     # --- 2. Cargar receta de materiales ------------------------------------
     receta: list[ProductoMaterial] = (
@@ -477,6 +512,53 @@ def calcular_costo_producto(
                 "precio_con_iva": float(precio_con_iva_el),
                 "precio_sugerido": float(precio_con_iva_el),
                 "precio_venta": float(precio_con_iva_el),
+            }
+
+        # Si el producto no tiene secciones ni receta pero sí precios fijos del
+        # Excel, se usan como último recurso (NO antes de las secciones).
+        if producto.precio_venta_base is not None:
+            precio_sin_iva = Decimal(str(producto.precio_venta_base))
+            precio_con_iva = Decimal(str(producto.precio_venta_con_iva)) if producto.precio_venta_con_iva else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")))
+            costo_produccion = Decimal(str(producto.precio_costo_base)) if producto.precio_costo_base else (precio_sin_iva / (Decimal("1") + ganancia_porcentaje / Decimal("100")))
+            costo_total_materiales = costo_produccion / (Decimal("1") + (pct_mano_obra + pct_gastos) / Decimal("100"))
+            costo_mano_obra = costo_total_materiales * pct_mano_obra / Decimal("100")
+            costo_gastos = costo_total_materiales * pct_gastos / Decimal("100")
+
+            return {
+                "producto_id": producto.id,
+                "producto_nombre": producto.nombre,
+                "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
+                "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
+                "materiales": [],
+                "materiales_detalle": [],
+                "resumen_costos": {
+                    "costo_materiales": float(costo_total_materiales),
+                    "costo_mano_obra": float(costo_mano_obra),
+                    "pct_mano_obra": float(pct_mano_obra),
+                    "costo_gastos": float(costo_gastos),
+                    "costo_gastos_indirectos": float(costo_gastos),
+                    "pct_gastos": float(pct_gastos),
+                    "costo_produccion": float(costo_produccion),
+                    "costo_total": float(costo_produccion),
+                    "ganancia_porcentaje": float(ganancia_porcentaje),
+                    "precio_sin_iva": float(precio_sin_iva),
+                    "iva_porcentaje": float(iva_porcentaje),
+                    "precio_con_iva": float(precio_con_iva),
+                    "precio_sugerido": float(precio_con_iva),
+                    "precio_venta": float(precio_con_iva),
+                },
+                "costo_materiales": float(costo_total_materiales),
+                "costo_mano_obra": float(costo_mano_obra),
+                "costo_gastos": float(costo_gastos),
+                "costo_gastos_indirectos": float(costo_gastos),
+                "costo_produccion": float(costo_produccion),
+                "costo_total": float(costo_produccion),
+                "ganancia_porcentaje": float(ganancia_porcentaje),
+                "precio_sin_iva": float(precio_sin_iva),
+                "iva_porcentaje": float(iva_porcentaje),
+                "precio_con_iva": float(precio_con_iva),
+                "precio_sugerido": float(precio_con_iva),
+                "precio_venta": float(precio_con_iva),
             }
 
         return {

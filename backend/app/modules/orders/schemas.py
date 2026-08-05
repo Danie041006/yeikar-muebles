@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import List, Optional
 from app.modules.clients.schemas import ClientResponse
 from app.modules.productos.schemas import ProductoResponse
+from app.modules.quotes.schemas import CotizacionResponse
 
 class DetallePedidoBase(BaseModel):
     producto_id: int
@@ -57,7 +58,22 @@ class PedidoResponse(PedidoBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     cliente: Optional[ClientResponse] = None
+    cotizacion: Optional[CotizacionResponse] = None
     detalles: List[DetallePedidoResponse] = []
 
     class Config:
         from_attributes = True
+
+class ConvertirCotizacionBody(BaseModel):
+    detalles: List[DetallePedidoCreate]
+    fecha_entrega_estimada: Optional[str] = None
+    # Abono inicial (OPCIONAL) al convertir cotización → pedido. Si es 0/None, el pedido
+    # se convierte sin abono y la factura queda PENDIENTE.
+    adelanto: Optional[float] = None
+    # Moneda del adelanto. Por defecto se usa la moneda de la cotización.
+    moneda_adelanto_id: Optional[int] = None
+    # TRM solo cuando el abono se recibe en una moneda no deducible de la tasa
+    # de la cotización (p.ej. VES con factura en USD/COP).
+    tasa_cambio_adelanto: Optional[float] = None
+    # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE
+    metodo_pago: Optional[str] = None
