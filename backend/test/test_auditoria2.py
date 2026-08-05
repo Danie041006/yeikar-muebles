@@ -277,3 +277,23 @@ def test_venta_moneda_distinta_a_cotizacion_es_400(client, cleaner, db):
     assert r_venta.status_code == 400, (
         f"esperado 400, se obtuvo {r_venta.status_code}: {r_venta.text}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F) Normalización de secciones en costeo paramétrico
+#    "EBANISTERÍA" (con tilde) debe matchear la regla "EBANISTERIA" y
+#    "EBANISTERÍA (NOCHEROS)" debe activar es_nochero.
+# ---------------------------------------------------------------------------
+def test_normalizar_seccion_canoniza_tildes_y_sufijos():
+    from app.modules.productos.cost_service import _normalizar_seccion
+
+    assert _normalizar_seccion("EBANISTERÍA") == "EBANISTERIA"
+    assert _normalizar_seccion("TAPICERÍA") == "TAPICERIA"
+    assert _normalizar_seccion("PINTURA (CAMA)") == "PINTURA"
+    assert _normalizar_seccion("TENDIDO (PATAS)") == "TENDIDO"
+    assert _normalizar_seccion("EBANISTERÍA (NOCHEROS)") == "NOCHEROS"
+    assert _normalizar_seccion("PINTURA (NOCHEROS)") == "NOCHEROS"
+    assert _normalizar_seccion("NOCHEROS") == "NOCHEROS"
+    assert _normalizar_seccion("COLA DE PATO") == "COLA_DE_PATO"
+    assert _normalizar_seccion(None) == "EBANISTERIA"
+    assert _normalizar_seccion("") == "EBANISTERIA"

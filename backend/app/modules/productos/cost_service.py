@@ -21,6 +21,7 @@ Además se evalúa `condicion_activacion` antes de aplicar la fórmula.
 Si la condición no se cumple, la cantidad del material es 0.
 """
 
+import unicodedata
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session, joinedload
 from app.modules.productos.model import Producto, ProductoMaterial, Material, ReglaGastoSeccion, SeccionProducto, ElementoSeccion, PoliticaSeccion, CostoProduccionSeccion
@@ -29,6 +30,25 @@ from app.modules.productos.model import Producto, ProductoMaterial, Material, Re
 # ---------------------------------------------------------------------------
 # Utilidades internas
 # ---------------------------------------------------------------------------
+
+def _normalizar_seccion(seccion) -> str:
+    """
+    Normaliza el valor de `seccion` a la clave canónica usada en
+    `regla_gasto_seccion` (sin tildes ni sufijos entre paréntesis).
+
+    - "EBANISTERÍA" → "EBANISTERIA"
+    - "PINTURA (CAMA)" → "PINTURA"
+    - "EBANISTERÍA (NOCHEROS)" → "NOCHEROS"
+    """
+    if not seccion:
+        return "EBANISTERIA"
+    s = str(seccion).upper()
+    if "NOCHEROS" in s:
+        return "NOCHEROS"
+    s = "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+    s = s.split("(")[0].strip()
+    s = s.replace(" ", "_")
+    return s or "EBANISTERIA"
 
 def _evaluar_condicion(condicion: dict, nuevo_ancho: Decimal, nuevo_largo: Decimal, atributos: dict = None) -> bool:
     """
@@ -246,7 +266,7 @@ def calcular_costo_producto(
                 area_base, area_nueva, atributos,
             )
             costo_linea = cantidad_calculada * Decimal(str(material.costo_base))
-            seccion = (pm.seccion or "EBANISTERIA").upper()
+            seccion = _normalizar_seccion(pm.seccion)
             es_nochero = seccion == "NOCHEROS"
 
             item = {

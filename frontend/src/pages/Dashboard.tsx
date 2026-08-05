@@ -60,7 +60,7 @@ export default function Dashboard() {
         .then(r => {
           const todayStr = new Date().toISOString().split('T')[0];
           const delayed = r.data.filter(p =>
-            (p.estado === 'PENDIENTE' || p.estado === 'EN_PROCESO') &&
+            (p.estado === 'COTIZADO' || p.estado === 'PRODUCCION') &&
             p.fecha_entrega_estimada &&
             p.fecha_entrega_estimada < todayStr
           );
@@ -240,9 +240,9 @@ export default function Dashboard() {
                       </td>
                       <td className="p-3">
                         <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                          order.estado === 'Entregado' || order.estado === 'Terminado'
+                          order.estado === 'ENTREGADO' || order.estado === 'TERMINADO'
                             ? 'bg-green-50 text-green-700'
-                            : order.estado === 'En producción'
+                            : order.estado === 'PRODUCCION' || order.estado === 'EN_PRODUCCION'
                             ? 'bg-blue-50 text-blue-700'
                             : 'bg-amber-50 text-amber-700'
                         }`}>

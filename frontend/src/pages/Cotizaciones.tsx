@@ -610,7 +610,7 @@ export default function Cotizaciones() {
         }));
       } else {
         const match = selectedQuoteForConvert.observaciones?.match(/Producto: (.*) \((.*)x(.*)m\)/);
-        let pId = products[0]?.id || 1;
+        let pId: number | undefined;
         let w = 1.0, l = 1.0;
         if (match) {
           const pName = match[1];
@@ -618,6 +618,10 @@ export default function Cotizaciones() {
           l = Number(match[3]) || 1.0;
           const found = products.find(p => p.nombre === pName);
           if (found) pId = found.id;
+        }
+        if (!pId) {
+          alert('No se pudo identificar el producto de esta cotización. Verifique que tenga detalles o que el producto exista en el catálogo.');
+          return;
         }
         convertDetails = [
           {

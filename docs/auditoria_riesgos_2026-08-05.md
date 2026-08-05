@@ -3,7 +3,7 @@
 **Fecha:** 2026-08-05
 **Alcance:** módulos de dinero (cotización → pedido → venta → pago), producción/costeo, inventario, compras, seguridad, gastos, clientes, proveedores y concurrencia.
 **Método:** suite de tests de riesgo (`backend/test/`) contra BD real (PostgreSQL), con limpieza estricta del teardown.
-**Resultado:** 67/67 tests en verde (fase 1: 56; fase 2: +11), 0 residuos en BD, frontend compila.
+**Resultado:** 68/68 tests en verde (fase 1: 56; fase 2: +11; fase 3: +1), 0 residuos en BD, frontend compila.
 
 ---
 
@@ -47,6 +47,18 @@
 | F2-14 | Baja | Proveedores | `EmailStr` en salida → `ResponseValidationError` con datos legacy | `str` en `ProveedorResponse` |
 
 Además: `pytest test/` ahora ignora `test_integracion_api.py` (script standalone con `sys.exit`) en `pytest.ini`.
+
+---
+
+## Resumen fase 3 (frontend + costeo)
+
+| # | Severidad | Módulo | Bug | Fix |
+|---|-----------|--------|-----|-----|
+| F3-1 | Alta | Costeo | `seccion` guardada con tilde (`EBANISTERÍA`) nunca matcheaba `regla_gasto_seccion` (`EBANISTERIA`) → 0% de gastos por sección y `es_nochero` inerte | `_normalizar_seccion()` en `cost_service.py` (NFD sin tildes, sufijos `(CAMA)`/`(NOCHEROS)`, espacios→`_`) |
+| F3-2 | Media | Dashboard | Pedidos retrasados siempre en 0: filtro usaba estados inexistentes (`PENDIENTE`/`EN_PROCESO`); badges de estado no pintaban | Estados reales de la BD (`COTIZADO`/`PRODUCCION`; badges `ENTREGADO`/`TERMINADO`/`PRODUCCION`) |
+| F3-3 | Media | Cotizaciones | Conversión a pedido sin detalles: fallback `products[0]?.id \|\| 1` creaba pedido con producto/medidas equivocadas en silencio | Si el producto no se resuelve → `alert` y aborta la conversión |
+
+**Estado:** 68/68 tests, frontend `npm run build` OK.
 
 ---
 
