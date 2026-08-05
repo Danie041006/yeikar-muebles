@@ -18,7 +18,10 @@ def crear_gasto(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    return service.crear_gasto(db, gasto)
+    try:
+        return service.crear_gasto(db, gasto)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/", response_model=List[schemas.GastoResponse])
 def listar_gastos(
@@ -51,7 +54,10 @@ def actualizar_gasto(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    db_gasto = service.actualizar_gasto(db, gasto_id, gasto_update)
+    try:
+        db_gasto = service.actualizar_gasto(db, gasto_id, gasto_update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not db_gasto:
         raise HTTPException(status_code=404, detail="Gasto no encontrado")
     return db_gasto

@@ -15,7 +15,8 @@ class GastoBase(BaseModel):
     observaciones: Optional[str] = None
 
 class GastoCreate(GastoBase):
-    pass
+    # None → se resuelve la tasa vigente (o 1.0 si es COP) en el servicio.
+    tasa_cambio: Optional[Decimal] = Field(None, gt=0)
 
 class GastoUpdate(BaseModel):
     tipo_gasto_id: Optional[int] = None

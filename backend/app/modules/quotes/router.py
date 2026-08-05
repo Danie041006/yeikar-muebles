@@ -52,7 +52,10 @@ def actualizar_cotizacion(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.actualizar_cotizacion(db, id_cotizacion, esquema)
+    try:
+        db_obj = service.actualizar_cotizacion(db, id_cotizacion, esquema)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not db_obj:
         raise HTTPException(status_code=404, detail="Cotizacion no encontrada")
     return db_obj

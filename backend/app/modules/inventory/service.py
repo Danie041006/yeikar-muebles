@@ -118,7 +118,10 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate) -> m
         fecha=datetime.utcnow()
     )
     db.add(db_mov)
-    db.commit()
+    # IMPORTANTE: flush, NO commit. Un commit aquí rompería la transacción del
+    # llamador (compra/producción): si algo falla después, la compra, el detalle y
+    # el movimiento ya quedarían persistidos a medias. El caller commitea al final.
+    db.flush()
     db.refresh(db_mov)
     return db_mov
 

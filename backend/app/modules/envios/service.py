@@ -33,7 +33,7 @@ def obtener_envios(db: Session, salto: int = 0, limite: int = 100, buscar: str =
             )
         )
         
-    return query.offset(salto).limit(limite).all()
+    return query.order_by(Envio.id.desc()).offset(salto).limit(limite).all()
 def crear_envio(db: Session, esquema: schemas.EnvioCreate):
     # Lock del pedido: dos creaciones simultáneas de envío para el mismo pedido
     # quedan serializadas y una sola crea el registro (la otra recibe el existente).

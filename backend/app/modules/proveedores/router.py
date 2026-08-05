@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 
 from app.db.session import get_db
@@ -57,7 +58,13 @@ def eliminar_proveedor(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_proveedor(db, id_proveedor)
+    try:
+        exito = service.eliminar_proveedor(db, id_proveedor)
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede eliminar el proveedor: tiene compras asociadas.",
+        )
     if not exito:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado")
     return None

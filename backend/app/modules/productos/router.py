@@ -1,6 +1,7 @@
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 
 from app.db.session import get_db
@@ -119,7 +120,13 @@ def eliminar_material(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_material(db, id_material)
+    try:
+        exito = service.eliminar_material(db, id_material)
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede eliminar el material: tiene recetas, inventario, movimientos o compras asociados.",
+        )
     if not exito:
         raise HTTPException(status_code=404, detail="Material no encontrado")
     return None

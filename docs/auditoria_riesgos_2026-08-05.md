@@ -1,13 +1,13 @@
 # Auditoría de riesgos — Hallazgos y correcciones
 
 **Fecha:** 2026-08-05
-**Alcance:** módulos de dinero (cotización → pedido → venta → pago), producción/costeo, inventario, compras, seguridad y concurrencia.
+**Alcance:** módulos de dinero (cotización → pedido → venta → pago), producción/costeo, inventario, compras, seguridad, gastos, clientes, proveedores y concurrencia.
 **Método:** suite de tests de riesgo (`backend/test/`) contra BD real (PostgreSQL), con limpieza estricta del teardown.
-**Resultado:** 56/56 tests en verde, 0 residuos en BD, frontend compila.
+**Resultado:** 67/67 tests en verde (fase 1: 56; fase 2: +11), 0 residuos en BD, frontend compila.
 
 ---
 
-## Resumen
+## Resumen fase 1
 
 | # | Severidad | Módulo | Bug | Fix |
 |---|-----------|--------|-----|-----|
@@ -24,6 +24,29 @@
 | C6 | Media | Producción | Eliminar consumo no reponía stock ni borraba el gasto | Movimiento ENTRADA inverso + borrado de Gasto |
 | M1b | Media | Producción | Cancelar compra RECIBIDA no revertía stock | Movimientos SALIDA por cada ENTRADA |
 | M1c | Media | Compras | Response model (`detalle` vs `detalles`) → 500 | `validation_alias="detalles"` |
+
+---
+
+## Resumen fase 2
+
+| # | Severidad | Módulo | Bug | Fix |
+|---|-----------|--------|-----|-----|
+| F2-1 | Crítica | Dinero | Abono USD sobre cotización COP se convertía 1 USD = 1 COP (la cotización COP fija tasa 1.0) | `_derivar_tasa_pago` COP→USD no deducible → exige TRM (`tasa = TRM / tasa_venta = TRM`) |
+| F2-2 | Alta | Dinero | Facturar pedido en moneda distinta a la cotización → total inflado ~4000× | Rechazo 400 (los precios están fijados en la moneda de la cotización) |
+| F2-3 | Alta | Dinero | `porcentaje_ganancia` sin clamp al facturar → 500 (mismo bug que M3 pero en ventas) | Clamp a 999.99 en `crear_venta_desde_pedido` |
+| F2-4 | Alta | Inventario | `registrar_movimiento` hacía `commit()` interno → compras/consumos a medias si fallaba un paso posterior | `flush()` + commit delegado al caller (router de inventario commitea) |
+| F2-5 | Alta | Clientes | DELETE cliente con pedidos/ventas → 500 `IntegrityError` | 409 con mensaje claro |
+| F2-6 | Alta | Proveedores | DELETE proveedor con compras → 500 `IntegrityError` | 409 con mensaje claro |
+| F2-7 | Alta | Materiales | DELETE material con receta/inventario/compras → 500 `IntegrityError` | 409 con mensaje claro |
+| F2-8 | Media | Gastos | `tipo_gasto_id`/`moneda_id` inexistentes → 500 `IntegrityError` | Validación de FK → 400 |
+| F2-9 | Media | Gastos | PATCH con `null` en NOT NULL → TypeError/IntegrityError → 500 | 400 explícito |
+| F2-10 | Media | Gastos | Gasto USD sin tasa se registraba como COP (1:1) | Tasa se resuelve por `moneda.codigo` + tasas vigentes |
+| F2-11 | Media | Cotizaciones | `tasa_cambio <= 0` aceptada → total_base corrupto | `Field(gt=0)` + recálculo en `actualizar_cotizacion` |
+| F2-12 | Media | Seguridad | Rotación de refresh token no atómica (race: dos refrescos válidos del mismo token) | `with_for_update()` en la revocación |
+| F2-13 | Baja | Varios | Paginación sin `ORDER BY` (envíos/clientes/proveedores) → páginas repetidas | `ORDER BY id DESC` |
+| F2-14 | Baja | Proveedores | `EmailStr` en salida → `ResponseValidationError` con datos legacy | `str` en `ProveedorResponse` |
+
+Además: `pytest test/` ahora ignora `test_integracion_api.py` (script standalone con `sys.exit`) en `pytest.ini`.
 
 ---
 
@@ -154,6 +177,7 @@ Archivo: `backend/test/conftest.py`.
 | `test_production_risks.py` | 8 | C1–C6 + M1 (producción/compra) |
 | `test_concurrency.py` | 4 | pagos/conversiones/consumos/salidas simultáneos |
 | `test_security.py` | 14 | JWT, refresh rotation, permisos por módulo |
+| `test_auditoria2.py` | 11 | regresiones fase 2: TRM COP→USD, DELETE con FK 409, gastos, cotización, moneda de venta |
 | `test_iqe.py` + `test_permisos.py` | 7 | legacy (verificación de no-regresión) |
 
 **Comando de verificación:**

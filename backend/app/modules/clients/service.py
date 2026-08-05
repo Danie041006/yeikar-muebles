@@ -25,7 +25,7 @@ def get_clients(
             )
         )
     
-    return query.offset(skip).limit(limit).all()
+    return query.order_by(model.Client.id.desc()).offset(skip).limit(limit).all()
 
 def create_client(db: Session, client: schemas.ClientCreate):
     # Verificar si el email ya existe (si se proporcionó)

@@ -146,7 +146,11 @@ def guardar_refresh_token(db: Session, usuario_id: int, token: str):
 
 def rotar_refresh_token(db: Session, token: str):
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    rt = db.query(model.RefreshToken).filter(model.RefreshToken.token_hash == token_hash).first()
+    # FOR UPDATE: dos refrescos simultáneos con el mismo token se serializan;
+    # el segundo ve revocado=True y no emite un par nuevo (rotación atómica).
+    rt = db.query(model.RefreshToken).filter(
+        model.RefreshToken.token_hash == token_hash
+    ).with_for_update().first()
     if rt is None or rt.revocado or rt.expires_at < datetime.utcnow():
         return None
     rt.revocado = True

@@ -35,10 +35,12 @@ def test_derivar_tasa_pago_misma_moneda(db):
 
 # --- test_derivar_tasa_pago_cop_a_usd ---
 def test_derivar_tasa_pago_cop_a_usd(db):
-    """Venta en COP, pago en USD → 1 USD = tasa_cotizacion COP."""
+    """Venta en COP, pago en USD → NO deducible: una cotización COP fija tasa 1.0
+    (1 COP = 1 COP), no una TRM real; deducirla convertiría 200 USD en 200 COP.
+    Debe exigir la TRM del abono (fallback con tasa_cambio_adelanto)."""
     tasa, derivada = _derivar_tasa_pago(db, moneda_venta_id=1, moneda_pago_id=2, tasa_cotizacion=3900)
-    assert tasa == 3900.0, f"esperado 3900.0, se obtuvo {tasa}"
-    assert derivada is True, f"esperado True, se obtuvo {derivada}"
+    assert tasa is None, f"esperado None (no deducible), se obtuvo {tasa}"
+    assert derivada is False, f"esperado False, se obtuvo {derivada}"
 
 
 # --- test_derivar_tasa_pago_usd_a_cop ---

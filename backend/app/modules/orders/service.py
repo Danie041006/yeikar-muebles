@@ -121,10 +121,14 @@ def _derivar_tasa_pago(db: Session, moneda_venta_id: int, moneda_pago_id: int, t
     }
     venta_cod = codigos.get(moneda_venta_id)
     pago_cod = codigos.get(moneda_pago_id)
-    if venta_cod == "COP" and pago_cod == "USD":
-        return float(tasa_cotizacion), True
+    # Cotización COP fija tasa_cambio = 1.0 (1 COP = 1 COP), NO una TRM USD real.
+    # Deducir "1 USD = 1 COP" desde ese 1.0 convertiría 200 USD en 200 COP.
+    # El par COP→USD NO es deducible: exige la TRM del abono en el request.
     if venta_cod == "USD" and pago_cod == "COP":
-        return 1.0 / float(tasa_cotizacion), True
+        # Solo es deducible si la cotización tiene una TRM real (> 1.0). Un 1.0
+        # significa cotización sin tasa cargada → no deducible, exige TRM explícita.
+        if float(tasa_cotizacion) > 1.0:
+            return 1.0 / float(tasa_cotizacion), True
     return None, False
 
 

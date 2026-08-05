@@ -21,6 +21,9 @@ class ProveedorResponse(ProveedorBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Salida en str: la columna es String(150) sin restricción y datos legacy
+    # (o migraciones) con email inválido reventarían EmailStr → ResponseValidationError 500.
+    email: Optional[str] = None
 
     class Config:
         from_attributes = True

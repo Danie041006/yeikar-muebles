@@ -3,7 +3,29 @@ from typing import List, Optional
 from datetime import date
 from decimal import Decimal
 from app.modules.gastos import model, schemas
-from app.modules.catalogos.model import TipoGasto
+from app.modules.catalogos.model import TipoGasto, Moneda
+
+
+def _validar_fks(db: Session, tipo_gasto_id: int, moneda_id: int) -> Moneda:
+    """Valida que el tipo de gasto y la moneda existan; devuelve la moneda (o lanza ValueError)."""
+    if not db.query(TipoGasto).filter(TipoGasto.id == tipo_gasto_id).first():
+        raise ValueError(f"El tipo de gasto con id {tipo_gasto_id} no existe.")
+    moneda = db.query(Moneda).filter(Moneda.id == moneda_id).first()
+    if not moneda:
+        raise ValueError(f"La moneda con id {moneda_id} no existe.")
+    return moneda
+
+
+def _resolver_tasa(db: Session, moneda: Moneda, fecha: date, tasa_cambio) -> Decimal:
+    """Devuelve la tasa a COP: 1.0 si es COP, la indicada, o la vigente si no se indicó."""
+    if moneda.codigo == "COP":
+        return Decimal("1.0")
+    if tasa_cambio is None:
+        from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+        tasa_cambio = obtener_tasa_moneda_a_cop(db, moneda.id, fecha)
+    if Decimal(str(tasa_cambio)) <= 0:
+        raise ValueError("La tasa de cambio debe ser mayor que cero.")
+    return Decimal(str(tasa_cambio))
 
 def obtener_gasto(db: Session, gasto_id: int):
     return db.query(model.Gasto).options(
@@ -35,8 +57,10 @@ def obtener_gastos(
     return query.order_by(model.Gasto.fecha.desc()).offset(skip).limit(limit).all()
 
 def crear_gasto(db: Session, gasto: schemas.GastoCreate):
-    es_cop = gasto.moneda_id == 1
-    monto_en_moneda_base = gasto.monto if es_cop else (gasto.monto * gasto.tasa_cambio)
+    moneda = _validar_fks(db, gasto.tipo_gasto_id, gasto.moneda_id)
+    tasa = _resolver_tasa(db, moneda, gasto.fecha, gasto.tasa_cambio)
+    es_cop = moneda.codigo == "COP"
+    monto_en_moneda_base = gasto.monto if es_cop else gasto.monto * tasa
 
     db_gasto = model.Gasto(
         tipo_gasto_id=gasto.tipo_gasto_id,
@@ -44,7 +68,7 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate):
         fecha=gasto.fecha,
         descripcion=gasto.descripcion,
         monto=gasto.monto,
-        tasa_cambio=gasto.tasa_cambio,
+        tasa_cambio=tasa,
         monto_en_moneda_base=monto_en_moneda_base,
         observaciones=gasto.observaciones,
     )
@@ -59,12 +83,36 @@ def actualizar_gasto(db: Session, gasto_id: int, gasto_update: schemas.GastoUpda
         return None
     data = gasto_update.model_dump(exclude_unset=True)
 
+    # Rechazar nulos explícitos sobre columnas NOT NULL (antes: TypeError/IntegrityError 500)
+    for campo in ("tipo_gasto_id", "moneda_id", "monto", "tasa_cambio"):
+        if campo in data and data[campo] is None:
+            raise ValueError(f"El campo {campo} no puede ser nulo.")
+
+    # Validar FKs si vienen en el update
+    moneda = None
+    if "tipo_gasto_id" in data:
+        if not db.query(TipoGasto).filter(TipoGasto.id == data["tipo_gasto_id"]).first():
+            raise ValueError(f"El tipo de gasto con id {data['tipo_gasto_id']} no existe.")
+    if "moneda_id" in data:
+        moneda = _validar_fks(db, db_gasto.tipo_gasto_id, data["moneda_id"])
+
+    # Recalcular monto_en_moneda_base si cambió moneda, monto o tasa
     if "monto" in data or "tasa_cambio" in data or "moneda_id" in data:
+        moneda = moneda or db.query(Moneda).filter(Moneda.id == (data.get("moneda_id") or db_gasto.moneda_id)).first()
         monto = data.get("monto", db_gasto.monto)
-        tasa_cambio = data.get("tasa_cambio", db_gasto.tasa_cambio)
-        moneda_id = data.get("moneda_id", db_gasto.moneda_id)
-        es_cop = moneda_id == 1
-        data["monto_en_moneda_base"] = monto if es_cop else (monto * tasa_cambio)
+        es_cop = moneda is not None and moneda.codigo == "COP"
+        if es_cop:
+            data["tasa_cambio"] = Decimal("1.0")
+            data["monto_en_moneda_base"] = monto
+        else:
+            tasa = data.get("tasa_cambio", db_gasto.tasa_cambio)
+            if tasa is None:
+                from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+                tasa = obtener_tasa_moneda_a_cop(db, moneda.id, db_gasto.fecha)
+            if Decimal(str(tasa)) <= 0:
+                raise ValueError("La tasa de cambio debe ser mayor que cero.")
+            data["tasa_cambio"] = Decimal(str(tasa))
+            data["monto_en_moneda_base"] = monto * data["tasa_cambio"]
 
     for key, value in data.items():
         setattr(db_gasto, key, value)

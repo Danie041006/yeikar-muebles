@@ -50,6 +50,15 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate, permitir_estado_
     if not moneda_id:
         raise ValueError("No se pudo determinar la moneda de la factura. Especifica una moneda.")
 
+    # Los precios de los detalles del pedido están fijados en la moneda de la cotización.
+    # Facturar en otra moneda sin reconvertir los montos inflaría/corrompería el total
+    # (p.ej. total COP declarado como USD). Exigir la moneda original.
+    if pedido.cotizacion and moneda_id != pedido.cotizacion.moneda_id:
+        raise ValueError(
+            "La moneda de la factura debe coincidir con la moneda de la cotización. "
+            "Los precios del pedido están fijados en esa moneda."
+        )
+
     # 4b. Tasa de cambio: respetar la fijada en la cotización (la TRM se congela al cotizar).
     #     Solo si el pedido no tiene cotización (o la moneda difiere) se refetchea la tasa vigente.
     tasa_cambio = None
@@ -84,7 +93,9 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate, permitir_estado_
             # Fallback: costo del producto
             costo_unit = float(dp.producto.precio_costo_base) if dp.producto and dp.producto.precio_costo_base is not None else 0.0
         pct_ganancia = float(dp.porcentaje_ganancia) if dp.porcentaje_ganancia is not None else (
-            round(((float(dp.precio) - costo_unit) / costo_unit) * 100, 2) if costo_unit > 0 else 0.0
+            # Clamp: la columna es numeric(5,2) → máx 999.99. Un margen mayor no
+            # debe romper la factura con un 500 (mismo fix que en pedidos).
+            min(999.99, round(((float(dp.precio) - costo_unit) / costo_unit) * 100, 2)) if costo_unit > 0 else 0.0
         )
         db_detalle = DetalleVenta(
             venta_id=db_venta.id,

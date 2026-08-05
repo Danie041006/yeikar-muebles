@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import date, datetime
 from typing import Optional, List, Any
 from app.modules.clients.schemas import ClientResponse
@@ -33,7 +33,7 @@ class CotizacionBase(BaseModel):
     estado: str
     total_estimado: float
     moneda_id: int = 1
-    tasa_cambio: float = 1.0
+    tasa_cambio: float = Field(1.0, gt=0)
     total_en_moneda_base: Optional[float] = None
     observaciones: Optional[str] = None
 
@@ -47,7 +47,7 @@ class CotizacionUpdate(BaseModel):
     estado: Optional[str] = None
     total_estimado: Optional[float] = None
     moneda_id: Optional[int] = None
-    tasa_cambio: Optional[float] = None
+    tasa_cambio: Optional[float] = Field(None, gt=0)
     total_en_moneda_base: Optional[float] = None
     observaciones: Optional[str] = None
 

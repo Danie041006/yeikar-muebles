@@ -46,6 +46,8 @@ def crear_movimiento(
     """
     try:
         mov = service.registrar_movimiento(db, movimiento)
+        db.commit()
+        db.refresh(mov)
         return mov
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

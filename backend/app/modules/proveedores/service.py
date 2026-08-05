@@ -15,7 +15,7 @@ def obtener_proveedores(db: Session, salto: int = 0, limite: int = 100, buscar: 
                 model.Proveedor.telefono.ilike(f"%{buscar}%")
             )
         )
-    return query.offset(salto).limit(limite).all()
+    return query.order_by(model.Proveedor.id.desc()).offset(salto).limit(limite).all()
 
 def crear_proveedor(db: Session, esquema: schemas.ProveedorCreate):
     db_obj = model.Proveedor(**esquema.model_dump())

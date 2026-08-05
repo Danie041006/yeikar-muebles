@@ -75,6 +75,15 @@ def actualizar_cotizacion(db: Session, id_cotizacion: int, esquema: schemas.Coti
     datos = esquema.model_dump(exclude_unset=True)
     for campo, valor in datos.items():
         setattr(db_obj, campo, valor)
+    # Recalcular total_en_moneda_base si cambió total, moneda o tasa (antes quedaba stale)
+    if "total_estimado" in datos or "moneda_id" in datos or "tasa_cambio" in datos:
+        if db_obj.moneda_id == MONEDA_BASE_ID:
+            db_obj.tasa_cambio = 1.0
+            db_obj.total_en_moneda_base = db_obj.total_estimado
+        else:
+            if not db_obj.tasa_cambio or float(db_obj.tasa_cambio) <= 0:
+                raise ValueError("La cotización en moneda extranjera requiere una tasa de cambio mayor que cero.")
+            db_obj.total_en_moneda_base = float(db_obj.total_estimado or 0) * float(db_obj.tasa_cambio)
     db.commit()
     db.refresh(db_obj)
     return db_obj
