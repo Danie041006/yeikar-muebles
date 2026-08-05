@@ -297,3 +297,43 @@ def test_normalizar_seccion_canoniza_tildes_y_sufijos():
     assert _normalizar_seccion("COLA DE PATO") == "COLA_DE_PATO"
     assert _normalizar_seccion(None) == "EBANISTERIA"
     assert _normalizar_seccion("") == "EBANISTERIA"
+
+
+# ---------------------------------------------------------------------------
+# G) POR_RANGO: la cantidad salta según el largo del mueble
+#    (regresión del flujo receta → calcular-precio)
+# ---------------------------------------------------------------------------
+def test_por_rango_aplica_cantidad_segun_largo(client, cleaner):
+    from conftest import crear_material
+
+    producto = crear_producto(client, cleaner)
+    material = crear_material(client, cleaner, costo_base=100.0)
+    r = client.post(f"/api/v1/producto/{producto['id']}/receta", json={
+        "material_id": material["id"],
+        "cantidad_base": 1,
+        "tipo_escala": "POR_RANGO",
+        "seccion": "EBANISTERIA",
+        "rangos": [
+            {"max": 1.0, "cantidad": 4},
+            {"max": 1.5, "cantidad": 6},
+            {"max": 2.0, "cantidad": 8},
+        ],
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    cleaner.registrar("producto_material", r.json()["id"])
+
+    def cant(largo):
+        r_calc = client.get(
+            f"/api/v1/producto/{producto['id']}/calcular-precio",
+            params={"ancho": 1.6, "largo": largo, "ganancia": 0, "iva": 0},
+            headers=ADMIN_HEADERS,
+        )
+        assert r_calc.status_code == 200, r_calc.text
+        mats = r_calc.json().get("materiales") or []
+        assert mats, r_calc.text
+        return mats[0]["cantidad_calculada"]
+
+    assert cant(0.8) == 4.0, "largo 0.8 debe caer en el rango 'hasta 1.0' → 4"
+    assert cant(1.2) == 6.0, "largo 1.2 debe caer en el rango 'hasta 1.5' → 6"
+    assert cant(1.9) == 8.0, "largo 1.9 debe caer en el rango 'hasta 2.0' → 8"
+    assert cant(3.0) == 8.0, "largo 3.0 supera todos los máximos → último rango (8)"

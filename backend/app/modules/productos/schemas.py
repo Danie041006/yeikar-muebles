@@ -31,6 +31,8 @@ class ProductoUpdate(BaseModel):
 
 class ProductoResponse(ProductoBase):
     id: int
+    precio_costo_base: Optional[float] = None
+    precio_venta_base: Optional[float] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     tipo_producto: Optional[TipoProductoResponse] = None
@@ -88,6 +90,7 @@ class ProductoMaterialUpdate(BaseModel):
     material_id: Optional[int] = None
     cantidad_base: Optional[float] = None
     tipo_escala: Optional[str] = None
+    seccion: Optional[str] = None
     distancia_pauta_cm: Optional[float] = None
     tornillos_por_pieza: Optional[int] = None
     condicion_activacion: Optional[Dict[str, Any]] = None

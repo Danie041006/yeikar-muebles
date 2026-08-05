@@ -132,10 +132,49 @@ export default function Productos() {
     distancia_pauta_cm: '',
     tornillos_por_pieza: '',
     formula_personalizada: '',
+    rangos: [] as { max: string; cantidad: string }[],
     es_fijo_override: false,
     observaciones: '',
     seccion: 'EBANISTERÍA',
   });
+
+  const resetRecipeForm = () => setRecipeForm({
+    id: null,
+    material_id: '',
+    cantidad_base: '',
+    tipo_escala: 'FIJO',
+    distancia_pauta_cm: '',
+    tornillos_por_pieza: '',
+    formula_personalizada: '',
+    rangos: [],
+    es_fijo_override: false,
+    observaciones: '',
+    seccion: 'EBANISTERÍA',
+  });
+
+  const handleOpenRecipeAdd = () => {
+    resetRecipeForm();
+    setMaterialSearch('');
+    setShowRecipeModal(true);
+  };
+
+  const handleEditRecipeItem = (item: ProductoMaterial) => {
+    setRecipeForm({
+      id: item.id,
+      material_id: String(item.material_id),
+      cantidad_base: String(item.cantidad_base),
+      tipo_escala: item.tipo_escala,
+      distancia_pauta_cm: item.distancia_pauta_cm != null ? String(item.distancia_pauta_cm) : '',
+      tornillos_por_pieza: item.tornillos_por_pieza != null ? String(item.tornillos_por_pieza) : '',
+      formula_personalizada: item.formula_personalizada || '',
+      rangos: (item.rangos || []).map((r) => ({ max: String(r.max), cantidad: String(r.cantidad) })),
+      es_fijo_override: !!item.es_fijo_override,
+      observaciones: item.observaciones || '',
+      seccion: item.seccion || 'EBANISTERÍA',
+    });
+    setMaterialSearch(item.material?.nombre || '');
+    setShowRecipeModal(true);
+  };
 
   const fetchData = async () => {
     try {
@@ -278,8 +317,12 @@ export default function Productos() {
             material_id: item.material_id,
             cantidad_base: item.cantidad_base,
             tipo_escala: item.tipo_escala,
+            seccion: item.seccion,
             distancia_pauta_cm: item.distancia_pauta_cm,
             tornillos_por_pieza: item.tornillos_por_pieza,
+            condicion_activacion: item.condicion_activacion,
+            rangos: item.rangos,
+            formula_personalizada: item.formula_personalizada,
             es_fijo_override: item.es_fijo_override,
             observaciones: item.observaciones,
           })
@@ -304,6 +347,11 @@ export default function Productos() {
       distancia_pauta_cm: recipeForm.distancia_pauta_cm ? parseFloat(recipeForm.distancia_pauta_cm) : undefined,
       tornillos_por_pieza: recipeForm.tornillos_por_pieza ? parseInt(recipeForm.tornillos_por_pieza) : undefined,
       formula_personalizada: recipeForm.formula_personalizada || undefined,
+      rangos: recipeForm.rangos.length > 0
+        ? recipeForm.rangos
+            .map((r) => ({ max: parseFloat(r.max), cantidad: parseFloat(r.cantidad) }))
+            .filter((r) => !isNaN(r.max) && !isNaN(r.cantidad))
+        : undefined,
       es_fijo_override: recipeForm.es_fijo_override,
       observaciones: recipeForm.observaciones || undefined,
       seccion: recipeForm.seccion,
@@ -645,26 +693,44 @@ export default function Productos() {
               <div className="p-4">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-bold text-yeikar-neutral/50 uppercase tracking-wider">
-                    {receta.length} {receta.length === 1 ? 'material' : 'materiales'} en receta
+                    {receta.length > 0 ? (
+                      `${receta.length} ${receta.length === 1 ? 'material' : 'materiales'} en receta`
+                    ) : secciones.length > 0 ? (
+                      `${secciones.reduce((acc, s) => acc + s.elementos.length, 0)} insumos en ${secciones.length} ${secciones.length === 1 ? 'sección' : 'secciones'}`
+                    ) : (
+                      '0 materiales en receta'
+                    )}
                   </span>
-                  <button
-                    onClick={() => {
-                      setSectionForm({ nombre: '', baseTipo: 'EBANISTERÍA', orden: 1, pct_gastos_seccion: '10' });
-                      setShowSectionModal(true);
-                    }}
-                    className="bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-primary px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
-                    title="Crear nueva sección (ej: EBANISTERÍA - Cama, EBANISTERÍA - Nocheros)"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Nueva Sección
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleOpenRecipeAdd}
+                      className="bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-primary px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                      title="Agregar material con su regla de escala (receta paramétrica)"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Agregar
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSectionForm({ nombre: '', baseTipo: 'EBANISTERÍA', orden: 1, pct_gastos_seccion: '10' });
+                        setShowSectionModal(true);
+                      }}
+                      className="bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-primary px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors"
+                      title="Crear nueva sección (ej: EBANISTERÍA - Cama, EBANISTERÍA - Nocheros)"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Nueva Sección
+                    </button>
+                  </div>
                 </div>
 
                 {recetaLoading ? (
                   <div className="flex justify-center py-8">
-                    <div className="w-6 h-6 border-3 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
+                    <div className="w-6 h-6 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
                   </div>
                 ) : secciones.length > 0 ? (
                   <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
@@ -866,7 +932,7 @@ export default function Productos() {
                   </div>
                 ) : receta.length === 0 ? (
                   <div className="border border-dashed border-yeikar-secondary-light/15 rounded-xl p-8 text-center text-yeikar-neutral/40 text-xs italic">
-                    Sin materiales — haz clic en "Agregar" para definir la receta.
+                    Sin insumos ni receta — usa "Nueva Sección" para crear el área (EBANISTERÍA, PINTURA…) o "Agregar" para definir la receta paramétrica.
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
@@ -891,7 +957,32 @@ export default function Productos() {
                             <div className="flex items-center gap-3 mt-0.5 text-[11px] font-mono text-yeikar-neutral/55">
                               <span>×{item.cantidad_base}</span>
                               {subtotal > 0 && <span className="text-yeikar-secondary font-bold">≈ {fmt(subtotal)}</span>}
+                              {item.seccion && (
+                                <span className="bg-yeikar-secondary/10 text-yeikar-secondary px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0">
+                                  {item.seccion}
+                                </span>
+                              )}
                             </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => handleEditRecipeItem(item)}
+                              className="p-1.5 rounded-lg hover:bg-yeikar-secondary/10 text-yeikar-neutral/40 hover:text-yeikar-secondary transition-colors"
+                              title="Editar material de la receta"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRecipeItem(item.id)}
+                              className="p-1.5 rounded-lg hover:bg-red-50 text-yeikar-neutral/40 hover:text-red-600 transition-colors"
+                              title="Quitar material de la receta"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
                           </div>
                         </div>
                       );
@@ -1249,6 +1340,60 @@ export default function Productos() {
                     onChange={(e) => setRecipeForm({ ...recipeForm, formula_personalizada: e.target.value })}
                     className="w-full bg-white border border-green-200 rounded-lg p-2 text-sm font-mono focus:outline-none"
                   />
+                </div>
+              )}
+
+              {recipeForm.tipo_escala === 'POR_RANGO' && (
+                <div className="bg-orange-50/50 p-3 rounded-xl border border-orange-100 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-bold text-yeikar-neutral/50">Rangos de largo (m)</label>
+                    <button
+                      type="button"
+                      onClick={() => setRecipeForm({ ...recipeForm, rangos: [...recipeForm.rangos, { max: '', cantidad: '' }] })}
+                      className="text-[10px] font-bold text-orange-600 hover:bg-orange-100 px-2 py-1 rounded-lg flex items-center gap-1 transition-colors"
+                    >
+                      + Agregar rango
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-orange-700/70">
+                    La cantidad salta en tramos según el largo del mueble: "hasta max m → cantidad unidades".
+                  </p>
+                  {recipeForm.rangos.length === 0 && (
+                    <p className="text-[10px] italic text-orange-700/60">Sin rangos definidos — se usará la cantidad base.</p>
+                  )}
+                  <div className="space-y-1.5">
+                    {recipeForm.rangos.map((r, i) => (
+                      <div key={i} className="flex items-center gap-2">
+                        <span className="text-[10px] font-mono text-orange-600 shrink-0">hasta</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          placeholder="1.5"
+                          value={r.max}
+                          onChange={(e) => setRecipeForm({ ...recipeForm, rangos: recipeForm.rangos.map((x, xi) => xi === i ? { ...x, max: e.target.value } : x) })}
+                          className="w-full bg-white border border-orange-200 rounded-lg p-2 text-sm font-mono focus:outline-none"
+                        />
+                        <span className="text-[10px] font-mono text-orange-600 shrink-0">m →</span>
+                        <input
+                          type="number"
+                          step="0.001"
+                          placeholder="6"
+                          value={r.cantidad}
+                          onChange={(e) => setRecipeForm({ ...recipeForm, rangos: recipeForm.rangos.map((x, xi) => xi === i ? { ...x, cantidad: e.target.value } : x) })}
+                          className="w-full bg-white border border-orange-200 rounded-lg p-2 text-sm font-mono focus:outline-none"
+                        />
+                        <span className="text-[10px] text-orange-600 shrink-0">und</span>
+                        <button
+                          type="button"
+                          onClick={() => setRecipeForm({ ...recipeForm, rangos: recipeForm.rangos.filter((_, xi) => xi !== i) })}
+                          className="p-1 text-orange-400 hover:text-red-600 shrink-0 transition-colors"
+                          title="Quitar rango"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

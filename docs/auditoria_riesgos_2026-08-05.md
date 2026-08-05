@@ -3,7 +3,7 @@
 **Fecha:** 2026-08-05
 **Alcance:** módulos de dinero (cotización → pedido → venta → pago), producción/costeo, inventario, compras, seguridad, gastos, clientes, proveedores y concurrencia.
 **Método:** suite de tests de riesgo (`backend/test/`) contra BD real (PostgreSQL), con limpieza estricta del teardown.
-**Resultado:** 68/68 tests en verde (fase 1: 56; fase 2: +11; fase 3: +1), 0 residuos en BD, frontend compila.
+**Resultado:** 69/69 tests en verde (fase 1: 56; fase 2: +11; fase 3: +2), 0 residuos en BD, frontend compila.
 
 ---
 
@@ -59,6 +59,19 @@ Además: `pytest test/` ahora ignora `test_integracion_api.py` (script standalon
 | F3-3 | Media | Cotizaciones | Conversión a pedido sin detalles: fallback `products[0]?.id \|\| 1` creaba pedido con producto/medidas equivocadas en silencio | Si el producto no se resuelve → `alert` y aborta la conversión |
 
 **Estado:** 68/68 tests, frontend `npm run build` OK.
+
+---
+
+## Resumen fase 4 (POR_RANGO + receta reactivada)
+
+| # | Severidad | Módulo | Bug | Fix |
+|---|-----------|--------|-----|-----|
+| F4-1 | Alta | Costeo | `POR_RANGO` seleccionable en la UI pero sin inputs de rangos → el backend recibía `null` y la cantidad nunca saltaba | Inputs editables "hasta X m → Y und" en el modal de receta + envío de `rangos` al guardar |
+| F4-2 | Alta | Productos | El modal de receta era **inalcanzable** (nunca se llamaba `setShowRecipeModal(true)`) → no se podía agregar/editar material paramétrico | Botón "Agregar" + botones editar/eliminar en cada ítem de receta |
+| F4-3 | Media | Productos | `handleDuplicar` perdía `seccion`, `condicion_activacion`, `rangos` y `formula_personalizada` al duplicar | Copia completa de la configuración |
+| F4-4 | Baja | Backend | `ProductoMaterialUpdate` omitía `seccion` → edit silenciosamente ignoraba cambios de sección | `seccion: Optional[str]` añadido al schema |
+
+**Estado:** 69/69 tests, `test_por_rango_aplica_cantidad_segun_largo` end-to-end (receta → calcular-precio), 0 residuos en BD, frontend `npm run build` OK.
 
 ---
 

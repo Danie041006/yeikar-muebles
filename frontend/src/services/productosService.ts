@@ -31,16 +31,22 @@ export interface Material {
   };
 }
 
+export interface RangoEscala {
+  max: number;
+  cantidad: number;
+}
+
 export interface ProductoMaterial {
   id: number;
   producto_id: number;
   material_id: number;
   cantidad_base: number;
   tipo_escala: 'FIJO' | 'LINEAL' | 'AREA' | 'ESPACIADO' | 'POR_RANGO' | 'FORMULA';
+  seccion?: string;
   distancia_pauta_cm?: number;
   tornillos_por_pieza?: number;
   condicion_activacion?: any;
-  rangos?: any;
+  rangos?: RangoEscala[];
   formula_personalizada?: string;
   es_fijo_override?: boolean;
   observaciones?: string;
