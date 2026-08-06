@@ -7,25 +7,31 @@ from decimal import Decimal
 from app.modules.orders.model import Pedido
 from app.modules.production.model import OrdenProduccion
 from app.modules.inventory.model import Inventario
-from app.modules.sales.model import Pago
+from app.modules.sales.model import Pago, Venta
 from app.modules.catalogos.model import Moneda
 from app.modules.dashboard import schemas
+from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
+from app.modules.users.model import Usuario
 
-def obtener_metricas_dashboard(db: Session) -> schemas.DashboardMetricsResponse:
+def obtener_metricas_dashboard(db: Session, usuario: Usuario) -> schemas.DashboardMetricsResponse:
     # 1. Pedidos activos (que no están entregados ni cancelados)
-    pedidos_activos = db.query(Pedido).filter(
+    pedidos_query = db.query(Pedido).filter(
         Pedido.estado.notin_(["ENTREGADO", "CANCELADO"])
-    ).count()
+    )
+    pedidos_activos = filtrar_registros_propios(pedidos_query, Pedido.creado_por_id, usuario).count()
 
     # 2. Órdenes de producción activas (no finalizadas ni canceladas)
-    ordenes_activas = db.query(OrdenProduccion).filter(
+    ordenes_query = db.query(OrdenProduccion).filter(
         OrdenProduccion.estado.in_(["PENDIENTE", "EN_PRODUCCION", "PAUSADA"])
-    ).count()
+    )
+    ordenes_activas = filtrar_registros_propios(ordenes_query, OrdenProduccion.creado_por_id, usuario).count()
 
     # 3. Alertas de stock (materiales con cantidad <= 5)
-    alertas_stock = db.query(Inventario).filter(
-        Inventario.cantidad <= 5.0
-    ).count()
+    alertas_stock = (
+        db.query(Inventario).filter(Inventario.cantidad <= 5.0).count()
+        if tiene_alcance_total(usuario)
+        else 0
+    )
 
     # 4. Ingresos del mes actual
     now = datetime.utcnow()
@@ -38,10 +44,11 @@ def obtener_metricas_dashboard(db: Session) -> schemas.DashboardMetricsResponse:
     ingresos_query = (
         db.query(Moneda.codigo, func.sum(Pago.monto).label("total"))
         .join(Pago, Pago.moneda_id == Moneda.id)
+        .join(Venta, Venta.id == Pago.venta_id)
         .filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt)
         .group_by(Moneda.codigo)
-        .all()
     )
+    ingresos_query = filtrar_registros_propios(ingresos_query, Venta.creado_por_id, usuario).all()
 
     ingresos_mes = [
         schemas.IngresoMesDetail(

@@ -18,6 +18,7 @@ from app.modules.catalogos.schemas import RolResponse
 
 class UsuarioResponse(UsuarioBase):
     id: int
+    empleado_id: Optional[int] = None
     activo: bool
     ultimo_acceso: Optional[datetime] = None
     created_at: datetime

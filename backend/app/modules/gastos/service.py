@@ -4,6 +4,9 @@ from datetime import date
 from decimal import Decimal
 from app.modules.gastos import model, schemas
 from app.modules.catalogos.model import TipoGasto, Moneda
+from app.modules.auditoria.service import record_event
+from app.modules.users.deps import filtrar_registros_propios
+from app.modules.users.model import Usuario
 
 
 def _validar_fks(db: Session, tipo_gasto_id: int, moneda_id: int) -> Moneda:
@@ -27,11 +30,25 @@ def _resolver_tasa(db: Session, moneda: Moneda, fecha: date, tasa_cambio) -> Dec
         raise ValueError("La tasa de cambio debe ser mayor que cero.")
     return Decimal(str(tasa_cambio))
 
-def obtener_gasto(db: Session, gasto_id: int):
-    return db.query(model.Gasto).options(
+def _snapshot(gasto: model.Gasto) -> dict:
+    return {
+        "tipo_gasto_id": gasto.tipo_gasto_id,
+        "moneda_id": gasto.moneda_id,
+        "fecha": gasto.fecha,
+        "monto": gasto.monto,
+        "descripcion": gasto.descripcion,
+        "observaciones": gasto.observaciones,
+    }
+
+
+def obtener_gasto(db: Session, gasto_id: int, usuario: Usuario | None = None):
+    query = db.query(model.Gasto).options(
         joinedload(model.Gasto.tipo_gasto),
         joinedload(model.Gasto.moneda)
-    ).filter(model.Gasto.id == gasto_id).first()
+    ).filter(model.Gasto.id == gasto_id)
+    if usuario is not None:
+        query = filtrar_registros_propios(query, model.Gasto.creado_por_id, usuario)
+    return query.first()
 
 def obtener_gastos(
     db: Session,
@@ -40,12 +57,15 @@ def obtener_gastos(
     tipo_gasto_id: Optional[int] = None,
     categoria: Optional[str] = None,
     fecha_desde: Optional[date] = None,
-    fecha_hasta: Optional[date] = None
+    fecha_hasta: Optional[date] = None,
+    usuario: Usuario | None = None,
 ) -> List[model.Gasto]:
     query = db.query(model.Gasto).options(
         joinedload(model.Gasto.tipo_gasto),
         joinedload(model.Gasto.moneda)
     )
+    if usuario is not None:
+        query = filtrar_registros_propios(query, model.Gasto.creado_por_id, usuario)
     if tipo_gasto_id:
         query = query.filter(model.Gasto.tipo_gasto_id == tipo_gasto_id)
     if categoria:
@@ -56,7 +76,7 @@ def obtener_gastos(
         query = query.filter(model.Gasto.fecha <= fecha_hasta)
     return query.order_by(model.Gasto.fecha.desc()).offset(skip).limit(limit).all()
 
-def crear_gasto(db: Session, gasto: schemas.GastoCreate):
+def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None = None):
     moneda = _validar_fks(db, gasto.tipo_gasto_id, gasto.moneda_id)
     tasa = _resolver_tasa(db, moneda, gasto.fecha, gasto.tasa_cambio)
     es_cop = moneda.codigo == "COP"
@@ -71,16 +91,33 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate):
         tasa_cambio=tasa,
         monto_en_moneda_base=monto_en_moneda_base,
         observaciones=gasto.observaciones,
+        creado_por_id=usuario.id if usuario is not None else None,
+        actualizado_por_id=usuario.id if usuario is not None else None,
     )
     db.add(db_gasto)
+    db.flush()
+    record_event(
+        db,
+        actor=usuario,
+        action="CREATE",
+        entity_type="gasto",
+        entity_id=db_gasto.id,
+        after=_snapshot(db_gasto),
+    )
     db.commit()
     db.refresh(db_gasto)
     return db_gasto
 
-def actualizar_gasto(db: Session, gasto_id: int, gasto_update: schemas.GastoUpdate):
-    db_gasto = obtener_gasto(db, gasto_id)
+def actualizar_gasto(
+    db: Session,
+    gasto_id: int,
+    gasto_update: schemas.GastoUpdate,
+    usuario: Usuario | None = None,
+):
+    db_gasto = obtener_gasto(db, gasto_id, usuario)
     if not db_gasto:
         return None
+    antes = _snapshot(db_gasto)
     data = gasto_update.model_dump(exclude_unset=True)
 
     # Rechazar nulos explícitos sobre columnas NOT NULL (antes: TypeError/IntegrityError 500)
@@ -116,14 +153,33 @@ def actualizar_gasto(db: Session, gasto_id: int, gasto_update: schemas.GastoUpda
 
     for key, value in data.items():
         setattr(db_gasto, key, value)
+    if usuario is not None:
+        db_gasto.actualizado_por_id = usuario.id
+    record_event(
+        db,
+        actor=usuario,
+        action="UPDATE",
+        entity_type="gasto",
+        entity_id=db_gasto.id,
+        before=antes,
+        after=_snapshot(db_gasto),
+    )
     db.commit()
     db.refresh(db_gasto)
     return db_gasto
 
-def eliminar_gasto(db: Session, gasto_id: int) -> bool:
-    db_gasto = obtener_gasto(db, gasto_id)
+def eliminar_gasto(db: Session, gasto_id: int, usuario: Usuario | None = None) -> bool:
+    db_gasto = obtener_gasto(db, gasto_id, usuario)
     if not db_gasto:
         return False
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="gasto",
+        entity_id=db_gasto.id,
+        before=_snapshot(db_gasto),
+    )
     db.delete(db_gasto)
     db.commit()
     return True

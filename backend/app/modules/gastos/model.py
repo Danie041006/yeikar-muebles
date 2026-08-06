@@ -15,8 +15,16 @@ class Gasto(Base):
     tasa_cambio = Column(Numeric(15,6), nullable=False, default=1.0)
     monto_en_moneda_base = Column(Numeric(15,2), nullable=False, default=0.0)
     observaciones = Column(Text, nullable=True)
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+    actualizado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
     tipo_gasto = relationship("TipoGasto")
     moneda = relationship("Moneda")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+    actualizador = relationship("Usuario", foreign_keys=[actualizado_por_id])
+
+    @property
+    def creador_nombre(self):
+        return self.creador.nombre_usuario if self.creador else None

@@ -25,7 +25,7 @@ interface PedidoSinFactura {
   fecha: string;
   estado: string;
   cliente?: { nombre: string };
-  cotizacion?: { total_estimado: number };
+  cotizacion?: { total_estimado: number; moneda_id?: number };
 }
 
 // ─── Badges helpers ───────────────────────────────────────────────────────────
@@ -287,7 +287,7 @@ function ModalDetalle({
                 <button
                   onClick={handleGeneratePdf}
                   disabled={isGeneratingPdf}
-                  className="px-3 py-1.5 bg-yeikar-primary text-white hover:bg-yeikar-primary/90 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  className="px-3 py-1.5 bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary/90 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -425,7 +425,7 @@ function ModalDetalle({
                   {!showForm ? (
                     <button
                       onClick={() => setShowForm(true)}
-                      className="w-full py-2.5 bg-yeikar-primary text-white font-bold font-headline rounded-xl hover:bg-yeikar-primary/90 transition-all text-sm"
+                      className="w-full py-2.5 bg-yeikar-primary text-yeikar-neutral font-bold font-headline rounded-xl hover:bg-yeikar-primary/90 transition-all text-sm"
                     >
                       + Registrar Cobro
                     </button>
@@ -576,7 +576,7 @@ function ModalDetalle({
                         <button
                           onClick={handlePago}
                           disabled={submitting}
-                          className="flex-1 py-2 text-sm font-bold bg-yeikar-primary text-white rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
+                          className="flex-1 py-2 text-sm font-bold bg-yeikar-primary text-yeikar-neutral rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
                         >
                           {submitting ? 'Guardando...' : 'Confirmar Cobro'}
                         </button>
@@ -774,7 +774,9 @@ function ModalCrearFactura({
   onClose: () => void;
   onCreado: () => void;
 }) {
-  const [monedaId, setMonedaId] = useState<number>(monedas[0]?.id ?? 0);
+  const [monedaId, setMonedaId] = useState<number>(
+    pedido.cotizacion?.moneda_id ?? monedas[0]?.id ?? 0
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -806,6 +808,11 @@ function ModalCrearFactura({
           <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
             Moneda de facturación
           </label>
+          {pedido.cotizacion?.moneda_id && (
+            <p className="text-xs text-yeikar-neutral/50 mb-2">
+              Moneda sugerida de la cotización (puedes cambiarla).
+            </p>
+          )}
           <select
             value={monedaId}
             onChange={(e) => setMonedaId(Number(e.target.value))}
@@ -833,7 +840,7 @@ function ModalCrearFactura({
           <button
             onClick={handleCrear}
             disabled={submitting}
-            className="flex-1 py-2.5 text-sm font-bold bg-yeikar-primary text-white rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
+            className="flex-1 py-2.5 text-sm font-bold bg-yeikar-primary text-yeikar-neutral rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
           >
             {submitting ? 'Creando...' : 'Crear Factura'}
           </button>
@@ -961,7 +968,7 @@ export default function Ventas() {
         >
           Pedidos sin Factura
           {pedidosSinFactura.length > 0 && (
-            <span className="bg-yeikar-primary text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+            <span className="bg-yeikar-primary text-yeikar-neutral text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
               {pedidosSinFactura.length}
             </span>
           )}
@@ -980,7 +987,7 @@ export default function Ventas() {
                 onClick={() => setFiltroEstado(est)}
                 className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
                   filtroEstado === est
-                    ? 'bg-yeikar-primary text-white border-yeikar-primary'
+                    ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
                     : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/20 hover:border-yeikar-primary/40'
                 }`}
               >
@@ -1098,7 +1105,7 @@ export default function Ventas() {
                         <button
                           id={`btn-crear-factura-${p.id}`}
                           onClick={() => setPedidoParaFactura(p)}
-                          className="px-3 py-1.5 bg-yeikar-primary text-white hover:bg-yeikar-primary/90 rounded-lg text-xs font-bold font-headline transition-colors"
+                          className="px-3 py-1.5 bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary/90 rounded-lg text-xs font-bold font-headline transition-colors"
                         >
                           Crear Factura
                         </button>

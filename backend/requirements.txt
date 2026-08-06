@@ -24,3 +24,7 @@ email-validator==2.3.0
 # Development & Testing (opcional, pero útiles)
 pytest==8.3.4
 httpx==0.28.1
+
+# AI Vision Providers
+openai==1.59.7
+google-genai==1.0.0

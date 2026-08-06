@@ -43,8 +43,6 @@ export default function Cotizaciones() {
   // States for printing
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedQuoteForPrint, setSelectedQuoteForPrint] = useState<Quote | null>(null);
-  const [printClientRif, setPrintClientRif] = useState('');
-  const [printExchangeRate, setPrintExchangeRate] = useState('4000');
   const [printDiscount, setPrintDiscount] = useState('0');
   const [printIva, setPrintIva] = useState('0');
   const [printCompanyRif, setPrintCompanyRif] = useState('J-50146039-3');
@@ -56,6 +54,13 @@ export default function Cotizaciones() {
   // Convert Form state
   const [deliveryDate, setDeliveryDate] = useState('');
   const [isConverting, setIsConverting] = useState(false);
+  const [convertError, setConvertError] = useState('');
+
+  // Adelanto de la conversión (opcional)
+  const [adelantoPct, setAdelantoPct] = useState('');
+  const [adelantoMonedaId, setAdelantoMonedaId] = useState<number>(1);
+  const [adelantoTrm, setAdelantoTrm] = useState('');
+  const [adelantoMetodo, setAdelantoMetodo] = useState('');
 
   // Create/Edit Form state (multi-item)
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null);
@@ -92,6 +97,32 @@ export default function Cotizaciones() {
 
   const selectedMoneda = currencies.find(c => c.id === selectedMonedaId);
   const currencyCode = selectedMoneda?.codigo || 'COP';
+
+  // ── Derivados del modal de conversión (adelanto) ──────────────────────────
+  const quoteEnConversion = selectedQuoteForConvert;
+  const quoteTotal = Number(quoteEnConversion?.total_estimado) || 0;
+  const quoteMoneda = currencies.find((c) => c.id === quoteEnConversion?.moneda_id);
+  const monedaAdelantoSel = currencies.find((c) => c.id === adelantoMonedaId);
+
+  // Tasa del abono ('1 {pago} = X {factura}') derivada de la TRM fijada en la cotización.
+  // null = el par no se puede deducir (p.ej. VES) → se pedirá TRM manual.
+  const tasaAbonoDerivada = () => {
+    if (!quoteEnConversion) return 1;
+    if (adelantoMonedaId === quoteEnConversion.moneda_id) return 1;
+    const qt = Number(quoteEnConversion.tasa_cambio) || 0;
+    if (!qt) return null;
+    const qCode = quoteMoneda?.codigo;
+    const pCode = monedaAdelantoSel?.codigo;
+    if (qCode === 'COP' && pCode === 'USD') return qt;
+    if (qCode === 'USD' && pCode === 'COP') return 1 / qt;
+    return null;
+  };
+
+  const pctAbono = Number(adelantoPct) || 0;
+  const abonoQuote = (quoteTotal * pctAbono) / 100;
+  const tasaAbono = tasaAbonoDerivada();
+  const necesitaTrmAbono = pctAbono > 0 && tasaAbono === null;
+  const abonoMontoPago = pctAbono > 0 && tasaAbono ? abonoQuote / tasaAbono : 0;
 
   const fetchInitialData = async () => {
     try {
@@ -508,6 +539,11 @@ export default function Cotizaciones() {
   const handleOpenConvert = (quote: Quote) => {
     setSelectedQuoteForConvert(quote);
     setDeliveryDate('');
+    setAdelantoPct('');
+    setAdelantoMonedaId(quote.moneda_id ?? 1);
+    setAdelantoTrm('');
+    setAdelantoMetodo('');
+    setConvertError('');
     setIsConvertOpen(true);
   };
 
@@ -515,17 +551,10 @@ export default function Cotizaciones() {
     setSelectedQuoteForPrint(quote);
     setAssociatedVenta(null);
     
-    // Load Client RIF from localStorage, or default to empty
-    const savedClientRif = localStorage.getItem(`rif_client_${quote.cliente_id}`) || '';
-    setPrintClientRif(savedClientRif);
-    
     // Load default values or saved configurations
     setPrintCompanyRif(localStorage.getItem('print_company_rif') || 'J-50146039-3');
     setPrintCompanyAddress(localStorage.getItem('print_company_address') || 'AV. INTERCOMUNAL CON CALLE 16 LOCAL Nro 15-205, BARRIO SIMÓN BOLÍVAR, UREÑA, TÁCHIRA');
     setPrintCompanyPhone(localStorage.getItem('print_company_phone') || '+58 412-1234567');
-    // Use quote's exchange rate if not COP, otherwise use saved/default
-    const defaultRate = quote.tasa_cambio && quote.moneda_id !== 1 ? String(quote.tasa_cambio) : (localStorage.getItem('print_exchange_rate') || '4000');
-    setPrintExchangeRate(defaultRate);
     setPrintDiscount('0');
     setPrintIva('0');
     
@@ -553,11 +582,9 @@ export default function Cotizaciones() {
     setIsGeneratingPdf(true);
 
     // Save settings in localStorage
-    localStorage.setItem(`rif_client_${selectedQuoteForPrint.cliente_id}`, printClientRif);
     localStorage.setItem('print_company_rif', printCompanyRif);
     localStorage.setItem('print_company_address', printCompanyAddress);
     localStorage.setItem('print_company_phone', printCompanyPhone);
-    localStorage.setItem('print_exchange_rate', printExchangeRate);
 
     const element = document.getElementById('pdf-preview-container');
     if (!element) { setIsGeneratingPdf(false); return; }
@@ -635,13 +662,27 @@ export default function Cotizaciones() {
         ];
       }
 
-      await pedidoService.convertQuote(selectedQuoteForConvert.id, convertDetails, deliveryDate || undefined);
+      const metodoLabel = METODOS_PAGO.find((m) => m.value === adelantoMetodo)?.label;
+      await pedidoService.convertQuote(selectedQuoteForConvert.id, {
+        detalles: convertDetails,
+        fecha_entrega_estimada: deliveryDate || undefined,
+        adelanto: abonoMontoPago > 0 ? abonoMontoPago : undefined,
+        moneda_adelanto_id: adelantoMonedaId,
+        tasa_cambio_adelanto: necesitaTrmAbono ? Number(adelantoTrm) : undefined,
+        metodo_pago: abonoMontoPago > 0 ? adelantoMetodo : undefined,
+      });
       setIsConvertOpen(false);
-      alert('¡Cotización convertida a pedido con éxito!');
+      const avisoAbono =
+        abonoMontoPago > 0 && monedaAdelantoSel
+          ? ` Abono inicial registrado: ${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel.codigo)}${metodoLabel ? ` · ${metodoLabel}` : ''}.`
+          : '';
+      alert(`¡Cotización convertida a pedido con éxito!${avisoAbono} Se creó la factura automáticamente.`);
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
-      alert('Error al convertir la cotización a pedido.');
+      setConvertError(
+        (err as any)?.response?.data?.detail || 'Error al convertir la cotización a pedido.'
+      );
     } finally {
       setIsConverting(false);
     }
@@ -705,7 +746,7 @@ export default function Cotizaciones() {
             </label>
             
             {!soloMesActual && (
-              <div className="flex items-center gap-1.5 animate-fadeIn">
+              <div className="flex items-center gap-1.5 animate-fade-in">
                 <span className="text-yeikar-neutral/40">|</span>
                 <select
                   value={selectedMonth}
@@ -761,7 +802,8 @@ export default function Cotizaciones() {
                 <tr className="bg-yeikar-neutral text-yeikar-tertiary font-headline uppercase text-xs tracking-wider">
                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Cotización ID</th>
                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Cliente</th>
-                  <th className="px-6 py-4 border-b border-yeikar-secondary/20">Fecha</th>
+                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Fecha</th>
+                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Registrada por</th>
                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Detalles</th>
                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Total Estimado</th>
                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Estado</th>
@@ -777,9 +819,17 @@ export default function Cotizaciones() {
                     <td className="px-6 py-4 font-bold text-yeikar-secondary font-headline">
                       {quote.cliente?.nombre || `Cliente ID: ${quote.cliente_id}`}
                     </td>
-                    <td className="px-6 py-4 font-mono text-yeikar-neutral/70">
-                      {quote.fecha}
-                    </td>
+                   <td className="px-6 py-4 font-mono text-yeikar-neutral/70">
+                     {quote.fecha}
+                   </td>
+                   <td className="px-6 py-4">
+                     <div className="font-semibold text-yeikar-secondary">
+                       {quote.creador_nombre || 'Registro histórico'}
+                     </div>
+                     <div className="mt-0.5 text-[10px] font-mono text-yeikar-neutral/45">
+                       {quote.created_at ? new Date(quote.created_at).toLocaleString('es-CO') : 'Hora no disponible'}
+                     </div>
+                   </td>
                     <td className="px-6 py-4 text-xs whitespace-pre-line text-yeikar-neutral/80">
                       {quote.observaciones}
                     </td>
@@ -991,11 +1041,17 @@ export default function Cotizaciones() {
                             className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
                           >
                             <option value="">Seleccione mueble...</option>
-                            {products.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.nombre} ({formatCurrency(Number(p.precio_base) / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)} base)
-                              </option>
-                            ))}
+                            {products.map((p) => {
+                              const basePrecio = Number(p.precio_venta_base ?? p.precio_costo_base ?? 0);
+                              const baseMostrar = isFinite(basePrecio) && basePrecio > 0
+                                ? formatCurrency(basePrecio / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)
+                                : null;
+                              return (
+                                <option key={p.id} value={p.id}>
+                                  {p.nombre}{baseMostrar ? ` (${baseMostrar} base)` : ''}
+                                </option>
+                              );
+                            })}
                           </select>
                         </div>
                         <div>
@@ -1083,7 +1139,7 @@ export default function Cotizaciones() {
                           {item.calcLoading ? (
                             <span className="text-yeikar-neutral/40">Calculando...</span>
                           ) : item.calcResult ? (
-                            <span>Subt: {formatCurrency(item.calcResult.precio_venta * item.cantidad, currencyCode)}</span>
+                            <span>Subt: {formatCurrency(item.calcResult.precio_venta * item.cantidad / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
                           ) : (
                             <span>{formatCurrency(0, currencyCode)}</span>
                           )}
@@ -1177,25 +1233,25 @@ export default function Cotizaciones() {
                         <div key={seccionNombre} className="bg-yeikar-secondary/10 rounded-lg p-2.5 space-y-1.5 border border-yeikar-secondary-light/5">
                           <div className="flex justify-between font-bold text-[11px] text-yeikar-primary border-b border-yeikar-secondary-light/15 pb-1">
                             <span className="uppercase truncate pr-1">{seccionNombre}</span>
-                            <span className="font-mono text-yeikar-primary-light">{formatCurrency(Number(datosSec.total_seccion), currencyCode)}</span>
+                            <span className="font-mono text-yeikar-primary-light">{formatCurrency(Number(datosSec.total_seccion) / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
                           </div>
                           <div className="space-y-0.5 text-[10px] text-yeikar-tertiary/75 font-mono">
                             {datosSec.costo_insumos > 0 && (
                               <div className="flex justify-between">
                                 <span>Insumos</span>
-                                <span>{formatCurrency(Number(datosSec.costo_insumos), currencyCode)}</span>
+                                <span>{formatCurrency(Number(datosSec.costo_insumos) / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
                               </div>
                             )}
                             {datosSec.total_costos_produccion > 0 && (
                               <div className="flex justify-between text-amber-500 font-medium">
                                 <span>C. Producción</span>
-                                <span>+{formatCurrency(Number(datosSec.total_costos_produccion), currencyCode)}</span>
+                                <span>+{formatCurrency(Number(datosSec.total_costos_produccion) / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
                               </div>
                             )}
                             {datosSec.gasto_seccion > 0 && (
                               <div className="flex justify-between">
                                 <span>Gastos ({datosSec.pct_gastos_seccion}%)</span>
-                                <span>+{formatCurrency(Number(datosSec.gasto_seccion), currencyCode)}</span>
+                                <span>+{formatCurrency(Number(datosSec.gasto_seccion) / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
                               </div>
                             )}
                           </div>
@@ -1215,7 +1271,7 @@ export default function Cotizaciones() {
                   PRECIO TOTAL SUGERIDO:
                 </span>
                 <div className="text-2xl font-black text-yeikar-primary font-mono">
-                  {formatCurrency(globalTotalCalc, currencyCode)}
+                  {formatCurrency(Math.round(globalTotalCalc / (selectedMonedaId === 1 ? 1 : tasaCambio)), currencyCode)}
                 </div>
               </div>
             </div>
@@ -1226,7 +1282,7 @@ export default function Cotizaciones() {
       {/* Convert Quote to Order Modal */}
       {isConvertOpen && (
         <div className="fixed inset-0 bg-yeikar-neutral/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 shadow-2xl w-full max-w-md overflow-hidden">
+          <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 shadow-2xl w-full max-w-lg overflow-hidden">
             <div className="bg-yeikar-neutral p-4 text-yeikar-tertiary flex items-center justify-between">
               <h3 className="font-headline font-bold text-lg text-yeikar-primary">
                 Convertir a Pedido de Fábrica
@@ -1235,8 +1291,31 @@ export default function Cotizaciones() {
             <div className="p-6 space-y-4">
               <p className="text-sm text-yeikar-neutral/80 font-body">
                 Vas a generar un nuevo pedido para <strong>{selectedQuoteForConvert?.cliente?.nombre}</strong>.
-                Por favor indica la fecha estimada de entrega.
+                La factura se creará automáticamente en la moneda de la cotización.
               </p>
+
+              {/* Info de la cotización (bloqueada) */}
+              <div className="bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-lg p-3 text-xs text-yeikar-neutral/80 space-y-0.5">
+                <div className="flex justify-between">
+                  <span className="font-bold text-yeikar-neutral/50">Cotización</span>
+                  <span className="font-mono">{quoteMoneda?.nombre} ({quoteMoneda?.codigo} {quoteMoneda?.simbolo})</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-bold text-yeikar-neutral/50">Total</span>
+                  <span className="font-mono font-bold text-yeikar-secondary">
+                    {formatCurrency(Math.round(quoteTotal), quoteMoneda?.codigo ?? 'COP')}
+                  </span>
+                </div>
+                {Number(selectedQuoteForConvert?.tasa_cambio) && quoteMoneda?.codigo !== 'COP' && (
+                  <div className="flex justify-between">
+                    <span className="font-bold text-yeikar-neutral/50">Tasa fijada al cotizar</span>
+                    <span className="font-mono">
+                      1 {quoteMoneda?.codigo} = {formatCurrency(Number(selectedQuoteForConvert?.tasa_cambio), 'COP')}
+                    </span>
+                  </div>
+                )}
+              </div>
+
               <div>
                 <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
                   Fecha Estimada de Entrega
@@ -1247,6 +1326,101 @@ export default function Cotizaciones() {
                   onChange={(e) => setDeliveryDate(e.target.value)}
                   className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
                 />
+              </div>
+
+              {/* Abono inicial (opcional) */}
+              <div className="border-t border-yeikar-secondary-light/10 pt-4">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline">
+                    Abono inicial <span className="normal-case font-normal text-yeikar-neutral/40">(opcional)</span>
+                  </label>
+                  <span className="text-xs font-mono font-bold text-yeikar-primary">
+                    {pctAbono > 0 ? `= ${formatCurrency(Math.round(abonoQuote), quoteMoneda?.codigo ?? 'COP')}` : 'Sin abono'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <div className="relative flex-1 min-w-32">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      placeholder="0"
+                      value={adelantoPct}
+                      onChange={(e) => setAdelantoPct(e.target.value)}
+                      className="w-full p-2 pr-8 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-yeikar-neutral/40 font-bold">%</span>
+                  </div>
+                  <select
+                    value={adelantoMonedaId}
+                    onChange={(e) => setAdelantoMonedaId(Number(e.target.value))}
+                    className="flex-1 min-w-32 p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
+                  >
+                    {currencies.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.nombre} ({m.codigo} {m.simbolo})
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={adelantoMetodo}
+                    onChange={(e) => {
+                      const valor = e.target.value;
+                      setAdelantoMetodo(valor);
+                      const meta = METODOS_PAGO.find((m) => m.value === valor);
+                      if (meta) {
+                        const mon = currencies.find((c) => c.codigo === meta.moneda);
+                        if (mon) setAdelantoMonedaId(mon.id);
+                      }
+                    }}
+                    className="flex-1 min-w-32 p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
+                  >
+                    <option value="">Método de pago</option>
+                    {METODOS_PAGO.map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {pctAbono > 0 && tasaAbono && adelantoMonedaId !== quoteEnConversion?.moneda_id && (
+                  <p className="text-xs text-yeikar-neutral/60 mt-2 font-mono">
+                    ≈ {formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? '')}
+                    {' '}· convertido con la tasa de la cotización
+                  </p>
+                )}
+
+                {necesitaTrmAbono && (
+                  <div className="mt-2">
+                    <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                      TRM: 1 {monedaAdelantoSel?.codigo ?? '?'} = X {quoteMoneda?.codigo ?? '?'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.0001"
+                      value={adelantoTrm}
+                      onChange={(e) => setAdelantoTrm(e.target.value)}
+                      placeholder="Ej: 38,50"
+                      className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {convertError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {convertError}
+                </p>
+              )}
+
+              {/* Resumen antes de confirmar */}
+              <div className="bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2 text-xs font-mono text-yeikar-secondary">
+                {pctAbono > 0
+                  ? `Abono inicial: ${pctAbono}% = ${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? quoteMoneda?.codigo ?? '')}${adelantoMonedaId !== quoteEnConversion?.moneda_id && tasaAbono ? ` (≈ ${formatCurrency(Math.round(abonoQuote), quoteMoneda?.codigo ?? '')})` : ''}${adelantoMetodo ? ` · ${METODOS_PAGO.find((m) => m.value === adelantoMetodo)?.label}` : ''} — se registra como primer pago.`
+                  : 'Sin abono inicial — la factura quedará PENDIENTE.'}
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-yeikar-secondary-light/10">
@@ -1276,7 +1450,6 @@ export default function Cotizaciones() {
         const netSubTotal = subTotal - discountVal;
         const ivaVal      = netSubTotal * (Number(printIva || 0) / 100);
         const grandTotal  = netSubTotal + ivaVal;
-        const usdTotal    = grandTotal / (Number(printExchangeRate) || 1);
 
         return (
           <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-hidden">
@@ -1307,22 +1480,9 @@ export default function Cotizaciones() {
                 <div className="w-full md:w-80 shrink-0 p-5 border-b md:border-b-0 md:border-r border-stone-100 overflow-y-auto space-y-5 bg-white">
 
                   <section className="space-y-2">
-                    <h4 className="text-[10px] uppercase tracking-widest font-bold text-stone-400">Datos del Cliente</h4>
-                    <div>
-                      <label className="block text-[10px] uppercase font-bold text-stone-400 mb-1">RIF / C.I.</label>
-                      <input type="text" placeholder="V-12345678-9" value={printClientRif}
-                        onChange={e => setPrintClientRif(e.target.value)}
-                        className="w-full p-2 border border-stone-200 rounded-lg text-xs focus:ring-1 focus:ring-amber-500 outline-none" />
-                    </div>
-                  </section>
-
-                  <hr className="border-stone-100" />
-
-                  <section className="space-y-2">
                     <h4 className="text-[10px] uppercase tracking-widest font-bold text-stone-400">Tasas & Ajustes</h4>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       {[
-                        { label: `Tasa COP/${selectedQuoteForPrint.moneda?.codigo || 'USD'}`, val: printExchangeRate, set: setPrintExchangeRate },
                         { label: 'Descuento %',  val: printDiscount,     set: setPrintDiscount     },
                         { label: 'IVA %',         val: printIva,          set: setPrintIva          },
                       ].map(({ label, val, set }) => (
@@ -1429,10 +1589,9 @@ export default function Cotizaciones() {
                       </div>
 
                       {/* ── Client Info ── */}
-                      <div className="grid grid-cols-4 gap-4 bg-stone-50/40 border border-stone-250 rounded-xl px-4 py-3 my-1 shadow-sm">
+                      <div className="grid grid-cols-3 gap-4 bg-stone-50/40 border border-stone-250 rounded-xl px-4 py-3 my-1 shadow-sm">
                         {[
                           { label: 'CLIENTE',    value: selectedQuoteForPrint.cliente?.nombre },
-                          { label: 'RIF / C.I.', value: printClientRif || '—' },
                           { label: 'TELÉFONO',   value: selectedQuoteForPrint.cliente?.telefono || '—' },
                           { label: 'DIRECCIÓN',  value: selectedQuoteForPrint.cliente?.direccion || '—' },
                         ].map(({ label, value }) => (
@@ -1552,10 +1711,10 @@ export default function Cotizaciones() {
                             </span>
                           </div>
 
-                          {selectedQuoteForPrint.moneda && selectedQuoteForPrint.moneda_id !== 1 && (
+                          {selectedQuoteForPrint.tasa_cambio && selectedQuoteForPrint.moneda_id !== 1 && (
                             <div className="flex justify-between items-baseline text-[8.5px] text-stone-600 font-mono font-medium border-t border-amber-200/60 pt-1">
                               <span>EQUIVALENTE EN COP:</span>
-                              <span>{formatCurrency(grandTotal * (Number(printExchangeRate) || 1), 'COP')}</span>
+                              <span>{formatCurrency(grandTotal * Number(selectedQuoteForPrint.tasa_cambio), 'COP')}</span>
                             </div>
                           )}
 
@@ -1573,14 +1732,6 @@ export default function Cotizaciones() {
                                 <span>{formatCurrency(Number(associatedVenta.saldo_pendiente), 'COP')}</span>
                               </div>
                             )}
-                            <div className="flex justify-between text-stone-900 font-mono font-extrabold">
-                              <span>BASE ({selectedQuoteForPrint.moneda?.codigo || 'USD'}):</span>
-                              <span className="text-amber-800 font-bold">{formatCurrency(usdTotal, selectedQuoteForPrint.moneda?.codigo || 'USD')}</span>
-                            </div>
-                            <div className="flex justify-between text-stone-600 font-medium">
-                              <span>TASA:</span>
-                              <span className="font-mono text-stone-800">{Number(printExchangeRate).toLocaleString('es-CO')} COP/{selectedQuoteForPrint.moneda?.codigo || 'USD'}</span>
-                            </div>
                           </div>
                         </div>
                       </div>

@@ -18,6 +18,7 @@ REGLA CENTRAL:
   El vendedor tiene la última palabra.
 """
 
+import logging
 import os
 from decimal import Decimal
 from typing import Optional
@@ -53,6 +54,8 @@ from app.modules.productos.model import Producto, Material, ProductoMaterial, Mu
 from app.modules.quotes.model import Cotizacion, DetalleCotizacion, CotizacionDetalleMaterial, CotizacionAnalisisIA
 from app.modules.quotes.structure_builder import build_cost_structure, recalculate_structure
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 # Umbral mínimo de confianza de la IA para no pedir revisión humana
@@ -62,17 +65,56 @@ CONFIANZA_MINIMA = float(os.getenv("IQE_CONFIANZA_MINIMA", "0.70"))
 def _get_vision_provider():
     """
     Factory del VisionProvider. Lee la variable IQE_VISION_PROVIDER del .env
-    para decidir qué proveedor usar. Así se intercambia en una sola línea.
+    para decidir qué proveedor usar.
+
+    Modos:
+      - "gpt" (default): OpenAI con fallback automático a Gemini si falla
+      - "gemini": Solo Gemini (sin fallback, para no gastar créditos OpenAI)
     """
     provider_name = os.getenv("IQE_VISION_PROVIDER", "gpt").lower()
-    if provider_name == "gpt":
-        from app.modules.quotes.gpt_vision_provider import GPTVisionProvider
-        return GPTVisionProvider()
-    elif provider_name == "gemini":
-        # Placeholder para el futuro proveedor de Gemini
-        raise NotImplementedError("GeminiVisionProvider aún no está implementado.")
-    else:
+
+    if provider_name == "gemini":
+        from app.modules.quotes.gemini_vision_provider import GeminiVisionProvider
+        return GeminiVisionProvider()
+
+    if provider_name != "gpt":
         raise ValueError(f"Proveedor de visión desconocido: {provider_name}")
+
+    # Modo "gpt": OpenAI con fallback a Gemini
+    from app.modules.quotes.gpt_vision_provider import GPTVisionProvider
+    from app.modules.quotes.gemini_vision_provider import GeminiVisionProvider
+    from app.modules.quotes.vision_provider import VisionProvider
+
+    class FallbackVisionProvider(VisionProvider):
+        """Wrapper que intenta GPT primero y cae a Gemini en errores recuperables."""
+
+        def __init__(self):
+            self._primary = GPTVisionProvider()
+            self._fallback = GeminiVisionProvider()
+            self._used_fallback = False
+
+        async def analyze(self, image_bytes: bytes, mime_type: str = "image/jpeg",
+                          contexto_adicional: Optional[str] = None,
+                          datos_proyecto: Optional[dict] = None) -> FurnitureAttributes:
+            try:
+                return await self._primary.analyze(image_bytes, mime_type, contexto_adicional, datos_proyecto)
+            except RuntimeError as e:
+                # Errores de API de OpenAI (sin créditos, rate limit, 5xx, etc.)
+                logger.warning("OpenAI Vision falló, cambiando a Gemini: %s", e)
+                self._used_fallback = True
+                return await self._fallback.analyze(image_bytes, mime_type, contexto_adicional, datos_proyecto)
+
+        async def generate_questions(self, image_bytes: bytes, mime_type: str = "image/jpeg",
+                                     contexto_adicional: Optional[str] = None,
+                                     datos_proyecto: Optional[dict] = None) -> list:
+            try:
+                return await self._primary.generate_questions(image_bytes, mime_type, contexto_adicional, datos_proyecto)
+            except RuntimeError as e:
+                logger.warning("OpenAI generate_questions falló, cambiando a Gemini: %s", e)
+                self._used_fallback = True
+                return await self._fallback.generate_questions(image_bytes, mime_type, contexto_adicional, datos_proyecto)
+
+    return FallbackVisionProvider()
 
 
 # ---------------------------------------------------------------------------

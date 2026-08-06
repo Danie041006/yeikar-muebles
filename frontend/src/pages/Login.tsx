@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { ArrowRight, Check, Eye, EyeOff, LockKeyhole, ShieldCheck, Sparkles, TriangleAlert } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 import { useAuth } from '../context/AuthContext';
 import { API_URL } from '../services/api';
@@ -8,45 +10,47 @@ import { API_URL } from '../services/api';
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { refresh } = useAuth();
+  const destination = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/dashboard';
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!username.trim() || !password) {
+      setError('Ingresa tu usuario y contraseña para continuar.');
+      return;
+    }
+
     setError('');
     setLoading(true);
     try {
       const formData = new URLSearchParams();
-      formData.append('username', username);
+      formData.append('username', username.trim());
       formData.append('password', password);
-      const response = await axios.post(
-        `${API_URL}/api/auth/login`,
-        formData,
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
-      if (response.data.access_token) {
-        localStorage.setItem('token', response.data.access_token);
-        if (response.data.refresh_token) {
-          localStorage.setItem('refresh_token', response.data.refresh_token);
-        }
-        await refresh();
-        navigate('/dashboard');
-      } else {
-        setError('Respuesta inválida del servidor');
+      const response = await axios.post(`${API_URL}/api/auth/login`, formData, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
+
+      if (!response.data.access_token) {
+        setError('No pudimos validar la respuesta del servidor. Inténtalo de nuevo.');
+        return;
       }
-    } catch (err: any) {
-      if (err.response?.status === 401) {
-        setError('Usuario o contraseña incorrectos');
-      } else if (err.code === 'ERR_NETWORK') {
-        setError('No se puede conectar al servidor');
-      } else if (err.response) {
-        setError(`Error ${err.response.status}: ${err.response.data?.detail || 'Error del servidor'}`);
-      } else if (err.request) {
-        setError('No se recibió respuesta del servidor');
+
+      localStorage.setItem('token', response.data.access_token);
+      if (response.data.refresh_token) localStorage.setItem('refresh_token', response.data.refresh_token);
+      await refresh();
+      navigate(destination, { replace: true });
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        if (err.response?.status === 401) setError('Usuario o contraseña incorrectos.');
+        else if (err.code === 'ERR_NETWORK') setError('No pudimos conectar con YEIKAR. Revisa tu conexión.');
+        else setError('El servicio no está disponible en este momento. Inténtalo nuevamente.');
       } else {
-        setError(`Error: ${err.message}`);
+        setError('Ocurrió un error inesperado. Inténtalo nuevamente.');
       }
     } finally {
       setLoading(false);
@@ -54,201 +58,157 @@ export default function Login() {
   };
 
   return (
-    <>
-      <style>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0) rotate(0deg); }
-          33% { transform: translateY(-18px) rotate(1deg); }
-          66% { transform: translateY(10px) rotate(-1deg); }
-        }
-        @keyframes float-d {
-          0%, 100% { transform: translateY(0) rotate(0deg); }
-          33% { transform: translateY(14px) rotate(-1deg); }
-          66% { transform: translateY(-8px) rotate(1deg); }
-        }
-        @keyframes glow-pulse {
-          0%, 100% { opacity: 0.25; }
-          50% { opacity: 0.55; }
-        }
-        @keyframes slideUp {
-          from { opacity: 0; transform: translateY(28px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes shimmer {
-          0% { background-position: -200% 0; }
-          100% { background-position: 200% 0; }
-        }
-        .anim-float   { animation: float 9s ease-in-out infinite; }
-        .anim-float-d { animation: float-d 11s ease-in-out 3s infinite; }
-        .anim-glow    { animation: glow-pulse 5s ease-in-out infinite; }
-        .anim-slide   { animation: slideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        .anim-shimmer { background-size: 200% 100%; animation: shimmer 2.5s linear infinite; }
-      `}</style>
+    <main className="relative min-h-screen overflow-hidden bg-yeikar-tertiary text-yeikar-neutral">
+      <div className="pointer-events-none absolute inset-0 premium-grid opacity-60" />
+      <div className="relative grid min-h-screen lg:grid-cols-[1.08fr_0.92fr]">
+        <section className="relative hidden overflow-hidden bg-gradient-to-br from-yeikar-neutral via-yeikar-secondary to-yeikar-neutral-dark px-10 py-10 text-white lg:flex lg:flex-col lg:justify-between xl:px-16 xl:py-12">
+          <div className="pointer-events-none absolute -right-28 top-1/2 h-[620px] w-[620px] -translate-y-1/2 rounded-full border border-yeikar-primary/10" />
+          <div className="pointer-events-none absolute -right-10 top-1/2 h-[440px] w-[440px] -translate-y-1/2 rounded-full border border-yeikar-primary/10" />
+          <div className="pointer-events-none absolute right-24 top-1/2 h-[260px] w-[260px] -translate-y-1/2 rounded-full border border-yeikar-primary/15" />
+          <div className="pointer-events-none absolute inset-y-0 right-1/3 w-px bg-gradient-to-b from-transparent via-yeikar-primary/20 to-transparent" />
 
-      <div className="relative min-h-screen bg-[#080808] overflow-hidden flex items-center justify-center select-none">
-        {/* Diamond-pattern texture overlay */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            opacity: 0.035,
-            backgroundImage: [
-              'linear-gradient(45deg, #D4AF37 1px, transparent 1px)',
-              'linear-gradient(-45deg, #D4AF37 1px, transparent 1px)',
-            ].join(', '),
-            backgroundSize: '64px 64px',
-          }}
-        />
-
-        {/* Warm radial glow */}
-        <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full pointer-events-none anim-glow"
-          style={{ background: 'radial-gradient(circle, rgba(212,175,55,0.08) 0%, transparent 60%)' }}
-        />
-
-        {/* Floating geometric particles */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-[12%] left-[8%] w-5 h-5 border border-yeikar-primary/20 rotate-45 anim-float" />
-          <div className="absolute top-[30%] right-[14%] w-7 h-7 border border-yeikar-primary/15 rotate-[18deg] anim-float-d" />
-          <div className="absolute bottom-[22%] left-[18%] w-3.5 h-3.5 border border-yeikar-primary/25 -rotate-12 anim-float" />
-          <div className="absolute bottom-[35%] right-[10%] w-5 h-5 border border-yeikar-primary/10 rotate-[30deg] anim-float-d" />
-          <div className="absolute top-[55%] left-[4%] w-[3px] h-14 bg-gradient-to-b from-yeikar-primary/10 to-transparent rotate-[35deg] anim-float" />
-          <div className="absolute top-[10%] right-[28%] w-[2px] h-20 bg-gradient-to-b from-yeikar-primary/8 to-transparent -rotate-[15deg] anim-float-d" />
-          <div className="absolute top-[70%] right-[5%] w-[3px] h-10 bg-gradient-to-b from-yeikar-primary/10 to-transparent rotate-[55deg] anim-float" />
-        </div>
-
-        {/* Card */}
-        <div className="relative w-full max-w-md px-5 anim-slide" style={{ animationDelay: '0ms' }}>
-          <div
-            className="relative bg-[#0f0f0f]/80 backdrop-blur-2xl rounded-3xl border border-yeikar-primary/10 overflow-hidden"
-            style={{
-              boxShadow: [
-                '0 25px 60px -12px rgba(0,0,0,0.8)',
-                '0 0 0 1px rgba(212,175,55,0.05) inset',
-              ].join(', '),
-            }}
-          >
-            {/* Gold accent bar */}
-            <div className="h-[3px] w-full bg-gradient-to-r from-transparent via-yeikar-primary to-transparent" />
-
-            <div className="px-8 py-10 sm:px-12 sm:py-12">
-              {/* Logo */}
-              <div
-                className="flex justify-center mb-5 anim-slide"
-                style={{ animationDelay: '100ms' }}
-              >
-                <div className="relative">
-                  <div className="absolute inset-0 rounded-full bg-yeikar-primary/15 blur-2xl" />
-                  <img
-                    src="/Logo-yeikar.png"
-                    alt="YEIKAR"
-                    className="relative h-20 w-20 object-contain"
-                  />
-                </div>
-              </div>
-
-              {/* Wordmark */}
-              <h1
-                className="text-center font-headline text-4xl sm:text-5xl tracking-[0.22em] text-yeikar-primary anim-slide"
-                style={{ animationDelay: '200ms' }}
-              >
-                YEIKAR
-              </h1>
-
-              {/* Gold divider */}
-              <div
-                className="flex justify-center my-3 anim-slide"
-                style={{ animationDelay: '260ms' }}
-              >
-                <div className="w-14 h-px bg-gradient-to-r from-transparent via-yeikar-primary/60 to-transparent" />
-              </div>
-
-              {/* Subtitle */}
-              <p
-                className="text-center text-yeikar-primary/45 text-[11px] tracking-[0.25em] uppercase mb-9 anim-slide"
-                style={{ animationDelay: '320ms' }}
-              >
-                Sistema de Gestión para Mueblería
-              </p>
-
-              {/* Error */}
-              {error && (
-                <div
-                  className="flex items-start gap-2.5 bg-red-950/30 border border-red-800/25 text-red-400 text-sm px-4 py-3 rounded-xl mb-6 anim-slide"
-                  style={{ animationDelay: '380ms' }}
-                >
-                  <svg className="w-4 h-4 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                  </svg>
-                  <span>{error}</span>
-                </div>
-              )}
-
-              {/* Form */}
-              <form onSubmit={handleSubmit} className="space-y-5">
-                <div
-                  className="anim-slide"
-                  style={{ animationDelay: '380ms' }}
-                >
-                  <label className="block text-yeikar-primary/40 text-[10px] tracking-[0.2em] uppercase mb-2 font-body">
-                    Usuario
-                  </label>
-                  <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    disabled={loading}
-                    className="w-full bg-transparent border-b-2 border-yeikar-primary/15 text-white placeholder-yeikar-primary/20 py-3 pl-0 pr-2 outline-none transition-all duration-300 text-sm tracking-wide focus:border-yeikar-primary focus:shadow-[0_2px_0_0_#D4AF37]"
-                    placeholder="Ingresa tu usuario"
-                    autoComplete="username"
-                  />
-                </div>
-
-                <div
-                  className="anim-slide"
-                  style={{ animationDelay: '440ms' }}
-                >
-                  <label className="block text-yeikar-primary/40 text-[10px] tracking-[0.2em] uppercase mb-2 font-body">
-                    Contraseña
-                  </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    disabled={loading}
-                    className="w-full bg-transparent border-b-2 border-yeikar-primary/15 text-white placeholder-yeikar-primary/20 py-3 pl-0 pr-2 outline-none transition-all duration-300 text-sm tracking-wide focus:border-yeikar-primary focus:shadow-[0_2px_0_0_#D4AF37]"
-                    placeholder="Ingresa tu contraseña"
-                    autoComplete="current-password"
-                  />
-                </div>
-
-                <div
-                  className="anim-slide pt-2"
-                  style={{ animationDelay: '500ms' }}
-                >
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full relative overflow-hidden group bg-gradient-to-r from-yeikar-primary via-[#e0c04a] to-yeikar-primary text-yeikar-secondary font-headline font-bold tracking-[0.15em] py-3.5 rounded-xl transition-all duration-300 hover:shadow-[0_0_30px_-4px_rgba(212,175,55,0.5)] hover:scale-[1.01] active:scale-[0.99] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 text-sm"
-                  >
-                    <span className="relative z-10">
-                      {loading ? 'INGRESANDO...' : 'INGRESAR'}
-                    </span>
-                    <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -skew-x-12 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700 ease-in-out" />
-                  </button>
-                </div>
-              </form>
-
-              {/* Footer */}
-              <p
-                className="text-center text-yeikar-primary/12 text-[9px] tracking-[0.35em] uppercase mt-9 anim-slide"
-                style={{ animationDelay: '560ms' }}
-              >
-                &copy; YEIKAR {new Date().getFullYear()}
-              </p>
+          <div className="relative z-10 flex items-center gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-2xl font-black text-yeikar-neutral shadow-gold">Y</div>
+            <div>
+              <p className="font-headline text-lg font-black tracking-[0.24em]">YEIKAR</p>
+              <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.2em] text-yeikar-primary/70">Atelier operativo</p>
             </div>
           </div>
-        </div>
+
+          <div className="relative z-10 max-w-xl pb-8 xl:pb-16">
+            <div className="mb-8 flex items-center gap-3 text-yeikar-primary/75">
+              <span className="h-px w-10 bg-yeikar-primary/60" />
+              <span className="font-mono text-[10px] font-bold uppercase tracking-[0.2em]">Control con intención</span>
+            </div>
+            <h1 className="max-w-2xl font-headline text-5xl font-semibold leading-[0.98] tracking-[-0.055em] text-white xl:text-7xl">
+              Cada detalle cuenta.<br />
+              <span className="text-yeikar-primary">Cada entrega también.</span>
+            </h1>
+            <p className="mt-8 max-w-md text-base leading-relaxed text-white/55">
+              Una vista precisa de tu taller, tus pedidos y la salud de tu negocio. Menos ruido. Más decisiones correctas.
+            </p>
+
+            <div className="mt-12 grid max-w-md grid-cols-2 gap-3">
+              {[
+                { label: 'Operación', value: 'En un solo lugar' },
+                { label: 'Visibilidad', value: 'De principio a fin' },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-white/10 bg-white/[0.045] p-4 backdrop-blur-sm">
+                  <p className="font-mono text-[9px] uppercase tracking-[0.16em] text-white/35">{item.label}</p>
+                  <p className="mt-2 font-headline text-sm font-semibold text-white/80">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="relative z-10 flex items-center justify-between border-t border-white/10 pt-5 text-[10px] text-white/35">
+            <span className="font-mono uppercase tracking-[0.15em]">Sistema de gestión para mueblería</span>
+            <span className="font-mono">01 / 04</span>
+          </div>
+        </section>
+
+        <section className="relative flex min-h-screen items-center justify-center px-5 py-8 sm:px-10 lg:px-14 xl:px-24">
+          <motion.div
+            initial={{ opacity: 0, y: 18 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+            className="w-full max-w-[430px]"
+          >
+            <div className="mb-10 flex items-center justify-between lg:hidden">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-xl font-black text-yeikar-neutral shadow-gold">Y</div>
+                <div>
+                  <p className="font-headline text-base font-black tracking-[0.22em] text-yeikar-secondary">YEIKAR</p>
+                  <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.18em] text-yeikar-primary-dark">Atelier ERP</p>
+                </div>
+              </div>
+              <span className="rounded-full border border-emerald-700/10 bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800">Seguro</span>
+            </div>
+
+            <div className="mb-9">
+              <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl border border-yeikar-primary/20 bg-yeikar-primary/10 text-yeikar-primary-dark">
+                <LockKeyhole className="h-5 w-5" strokeWidth={1.8} />
+              </div>
+              <p className="eyebrow mb-2">Acceso privado</p>
+              <h2 className="font-headline text-4xl font-semibold leading-tight tracking-[-0.045em] text-yeikar-neutral sm:text-[44px]">Bienvenido de vuelta.</h2>
+              <p className="mt-3 max-w-sm text-sm leading-relaxed text-yeikar-neutral/55">Ingresa a tu espacio de trabajo y mantén cada área de tu operación en movimiento.</p>
+            </div>
+
+            {error && (
+              <div className="mb-6 flex items-start gap-3 rounded-2xl border border-rose-200/80 bg-rose-50/80 px-4 py-3.5 text-sm text-rose-800" role="alert" aria-live="polite">
+                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+              <div>
+                <label htmlFor="username" className="label">Usuario</label>
+                <input
+                  id="username"
+                  type="text"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  disabled={loading}
+                  className="input h-12 bg-white/80"
+                  placeholder="Tu usuario"
+                  autoComplete="username"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label htmlFor="password" className="label mb-0">Contraseña</label>
+                  <span className="text-[11px] text-yeikar-neutral/40">Acceso seguro</span>
+                </div>
+                <div className="relative">
+                  <input
+                    id="password"
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    disabled={loading}
+                    className="input h-12 bg-white/80 pr-12"
+                    placeholder="Tu contraseña"
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((visible) => !visible)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-yeikar-neutral/40 transition-colors hover:bg-yeikar-tertiary hover:text-yeikar-secondary"
+                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="group flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-yeikar-primary px-5 font-headline text-sm font-bold text-yeikar-neutral shadow-gold transition-all duration-200 hover:bg-yeikar-primary-light hover:shadow-lift disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? (
+                  <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-yeikar-neutral/25 border-t-yeikar-neutral" /> Validando acceso...</span>
+                ) : (
+                  <>Entrar al espacio de trabajo <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>
+                )}
+              </button>
+            </form>
+
+            <div className="mt-9 flex items-center gap-3 border-t border-yeikar-secondary-light/10 pt-5 text-[11px] text-yeikar-neutral/45">
+              <ShieldCheck className="h-4 w-4 text-yeikar-primary-dark" />
+              <span>Tu sesión está protegida y tus datos permanecen privados.</span>
+            </div>
+
+            <div className="mt-8 flex items-center justify-between text-[10px] text-yeikar-neutral/35">
+              <span className="flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-yeikar-primary-dark" /> Operación conectada</span>
+              <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-yeikar-primary-dark" /> YEIKAR {new Date().getFullYear()}</span>
+            </div>
+          </motion.div>
+        </section>
       </div>
-    </>
+    </main>
   );
 }

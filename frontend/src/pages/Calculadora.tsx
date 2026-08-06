@@ -4,12 +4,12 @@ import { cotizacionService, Product, CalculationResult } from '../services/cotiz
 // ─── Badge de tipo de escala ────────────────────────────────────────────────
 function EscalaBadge({ tipo }: { tipo: string }) {
   const map: Record<string, { label: string; bg: string; text: string }> = {
-    FIJO:      { label: 'FIJO',      bg: 'bg-emerald-500/20', text: 'text-emerald-300' },
-    LINEAL:    { label: 'LINEAL',    bg: 'bg-sky-500/20',     text: 'text-sky-300'     },
-    AREA:      { label: 'ÁREA',      bg: 'bg-amber-500/20',   text: 'text-amber-300'   },
-    ESPACIADO: { label: 'ESPACIADO', bg: 'bg-violet-500/20',  text: 'text-violet-300'  },
+    FIJO:      { label: 'FIJO',      bg: 'bg-emerald-500/15', text: 'text-emerald-300' },
+    LINEAL:    { label: 'LINEAL',    bg: 'bg-sky-500/15',     text: 'text-sky-300'     },
+    AREA:      { label: 'ÁREA',      bg: 'bg-yeikar-primary/15', text: 'text-yeikar-primary-light' },
+    ESPACIADO: { label: 'ESPACIADO', bg: 'bg-violet-500/15',  text: 'text-violet-300'  },
   };
-  const style = map[tipo] ?? { label: tipo, bg: 'bg-slate-500/20', text: 'text-slate-300' };
+  const style = map[tipo] ?? { label: tipo, bg: 'bg-yeikar-neutral-light', text: 'text-yeikar-tertiary/70' };
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold tracking-widest uppercase ${style.bg} ${style.text}`}>
       {style.label}
@@ -30,7 +30,7 @@ function Leyenda() {
       {items.map(({ tipo, desc }) => (
         <div key={tipo} className="flex items-center gap-1.5">
           <EscalaBadge tipo={tipo} />
-          <span className="text-xs text-slate-400">— {desc}</span>
+          <span className="text-xs text-yeikar-tertiary/60">— {desc}</span>
         </div>
       ))}
     </div>
@@ -48,9 +48,9 @@ function DimSlider({
   return (
     <div className="flex-1 min-w-0">
       <div className="flex items-center justify-between mb-1">
-        <span className="text-xs text-slate-400 uppercase tracking-wider">{label}</span>
-        <span className="text-2xl font-black text-white font-mono tabular-nums">
-          {value.toFixed(2)} <span className="text-sm font-normal text-slate-400">m</span>
+        <span className="text-xs text-yeikar-tertiary/70 uppercase tracking-wider">{label}</span>
+        <span className="text-2xl font-black text-yeikar-primary font-mono tabular-nums">
+          {value.toFixed(2)} <span className="text-sm font-normal text-yeikar-tertiary/50">m</span>
         </span>
       </div>
       <div className="relative">
@@ -61,11 +61,11 @@ function DimSlider({
           onChange={e => onChange(parseFloat(e.target.value))}
           className="w-full h-1.5 appearance-none rounded-full outline-none cursor-pointer"
           style={{
-            background: `linear-gradient(to right, #f59e0b ${pct}%, #334155 ${pct}%)`,
+            background: `linear-gradient(to right, #D4AF37 ${pct}%, #422C1F ${pct}%)`,
           }}
         />
       </div>
-      <div className="flex justify-between text-[10px] text-slate-600 mt-1">
+      <div className="flex justify-between text-[10px] text-yeikar-tertiary/40 mt-1">
         <span>{min} m</span>
         <span>{max} m</span>
       </div>
@@ -137,24 +137,24 @@ export default function Calculadora() {
     (ancho !== Number(productoActual.ancho_base) || largo !== Number(productoActual.largo_base));
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 p-6">
+    <div className="min-h-screen bg-yeikar-secondary-dark text-yeikar-tertiary p-6 font-body">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-black tracking-tight text-white">
+        <h1 className="text-2xl font-headline font-black tracking-tight text-yeikar-tertiary">
           Calculadora de Costos Paramétrica
         </h1>
-        <p className="text-sm text-slate-400 mt-1">
+        <p className="text-sm text-yeikar-tertiary/70 mt-1">
           Ajusta las dimensiones y ve cómo escala cada material en tiempo real.
         </p>
       </div>
 
       {/* Selector de producto */}
-      <div className="bg-slate-800 rounded-2xl p-5 mb-5 border border-slate-700">
-        <label className="block text-xs text-slate-400 uppercase tracking-widest mb-2">
+      <div className="bg-yeikar-neutral-light rounded-2xl p-5 mb-5 border border-yeikar-primary/15 shadow-card">
+        <label className="block text-xs text-yeikar-tertiary/70 uppercase tracking-widest mb-2">
           Producto Modelo
         </label>
         <select
-          className="w-full bg-slate-700 border border-slate-600 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 transition"
+          className="w-full bg-yeikar-neutral border border-yeikar-primary/20 rounded-xl px-4 py-2.5 text-yeikar-tertiary text-sm focus:outline-none focus:border-yeikar-primary focus:ring-2 focus:ring-yeikar-primary/30 transition"
           value={productoId ?? ''}
           onChange={e => setProductoId(e.target.value ? Number(e.target.value) : null)}
         >
@@ -173,17 +173,17 @@ export default function Calculadora() {
           {/* Encabezado del producto y precio */}
           <div className="flex items-start justify-between mb-4 flex-wrap gap-4">
             <div>
-              <h2 className="text-xl font-bold text-white">
-                {productoActual?.nombre} — <span className="text-amber-400">Calculadora Paramétrica</span>
+              <h2 className="text-xl font-bold text-yeikar-tertiary">
+                {productoActual?.nombre} — <span className="text-yeikar-primary">Calculadora Paramétrica</span>
               </h2>
-              <p className="text-sm text-slate-400">Mueve los sliders y ve cómo escala cada material</p>
+              <p className="text-sm text-yeikar-tertiary/70">Mueve los sliders y ve cómo escala cada material</p>
             </div>
             <div className="text-right">
-              <p className="text-xs text-slate-400 uppercase tracking-wider">Precio estimado</p>
+              <p className="text-xs text-yeikar-tertiary/70 uppercase tracking-wider">Precio estimado</p>
               {cargando ? (
-                <div className="h-8 w-40 bg-slate-700 animate-pulse rounded mt-1" />
+                <div className="h-8 w-40 bg-yeikar-primary/15 animate-pulse rounded mt-1" />
               ) : resultado ? (
-                <p className="text-3xl font-black text-amber-400 font-mono tabular-nums">
+                <p className="text-3xl font-black text-yeikar-primary font-mono tabular-nums">
                   {cop(resultado.precio_venta)}
                 </p>
               ) : null}
@@ -191,7 +191,7 @@ export default function Calculadora() {
           </div>
 
           {/* Sliders */}
-          <div className="bg-slate-800 rounded-2xl p-5 mb-5 border border-slate-700">
+          <div className="bg-yeikar-neutral-light rounded-2xl p-5 mb-5 border border-yeikar-primary/15 shadow-card">
             <div className="flex gap-6 flex-wrap mb-4">
               <DimSlider
                 label="Ancho"
@@ -210,8 +210,8 @@ export default function Calculadora() {
             {/* Ganancia */}
             <div className="mb-2">
               <div className="flex justify-between items-center mb-1">
-                <span className="text-xs text-slate-400 uppercase tracking-wider">Ganancia</span>
-                <span className="text-base font-bold text-amber-400 font-mono">{ganancia}%</span>
+                <span className="text-xs text-yeikar-tertiary/70 uppercase tracking-wider">Ganancia</span>
+                <span className="text-base font-bold text-yeikar-primary font-mono">{ganancia}%</span>
               </div>
               <input
                 type="range" min={0} max={100} step={1}
@@ -219,7 +219,7 @@ export default function Calculadora() {
                 onChange={e => setGanancia(parseInt(e.target.value))}
                 className="w-full h-1.5 appearance-none rounded-full outline-none cursor-pointer"
                 style={{
-                  background: `linear-gradient(to right, #f59e0b ${ganancia}%, #334155 ${ganancia}%)`,
+                  background: `linear-gradient(to right, #D4AF37 ${ganancia}%, #422C1F ${ganancia}%)`,
                 }}
               />
             </div>
@@ -227,11 +227,11 @@ export default function Calculadora() {
             {/* Indicador dimensiones */}
             {baseDim && (
               <div className="text-center mt-3">
-                <span className="text-xs text-slate-500">
-                  Base: <span className="text-slate-300 font-mono">{baseDim}</span>
+                <span className="text-xs text-yeikar-tertiary/50">
+                  Base: <span className="text-yeikar-tertiary/80 font-mono">{baseDim}</span>
                   {dimCambiada
-                    ? <span className="ml-2 text-amber-400">→ {ancho.toFixed(2)}m × {largo.toFixed(2)}m</span>
-                    : <span className="ml-2 text-emerald-400">— sin cambios</span>}
+                    ? <span className="ml-2 text-yeikar-primary">→ {ancho.toFixed(2)}m × {largo.toFixed(2)}m</span>
+                    : <span className="ml-2 text-yeikar-primary/80">— sin cambios</span>}
                 </span>
               </div>
             )}
@@ -242,31 +242,31 @@ export default function Calculadora() {
 
           {/* Error */}
           {error && (
-            <div className="bg-red-900/40 border border-red-700/50 text-red-300 rounded-xl p-4 mb-4 text-sm">
+            <div className="bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl p-4 mb-4 text-sm">
               {error}
             </div>
           )}
 
           {/* Tabla de materiales */}
           {cargando && !resultado && (
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden mb-5">
+            <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 overflow-hidden mb-5">
               {[...Array(6)].map((_, i) => (
-                <div key={i} className="flex gap-4 p-4 border-b border-slate-700/50">
-                  <div className="h-4 w-40 bg-slate-700 animate-pulse rounded" />
-                  <div className="h-4 w-20 bg-slate-700 animate-pulse rounded ml-auto" />
-                  <div className="h-4 w-24 bg-slate-700 animate-pulse rounded" />
-                  <div className="h-4 w-20 bg-slate-700 animate-pulse rounded" />
-                  <div className="h-4 w-24 bg-slate-700 animate-pulse rounded" />
+                <div key={i} className="flex gap-4 p-4 border-b border-yeikar-primary/10">
+                  <div className="h-4 w-40 bg-yeikar-primary/15 animate-pulse rounded" />
+                  <div className="h-4 w-20 bg-yeikar-primary/15 animate-pulse rounded ml-auto" />
+                  <div className="h-4 w-24 bg-yeikar-primary/15 animate-pulse rounded" />
+                  <div className="h-4 w-20 bg-yeikar-primary/15 animate-pulse rounded" />
+                  <div className="h-4 w-24 bg-yeikar-primary/15 animate-pulse rounded" />
                 </div>
               ))}
             </div>
           )}
 
           {resultado && (
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden mb-5">
+            <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 overflow-hidden mb-5 shadow-card">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-slate-700 text-slate-400 text-xs uppercase tracking-wider">
+                  <tr className="border-b border-yeikar-primary/15 text-yeikar-tertiary/60 text-xs uppercase tracking-wider">
                     <th className="px-4 py-3 text-left">Material</th>
                     <th className="px-4 py-3 text-left">Regla</th>
                     <th className="px-4 py-3 text-right">Cant. base</th>
@@ -284,10 +284,10 @@ export default function Calculadora() {
                     return (
                       <tr
                         key={idx}
-                        className="border-b border-slate-700/40 hover:bg-slate-700/30 transition-colors"
+                        className="border-b border-yeikar-primary/10 hover:bg-yeikar-primary/5 transition-colors"
                       >
                         <td className="px-4 py-3">
-                          <div className="font-semibold text-white">{m.nombre}</div>
+                          <div className="font-semibold text-yeikar-tertiary">{m.nombre}</div>
                         </td>
                         <td className="px-4 py-3">
                           {/* Mostrar badge según relación con el cambio de dimensiones */}
@@ -295,13 +295,13 @@ export default function Calculadora() {
                             ? <EscalaBadge tipo="FIJO" />
                             : <EscalaBadge tipo="LINEAL" />}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-300">
+                        <td className="px-4 py-3 text-right font-mono text-yeikar-tertiary/75">
                           {m.cantidad_calculada.toFixed(2)} {m.unidad}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-white">
+                        <td className="px-4 py-3 text-right font-mono font-bold text-yeikar-tertiary">
                           {m.cantidad_calculada.toFixed(2)} {m.unidad}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-amber-300">
+                        <td className="px-4 py-3 text-right font-mono text-yeikar-primary-light">
                           {cop(m.costo_subtotal)}
                         </td>
                       </tr>
@@ -311,26 +311,26 @@ export default function Calculadora() {
               </table>
 
               {/* Footer desglose */}
-              <div className="border-t border-slate-700 px-4 py-4 space-y-2">
-                <div className="flex justify-between text-sm text-slate-400">
+              <div className="border-t border-yeikar-primary/15 px-4 py-4 space-y-2">
+                <div className="flex justify-between text-sm text-yeikar-tertiary/60">
                   <span>Subtotal materiales (muestra)</span>
-                  <span className="font-mono text-slate-300">{cop(resultado.costo_materiales)}</span>
+                  <span className="font-mono text-yeikar-tertiary/80">{cop(resultado.costo_materiales)}</span>
                 </div>
-                <div className="flex justify-between text-sm text-slate-400">
+                <div className="flex justify-between text-sm text-yeikar-tertiary/60">
                   <span>Mano de obra estimada</span>
-                  <span className="font-mono text-slate-300">{cop(resultado.costo_mano_obra)}</span>
+                  <span className="font-mono text-yeikar-tertiary/80">{cop(resultado.costo_mano_obra)}</span>
                 </div>
-                <div className="flex justify-between text-sm text-slate-400">
+                <div className="flex justify-between text-sm text-yeikar-tertiary/60">
                   <span>Gastos indirectos</span>
-                  <span className="font-mono text-slate-300">{cop(resultado.costo_gastos_indirectos)}</span>
+                  <span className="font-mono text-yeikar-tertiary/80">{cop(resultado.costo_gastos_indirectos)}</span>
                 </div>
-                <div className="flex justify-between text-sm font-bold pt-1 border-t border-slate-700">
-                  <span className="text-slate-200">Costo de producción total</span>
-                  <span className="font-mono text-white">{cop(resultado.costo_total)}</span>
+                <div className="flex justify-between text-sm font-bold pt-1 border-t border-yeikar-primary/15">
+                  <span className="text-yeikar-tertiary/90">Costo de producción total</span>
+                  <span className="font-mono text-yeikar-tertiary">{cop(resultado.costo_total)}</span>
                 </div>
-                <div className="flex justify-between text-lg font-black pt-2 border-t border-amber-500/30">
-                  <span className="text-amber-400">Precio sugerido de venta ({ganancia}% ganancia)</span>
-                  <span className="font-mono text-amber-400">{cop(resultado.precio_venta)}</span>
+                <div className="flex justify-between text-lg font-black pt-2 border-t border-yeikar-primary/30">
+                  <span className="text-yeikar-primary">Precio sugerido de venta ({ganancia}% ganancia)</span>
+                  <span className="font-mono text-yeikar-primary">{cop(resultado.precio_venta)}</span>
                 </div>
               </div>
             </div>
@@ -338,9 +338,9 @@ export default function Calculadora() {
 
           {/* Estado vacío */}
           {!resultado && !cargando && !error && (
-            <div className="bg-slate-800 rounded-2xl border border-slate-700 p-12 text-center">
+            <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 p-12 text-center shadow-card">
               <div className="text-4xl mb-3">📐</div>
-              <p className="text-slate-400">Ajusta las dimensiones para ver el cálculo de materiales</p>
+              <p className="text-yeikar-tertiary/70">Ajusta las dimensiones para ver el cálculo de materiales</p>
             </div>
           )}
         </>
@@ -348,10 +348,10 @@ export default function Calculadora() {
 
       {/* Estado inicial sin producto */}
       {!productoId && (
-        <div className="bg-slate-800 rounded-2xl border border-slate-700 p-16 text-center">
+        <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 p-16 text-center shadow-card">
           <div className="text-5xl mb-4">🛏️</div>
-          <h3 className="text-xl font-bold text-white mb-2">Selecciona un producto modelo</h3>
-          <p className="text-slate-400 text-sm max-w-sm mx-auto">
+          <h3 className="text-xl font-bold text-yeikar-tertiary mb-2">Selecciona un producto modelo</h3>
+          <p className="text-yeikar-tertiary/70 text-sm max-w-sm mx-auto">
             Elige la cama o mueble base y ajusta las dimensiones para ver en vivo cuántos materiales se necesitan y cuánto cuesta producirlo.
           </p>
         </div>

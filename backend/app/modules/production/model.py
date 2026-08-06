@@ -19,6 +19,8 @@ class OrdenProduccion(Base):
     fecha_inicio = Column(Date, nullable=True)
     fecha_fin = Column(Date, nullable=True)
     estado = Column(String(50), nullable=False)
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+    actualizado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -26,6 +28,12 @@ class OrdenProduccion(Base):
     detalle_pedido = relationship("DetallePedido")
     etapas = relationship("EtapaProduccion", back_populates="orden", cascade="all, delete-orphan")
     costo = relationship("CostoProduccion", back_populates="orden", uselist=False, cascade="all, delete-orphan")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+    actualizador = relationship("Usuario", foreign_keys=[actualizado_por_id])
+
+    @property
+    def creador_nombre(self):
+        return self.creador.nombre_usuario if self.creador else None
 
 class EtapaProduccion(Base):
     __tablename__ = "etapa_produccion"

@@ -27,6 +27,7 @@ from app.modules.users import schemas, service
 
 # Roles con acceso total (definidos por código, no editables desde el panel)
 ROLES_SUPER = ("Dueño", "Administrador")
+ROLES_ALCANCE_TOTAL = ROLES_SUPER
 
 # Catálogo central de módulos del ERP.
 # clave = identificador usado en la tabla `rol_modulo` y en las rutas.
@@ -45,6 +46,7 @@ MODULOS_CATALOGO: List[Dict[str, str]] = [
     {"clave": "proveedores", "nombre": "Proveedores", "descripcion": "Registro y gestión de proveedores."},
     {"clave": "empleados", "nombre": "Empleados", "descripcion": "Registro y gestión de empleados."},
     {"clave": "gastos", "nombre": "Gastos", "descripcion": "Registro y control de gastos."},
+    {"clave": "cuentas", "nombre": "Cuentas y movimientos", "descripcion": "Medios de pago (efectivo, Zelle, bancos), saldos y movimientos de cada cuenta."},
     {"clave": "compras", "nombre": "Compras", "descripcion": "Compras de materiales e insumos."},
     {"clave": "reportes", "nombre": "Reportes financieros", "descripcion": "Pérdidas y ganancias, indicadores."},
     {"clave": "tasas", "nombre": "Tasas de cambio", "descripcion": "Tasas de cambio diarias."},
@@ -97,6 +99,18 @@ def get_current_user(
 def es_admin_user(usuario: Usuario) -> bool:
     """True si el usuario tiene un rol con acceso total (Dueño/Administrador)."""
     return any(r.nombre in ROLES_SUPER for r in usuario.roles)
+
+
+def tiene_alcance_total(usuario: Usuario) -> bool:
+    """Indica si el usuario puede consultar registros de toda la operación."""
+    return any(r.nombre in ROLES_ALCANCE_TOTAL for r in usuario.roles)
+
+
+def filtrar_registros_propios(query, columna, usuario: Usuario):
+    """Aplica alcance por fila. Los registros históricos NULL quedan reservados a dueños."""
+    if tiene_alcance_total(usuario):
+        return query
+    return query.filter(columna == usuario.id)
 
 
 def obtener_accesos_usuario(db: Session, usuario: Usuario) -> Dict[str, bool]:

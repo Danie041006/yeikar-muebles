@@ -69,6 +69,7 @@ class MovimientoCaja(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     metodo_caja_id = Column(BigInteger, ForeignKey("metodo_caja.id", ondelete="RESTRICT"), nullable=False)
+    usuario_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
     fecha = Column(Date, nullable=False)
     tipo = Column(String(20), nullable=False)  # APERTURA | ENTRADA | SALIDA | AJUSTE
     monto = Column(Numeric(15, 2), nullable=False)
@@ -82,6 +83,7 @@ class MovimientoCaja(Base):
 
     metodo_caja = relationship("MetodoCaja")
     moneda = relationship("Moneda")
+    usuario = relationship("Usuario")
 
 
 class DevolucionVenta(Base):

@@ -34,7 +34,26 @@ def listar_productos(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_productos(db, salto=salto, limite=limite, buscar=buscar)
+    productos = service.obtener_productos(db, salto=salto, limite=limite, buscar=buscar)
+    # Precio base de referencia: si el producto no tiene precio_venta_base guardado,
+    # se calcula con la receta paramétrica a sus dimensiones base (con ganancia por defecto).
+    for prod in productos:
+        if prod.precio_venta_base is None and prod.precio_costo_base is None:
+            try:
+                resultado = cost_service.calcular_costo_producto(
+                    db=db,
+                    producto_id=prod.id,
+                    nuevo_ancho=Decimal(str(prod.ancho_base or 1)),
+                    nuevo_largo=Decimal(str(prod.largo_base or 1)),
+                    ganancia_porcentaje=Decimal("40"),
+                    iva_porcentaje=Decimal("0"),
+                )
+                if resultado.get("precio_venta"):
+                    prod.precio_venta_base = resultado["precio_venta"]
+                    prod.precio_costo_base = resultado.get("costo_total")
+            except ValueError:
+                pass
+    return productos
 
 @router.get("/producto/{id_producto}", response_model=schemas.ProductoResponse)
 def ver_producto(

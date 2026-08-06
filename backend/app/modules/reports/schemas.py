@@ -105,6 +105,16 @@ class MetodoCajaResponse(MetodoCajaBase):
         from_attributes = True
 
 
+class ResponsableResponse(BaseModel):
+    """Usuario responsable de haber registrado un movimiento de caja."""
+    id: int
+    nombre_usuario: str
+    email: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
 class MovimientoCajaBase(BaseModel):
     metodo_caja_id: int
     fecha: date
@@ -128,10 +138,25 @@ class MovimientoCajaUpdate(BaseModel):
 
 class MovimientoCajaResponse(MovimientoCajaBase):
     id: int
+    usuario_id: Optional[int] = None
     monto_en_moneda_base: Optional[Decimal] = None
     created_at: Optional[datetime] = None
     metodo_caja: Optional[MetodoCajaResponse] = None
     moneda: Optional["MonedaResponse"] = None
+    usuario: Optional[ResponsableResponse] = None
+
+class ResumenCuentaResponse(BaseModel):
+    """Saldo de una cuenta: por moneda (monto en su propia moneda) + total COP."""
+    metodo_caja: MetodoCajaResponse
+    saldo_por_moneda: List["LineaSaldoMoneda"] = []
+    saldo_cop: Decimal = Decimal("0.0")
+
+class LineaSaldoMoneda(BaseModel):
+    moneda_id: int
+    codigo: str
+    simbolo: str
+    monto: Decimal = Decimal("0.0")
+    monto_cop: Decimal = Decimal("0.0")
 
     class Config:
         from_attributes = True
@@ -278,4 +303,5 @@ class InformeMensualResponse(BaseModel):
 from app.modules.catalogos.schemas import MonedaResponse  # noqa: E402
 from app.modules.sales.schemas import VentaResponse  # noqa: E402
 MovimientoCajaResponse.model_rebuild()
+ResumenCuentaResponse.model_rebuild()
 DevolucionVentaResponse.model_rebuild()

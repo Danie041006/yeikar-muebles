@@ -18,7 +18,7 @@ def crear_pedido(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        return service.crear_pedido(db, esquema)
+        return service.crear_pedido(db, esquema, usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -35,7 +35,7 @@ def listar_pedidos(
 ):
     return service.obtener_pedidos(
         db, salto=salto, limite=limite, buscar=buscar,
-        solo_mes_actual=solo_mes_actual, mes=mes, anio=anio
+        solo_mes_actual=solo_mes_actual, mes=mes, anio=anio, usuario=usuario_actual
     )
 
 @router.get("/{id_pedido}", response_model=schemas.PedidoResponse)
@@ -44,7 +44,7 @@ def ver_pedido(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.obtener_pedido(db, id_pedido)
+    db_obj = service.obtener_pedido(db, id_pedido, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return db_obj
@@ -56,7 +56,7 @@ def actualizar_pedido(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.actualizar_pedido(db, id_pedido, esquema)
+    db_obj = service.actualizar_pedido(db, id_pedido, esquema, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return db_obj
@@ -67,7 +67,7 @@ def eliminar_pedido(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_pedido(db, id_pedido)
+    exito = service.eliminar_pedido(db, id_pedido, usuario_actual)
     if not exito:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return None
@@ -98,6 +98,7 @@ def convertir_cotizacion_a_pedido(
             moneda_adelanto_id=body.moneda_adelanto_id,
             tasa_cambio_adelanto=body.tasa_cambio_adelanto,
             metodo_pago=body.metodo_pago,
+            usuario=usuario_actual,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

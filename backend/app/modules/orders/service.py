@@ -7,9 +7,26 @@ from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
 from app.modules.sales import service as venta_service
 from app.modules.sales.schemas import VentaCreate, PagoCreate
+from app.modules.auditoria.service import record_event
+from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
+from app.modules.users.model import Usuario
 
-def obtener_pedido(db: Session, id_pedido: int):
-    return db.query(model.Pedido).filter(model.Pedido.id == id_pedido).first()
+def _snapshot(pedido: model.Pedido) -> dict:
+    return {
+        "cotizacion_id": pedido.cotizacion_id,
+        "cliente_id": pedido.cliente_id,
+        "fecha": pedido.fecha,
+        "estado": pedido.estado,
+        "fecha_entrega_estimada": pedido.fecha_entrega_estimada,
+        "observaciones": pedido.observaciones,
+    }
+
+
+def obtener_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
+    query = db.query(model.Pedido).filter(model.Pedido.id == id_pedido)
+    if usuario is not None:
+        query = filtrar_registros_propios(query, model.Pedido.creado_por_id, usuario)
+    return query.first()
 
 def obtener_pedidos(
     db: Session,
@@ -18,9 +35,12 @@ def obtener_pedidos(
     buscar: str = None,
     solo_mes_actual: bool = True,
     mes: int = None,
-    anio: int = None
+    anio: int = None,
+    usuario: Usuario | None = None,
 ):
     query = db.query(model.Pedido)
+    if usuario is not None:
+        query = filtrar_registros_propios(query, model.Pedido.creado_por_id, usuario)
     if buscar:
         query = query.join(Client).filter(
             or_(
@@ -45,9 +65,12 @@ def obtener_pedidos(
 
     return query.offset(salto).limit(limite).all()
 
-def crear_pedido(db: Session, esquema: schemas.PedidoCreate):
+def crear_pedido(db: Session, esquema: schemas.PedidoCreate, usuario: Usuario | None = None):
     # Crear cabecera de pedido
     pedido_datos = esquema.model_dump(exclude={"detalles"})
+    if usuario is not None:
+        pedido_datos["creado_por_id"] = usuario.id
+        pedido_datos["actualizado_por_id"] = usuario.id
     db_pedido = model.Pedido(**pedido_datos)
     db.add(db_pedido)
     db.flush()  # Para obtener el db_pedido.id
@@ -60,16 +83,33 @@ def crear_pedido(db: Session, esquema: schemas.PedidoCreate):
         )
         db.add(db_detalle)
 
+    record_event(
+        db,
+        actor=usuario,
+        action="CREATE",
+        entity_type="pedido",
+        entity_id=db_pedido.id,
+        after=_snapshot(db_pedido),
+    )
     db.commit()
     db.refresh(db_pedido)
     return db_pedido
 
-def actualizar_pedido(db: Session, id_pedido: int, esquema: schemas.PedidoUpdate):
+def actualizar_pedido(
+    db: Session,
+    id_pedido: int,
+    esquema: schemas.PedidoUpdate,
+    usuario: Usuario | None = None,
+):
     # FOR UPDATE: dos transiciones simultáneas a PRODUCCION se serializan; el
     # segundo request ve el estado ya cambiado y no duplica las órdenes.
-    db_pedido = db.query(model.Pedido).filter(model.Pedido.id == id_pedido).with_for_update().first()
+    query = db.query(model.Pedido).filter(model.Pedido.id == id_pedido)
+    if usuario is not None:
+        query = filtrar_registros_propios(query, model.Pedido.creado_por_id, usuario)
+    db_pedido = query.with_for_update().first()
     if not db_pedido:
         return None
+    antes = _snapshot(db_pedido)
     datos = esquema.model_dump(exclude_unset=True)
     
     estado_anterior = db_pedido.estado
@@ -92,18 +132,39 @@ def actualizar_pedido(db: Session, id_pedido: int, esquema: schemas.PedidoUpdate
                     detalle_pedido_id=detalle.id,
                     estado="EN_PRODUCCION",
                     fecha_inicio=date.today(),
-                    fecha_fin=None
+                    fecha_fin=None,
+                    creado_por_id=usuario.id if usuario is not None else None,
+                    actualizado_por_id=usuario.id if usuario is not None else None,
                 )
                 db.add(db_orden)
 
+    if usuario is not None:
+        db_pedido.actualizado_por_id = usuario.id
+    record_event(
+        db,
+        actor=usuario,
+        action="STATE_CHANGE" if "estado" in datos else "UPDATE",
+        entity_type="pedido",
+        entity_id=db_pedido.id,
+        before=antes,
+        after=_snapshot(db_pedido),
+    )
     db.commit()
     db.refresh(db_pedido)
     return db_pedido
 
-def eliminar_pedido(db: Session, id_pedido: int):
-    db_pedido = obtener_pedido(db, id_pedido)
+def eliminar_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
+    db_pedido = obtener_pedido(db, id_pedido, usuario)
     if not db_pedido:
         return False
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="pedido",
+        entity_id=db_pedido.id,
+        before=_snapshot(db_pedido),
+    )
     db.delete(db_pedido)
     db.commit()
     return True
@@ -141,10 +202,14 @@ def convertir_cotizacion_a_pedido(
     moneda_adelanto_id: int = None,
     tasa_cambio_adelanto: float = None,
     metodo_pago: str = None,
+    usuario: Usuario | None = None,
 ):
     # Buscar la cotización con FOR UPDATE: dos conversiones simultáneas quedan
     # serializadas; la segunda detecta el pedido ya creado en vez de lanzar 500.
-    db_cotizacion = db.query(Cotizacion).filter(Cotizacion.id == id_cotizacion).with_for_update().first()
+    cotizacion_query = db.query(Cotizacion).filter(Cotizacion.id == id_cotizacion)
+    if usuario is not None:
+        cotizacion_query = filtrar_registros_propios(cotizacion_query, Cotizacion.creado_por_id, usuario)
+    db_cotizacion = cotizacion_query.with_for_update().first()
     if not db_cotizacion:
         raise ValueError("Cotizacion no encontrada")
 
@@ -187,6 +252,7 @@ def convertir_cotizacion_a_pedido(
             tasa_pago = float(tasa_cambio_adelanto) / tasa_venta
 
     # Cambiar estado de la cotización a APROBADA
+    estado_cotizacion_anterior = db_cotizacion.estado
     db_cotizacion.estado = "APROBADA"
 
     # Crear la cabecera de pedido basada en la cotización
@@ -196,7 +262,9 @@ def convertir_cotizacion_a_pedido(
         fecha=date.today(),
         estado="COTIZADO",
         observaciones=db_cotizacion.observaciones,
-        fecha_entrega_estimada=fecha_entrega_estimada
+        fecha_entrega_estimada=fecha_entrega_estimada,
+        creado_por_id=usuario.id if usuario is not None else None,
+        actualizado_por_id=usuario.id if usuario is not None else None,
     )
     db.add(db_pedido)
     db.flush()
@@ -244,6 +312,7 @@ def convertir_cotizacion_a_pedido(
         ),
         permitir_estado_cotizado=True,
         commit=False,  # la conversión commitea atómicamente al final
+        usuario=usuario,
     )
 
     # ── Registrar el adelanto como primer pago de la factura (opcional) ───
@@ -260,8 +329,26 @@ def convertir_cotizacion_a_pedido(
                 referencia=f"Adelanto conversión cotización #{id_cotizacion}",
             ),
             commit=False,  # la conversión commitea atómicamente al final
+            usuario=usuario,
         )
 
+    record_event(
+        db,
+        actor=usuario,
+        action="CREATE",
+        entity_type="pedido",
+        entity_id=db_pedido.id,
+        after=_snapshot(db_pedido),
+    )
+    record_event(
+        db,
+        actor=usuario,
+        action="STATE_CHANGE",
+        entity_type="cotizacion",
+        entity_id=db_cotizacion.id,
+        before={"estado": estado_cotizacion_anterior},
+        after={"estado": db_cotizacion.estado},
+    )
     db.commit()
     db.refresh(db_pedido)
     return db_pedido

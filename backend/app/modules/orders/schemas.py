@@ -57,6 +57,9 @@ class PedidoResponse(PedidoBase):
     cliente_id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    creado_por_id: Optional[int] = None
+    actualizado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     cliente: Optional[ClientResponse] = None
     cotizacion: Optional[CotizacionResponse] = None
     detalles: List[DetallePedidoResponse] = []

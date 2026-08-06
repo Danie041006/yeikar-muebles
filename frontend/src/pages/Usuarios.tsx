@@ -375,7 +375,7 @@ export default function Usuarios() {
       {/* Top Header & Actions */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-yeikar-secondary-light/10 shadow-sm">
         <div>
-          <h1 className="text-2xl font-black font-headline text-yeikar-neutral tracking-tight">
+          <h1 className="text-3xl font-black font-headline text-yeikar-neutral tracking-tight">
             Gestión de Usuarios y Roles
           </h1>
           <p className="text-sm text-yeikar-neutral/50">
@@ -395,7 +395,7 @@ export default function Usuarios() {
 
       {/* Notifications */}
       {error && (
-        <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200 text-sm animate-fadeIn flex items-center gap-3">
+        <div className="bg-red-50 text-red-700 p-4 rounded-xl border border-red-200 text-sm animate-fade-in flex items-center gap-3">
           <svg className="w-5 h-5 text-red-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -404,7 +404,7 @@ export default function Usuarios() {
       )}
 
       {success && (
-        <div className="bg-green-50 text-green-700 p-4 rounded-xl border border-green-200 text-sm animate-fadeIn flex items-center gap-3">
+        <div className="bg-green-50 text-green-700 p-4 rounded-xl border border-green-200 text-sm animate-fade-in flex items-center gap-3">
           <svg className="w-5 h-5 text-green-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -613,7 +613,7 @@ export default function Usuarios() {
 
       {/* Modal - Create User */}
       {isCreateOpen && (
-        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl border border-yeikar-secondary/15 max-w-md w-full shadow-2xl p-6 relative animate-scaleIn">
             <h3 className="text-lg font-black font-headline text-yeikar-secondary mb-1">
               Crear Nuevo Usuario
@@ -695,7 +695,7 @@ export default function Usuarios() {
 
       {/* Modal - Create Rol */}
       {isRolCreateOpen && (
-        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-30 flex items-center justify-center p-4 animate-fadeIn">
+        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl border border-yeikar-secondary/15 max-w-md w-full shadow-2xl p-6 relative animate-scaleIn">
             <h3 className="text-lg font-black font-headline text-yeikar-secondary mb-1">Nuevo Rol</h3>
             <p className="text-xs text-yeikar-neutral/50 mb-4">
@@ -754,7 +754,7 @@ export default function Usuarios() {
 
       {/* Modal - Edit Rol */}
       {isRolEditOpen && (
-        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-30 flex items-center justify-center p-4 animate-fadeIn">
+        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl border border-yeikar-secondary/15 max-w-md w-full shadow-2xl p-6 relative animate-scaleIn">
             <h3 className="text-lg font-black font-headline text-yeikar-secondary mb-4">Editar Rol</h3>
             <form onSubmit={handleEditRol} className="space-y-4 font-headline">
@@ -804,7 +804,7 @@ export default function Usuarios() {
 
       {/* Modal - Configurar módulos del rol */}
       {rolEditor && (
-        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-40 flex items-center justify-center p-4 animate-fadeIn">
+        <div className="fixed inset-0 bg-yeikar-neutral/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl border border-yeikar-secondary/15 max-w-2xl w-full shadow-2xl p-6 relative animate-scaleIn max-h-[85vh] flex flex-col">
             <div className="flex items-start justify-between mb-1">
               <div>

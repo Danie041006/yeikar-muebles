@@ -23,6 +23,7 @@ from app.modules.reports.cuentas_router import router as cuentas_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.envios.router import router as envios_router
 from app.modules.quotes.intelligent_router import router as iqe_router
+from app.modules.auditoria.router import router as auditoria_router
 app = FastAPI(
     title="YEIKAR API",
     version="0.0.1",
@@ -63,3 +64,4 @@ app.include_router(cuentas_router, prefix="/api/v1", tags=["cuentas"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
 app.include_router(envios_router, prefix="/api/v1/envio", tags=["envios"])
 app.include_router(iqe_router, prefix="/api/v1/intelligent-quotation", tags=["cotización inteligente"])
+app.include_router(auditoria_router, prefix="/api/v1/auditoria", tags=["auditoría"])

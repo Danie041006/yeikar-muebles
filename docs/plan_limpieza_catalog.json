@@ -1,0 +1,6222 @@
+[
+ {
+  "nombre": "ALGODÓN",
+  "canon": 15000.0,
+  "precios_db": [
+   14000.0,
+   15000.0
+  ],
+  "materiales": [
+   {
+    "id": 7,
+    "nombre": "ALGODÓN",
+    "precio": 15000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 6,
+    "nombre": "ALGODÓN",
+    "precio": 14000.0,
+    "nuevo_precio": 15000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 8,
+    "nombre": "ALGODÓN",
+    "precio": 14000.0,
+    "nuevo_precio": 15000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "APAGADORES",
+  "canon": 29000.0,
+  "precios_db": [
+   1500.0,
+   5000.0,
+   29000.0
+  ],
+  "materiales": [
+   {
+    "id": 12,
+    "nombre": "APAGADORES",
+    "precio": 29000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 13,
+    "nombre": "APAGADORES",
+    "precio": 5000.0,
+    "nuevo_precio": 29000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 11,
+    "nombre": "APAGADORES",
+    "precio": 1500.0,
+    "nuevo_precio": 29000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "BISELADO DEL ESPEJO BORDE",
+  "canon": 7000.0,
+  "precios_db": [
+   7000.0
+  ],
+  "materiales": [
+   {
+    "id": 17,
+    "nombre": "BISELADO DEL ESPEJO BORDE",
+    "precio": 7000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 18,
+    "nombre": "BISELADO DEL ESPEJO BORDE",
+    "precio": 7000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "BOTONES",
+  "canon": 5000.0,
+  "precios_db": [
+   5000.0
+  ],
+  "materiales": [
+   {
+    "id": 20,
+    "nombre": "BOTONES",
+    "precio": 5000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 21,
+    "nombre": "BOTONES",
+    "precio": 0.0,
+    "nuevo_precio": 5000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CABLE",
+  "canon": 3000.0,
+  "precios_db": [
+   1100.0,
+   1500.0,
+   3000.0
+  ],
+  "materiales": [
+   {
+    "id": 23,
+    "nombre": "CABLE",
+    "precio": 3000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 26,
+    "nombre": "CABLE",
+    "precio": 3000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 25,
+    "nombre": "CABLE",
+    "precio": 1500.0,
+    "nuevo_precio": 3000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 24,
+    "nombre": "CABLE",
+    "precio": 1100.0,
+    "nuevo_precio": 3000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CABULLA",
+  "canon": 12000.0,
+  "precios_db": [
+   9000.0,
+   10000.0,
+   12000.0,
+   13000.0,
+   16000.0,
+   18000.0
+  ],
+  "materiales": [
+   {
+    "id": 29,
+    "nombre": "CABULLA",
+    "precio": 18000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 31,
+    "nombre": "CABULLA",
+    "precio": 16000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 33,
+    "nombre": "CABULLA",
+    "precio": 13000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 32,
+    "nombre": "CABULLA",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 34,
+    "nombre": "CABUYA",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 35,
+    "nombre": "CABUYA",
+    "precio": 10000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 30,
+    "nombre": "CABULLA",
+    "precio": 9000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CAFETERO",
+  "canon": 30000.0,
+  "precios_db": [
+   30000.0
+  ],
+  "materiales": [
+   {
+    "id": 36,
+    "nombre": "CAFETERO",
+    "precio": 30000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 37,
+    "nombre": "CAFETERO",
+    "precio": 0.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CANTO 19",
+  "canon": 800.0,
+  "precios_db": [
+   800.0,
+   1700.0
+  ],
+  "materiales": [
+   {
+    "id": 40,
+    "nombre": "CANTO 19",
+    "precio": 1700.0,
+    "nuevo_precio": 800.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 41,
+    "nombre": "CANTO 19",
+    "precio": 800.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "CARTON",
+  "canon": 5000.0,
+  "precios_db": [
+   5000.0,
+   5500.0,
+   6000.0
+  ],
+  "materiales": [
+   {
+    "id": 45,
+    "nombre": "CARTON",
+    "precio": 6000.0,
+    "nuevo_precio": 5000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 47,
+    "nombre": "CARTON",
+    "precio": 5500.0,
+    "nuevo_precio": 5000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 44,
+    "nombre": "CARTON",
+    "precio": 5000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 46,
+    "nombre": "CARTON",
+    "precio": 5000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 48,
+    "nombre": "CARTON",
+    "precio": 5000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CASQUETES",
+  "canon": 600.0,
+  "precios_db": [
+   100.0,
+   170.0,
+   300.0,
+   600.0
+  ],
+  "materiales": [
+   {
+    "id": 52,
+    "nombre": "CASQUETES",
+    "precio": 600.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 51,
+    "nombre": "CASQUETES",
+    "precio": 300.0,
+    "nuevo_precio": 600.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 49,
+    "nombre": "CASQUETES",
+    "precio": 170.0,
+    "nuevo_precio": 600.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 50,
+    "nombre": "CASQUETES",
+    "precio": 100.0,
+    "nuevo_precio": 600.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CAZATA",
+  "canon": 56000.0,
+  "precios_db": [
+   56000.0,
+   64000.0
+  ],
+  "materiales": [
+   {
+    "id": 54,
+    "nombre": "CAZATA",
+    "precio": 64000.0,
+    "nuevo_precio": 56000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 55,
+    "nombre": "CAZATA",
+    "precio": 56000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CAÑAMO",
+  "canon": 12000.0,
+  "precios_db": [
+   12000.0,
+   15000.0,
+   30000.0
+  ],
+  "materiales": [
+   {
+    "id": 56,
+    "nombre": "CAÑAMO",
+    "precio": 30000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 59,
+    "nombre": "CAÑAMO",
+    "precio": 15000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 58,
+    "nombre": "CAÑAMO",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 57,
+    "nombre": "CAÑAMO",
+    "precio": 0.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CIERRE MAGICO",
+  "canon": 1000.0,
+  "precios_db": [
+   1000.0,
+   5000.0
+  ],
+  "materiales": [
+   {
+    "id": 63,
+    "nombre": "CIERRE MAGICO",
+    "precio": 5000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 61,
+    "nombre": "CIERRE MAGICO",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 62,
+    "nombre": "CIERRE MAGICO",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CLAVILLO",
+  "canon": 1000.0,
+  "precios_db": [
+   600.0,
+   1000.0,
+   2000.0
+  ],
+  "materiales": [
+   {
+    "id": 67,
+    "nombre": "CLAVILLO",
+    "precio": 2000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 65,
+    "nombre": "CLAVILLO",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 66,
+    "nombre": "CLAVILLO",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 68,
+    "nombre": "CLAVILLO",
+    "precio": 600.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CLAVILLO F.50",
+  "canon": 1000.0,
+  "precios_db": [
+   1000.0
+  ],
+  "materiales": [
+   {
+    "id": 71,
+    "nombre": "CLAVILLO F.50",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 72,
+    "nombre": "CLAVILLO F.50",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "CLAVILLOS",
+  "canon": 1000.0,
+  "precios_db": [
+   1000.0,
+   2000.0
+  ],
+  "materiales": [
+   {
+    "id": 75,
+    "nombre": "CLAVILLOS",
+    "precio": 2000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 74,
+    "nombre": "CLAVILLOS",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 76,
+    "nombre": "CLAVILLOS",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 77,
+    "nombre": "CLAVILLOS",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 78,
+    "nombre": "CLAVILLOS",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 79,
+    "nombre": "CLAVILLOS",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 80,
+    "nombre": "CLAVILLOS",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "COLA DE PATO",
+  "canon": 40000.0,
+  "precios_db": [
+   35000.0,
+   40000.0,
+   50000.0
+  ],
+  "materiales": [
+   {
+    "id": 90,
+    "nombre": "COLAPATO",
+    "precio": 50000.0,
+    "nuevo_precio": 40000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 93,
+    "nombre": "COLAPATOS",
+    "precio": 40000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 89,
+    "nombre": "COLAPATO",
+    "precio": 35000.0,
+    "nuevo_precio": 40000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 91,
+    "nombre": "COLAPATO",
+    "precio": 35000.0,
+    "nuevo_precio": 40000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLA DE RATA",
+  "canon": 7222.0,
+  "precios_db": [
+   1000.0,
+   1570.0
+  ],
+  "materiales": [
+   {
+    "id": 85,
+    "nombre": "COLA DE RATA",
+    "precio": 1570.0,
+    "nuevo_precio": 7222.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 86,
+    "nombre": "COLA DE RATA",
+    "precio": 1000.0,
+    "nuevo_precio": 7222.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "COLA E RATA",
+  "canon": 500.0,
+  "precios_db": [
+   500.0
+  ],
+  "materiales": [
+   {
+    "id": 87,
+    "nombre": "COLA E RATA",
+    "precio": 500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 88,
+    "nombre": "COLA E RATA",
+    "precio": 500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLARATA",
+  "canon": 1000.0,
+  "precios_db": [
+   600.0,
+   1000.0,
+   2000.0
+  ],
+  "materiales": [
+   {
+    "id": 95,
+    "nombre": "COLARATA",
+    "precio": 2000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 94,
+    "nombre": "COLARATA",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 96,
+    "nombre": "COLARATA",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 98,
+    "nombre": "COLARATA",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 97,
+    "nombre": "COLARATA",
+    "precio": 600.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLBON",
+  "canon": 14000.0,
+  "precios_db": [
+   12000.0,
+   13000.0,
+   14000.0,
+   19000.0,
+   49000.0
+  ],
+  "materiales": [
+   {
+    "id": 99,
+    "nombre": "COLBON",
+    "precio": 49000.0,
+    "nuevo_precio": 14000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 103,
+    "nombre": "COLBON",
+    "precio": 19000.0,
+    "nuevo_precio": 14000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 102,
+    "nombre": "COLBON",
+    "precio": 14000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 101,
+    "nombre": "COLBON",
+    "precio": 13000.0,
+    "nuevo_precio": 14000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 100,
+    "nombre": "COLBON",
+    "precio": 12000.0,
+    "nuevo_precio": 14000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLOR",
+  "canon": 22000.0,
+  "precios_db": [
+   18000.0,
+   20000.0,
+   21000.0,
+   22000.0
+  ],
+  "materiales": [
+   {
+    "id": 107,
+    "nombre": "COLOR",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 108,
+    "nombre": "COLOR",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 106,
+    "nombre": "COLOR",
+    "precio": 21000.0,
+    "nuevo_precio": 22000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 105,
+    "nombre": "COLOR",
+    "precio": 20000.0,
+    "nuevo_precio": 22000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 104,
+    "nombre": "COLOR",
+    "precio": 18000.0,
+    "nuevo_precio": 22000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLOR BLANCO",
+  "canon": 22000.0,
+  "precios_db": [
+   22000.0
+  ],
+  "materiales": [
+   {
+    "id": 113,
+    "nombre": "COLOR BLANCO",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 114,
+    "nombre": "COLOR BLANCO",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "COLOR GRIS",
+  "canon": 22000.0,
+  "precios_db": [
+   19000.0,
+   22000.0,
+   23000.0
+  ],
+  "materiales": [
+   {
+    "id": 120,
+    "nombre": "COLOR GRIS",
+    "precio": 23000.0,
+    "nuevo_precio": 22000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 119,
+    "nombre": "COLOR GRIS",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 118,
+    "nombre": "COLOR GRIS",
+    "precio": 19000.0,
+    "nuevo_precio": 22000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLOR MIEL",
+  "canon": 22000.0,
+  "precios_db": [
+   22000.0
+  ],
+  "materiales": [
+   {
+    "id": 123,
+    "nombre": "COLOR MIEL",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 124,
+    "nombre": "COLOR MIEL",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLOR NEGRO",
+  "canon": 22000.0,
+  "precios_db": [
+   20000.0,
+   22000.0
+  ],
+  "materiales": [
+   {
+    "id": 128,
+    "nombre": "COLOR NEGRO",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 127,
+    "nombre": "COLOR NEGRO",
+    "precio": 20000.0,
+    "nuevo_precio": 22000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 129,
+    "nombre": "COLOR NEGRO",
+    "precio": 20000.0,
+    "nuevo_precio": 22000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COLOR NEGRO TENDIDOS",
+  "canon": 22000.0,
+  "precios_db": [
+   22000.0
+  ],
+  "materiales": [
+   {
+    "id": 130,
+    "nombre": "COLOR NEGRO TENDIDOS",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 131,
+    "nombre": "COLOR NEGRO TENDIDOS",
+    "precio": 22000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "CORREDERAS",
+  "canon": 30000.0,
+  "precios_db": [
+   8000.0,
+   10000.0,
+   15000.0,
+   19000.0,
+   20000.0,
+   30000.0,
+   32000.0
+  ],
+  "materiales": [
+   {
+    "id": 137,
+    "nombre": "CORREDERAS",
+    "precio": 32000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 143,
+    "nombre": "CORREDERAS",
+    "precio": 32000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 136,
+    "nombre": "CORREDERAS",
+    "precio": 30000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 141,
+    "nombre": "CORREDERAS",
+    "precio": 30000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 142,
+    "nombre": "CORREDERAS",
+    "precio": 30000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 138,
+    "nombre": "CORREDERAS",
+    "precio": 20000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 147,
+    "nombre": "CORREDERAS",
+    "precio": 20000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 146,
+    "nombre": "CORREDERAS",
+    "precio": 19000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 135,
+    "nombre": "CORREDERAS",
+    "precio": 15000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 140,
+    "nombre": "CORREDERAS",
+    "precio": 15000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 139,
+    "nombre": "CORREDERAS",
+    "precio": 10000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 144,
+    "nombre": "CORREDERAS",
+    "precio": 10000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 145,
+    "nombre": "CORREDERAS",
+    "precio": 10000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 148,
+    "nombre": "CORREDERAS",
+    "precio": 8000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "CORREDERAS 35 NORMAL",
+  "canon": 250000.0,
+  "precios_db": [
+   10000.0,
+   11000.0,
+   12000.0
+  ],
+  "materiales": [
+   {
+    "id": 153,
+    "nombre": "CORREDERAS 35 NORMAL",
+    "precio": 12000.0,
+    "nuevo_precio": 250000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 152,
+    "nombre": "CORREDERAS 35 NORMAL",
+    "precio": 11000.0,
+    "nuevo_precio": 250000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 151,
+    "nombre": "CORREDERAS 35 NORMAL",
+    "precio": 10000.0,
+    "nuevo_precio": 250000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 150,
+    "nombre": "CORREDERAS 35 NORMAL",
+    "precio": 0.0,
+    "nuevo_precio": 250000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "CORREDERAS 35 PUFF",
+  "canon": 20000.0,
+  "precios_db": [
+   20000.0,
+   38999.0
+  ],
+  "materiales": [
+   {
+    "id": 155,
+    "nombre": "CORREDERAS 35 PUFF",
+    "precio": 38999.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 154,
+    "nombre": "CORREDERAS 35 PUFF",
+    "precio": 20000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "CORREDERAS 35 PUSH",
+  "canon": 18000.0,
+  "precios_db": [
+   17500.0,
+   18000.0
+  ],
+  "materiales": [
+   {
+    "id": 157,
+    "nombre": "CORREDERAS 35 PUSH",
+    "precio": 18000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 156,
+    "nombre": "CORREDERAS 35 PUSH",
+    "precio": 17500.0,
+    "nuevo_precio": 18000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COSTAL",
+  "canon": 4000.0,
+  "precios_db": [
+   2240.0,
+   3000.0,
+   3500.0,
+   4000.0,
+   25000.0
+  ],
+  "materiales": [
+   {
+    "id": 170,
+    "nombre": "COSTAL",
+    "precio": 25000.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 176,
+    "nombre": "COSTAL",
+    "precio": 4000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 172,
+    "nombre": "COSTAL",
+    "precio": 3500.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 175,
+    "nombre": "COSTAL",
+    "precio": 3500.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 171,
+    "nombre": "COSTAL",
+    "precio": 3000.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 174,
+    "nombre": "COSTAL",
+    "precio": 3000.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 173,
+    "nombre": "COSTAL",
+    "precio": 2240.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "COSTO OPERATIVOS",
+  "canon": 50000.0,
+  "precios_db": [],
+  "materiales": [
+   {
+    "id": 183,
+    "nombre": "COSTO OPERATIVOS",
+    "precio": 0.0,
+    "nuevo_precio": 50000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "EBANISTERIA",
+  "canon": 105000.0,
+  "precios_db": [
+   100000.0
+  ],
+  "materiales": [
+   {
+    "id": 185,
+    "nombre": "EBANISTERIA",
+    "precio": 100000.0,
+    "nuevo_precio": 105000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "ENCINA",
+  "canon": 160000.0,
+  "precios_db": [
+   100000.0,
+   160000.0
+  ],
+  "materiales": [
+   {
+    "id": 194,
+    "nombre": "ENCINA",
+    "precio": 160000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 195,
+    "nombre": "ENCINA",
+    "precio": 160000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 193,
+    "nombre": "ENCINA",
+    "precio": 100000.0,
+    "nuevo_precio": 160000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESMALTE NEGRO",
+  "canon": null,
+  "precios_db": [
+   13000.0
+  ],
+  "materiales": [
+   {
+    "id": 198,
+    "nombre": "ESMALTE NEGRO",
+    "precio": 13000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 199,
+    "nombre": "ESMALTE NEGRO",
+    "precio": 13000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPEJO",
+  "canon": 50000.0,
+  "precios_db": [
+   12000.0,
+   45000.0,
+   50000.0
+  ],
+  "materiales": [
+   {
+    "id": 200,
+    "nombre": "ESPEJO",
+    "precio": 50000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 203,
+    "nombre": "ESPEJO",
+    "precio": 50000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 201,
+    "nombre": "ESPEJO",
+    "precio": 45000.0,
+    "nuevo_precio": 50000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 202,
+    "nombre": "ESPEJO",
+    "precio": 12000.0,
+    "nuevo_precio": 50000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA 1 1/2'' AZUL",
+  "canon": 26000.0,
+  "precios_db": [
+   1000.0,
+   26000.0,
+   30000.0
+  ],
+  "materiales": [
+   {
+    "id": 210,
+    "nombre": "ESPUMA 1 1/2'' AZUL",
+    "precio": 30000.0,
+    "nuevo_precio": 26000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 209,
+    "nombre": "ESPUMA 1 1/2'' AZUL",
+    "precio": 26000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 208,
+    "nombre": "ESPUMA 1 1/2'' AZUL",
+    "precio": 1000.0,
+    "nuevo_precio": 26000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA 1 ROSADA",
+  "canon": 20000.0,
+  "precios_db": [
+   8000.0,
+   20000.0,
+   25125.0
+  ],
+  "materiales": [
+   {
+    "id": 213,
+    "nombre": "ESPUMA 1\" ROSADA",
+    "precio": 25125.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 212,
+    "nombre": "ESPUMA 1\" ROSADA",
+    "precio": 20000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 214,
+    "nombre": "ESPUMA 1\" ROSADA",
+    "precio": 8000.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA 1' NARANJA",
+  "canon": 24000.0,
+  "precios_db": [
+   16000.0,
+   24000.0
+  ],
+  "materiales": [
+   {
+    "id": 216,
+    "nombre": "ESPUMA 1' NARANJA",
+    "precio": 24000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 215,
+    "nombre": "ESPUMA 1' NARANJA",
+    "precio": 16000.0,
+    "nuevo_precio": 24000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA 1/2 BLANCA",
+  "canon": 7300.0,
+  "precios_db": [
+   7000.0,
+   7300.0
+  ],
+  "materiales": [
+   {
+    "id": 218,
+    "nombre": "ESPUMA 1/2 BLANCA",
+    "precio": 7300.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 219,
+    "nombre": "ESPUMA 1/2 BLANCA",
+    "precio": 7000.0,
+    "nuevo_precio": 7300.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA 1/2 ROSADA",
+  "canon": 25000.0,
+  "precios_db": [
+   6630.0,
+   8000.0,
+   25000.0,
+   25125.0
+  ],
+  "materiales": [
+   {
+    "id": 221,
+    "nombre": "ESPUMA 1/2 ROSADA",
+    "precio": 25125.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 220,
+    "nombre": "ESPUMA 1/2 ROSADA",
+    "precio": 25000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 223,
+    "nombre": "ESPUMA 1/2 ROSADA",
+    "precio": 8000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 224,
+    "nombre": "ESPUMA 1/2\" ROSADA",
+    "precio": 8000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 222,
+    "nombre": "ESPUMA 1/2 ROSADA",
+    "precio": 6630.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA 2 AZUL",
+  "canon": 41000.0,
+  "precios_db": [
+   40000.0,
+   41000.0,
+   41340.0,
+   50000.0,
+   50250.0
+  ],
+  "materiales": [
+   {
+    "id": 229,
+    "nombre": "ESPUMA 2 AZUL",
+    "precio": 50250.0,
+    "nuevo_precio": 41000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 228,
+    "nombre": "ESPUMA 2 AZUL",
+    "precio": 50000.0,
+    "nuevo_precio": 41000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 227,
+    "nombre": "ESPUMA 2 AZUL",
+    "precio": 41340.0,
+    "nuevo_precio": 41000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 226,
+    "nombre": "ESPUMA 2 AZUL",
+    "precio": 41000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 225,
+    "nombre": "ESPUMA 2 AZUL",
+    "precio": 40000.0,
+    "nuevo_precio": 41000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA AZUL DE 2 PULGADAS",
+  "canon": 41000.0,
+  "precios_db": [
+   39000.0,
+   41000.0,
+   41340.0
+  ],
+  "materiales": [
+   {
+    "id": 239,
+    "nombre": "ESPUMA AZUL DE 2 PULGADAS",
+    "precio": 41340.0,
+    "nuevo_precio": 41000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 238,
+    "nombre": "ESPUMA AZUL DE 2 PULGADAS",
+    "precio": 41000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 237,
+    "nombre": "ESPUMA AZUL DE 2 PULGADAS",
+    "precio": 39000.0,
+    "nuevo_precio": 41000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA BLANCA DE 1/2",
+  "canon": 19900.0,
+  "precios_db": [
+   12500.0,
+   19900.0
+  ],
+  "materiales": [
+   {
+    "id": 244,
+    "nombre": "ESPUMA BLANCA DE 1/2",
+    "precio": 19900.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 243,
+    "nombre": "ESPUMA BLANCA DE 1/2",
+    "precio": 12500.0,
+    "nuevo_precio": 19900.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA DE 1 1/2'' ROSADA",
+  "canon": 30000.0,
+  "precios_db": [
+   26000.0,
+   30000.0
+  ],
+  "materiales": [
+   {
+    "id": 246,
+    "nombre": "ESPUMA DE 1 1/2'' ROSADA",
+    "precio": 30000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 248,
+    "nombre": "ESPUMA DE 1 1/2'' ROSADA",
+    "precio": 30000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 247,
+    "nombre": "ESPUMA DE 1 1/2'' ROSADA",
+    "precio": 26000.0,
+    "nuevo_precio": 30000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA DE 1 1/2PULGADA AZUL",
+  "canon": 26000.0,
+  "precios_db": [
+   26000.0,
+   33000.0,
+   40000.0
+  ],
+  "materiales": [
+   {
+    "id": 251,
+    "nombre": "ESPUMA DE 1 1/2PULGADA AZUL",
+    "precio": 40000.0,
+    "nuevo_precio": 26000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 250,
+    "nombre": "ESPUMA DE 1 1/2PULGADA AZUL",
+    "precio": 33000.0,
+    "nuevo_precio": 26000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 249,
+    "nombre": "ESPUMA DE 1 1/2PULGADA AZUL",
+    "precio": 26000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA DE 1 1/2PULGADA ROSADA",
+  "canon": 33000.0,
+  "precios_db": [
+   30000.0,
+   33000.0
+  ],
+  "materiales": [
+   {
+    "id": 253,
+    "nombre": "ESPUMA DE 1 1/2PULGADA ROSADA",
+    "precio": 33000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 252,
+    "nombre": "ESPUMA DE 1 1/2PULGADA ROSADA",
+    "precio": 30000.0,
+    "nuevo_precio": 33000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA DE 1 PULGADA ROSADA",
+  "canon": 20000.0,
+  "precios_db": [
+   20000.0,
+   27000.0,
+   30000.0
+  ],
+  "materiales": [
+   {
+    "id": 257,
+    "nombre": "ESPUMA DE 1 PULGADA ROSADA",
+    "precio": 30000.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 256,
+    "nombre": "ESPUMA DE 1 PULGADA ROSADA",
+    "precio": 27000.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 255,
+    "nombre": "ESPUMA DE 1 PULGADA ROSADA",
+    "precio": 20000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA DE 1/2 ROSADA",
+  "canon": 6630.0,
+  "precios_db": [
+   6630.0,
+   8000.0,
+   30000.0
+  ],
+  "materiales": [
+   {
+    "id": 263,
+    "nombre": "ESPUMA DE 1/2 ROSADA",
+    "precio": 30000.0,
+    "nuevo_precio": 6630.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 262,
+    "nombre": "ESPUMA DE 1/2 ROSADA",
+    "precio": 8000.0,
+    "nuevo_precio": 6630.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 264,
+    "nombre": "ESPUMA DE 1/2\" ROSADA",
+    "precio": 6630.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA DE 2 ROSADA",
+  "canon": 48000.0,
+  "precios_db": [
+   48000.0
+  ],
+  "materiales": [
+   {
+    "id": 268,
+    "nombre": "ESPUMA DE 2 ROSADA",
+    "precio": 48000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 269,
+    "nombre": "ESPUMA DE 2\" ROSADA",
+    "precio": 48000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA DE 2'' ROSADA",
+  "canon": 5000.0,
+  "precios_db": [
+   30000.0
+  ],
+  "materiales": [
+   {
+    "id": 270,
+    "nombre": "ESPUMA DE 2'' ROSADA",
+    "precio": 30000.0,
+    "nuevo_precio": 5000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA GRIS DE 1 Y 1/2 P",
+  "canon": 46000.0,
+  "precios_db": [
+   46000.0
+  ],
+  "materiales": [
+   {
+    "id": 273,
+    "nombre": "ESPUMA GRIS DE 1 Y 1/2 P",
+    "precio": 46000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 272,
+    "nombre": "ESPUMA GRIS DE 1 Y 1/2 P",
+    "precio": 0.0,
+    "nuevo_precio": 46000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA NARANJA 1CM",
+  "canon": 18000.0,
+  "precios_db": [
+   18000.0
+  ],
+  "materiales": [
+   {
+    "id": 274,
+    "nombre": "ESPUMA NARANJA 1CM",
+    "precio": 18000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 275,
+    "nombre": "ESPUMA NARANJA 1CM",
+    "precio": 0.0,
+    "nuevo_precio": 18000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESPUMA ROSADA 2",
+  "canon": 48000.0,
+  "precios_db": [
+   48000.0
+  ],
+  "materiales": [
+   {
+    "id": 277,
+    "nombre": "ESPUMA ROSADA 2",
+    "precio": 48000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 278,
+    "nombre": "ESPUMA ROSADA 2\"",
+    "precio": 48000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "ESTOPEROLES",
+  "canon": null,
+  "precios_db": [
+   500.0,
+   1800.0
+  ],
+  "materiales": [
+   {
+    "id": 282,
+    "nombre": "ESTOPEROLES",
+    "precio": 1800.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 281,
+    "nombre": "ESTOPEROLES",
+    "precio": 500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "F40",
+  "canon": 1000.0,
+  "precios_db": [
+   1000.0,
+   28000.0
+  ],
+  "materiales": [
+   {
+    "id": 284,
+    "nombre": "F40",
+    "precio": 28000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 283,
+    "nombre": "F40",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "FIELTRO",
+  "canon": 4000.0,
+  "precios_db": [
+   3000.0,
+   4000.0,
+   14000.0,
+   17000.0
+  ],
+  "materiales": [
+   {
+    "id": 286,
+    "nombre": "FIELTRO",
+    "precio": 17000.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 288,
+    "nombre": "FIELTRO",
+    "precio": 14000.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 289,
+    "nombre": "FIELTRO",
+    "precio": 4000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 287,
+    "nombre": "FIELTRO",
+    "precio": 3000.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "GANCHOS",
+  "canon": 20000.0,
+  "precios_db": [
+   20000.0
+  ],
+  "materiales": [
+   {
+    "id": 291,
+    "nombre": "GANCHOS",
+    "precio": 20000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 290,
+    "nombre": "GANCHOS",
+    "precio": 0.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "GASOLINA",
+  "canon": 4500.0,
+  "precios_db": [
+   450.0,
+   3000.0,
+   4500.0,
+   5000.0
+  ],
+  "materiales": [
+   {
+    "id": 294,
+    "nombre": "GASOLINA",
+    "precio": 5000.0,
+    "nuevo_precio": 4500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 299,
+    "nombre": "GASOLINA",
+    "precio": 5000.0,
+    "nuevo_precio": 4500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 301,
+    "nombre": "GASOLINA",
+    "precio": 5000.0,
+    "nuevo_precio": 4500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 298,
+    "nombre": "GASOLINA",
+    "precio": 4500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 300,
+    "nombre": "GASOLINA",
+    "precio": 4500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 296,
+    "nombre": "GASOLINA",
+    "precio": 3000.0,
+    "nuevo_precio": 4500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 297,
+    "nombre": "GASOLINA",
+    "precio": 450.0,
+    "nuevo_precio": 4500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 295,
+    "nombre": "GASOLINA",
+    "precio": 0.0,
+    "nuevo_precio": 4500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "GATO DE LA CAMA",
+  "canon": 160000.0,
+  "precios_db": [
+   150000.0
+  ],
+  "materiales": [
+   {
+    "id": 303,
+    "nombre": "GATO DE LA CAMA",
+    "precio": 150000.0,
+    "nuevo_precio": 160000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "GRAPAS",
+  "canon": 12000.0,
+  "precios_db": [
+   500.0,
+   540.0,
+   550.0,
+   600.0,
+   1000.0,
+   5000.0,
+   10000.0,
+   12000.0,
+   20000.0
+  ],
+  "materiales": [
+   {
+    "id": 320,
+    "nombre": "GRAPAS",
+    "precio": 20000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 307,
+    "nombre": "GRAPAS",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 311,
+    "nombre": "GRAPAS",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 313,
+    "nombre": "GRAPAS",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 314,
+    "nombre": "GRAPAS",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 317,
+    "nombre": "GRAPAS",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 319,
+    "nombre": "GRAPAS",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 325,
+    "nombre": "GRAPAS",
+    "precio": 12000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 310,
+    "nombre": "GRAPAS",
+    "precio": 10000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 312,
+    "nombre": "GRAPAS",
+    "precio": 10000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 318,
+    "nombre": "GRAPAS",
+    "precio": 10000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 309,
+    "nombre": "GRAPAS",
+    "precio": 5000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 306,
+    "nombre": "GRAPAS",
+    "precio": 1000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 324,
+    "nombre": "GRAPAS",
+    "precio": 1000.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 323,
+    "nombre": "GRAPAS",
+    "precio": 600.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 316,
+    "nombre": "GRAPAS",
+    "precio": 550.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 322,
+    "nombre": "GRAPAS",
+    "precio": 540.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 308,
+    "nombre": "GRAPAS",
+    "precio": 500.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 315,
+    "nombre": "GRAPAS",
+    "precio": 500.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 321,
+    "nombre": "GRAPAS",
+    "precio": 500.0,
+    "nuevo_precio": 12000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "GUATA",
+  "canon": 18500.0,
+  "precios_db": [
+   13000.0,
+   14000.0,
+   15000.0,
+   18500.0,
+   19000.0
+  ],
+  "materiales": [
+   {
+    "id": 329,
+    "nombre": "GUATA",
+    "precio": 19000.0,
+    "nuevo_precio": 18500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 328,
+    "nombre": "GUATA",
+    "precio": 18500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 327,
+    "nombre": "GUATA",
+    "precio": 15000.0,
+    "nuevo_precio": 18500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 326,
+    "nombre": "GUATA",
+    "precio": 14000.0,
+    "nuevo_precio": 18500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 330,
+    "nombre": "GUATA",
+    "precio": 13000.0,
+    "nuevo_precio": 18500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "GUATA 300",
+  "canon": 18500.0,
+  "precios_db": [
+   18500.0,
+   19000.0
+  ],
+  "materiales": [
+   {
+    "id": 332,
+    "nombre": "GUATA 300",
+    "precio": 19000.0,
+    "nuevo_precio": 18500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 331,
+    "nombre": "GUATA 300",
+    "precio": 18500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "HILO",
+  "canon": 25000.0,
+  "precios_db": [
+   4000.0,
+   5000.0,
+   25000.0,
+   27000.0,
+   28000.0
+  ],
+  "materiales": [
+   {
+    "id": 343,
+    "nombre": "HILO",
+    "precio": 28000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 338,
+    "nombre": "HILO",
+    "precio": 27000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 340,
+    "nombre": "HILO",
+    "precio": 27000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 345,
+    "nombre": "HILO",
+    "precio": 27000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 337,
+    "nombre": "HILO",
+    "precio": 25000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 342,
+    "nombre": "HILO",
+    "precio": 25000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 344,
+    "nombre": "HILO",
+    "precio": 25000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 341,
+    "nombre": "HILO",
+    "precio": 5000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 339,
+    "nombre": "HILO",
+    "precio": 4000.0,
+    "nuevo_precio": 25000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "JALADORES",
+  "canon": 10000.0,
+  "precios_db": [
+   4000.0,
+   8000.0,
+   10000.0,
+   26800.0
+  ],
+  "materiales": [
+   {
+    "id": 349,
+    "nombre": "JALADORES",
+    "precio": 26800.0,
+    "nuevo_precio": 10000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 348,
+    "nombre": "JALADORES",
+    "precio": 10000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 351,
+    "nombre": "JALADORES",
+    "precio": 8000.0,
+    "nuevo_precio": 10000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 350,
+    "nombre": "JALADORES",
+    "precio": 4000.0,
+    "nuevo_precio": 10000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LACA",
+  "canon": 23000.0,
+  "precios_db": [
+   21000.0
+  ],
+  "materiales": [
+   {
+    "id": 353,
+    "nombre": "LACA",
+    "precio": 21000.0,
+    "nuevo_precio": 23000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "LACA BRILLANTE CON ESCARCHA",
+  "canon": 23000.0,
+  "precios_db": [
+   22000.0,
+   23000.0
+  ],
+  "materiales": [
+   {
+    "id": 356,
+    "nombre": "LACA BRILLANTE CON ESCARCHA",
+    "precio": 23000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 355,
+    "nombre": "LACA BRILLANTE CON ESCARCHA",
+    "precio": 22000.0,
+    "nuevo_precio": 23000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LACA S/M",
+  "canon": 23000.0,
+  "precios_db": [
+   22000.0,
+   23000.0
+  ],
+  "materiales": [
+   {
+    "id": 358,
+    "nombre": "LACA S/M",
+    "precio": 23000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 357,
+    "nombre": "LACA S/M",
+    "precio": 22000.0,
+    "nuevo_precio": 23000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LACA SEMIMATE",
+  "canon": 23000.0,
+  "precios_db": [
+   21000.0,
+   22000.0,
+   23000.0
+  ],
+  "materiales": [
+   {
+    "id": 361,
+    "nombre": "LACA SEMIMATE",
+    "precio": 23000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 363,
+    "nombre": "LACA SEMIMATE",
+    "precio": 23000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 360,
+    "nombre": "LACA SEMIMATE",
+    "precio": 22000.0,
+    "nuevo_precio": 23000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 362,
+    "nombre": "LACA SEMIMATE",
+    "precio": 21000.0,
+    "nuevo_precio": 23000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LAM MDF 15",
+  "canon": 220000.0,
+  "precios_db": [
+   207.0,
+   210.0,
+   217.0,
+   49270.0,
+   207000.0,
+   210000.0,
+   220000.0,
+   340000.0
+  ],
+  "materiales": [
+   {
+    "id": 373,
+    "nombre": "LAM MDF 15",
+    "precio": 340000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 369,
+    "nombre": "LAM MDF 15",
+    "precio": 220000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 371,
+    "nombre": "LAM MDF 15",
+    "precio": 220000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 372,
+    "nombre": "LAM MDF 15",
+    "precio": 220000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 378,
+    "nombre": "LAM MDF 15\"",
+    "precio": 220000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 404,
+    "nombre": "LAMINA DE 15\"",
+    "precio": 220000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 368,
+    "nombre": "LAM MDF 15",
+    "precio": 210000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 370,
+    "nombre": "LAM MDF 15",
+    "precio": 210000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 375,
+    "nombre": "LAM MDF 15",
+    "precio": 210000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 376,
+    "nombre": "LAM MDF 15",
+    "precio": 210000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 403,
+    "nombre": "LAMINA DE 15",
+    "precio": 210000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 374,
+    "nombre": "LAM MDF 15",
+    "precio": 207000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 480,
+    "nombre": "MDF 15",
+    "precio": 207000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 377,
+    "nombre": "LAM MDF 15\"",
+    "precio": 49270.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 367,
+    "nombre": "LAM MDF 15",
+    "precio": 217.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 366,
+    "nombre": "LAM MDF 15",
+    "precio": 210.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 365,
+    "nombre": "LAM MDF 15",
+    "precio": 207.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "LAM MDF 2.5",
+  "canon": 65000.0,
+  "precios_db": [
+   65000.0
+  ],
+  "materiales": [
+   {
+    "id": 381,
+    "nombre": "LAM MDF 2.5",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 407,
+    "nombre": "LAMINA DE 2.5 MDF",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 408,
+    "nombre": "LAMINA DE 2.5\"",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "LAM MDF 2.7",
+  "canon": 65000.0,
+  "precios_db": [
+   65000.0,
+   68000.0
+  ],
+  "materiales": [
+   {
+    "id": 379,
+    "nombre": "LAM MDF 2,7",
+    "precio": 68000.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 380,
+    "nombre": "LAM MDF 2,7\"",
+    "precio": 68000.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 383,
+    "nombre": "LAM MDF 2.7",
+    "precio": 68000.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 382,
+    "nombre": "LAM MDF 2.7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 384,
+    "nombre": "LAM MDF 2.7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LAM MDF 5",
+  "canon": 130000.0,
+  "precios_db": [
+   130000.0
+  ],
+  "materiales": [
+   {
+    "id": 386,
+    "nombre": "LAM MDF 5",
+    "precio": 130000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 387,
+    "nombre": "LAM MDF 5",
+    "precio": 130000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LAM MDF 7",
+  "canon": 125.0,
+  "precios_db": [
+   130.0
+  ],
+  "materiales": [
+   {
+    "id": 392,
+    "nombre": "LAM MDF 7",
+    "precio": 130.0,
+    "nuevo_precio": 125.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "LAM MDF 9",
+  "canon": 140000.0,
+  "precios_db": [
+   140.0,
+   31900.0,
+   32000.0,
+   136000.0,
+   140000.0
+  ],
+  "materiales": [
+   {
+    "id": 394,
+    "nombre": "LAM MDF 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 395,
+    "nombre": "LAM MDF 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 397,
+    "nombre": "LAM MDF 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 398,
+    "nombre": "LAM MDF 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 399,
+    "nombre": "LAM MFF 9\"",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 400,
+    "nombre": "LAM MFF 9\"",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 418,
+    "nombre": "LAMINA DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 419,
+    "nombre": "LAMINA DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 420,
+    "nombre": "LAMINA DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 421,
+    "nombre": "LAMINA DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 422,
+    "nombre": "LAMINA DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 423,
+    "nombre": "LAMINA DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 424,
+    "nombre": "LAMINA DE 9 MDF",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 427,
+    "nombre": "LAMINA DE 9\"",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 746,
+    "nombre": "LAM MFF 9\"",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 396,
+    "nombre": "LAM MDF 9",
+    "precio": 136000.0,
+    "nuevo_precio": 140000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 425,
+    "nombre": "LAMINA DE 9 MDF",
+    "precio": 136000.0,
+    "nuevo_precio": 140000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 428,
+    "nombre": "LAMINA DE 9\"",
+    "precio": 32000.0,
+    "nuevo_precio": 140000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 426,
+    "nombre": "LAMINA DE 9\"",
+    "precio": 31900.0,
+    "nuevo_precio": 140000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 393,
+    "nombre": "LAM MDF 9",
+    "precio": 140.0,
+    "nuevo_precio": 140000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "LAMINA DE 2,7",
+  "canon": 68000.0,
+  "precios_db": [
+   15229.0,
+   68000.0
+  ],
+  "materiales": [
+   {
+    "id": 405,
+    "nombre": "LAMINA DE 2,7",
+    "precio": 68000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 406,
+    "nombre": "LAMINA DE 2,7\"",
+    "precio": 15229.0,
+    "nuevo_precio": 68000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LAMINA DE 5.5",
+  "canon": 130000.0,
+  "precios_db": [
+   29114.0,
+   130000.0,
+   140000.0
+  ],
+  "materiales": [
+   {
+    "id": 388,
+    "nombre": "LAM MDF 5,5\"",
+    "precio": 140000.0,
+    "nuevo_precio": 130000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 390,
+    "nombre": "LAM MDF 5,5\"",
+    "precio": 140000.0,
+    "nuevo_precio": 130000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 414,
+    "nombre": "LAMINA DE 5.5",
+    "precio": 140000.0,
+    "nuevo_precio": 130000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 415,
+    "nombre": "LAMINA DE 5.5\"",
+    "precio": 140000.0,
+    "nuevo_precio": 130000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 389,
+    "nombre": "LAM MDF 5,5\"",
+    "precio": 130000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 409,
+    "nombre": "LAMINA DE 5,5",
+    "precio": 130000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 410,
+    "nombre": "LAMINA DE 5,5\"",
+    "precio": 130000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 412,
+    "nombre": "LAMINA DE 5.5",
+    "precio": 130000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 413,
+    "nombre": "LAMINA DE 5.5",
+    "precio": 130000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 391,
+    "nombre": "LAM MDF 5,5\"",
+    "precio": 29114.0,
+    "nuevo_precio": 130000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 411,
+    "nombre": "LAMINA DE 5,5\"",
+    "precio": 29114.0,
+    "nuevo_precio": 130000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LAMINA DE 6",
+  "canon": 220000.0,
+  "precios_db": [
+   216000.0,
+   220000.0
+  ],
+  "materiales": [
+   {
+    "id": 417,
+    "nombre": "LAMINA DE 6",
+    "precio": 220000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 416,
+    "nombre": "LAMINA DE 6",
+    "precio": 216000.0,
+    "nuevo_precio": 220000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LAMPARAS DE LUZ",
+  "canon": 135000.0,
+  "precios_db": [
+   100000.0,
+   125000.0,
+   135000.0
+  ],
+  "materiales": [
+   {
+    "id": 433,
+    "nombre": "LAMPARAS DE LUZ",
+    "precio": 135000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 432,
+    "nombre": "LAMPARAS DE LUZ",
+    "precio": 125000.0,
+    "nuevo_precio": 135000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 431,
+    "nombre": "LAMPARAS DE LUZ",
+    "precio": 100000.0,
+    "nuevo_precio": 135000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LENCILLO",
+  "canon": 4000.0,
+  "precios_db": [
+   2650.0,
+   3500.0,
+   4000.0
+  ],
+  "materiales": [
+   {
+    "id": 435,
+    "nombre": "LENCILLO",
+    "precio": 4000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 438,
+    "nombre": "LENCILLO",
+    "precio": 4000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 437,
+    "nombre": "LENCILLO",
+    "precio": 3500.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 436,
+    "nombre": "LENCILLO",
+    "precio": 2650.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LIENCILLO",
+  "canon": 4000.0,
+  "precios_db": [
+   3000.0,
+   4000.0
+  ],
+  "materiales": [
+   {
+    "id": 441,
+    "nombre": "LIENCILLO",
+    "precio": 4000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 440,
+    "nombre": "LIENCILLO",
+    "precio": 3000.0,
+    "nuevo_precio": 4000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LIJA",
+  "canon": 2000.0,
+  "precios_db": [
+   2000.0
+  ],
+  "materiales": [
+   {
+    "id": 442,
+    "nombre": "LIJA",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 443,
+    "nombre": "LIJA",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 444,
+    "nombre": "LIJA",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LIJA 120",
+  "canon": 2000.0,
+  "precios_db": [
+   2000.0
+  ],
+  "materiales": [
+   {
+    "id": 447,
+    "nombre": "LIJA 120",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 448,
+    "nombre": "LIJA 120",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 449,
+    "nombre": "LIJA 120",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "LIJA 150",
+  "canon": 2000.0,
+  "precios_db": [
+   200.0,
+   2000.0
+  ],
+  "materiales": [
+   {
+    "id": 450,
+    "nombre": "LIJA 150",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 452,
+    "nombre": "LIJA 150",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 453,
+    "nombre": "LIJA 150",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 451,
+    "nombre": "LIJA 150",
+    "precio": 200.0,
+    "nuevo_precio": 2000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "LIJA 2000",
+  "canon": 2000.0,
+  "precios_db": [
+   2000.0,
+   4000.0
+  ],
+  "materiales": [
+   {
+    "id": 456,
+    "nombre": "LIJA 2000",
+    "precio": 4000.0,
+    "nuevo_precio": 2000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 455,
+    "nombre": "LIJA 2000",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "LIJA 400",
+  "canon": 2000.0,
+  "precios_db": [
+   2000.0,
+   4000.0
+  ],
+  "materiales": [
+   {
+    "id": 462,
+    "nombre": "LIJA 400",
+    "precio": 4000.0,
+    "nuevo_precio": 2000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 459,
+    "nombre": "LIJA 400",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 460,
+    "nombre": "LIJA 400",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 461,
+    "nombre": "LIJA 400",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "MADERA",
+  "canon": 140.0,
+  "precios_db": [
+   140.0
+  ],
+  "materiales": [
+   {
+    "id": 1,
+    "nombre": "MADERA",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 2,
+    "desactivar": false
+   },
+   {
+    "id": 2,
+    "nombre": "MADERA",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 3,
+    "nombre": "MADERA",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "MADERA (2)",
+  "canon": 140.0,
+  "precios_db": [
+   135.0,
+   140.0
+  ],
+  "materiales": [
+   {
+    "id": 466,
+    "nombre": "MADERA (2)",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 467,
+    "nombre": "MADERA (2)",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 465,
+    "nombre": "MADERA (2)",
+    "precio": 135.0,
+    "nuevo_precio": 140.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MADERA 60X1X4",
+  "canon": 140.0,
+  "precios_db": [
+   135.0,
+   140.0,
+   140000.0
+  ],
+  "materiales": [
+   {
+    "id": 471,
+    "nombre": "MADERA 60X1X4",
+    "precio": 140000.0,
+    "nuevo_precio": 140.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 469,
+    "nombre": "MADERA 60X1X4",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 470,
+    "nombre": "MADERA 60X1X4",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 473,
+    "nombre": "MADERA 60X1X4",
+    "precio": 140.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 472,
+    "nombre": "MADERA 60X1X4",
+    "precio": 135.0,
+    "nuevo_precio": 140.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MANIJAS",
+  "canon": 10000.0,
+  "precios_db": [
+   8000.0,
+   10000.0
+  ],
+  "materiales": [
+   {
+    "id": 474,
+    "nombre": "MANIJAS",
+    "precio": 10000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 475,
+    "nombre": "MANIJAS",
+    "precio": 10000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 477,
+    "nombre": "MANIJAS",
+    "precio": 10000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 476,
+    "nombre": "MANIJAS",
+    "precio": 8000.0,
+    "nuevo_precio": 10000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "MDF DE 15",
+  "canon": 330000.0,
+  "precios_db": [
+   210000.0,
+   220000.0,
+   330000.0
+  ],
+  "materiales": [
+   {
+    "id": 484,
+    "nombre": "MDF DE 15",
+    "precio": 330000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 483,
+    "nombre": "MDF DE 15",
+    "precio": 220000.0,
+    "nuevo_precio": 330000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 485,
+    "nombre": "MDF DE 15\"",
+    "precio": 220000.0,
+    "nuevo_precio": 330000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 482,
+    "nombre": "MDF DE 15",
+    "precio": 210000.0,
+    "nuevo_precio": 330000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MDF DE 2,7",
+  "canon": 65000.0,
+  "precios_db": [
+   65.0,
+   15229.0,
+   20000.0,
+   65000.0,
+   68000.0
+  ],
+  "materiales": [
+   {
+    "id": 495,
+    "nombre": "MDF DE 2,7\"",
+    "precio": 68000.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 487,
+    "nombre": "MDF DE 2,7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 490,
+    "nombre": "MDF DE 2,7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 491,
+    "nombre": "MDF DE 2,7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 493,
+    "nombre": "MDF DE 2,7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 492,
+    "nombre": "MDF DE 2,7",
+    "precio": 20000.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 489,
+    "nombre": "MDF DE 2,7",
+    "precio": 15229.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 488,
+    "nombre": "MDF DE 2,7",
+    "precio": 65.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 494,
+    "nombre": "MDF DE 2,7",
+    "precio": 65.0,
+    "nuevo_precio": 65000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MDF DE 2.7",
+  "canon": 65000.0,
+  "precios_db": [
+   65000.0
+  ],
+  "materiales": [
+   {
+    "id": 496,
+    "nombre": "MDF DE 2.7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 497,
+    "nombre": "MDF DE 2.7",
+    "precio": 65000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MDF DE 3",
+  "canon": 65.0,
+  "precios_db": [
+   65.0,
+   67.0,
+   16800.0,
+   65000.0,
+   140000.0
+  ],
+  "materiales": [
+   {
+    "id": 502,
+    "nombre": "MDF DE 3",
+    "precio": 140000.0,
+    "nuevo_precio": 65.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 499,
+    "nombre": "MDF DE 3",
+    "precio": 65000.0,
+    "nuevo_precio": 65.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 498,
+    "nombre": "MDF DE 3",
+    "precio": 16800.0,
+    "nuevo_precio": 65.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 503,
+    "nombre": "MDF DE 3",
+    "precio": 16800.0,
+    "nuevo_precio": 65.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 501,
+    "nombre": "MDF DE 3",
+    "precio": 67.0,
+    "nuevo_precio": 65.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 500,
+    "nombre": "MDF DE 3",
+    "precio": 65.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MDF DE 9",
+  "canon": 140000.0,
+  "precios_db": [
+   136000.0,
+   140000.0
+  ],
+  "materiales": [
+   {
+    "id": 506,
+    "nombre": "MDF DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 507,
+    "nombre": "MDF DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 508,
+    "nombre": "MDF DE 9",
+    "precio": 140000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 505,
+    "nombre": "MDF DE 9",
+    "precio": 136000.0,
+    "nuevo_precio": 140000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MDF DE 9MM",
+  "canon": 23000.0,
+  "precios_db": [
+   46000.0
+  ],
+  "materiales": [
+   {
+    "id": 509,
+    "nombre": "MDF DE 9MM",
+    "precio": 46000.0,
+    "nuevo_precio": 23000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "MELAMINA DE 15 VIENES",
+  "canon": 246000.0,
+  "precios_db": [
+   246000.0
+  ],
+  "materiales": [
+   {
+    "id": 511,
+    "nombre": "MELAMINA DE 15 VIENES",
+    "precio": 246000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 512,
+    "nombre": "MELAMINA DE 15 VIENES",
+    "precio": 246000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "METROS DE TAPA CANTO",
+  "canon": 2000.0,
+  "precios_db": [
+   770.0,
+   2000.0
+  ],
+  "materiales": [
+   {
+    "id": 517,
+    "nombre": "METROS DE TAPA CANTO",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 516,
+    "nombre": "METROS DE TAPA CANTO",
+    "precio": 770.0,
+    "nuevo_precio": 2000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MULTIUSO",
+  "canon": 6000.0,
+  "precios_db": [
+   6000.0
+  ],
+  "materiales": [
+   {
+    "id": 519,
+    "nombre": "MULTIUSO",
+    "precio": 6000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 518,
+    "nombre": "MULTIUSO",
+    "precio": 0.0,
+    "nuevo_precio": 6000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "MULTIUSOS",
+  "canon": 6000.0,
+  "precios_db": [
+   3000.0,
+   6000.0
+  ],
+  "materiales": [
+   {
+    "id": 520,
+    "nombre": "MULTIUSOS",
+    "precio": 6000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 521,
+    "nombre": "MULTIUSOS",
+    "precio": 3000.0,
+    "nuevo_precio": 6000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "NITRO",
+  "canon": 70000.0,
+  "precios_db": [
+   70000.0
+  ],
+  "materiales": [
+   {
+    "id": 524,
+    "nombre": "NITRO",
+    "precio": 70000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 523,
+    "nombre": "NITRO",
+    "precio": 0.0,
+    "nuevo_precio": 70000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PASADA DE LAMINA",
+  "canon": 40000.0,
+  "precios_db": [
+   20000.0,
+   40000.0
+  ],
+  "materiales": [
+   {
+    "id": 528,
+    "nombre": "PASADA DE LAMINA",
+    "precio": 40000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 529,
+    "nombre": "PASADA DE LAMINA",
+    "precio": 20000.0,
+    "nuevo_precio": 40000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PATA DE TENDIDO",
+  "canon": 1050.0,
+  "precios_db": [
+   2000.0,
+   2100.0
+  ],
+  "materiales": [
+   {
+    "id": 531,
+    "nombre": "PATA DE TENDIDO",
+    "precio": 2100.0,
+    "nuevo_precio": 1050.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 532,
+    "nombre": "PATA DE TENDIDO",
+    "precio": 2100.0,
+    "nuevo_precio": 1050.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 530,
+    "nombre": "PATA DE TENDIDO",
+    "precio": 2000.0,
+    "nuevo_precio": 1050.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "PATAS",
+  "canon": 5000.0,
+  "precios_db": [
+   5000.0,
+   16000.0
+  ],
+  "materiales": [
+   {
+    "id": 534,
+    "nombre": "PATAS",
+    "precio": 16000.0,
+    "nuevo_precio": 5000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 533,
+    "nombre": "PATAS",
+    "precio": 5000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "PATAS DE CAMAS",
+  "canon": 17500.0,
+  "precios_db": [
+   11000.0,
+   17500.0
+  ],
+  "materiales": [
+   {
+    "id": 537,
+    "nombre": "PATAS DE CAMAS",
+    "precio": 17500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 536,
+    "nombre": "PATAS DE CAMAS",
+    "precio": 11000.0,
+    "nuevo_precio": 17500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PATAS L PLATEADAS",
+  "canon": 8000.0,
+  "precios_db": [
+   8000.0
+  ],
+  "materiales": [
+   {
+    "id": 543,
+    "nombre": "PATAS L PLATEADAS",
+    "precio": 8000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 542,
+    "nombre": "PATAS L PLATEADAS",
+    "precio": 0.0,
+    "nuevo_precio": 8000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PEGANTE DE PISTOLA",
+  "canon": 43000.0,
+  "precios_db": [
+   13000.0,
+   43000.0
+  ],
+  "materiales": [
+   {
+    "id": 546,
+    "nombre": "PEGANTE DE PISTOLA",
+    "precio": 43000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 548,
+    "nombre": "PEGANTE DE PISTOLA",
+    "precio": 43000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 547,
+    "nombre": "PEGANTE DE PISTOLA",
+    "precio": 13000.0,
+    "nuevo_precio": 43000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PEOPE METROS",
+  "canon": 3000.0,
+  "precios_db": [
+   3000.0,
+   3500.0
+  ],
+  "materiales": [
+   {
+    "id": 555,
+    "nombre": "PEOPE METROS",
+    "precio": 3500.0,
+    "nuevo_precio": 3000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 554,
+    "nombre": "PEOPE METROS",
+    "precio": 3000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PEOPLE",
+  "canon": 3500.0,
+  "precios_db": [
+   3000.0,
+   3500.0,
+   4000.0
+  ],
+  "materiales": [
+   {
+    "id": 556,
+    "nombre": "PEOPLE",
+    "precio": 4000.0,
+    "nuevo_precio": 3500.0,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 580,
+    "nombre": "POP",
+    "precio": 4000.0,
+    "nuevo_precio": 3500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 551,
+    "nombre": "PEOPE",
+    "precio": 3500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 553,
+    "nombre": "PEOPE",
+    "precio": 3500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 552,
+    "nombre": "PEOPE",
+    "precio": 3000.0,
+    "nuevo_precio": 3500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 579,
+    "nombre": "POP",
+    "precio": 3000.0,
+    "nuevo_precio": 3500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "PICADILLO",
+  "canon": 15000.0,
+  "precios_db": [
+   15000.0
+  ],
+  "materiales": [
+   {
+    "id": 557,
+    "nombre": "PICADILLO",
+    "precio": 15000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 558,
+    "nombre": "PICADILLO",
+    "precio": 15000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PINTURA ( ALEX)",
+  "canon": null,
+  "precios_db": [
+   2800.0
+  ],
+  "materiales": [
+   {
+    "id": 560,
+    "nombre": "PINTURA ( ALEX)",
+    "precio": 2800.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 559,
+    "nombre": "PINTURA ( ALEX)",
+    "precio": 0.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PINTURA ALEX",
+  "canon": null,
+  "precios_db": [
+   2000.0,
+   2100.0,
+   3150.0,
+   20000.0,
+   26250.0,
+   30000.0,
+   31000.0,
+   36750.0,
+   63000.0,
+   73500.0,
+   78750.0
+  ],
+  "materiales": [
+   {
+    "id": 571,
+    "nombre": "PINTURA ALEX",
+    "precio": 78750.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 570,
+    "nombre": "PINTURA ALEX",
+    "precio": 73500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 569,
+    "nombre": "PINTURA ALEX",
+    "precio": 63000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 568,
+    "nombre": "PINTURA ALEX",
+    "precio": 36750.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 566,
+    "nombre": "PINTURA ALEX",
+    "precio": 31000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 565,
+    "nombre": "PINTURA ALEX",
+    "precio": 30000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 564,
+    "nombre": "PINTURA ALEX",
+    "precio": 26250.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 562,
+    "nombre": "PINTURA ALEX",
+    "precio": 20000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 567,
+    "nombre": "PINTURA ALEX",
+    "precio": 3150.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 572,
+    "nombre": "PINTURA ALEX",
+    "precio": 3150.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 563,
+    "nombre": "PINTURA ALEX",
+    "precio": 2100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 561,
+    "nombre": "PINTURA ALEX",
+    "precio": 2000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PINTURA TENDIDOS",
+  "canon": 6300.0,
+  "precios_db": [
+   6300.0
+  ],
+  "materiales": [
+   {
+    "id": 575,
+    "nombre": "PINTURA TENDIDOS",
+    "precio": 6300.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 576,
+    "nombre": "PINTURA TENDIDOS",
+    "precio": 6300.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PINTUTRA DE CAMA",
+  "canon": 587608.8,
+  "precios_db": [],
+  "materiales": [
+   {
+    "id": 577,
+    "nombre": "PINTUTRA DE CAMA",
+    "precio": 0.0,
+    "nuevo_precio": 587608.8,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "PREPARADA(JOTA) PINTURA",
+  "canon": null,
+  "precios_db": [
+   4000.0
+  ],
+  "materiales": [
+   {
+    "id": 582,
+    "nombre": "PREPARADA(JOTA) PINTURA",
+    "precio": 4000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 581,
+    "nombre": "PREPARADA(JOTA) PINTURA",
+    "precio": 0.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "PUNTOS DE HISTALACION",
+  "canon": 31500.0,
+  "precios_db": [
+   15750.0,
+   31500.0
+  ],
+  "materiales": [
+   {
+    "id": 585,
+    "nombre": "PUNTOS DE HISTALACION",
+    "precio": 31500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 586,
+    "nombre": "PUNTOS DE HISTALACION",
+    "precio": 15750.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "RESANE",
+  "canon": 20000.0,
+  "precios_db": [
+   10000.0,
+   20000.0,
+   23000.0
+  ],
+  "materiales": [
+   {
+    "id": 596,
+    "nombre": "RESANE",
+    "precio": 23000.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 592,
+    "nombre": "RESANE",
+    "precio": 20000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 595,
+    "nombre": "RESANE",
+    "precio": 20000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 594,
+    "nombre": "RESANE",
+    "precio": 10000.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 593,
+    "nombre": "RESANE",
+    "precio": 0.0,
+    "nuevo_precio": 20000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "RIATA",
+  "canon": 1000.0,
+  "precios_db": [
+   1000.0,
+   3000.0,
+   37000.0,
+   43000.0,
+   50000.0
+  ],
+  "materiales": [
+   {
+    "id": 601,
+    "nombre": "RIATA",
+    "precio": 50000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 602,
+    "nombre": "RIATA",
+    "precio": 43000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 599,
+    "nombre": "RIATA",
+    "precio": 37000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 598,
+    "nombre": "RIATA",
+    "precio": 3000.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 597,
+    "nombre": "RIATA",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 600,
+    "nombre": "RIATA",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "SELLADOR",
+  "canon": 18000.0,
+  "precios_db": [
+   18000.0,
+   19000.0,
+   55000.0
+  ],
+  "materiales": [
+   {
+    "id": 607,
+    "nombre": "SELLADOR",
+    "precio": 55000.0,
+    "nuevo_precio": 18000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 610,
+    "nombre": "SELLADOR",
+    "precio": 19000.0,
+    "nuevo_precio": 18000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 606,
+    "nombre": "SELLADOR",
+    "precio": 18000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 608,
+    "nombre": "SELLADOR",
+    "precio": 18000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 609,
+    "nombre": "SELLADOR",
+    "precio": 18000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "SUPER",
+  "canon": 19000.0,
+  "precios_db": [
+   19.0,
+   13300.0,
+   14000.0,
+   15000.0,
+   16000.0,
+   16250.0,
+   17000.0,
+   19000.0
+  ],
+  "materiales": [
+   {
+    "id": 621,
+    "nombre": "SUPER",
+    "precio": 19000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 622,
+    "nombre": "SUPER",
+    "precio": 19000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 623,
+    "nombre": "SUPER",
+    "precio": 19000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 624,
+    "nombre": "SUPER",
+    "precio": 19000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 619,
+    "nombre": "SUPER",
+    "precio": 17000.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 618,
+    "nombre": "SUPER",
+    "precio": 16250.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 617,
+    "nombre": "SUPER",
+    "precio": 16000.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 616,
+    "nombre": "SUPER",
+    "precio": 15000.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 615,
+    "nombre": "SUPER",
+    "precio": 14000.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 614,
+    "nombre": "SUPER",
+    "precio": 13300.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 620,
+    "nombre": "SUPER",
+    "precio": 19.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 613,
+    "nombre": "SUPER",
+    "precio": 0.0,
+    "nuevo_precio": 19000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "SUPER SPRAY",
+  "canon": 18000.0,
+  "precios_db": [
+   18000.0,
+   19000.0,
+   25000.0
+  ],
+  "materiales": [
+   {
+    "id": 629,
+    "nombre": "SUPER SPRAY",
+    "precio": 25000.0,
+    "nuevo_precio": 18000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 628,
+    "nombre": "SUPER SPRAY",
+    "precio": 19000.0,
+    "nuevo_precio": 18000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 627,
+    "nombre": "SUPER SPRAY",
+    "precio": 18000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TABLA",
+  "canon": 31500.0,
+  "precios_db": [
+   28600.0,
+   31000.0,
+   31500.0,
+   46500.0,
+   50000.0,
+   93000.0
+  ],
+  "materiales": [
+   {
+    "id": 636,
+    "nombre": "TABLA",
+    "precio": 93000.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 635,
+    "nombre": "TABLA",
+    "precio": 50000.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 637,
+    "nombre": "TABLA",
+    "precio": 46500.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 638,
+    "nombre": "TABLA",
+    "precio": 46500.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 639,
+    "nombre": "TABLA",
+    "precio": 46500.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 633,
+    "nombre": "TABLA",
+    "precio": 31500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 634,
+    "nombre": "TABLA",
+    "precio": 31500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 632,
+    "nombre": "TABLA",
+    "precio": 31000.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 630,
+    "nombre": "TABLA",
+    "precio": 28600.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 631,
+    "nombre": "TABLA",
+    "precio": 28600.0,
+    "nuevo_precio": 31500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TABLAS",
+  "canon": 21000.0,
+  "precios_db": [
+   21000.0,
+   40000.0
+  ],
+  "materiales": [
+   {
+    "id": 644,
+    "nombre": "TABLAS",
+    "precio": 40000.0,
+    "nuevo_precio": 21000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 642,
+    "nombre": "TABLAS",
+    "precio": 21000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 643,
+    "nombre": "TABLAS",
+    "precio": 21000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TABULACIÓN (PAGO)",
+  "canon": null,
+  "precios_db": [
+   10000.0,
+   15000.0,
+   200000.0,
+   300000.0
+  ],
+  "materiales": [
+   {
+    "id": 649,
+    "nombre": "TABULACIÓN (PAGO)",
+    "precio": 300000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 648,
+    "nombre": "TABULACIÓN (PAGO)",
+    "precio": 200000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 647,
+    "nombre": "TABULACIÓN (PAGO)",
+    "precio": 15000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 646,
+    "nombre": "TABULACIÓN (PAGO)",
+    "precio": 10000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "TALCO",
+  "canon": 2500.0,
+  "precios_db": [
+   2500.0,
+   3000.0,
+   5000.0
+  ],
+  "materiales": [
+   {
+    "id": 651,
+    "nombre": "TALCO",
+    "precio": 5000.0,
+    "nuevo_precio": 2500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 653,
+    "nombre": "TALCO",
+    "precio": 3000.0,
+    "nuevo_precio": 2500.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 650,
+    "nombre": "TALCO",
+    "precio": 2500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 652,
+    "nombre": "TALCO",
+    "precio": 2500.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TELA",
+  "canon": 34000.0,
+  "precios_db": [
+   20000.0,
+   25000.0,
+   28000.0,
+   30000.0,
+   32000.0,
+   34000.0,
+   38000.0,
+   40000.0
+  ],
+  "materiales": [
+   {
+    "id": 664,
+    "nombre": "TELA",
+    "precio": 40000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 657,
+    "nombre": "TELA",
+    "precio": 38000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 663,
+    "nombre": "TELA",
+    "precio": 38000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 662,
+    "nombre": "TELA",
+    "precio": 34000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 661,
+    "nombre": "TELA",
+    "precio": 32000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 660,
+    "nombre": "TELA",
+    "precio": 30000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 659,
+    "nombre": "TELA",
+    "precio": 28000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 658,
+    "nombre": "TELA",
+    "precio": 25000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 656,
+    "nombre": "TELA",
+    "precio": 20000.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TELA DIVERSA BEIS",
+  "canon": 35000.0,
+  "precios_db": [
+   29899.0,
+   35000.0
+  ],
+  "materiales": [
+   {
+    "id": 676,
+    "nombre": "TELA DIVERSA BEIS",
+    "precio": 35000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 675,
+    "nombre": "TELA DIVERSA BEIS",
+    "precio": 29899.0,
+    "nuevo_precio": 35000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TELA FERRO FORTE GRIS",
+  "canon": 3611.0,
+  "precios_db": [
+   25000.0
+  ],
+  "materiales": [
+   {
+    "id": 681,
+    "nombre": "TELA FERRO FORTE GRIS",
+    "precio": 25000.0,
+    "nuevo_precio": 3611.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "TINER",
+  "canon": 34000.0,
+  "precios_db": [
+   8500.0,
+   34000.0
+  ],
+  "materiales": [
+   {
+    "id": 696,
+    "nombre": "TINER",
+    "precio": 34000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 698,
+    "nombre": "TINER",
+    "precio": 34000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 697,
+    "nombre": "TINER",
+    "precio": 8500.0,
+    "nuevo_precio": 34000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TINTE MIEL",
+  "canon": null,
+  "precios_db": [
+   28000.0
+  ],
+  "materiales": [
+   {
+    "id": 700,
+    "nombre": "TINTE MIEL",
+    "precio": 28000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 699,
+    "nombre": "TINTE MIEL",
+    "precio": 0.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TOMA",
+  "canon": 15000.0,
+  "precios_db": [
+   15000.0,
+   28000.0
+  ],
+  "materiales": [
+   {
+    "id": 702,
+    "nombre": "TOMA",
+    "precio": 28000.0,
+    "nuevo_precio": 15000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 701,
+    "nombre": "TOMA",
+    "precio": 15000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "TORNILLOS",
+  "canon": 100.0,
+  "precios_db": [
+   100.0
+  ],
+  "materiales": [
+   {
+    "id": 709,
+    "nombre": "TORNILLOS",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 710,
+    "nombre": "TORNILLOS",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 711,
+    "nombre": "TORNILLOS",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TORNILLOS 1",
+  "canon": 100.0,
+  "precios_db": [
+   100.0
+  ],
+  "materiales": [
+   {
+    "id": 712,
+    "nombre": "TORNILLOS 1",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 714,
+    "nombre": "TORNILLOS 1\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TORNILLOS 2",
+  "canon": 100.0,
+  "precios_db": [
+   100.0
+  ],
+  "materiales": [
+   {
+    "id": 717,
+    "nombre": "TORNILLOS 2",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 718,
+    "nombre": "TORNILLOS 2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TORNILLOS DE 1 1/2",
+  "canon": 100.0,
+  "precios_db": [
+   100.0
+  ],
+  "materiales": [
+   {
+    "id": 719,
+    "nombre": "TORNILLOS DE 1 1/2",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 720,
+    "nombre": "TORNILLOS DE 1 1/2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 721,
+    "nombre": "TORNILLOS DE 1 1/2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 722,
+    "nombre": "TORNILLOS DE 1\" 1/2",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 723,
+    "nombre": "TORNILLOS DE 1\" 1/2",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TORNILLOS DE 2\"",
+  "canon": 100.0,
+  "precios_db": [
+   100.0
+  ],
+  "materiales": [
+   {
+    "id": 725,
+    "nombre": "TORNILLOS DE 2",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 726,
+    "nombre": "TORNILLOS DE 2",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 1,
+    "desactivar": false
+   },
+   {
+    "id": 727,
+    "nombre": "TORNILLOS DE 2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 728,
+    "nombre": "TORNILLOS DE 2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 729,
+    "nombre": "TORNILLOS DE 2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 731,
+    "nombre": "TORNILLOS DE 2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 732,
+    "nombre": "TORNILLOS DE 2\"",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 730,
+    "nombre": "TORNILLOS DE 2\"",
+    "precio": 0.0,
+    "nuevo_precio": 100.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "TORNILLOS DE 2''",
+  "canon": 100.0,
+  "precios_db": [
+   26.0,
+   100.0
+  ],
+  "materiales": [
+   {
+    "id": 733,
+    "nombre": "TORNILLOS DE 2''",
+    "precio": 100.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 734,
+    "nombre": "TORNILLOS DE 2''",
+    "precio": 26.0,
+    "nuevo_precio": 100.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ },
+ {
+  "nombre": "TORNILLOS TUERCA UÑA",
+  "canon": 1000.0,
+  "precios_db": [
+   1000.0,
+   2300.0
+  ],
+  "materiales": [
+   {
+    "id": 738,
+    "nombre": "TORNILLOS TUERCA UÑA",
+    "precio": 2300.0,
+    "nuevo_precio": 1000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   },
+   {
+    "id": 737,
+    "nombre": "TORNILLOS TUERCA UÑA",
+    "precio": 1000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   }
+  ]
+ },
+ {
+  "nombre": "VIDRIOS",
+  "canon": 45000.0,
+  "precios_db": [
+   2000.0,
+   45000.0
+  ],
+  "materiales": [
+   {
+    "id": 744,
+    "nombre": "VIDRIOS",
+    "precio": 45000.0,
+    "nuevo_precio": null,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": false
+   },
+   {
+    "id": 743,
+    "nombre": "VIDRIOS",
+    "precio": 2000.0,
+    "nuevo_precio": 45000.0,
+    "activo": true,
+    "en_uso": 0,
+    "desactivar": true
+   }
+  ]
+ }
+]

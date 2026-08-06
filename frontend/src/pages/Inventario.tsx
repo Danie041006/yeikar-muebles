@@ -352,7 +352,7 @@ export default function Inventario() {
 
             {loadingKardex ? (
               <div className="flex-1 flex flex-col items-center justify-center space-y-3">
-                <div className="w-8 h-8 border-3 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
                 <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
               </div>
             ) : (

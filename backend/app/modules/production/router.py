@@ -20,7 +20,7 @@ def crear_orden(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.crear_orden_produccion(db, esquema)
+    return service.crear_orden_produccion(db, esquema, usuario_actual)
 
 @router.post("/orden/desde-pedido/{detalle_pedido_id}", response_model=schemas.OrdenProduccionResponse, status_code=status.HTTP_201_CREATED)
 def crear_orden_desde_pedido(
@@ -29,7 +29,7 @@ def crear_orden_desde_pedido(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        return service.crear_orden_desde_detalle_pedido(db, detalle_pedido_id)
+        return service.crear_orden_desde_detalle_pedido(db, detalle_pedido_id, usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except IntegrityError:
@@ -43,7 +43,7 @@ def listar_ordenes(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_ordenes_produccion(db, salto=salto, limite=limite, buscar=buscar)
+    return service.obtener_ordenes_produccion(db, salto=salto, limite=limite, buscar=buscar, usuario=usuario_actual)
 
 @router.get("/orden/{id}", response_model=schemas.OrdenProduccionResponse)
 def ver_orden(
@@ -51,7 +51,7 @@ def ver_orden(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.obtener_orden_produccion(db, id)
+    db_obj = service.obtener_orden_produccion(db, id, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
     return db_obj
@@ -63,7 +63,7 @@ def actualizar_orden(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.actualizar_orden_produccion(db, id, esquema)
+    db_obj = service.actualizar_orden_produccion(db, id, esquema, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
     return db_obj
@@ -76,7 +76,7 @@ def cambiar_estado_orden(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        db_obj = service.cambiar_estado_orden_produccion(db, id, estado)
+        db_obj = service.cambiar_estado_orden_produccion(db, id, estado, usuario_actual)
         if not db_obj:
             raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
         return db_obj
@@ -89,7 +89,7 @@ def eliminar_orden(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_orden_produccion(db, id)
+    exito = service.eliminar_orden_produccion(db, id, usuario_actual)
     if not exito:
         raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
     return None
@@ -104,7 +104,10 @@ def crear_etapa(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.crear_etapa_produccion(db, esquema)
+    try:
+        return service.crear_etapa_produccion(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/etapa/{id}", response_model=schemas.EtapaProduccionResponse)
 def ver_etapa(
@@ -112,7 +115,7 @@ def ver_etapa(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.obtener_etapa_produccion(db, id)
+    db_obj = service.obtener_etapa_produccion(db, id, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
     return db_obj
@@ -124,7 +127,7 @@ def actualizar_etapa(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.actualizar_etapa_produccion(db, id, esquema)
+    db_obj = service.actualizar_etapa_produccion(db, id, esquema, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
     return db_obj
@@ -137,7 +140,7 @@ def cambiar_estado_etapa(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        db_obj = service.cambiar_estado_etapa_produccion(db, id, estado)
+        db_obj = service.cambiar_estado_etapa_produccion(db, id, estado, usuario_actual)
         if not db_obj:
             raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
         return db_obj
@@ -150,7 +153,7 @@ def eliminar_etapa(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_etapa_produccion(db, id)
+    exito = service.eliminar_etapa_produccion(db, id, usuario_actual)
     if not exito:
         raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
     return None

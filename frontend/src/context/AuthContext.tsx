@@ -8,6 +8,7 @@ export interface ModuloAcceso {
 
 export interface UsuarioMe {
   id: number;
+  empleado_id?: number | null;
   nombre_usuario: string;
   email: string | null;
   activo: boolean;

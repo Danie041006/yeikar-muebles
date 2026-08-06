@@ -17,7 +17,7 @@ def create_client(
     current_user: Usuario = Depends(get_current_user)
 ):
     try:
-        return service.create_client(db, client)
+        return service.create_client(db, client, current_user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -29,7 +29,7 @@ def read_clients(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    clients = service.get_clients(db, skip=skip, limit=limit, search=search)
+    clients = service.get_clients(db, skip=skip, limit=limit, search=search, usuario=current_user)
     return clients
 
 @router.get("/{client_id}", response_model=schemas.ClientResponse)
@@ -38,7 +38,7 @@ def read_client(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    db_client = service.get_client(db, client_id)
+    db_client = service.get_client(db, client_id, current_user)
     if db_client is None:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return db_client
@@ -50,7 +50,7 @@ def update_client(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    db_client = service.update_client(db, client_id, client_update)
+    db_client = service.update_client(db, client_id, client_update, current_user)
     if db_client is None:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return db_client
@@ -62,7 +62,7 @@ def delete_client(
     current_user: Usuario = Depends(get_current_user)
 ):
     try:
-        deleted = service.delete_client(db, client_id)
+        deleted = service.delete_client(db, client_id, current_user)
     except IntegrityError:
         raise HTTPException(
             status_code=409,

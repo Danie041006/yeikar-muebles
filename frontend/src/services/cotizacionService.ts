@@ -14,7 +14,8 @@ export interface Product {
   codigo: string;
   nombre: string;
   descripcion?: string;
-  precio_base: number;
+  precio_venta_base?: number;
+  precio_costo_base?: number;
   alto_base: number;
   ancho_base: number;
   largo_base: number;
@@ -50,6 +51,9 @@ export interface Quote {
   observaciones?: string;
   created_at?: string;
   updated_at?: string;
+  creado_por_id?: number | null;
+  actualizado_por_id?: number | null;
+  creador_nombre?: string | null;
   cliente?: Client;
   moneda?: Moneda;
   detalles: QuoteDetail[];

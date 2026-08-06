@@ -34,6 +34,9 @@ class GastoResponse(GastoBase):
     moneda: Optional[MonedaResponse] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    creado_por_id: Optional[int] = None
+    actualizado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
 
     class Config:
         from_attributes = True

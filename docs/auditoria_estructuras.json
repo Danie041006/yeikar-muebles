@@ -1,0 +1,3139 @@
+{
+  "resumen": [
+    {
+      "hoja": "CAMA MODELO CHEMBER  (2)",
+      "producto": "CAMA CHEMBER 2X2",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 20,
+      "costos_prod": 3,
+      "total_calc": 1543145.75,
+      "total_hoja": 2078336.85,
+      "delta": -25.75093156819117,
+      "diagnostico": "total_declarado_obsoleto",
+      "total_catalog": 1616692.75,
+      "cobertura_catalog": 97.60386361246451,
+      "precios_devian_catalog": [
+        {
+          "material": "ESPUMA 1/2 ROSADA",
+          "hoja": 3315.0,
+          "catalogo": 12500.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "LAM MDF 9",
+          "hoja": 21875.0,
+          "catalogo": 140000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 3",
+        "referencia: LAMINA DE 15",
+        "referencia: LAMINA DE 5.5",
+        "referencia: GANCHOS",
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: COLBON",
+        "... y 49 más"
+      ]
+    },
+    {
+      "hoja": "CAMAS ",
+      "producto": null,
+      "estado": "REVISAR_SIN_TOTAL",
+      "secciones": 1,
+      "total_insumos": 0,
+      "costos_prod": 0,
+      "total_calc": 0.0,
+      "total_hoja": null,
+      "delta": null,
+      "diagnostico": null,
+      "total_catalog": 0.0,
+      "cobertura_catalog": 0.0,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [],
+      "advertencias": []
+    },
+    {
+      "hoja": "27-2-25 CAMA ROMANA CAPIT (2)",
+      "producto": "CAMA ROMANA \"CAPITONEADA 2*2",
+      "estado": "OK",
+      "secciones": 3,
+      "total_insumos": 26,
+      "costos_prod": 7,
+      "total_calc": 1792919.0,
+      "total_hoja": 1823679.0,
+      "delta": -1.686700345839372,
+      "diagnostico": null,
+      "total_catalog": 1977134.0,
+      "cobertura_catalog": 61.13318284424379,
+      "precios_devian_catalog": [
+        {
+          "material": "CASQUETES",
+          "hoja": 36550.0,
+          "catalogo": 129000.0
+        },
+        {
+          "material": "CAÑAMO",
+          "hoja": 30000.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 500.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "COSTAL",
+          "hoja": 25000.0,
+          "catalogo": 4000.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 5000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: CAMA",
+        "referencia: PINTURA DE 4 PATAS"
+      ]
+    },
+    {
+      "hoja": "28-2-25  CAMA  DINASTIA ",
+      "producto": "CAMA DINASTIA 2*2",
+      "estado": "OK",
+      "secciones": 4,
+      "total_insumos": 31,
+      "costos_prod": 6,
+      "total_calc": 1788819.997,
+      "total_hoja": 1661720.0,
+      "delta": 7.648701165057892,
+      "diagnostico": null,
+      "total_catalog": 1857019.997,
+      "cobertura_catalog": 64.65947044871484,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 500.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 500.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "FIELTRO",
+          "hoja": 17000.0,
+          "catalogo": 4000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: CAMA",
+        "referencia: UNDUPLAC",
+        "referencia: CAMA",
+        "referencia: ESPUMA ROSADA DE 1 1/2",
+        "referencia: ESPUMA AZUL DE 1 Y 1/2 P",
+        "referencia: ESPUMA GRIS DE 1 Y 1/2 P",
+        "referencia: ESPUMA ROSADA DE 2P",
+        "referencia: CAÑAMO",
+        "... y 2 más"
+      ]
+    },
+    {
+      "hoja": "CAMA CADENETA ",
+      "producto": "cama del modelo cadeneta",
+      "estado": "OK",
+      "secciones": 5,
+      "total_insumos": 42,
+      "costos_prod": 4,
+      "total_calc": 3208462.0,
+      "total_hoja": 3208462.0,
+      "delta": 0.0,
+      "diagnostico": null,
+      "total_catalog": 3463018.0,
+      "cobertura_catalog": 98.93356538950458,
+      "precios_devian_catalog": [
+        {
+          "material": "TINER",
+          "hoja": 17000.0,
+          "catalogo": 68000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 5000.0,
+          "catalogo": 10000.0
+        },
+        {
+          "material": "TELA",
+          "hoja": 160000.0,
+          "catalogo": 272000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "COLBON",
+          "hoja": 100.0,
+          "catalogo": 14000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 1000.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: SUPER",
+        "referencia: TALCO",
+        "referencia: ESMALTE NEGRO",
+        "referencia: ENCINA",
+        "referencia: TINTE MIEL",
+        "referencia: CORREDERAS DE PEINADORA",
+        "referencia: CORREDERAS DE NOCHERO",
+        "referencia: ESTOPEROLES",
+        "... y 1 más"
+      ]
+    },
+    {
+      "hoja": "CAMA DE2X2 CON GAVETA ",
+      "producto": "cama del modelo cadeneta",
+      "estado": "OK",
+      "secciones": 5,
+      "total_insumos": 42,
+      "costos_prod": 5,
+      "total_calc": 3366948.0,
+      "total_hoja": 3366948.0,
+      "delta": 0.0,
+      "diagnostico": null,
+      "total_catalog": 3471618.0,
+      "cobertura_catalog": 90.67651534364697,
+      "precios_devian_catalog": [
+        {
+          "material": "TINER",
+          "hoja": 17000.0,
+          "catalogo": 68000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 5000.0,
+          "catalogo": 10000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MADERA",
+          "hoja": 140000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "COLBON",
+          "hoja": 100.0,
+          "catalogo": 14000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 1000.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: TALCO",
+        "referencia: ESMALTE NEGRO",
+        "referencia: ENCINA",
+        "referencia: TINTE MIEL",
+        "referencia: CORREDERAS DE",
+        "referencia: CORREDERAS DE NOCHERO",
+        "referencia: ESTOPEROLES",
+        "referencia: CAÑAMO"
+      ]
+    },
+    {
+      "hoja": "28-2-2025 CAMA  CANada (3)",
+      "producto": "CAMA \"CANADA 2*2",
+      "estado": "OK",
+      "secciones": 4,
+      "total_insumos": 36,
+      "costos_prod": 5,
+      "total_calc": 1821325.0,
+      "total_hoja": 1762645.0,
+      "delta": 3.329087819725469,
+      "diagnostico": null,
+      "total_catalog": 1901185.0,
+      "cobertura_catalog": 58.771764705882354,
+      "precios_devian_catalog": [
+        {
+          "material": "CAÑAMO",
+          "hoja": 3000.0,
+          "catalogo": 1200.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 500.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 500.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "MADERA",
+          "hoja": 135000.0,
+          "catalogo": 140.0
+        },
+        {
+          "material": "COSTAL",
+          "hoja": 25000.0,
+          "catalogo": 4000.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 5000.0,
+          "catalogo": 25000.0
+        },
+        {
+          "material": "FIELTRO",
+          "hoja": 17000.0,
+          "catalogo": 4000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: CAMA",
+        "referencia: CLAVILLOS",
+        "referencia: CAMA",
+        "referencia: ESPUMA ROSADA DE 2P",
+        "referencia: LACA SEMI MATE",
+        "referencia: SELLADOR"
+      ]
+    },
+    {
+      "hoja": "CAMA FRANYER ",
+      "producto": "CAMA MODELO FRANYER DE 2X2 10/06/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 52,
+      "costos_prod": 6,
+      "total_calc": 3123522.25,
+      "total_hoja": 3099122.25,
+      "delta": 0.7873196999569797,
+      "diagnostico": null,
+      "total_catalog": 3059104.75,
+      "cobertura_catalog": 96.72629259911756,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "referencia: NITRO",
+        "... y 15 más"
+      ]
+    },
+    {
+      "hoja": "CAMA CHOCOLATINA ",
+      "producto": "CAMA MODELO CHOCOLATINA DE 2X2 10/06/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 54,
+      "costos_prod": 6,
+      "total_calc": 2979036.25,
+      "total_hoja": 2954616.25,
+      "delta": 0.8265032726331212,
+      "diagnostico": null,
+      "total_catalog": 3006638.75,
+      "cobertura_catalog": 96.44048373569952,
+      "precios_devian_catalog": [
+        {
+          "material": "PATAS DE CAMAS",
+          "hoja": 44000.0,
+          "catalogo": 70000.0
+        },
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 4000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: LAMINA DE 9",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "... y 13 más"
+      ]
+    },
+    {
+      "hoja": "CAMA NAUTICA ",
+      "producto": "CAMA MODEO NAUTICA DE 2X2 10/06/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 52,
+      "costos_prod": 6,
+      "total_calc": 3108982.25,
+      "total_hoja": 3062536.25,
+      "delta": 1.5165861302049894,
+      "diagnostico": null,
+      "total_catalog": 3112294.75,
+      "cobertura_catalog": 96.32740970833798,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 4000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "referencia: NITRO",
+        "... y 14 más"
+      ]
+    },
+    {
+      "hoja": "CAMA MODELO VENECIA ",
+      "producto": "CAMA MODELO VENECIA DE 2X2 10/06/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 57,
+      "costos_prod": 6,
+      "total_calc": 3069620.25,
+      "total_hoja": 3068820.25,
+      "delta": 0.026068649670830345,
+      "diagnostico": null,
+      "total_catalog": 3097822.75,
+      "cobertura_catalog": 96.57619698247186,
+      "precios_devian_catalog": [
+        {
+          "material": "PATAS DE CAMAS",
+          "hoja": 44000.0,
+          "catalogo": 70000.0
+        },
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 4000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "referencia: NITRO",
+        "... y 9 más"
+      ]
+    },
+    {
+      "hoja": "CAMA FILIPINA ",
+      "producto": "CAMA MODELOFILIPINA DE 2X2 10/06/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 54,
+      "costos_prod": 6,
+      "total_calc": 2907686.25,
+      "total_hoja": 2884886.25,
+      "delta": 0.7903257884084685,
+      "diagnostico": null,
+      "total_catalog": 2935288.75,
+      "cobertura_catalog": 96.26701830100991,
+      "precios_devian_catalog": [
+        {
+          "material": "PATAS DE CAMAS",
+          "hoja": 44000.0,
+          "catalogo": 70000.0
+        },
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 4000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: LAMINA DE 9",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "... y 12 más"
+      ]
+    },
+    {
+      "hoja": "CAMA EXAGONAL ",
+      "producto": "CAMA MODELO EZAGONAL DE 2X2 10/06/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 52,
+      "costos_prod": 8,
+      "total_calc": 3045688.75,
+      "total_hoja": 3042288.75,
+      "delta": 0.11175796511754514,
+      "diagnostico": null,
+      "total_catalog": 3037533.75,
+      "cobertura_catalog": 96.30269378894305,
+      "precios_devian_catalog": [
+        {
+          "material": "PINTURA DE PATAS ALEX",
+          "hoja": 4200.0,
+          "catalogo": 8400.0
+        },
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "GASOLINA",
+          "hoja": 4.5,
+          "catalogo": 4500.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 4000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: KEROSEN",
+        "referencia: NITRO",
+        "referencia: LIJA 240",
+        "referencia: LIJA 150",
+        "... y 14 más"
+      ]
+    },
+    {
+      "hoja": "CAMA DE MELAMINA DE 1.60",
+      "producto": "CAMA DE 1.60 CON MESA DE NOCHE 2/10/2025",
+      "estado": "OK",
+      "secciones": 6,
+      "total_insumos": 34,
+      "costos_prod": 3,
+      "total_calc": 4205730.0,
+      "total_hoja": 4146687.0,
+      "delta": 1.4238595775374414,
+      "diagnostico": null,
+      "total_catalog": 4143280.0,
+      "cobertura_catalog": 99.90830429636051,
+      "precios_devian_catalog": [
+        {
+          "material": "METROS DE TAPA CANTO",
+          "hoja": 177000.0,
+          "catalogo": 300000.0
+        },
+        {
+          "material": "ENCHUFE",
+          "hoja": 5000.0,
+          "catalogo": 10000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 550.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: GRAPAS",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "referencia: NITRO",
+        "referencia: LIJA 240",
+        "referencia: TALCO",
+        "... y 31 más"
+      ]
+    },
+    {
+      "hoja": "CAMA DE MELAMINA DE 1.40 CON N ",
+      "producto": "CAMA DE 1.40 CON MESA DE NOCHE 7/07/2025",
+      "estado": "BLOQUEADA",
+      "secciones": 6,
+      "total_insumos": 36,
+      "costos_prod": 3,
+      "total_calc": 3256702.00385,
+      "total_hoja": 2786915.76,
+      "delta": 16.85685124009633,
+      "diagnostico": "total_declarado_obsoleto",
+      "total_catalog": 3166002.00385,
+      "cobertura_catalog": 99.8754991352849,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 550.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: MADERA (2)",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: CORREDERAS",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "... y 32 más"
+      ]
+    },
+    {
+      "hoja": "CAMA CON HERRAJES ",
+      "producto": "CAMA MODELO HERRAJE EN CRUDO DE 2X2",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 54,
+      "costos_prod": 7,
+      "total_calc": 3896864.25,
+      "total_hoja": 3346512.0,
+      "delta": 16.44554837992513,
+      "diagnostico": "total_declarado_obsoleto",
+      "total_catalog": 3869405.25,
+      "cobertura_catalog": 97.51555416571541,
+      "precios_devian_catalog": [
+        {
+          "material": "COLBON",
+          "hoja": 24500.0,
+          "catalogo": 7000.0
+        },
+        {
+          "material": "SELLADOR",
+          "hoja": 55000.0,
+          "catalogo": 18000.0
+        },
+        {
+          "material": "COLARATA",
+          "hoja": 3000.0,
+          "catalogo": 5000.0
+        },
+        {
+          "material": "FIELTRO",
+          "hoja": 21000.0,
+          "catalogo": 6000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "LAM MDF 15",
+          "hoja": 207.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 500.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "COLA DE RATA",
+          "hoja": 1000.0,
+          "catalogo": 7222.0
+        },
+        {
+          "material": "HILO",
+          "hoja": 4000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: KEROSEN",
+        "referencia: NITRO",
+        "referencia: TINTE MIEL",
+        "referencia: GASOLINA",
+        "referencia: RESANE",
+        "referencia: LACA",
+        "referencia: MADERA 60X1X4",
+        "referencia: TABLAS",
+        "... y 10 más"
+      ]
+    },
+    {
+      "hoja": "NOCHERO 3 D SOLO (2)",
+      "producto": "NOCHERO 3 D EN COLOR CHAMPAÑA",
+      "estado": "OK",
+      "secciones": 5,
+      "total_insumos": 21,
+      "costos_prod": 2,
+      "total_calc": 504310.5,
+      "total_hoja": 496256.0,
+      "delta": 1.6230534240392056,
+      "diagnostico": null,
+      "total_catalog": 513186.0,
+      "cobertura_catalog": 93.60636859760677,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 540.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "GASOLINA",
+          "hoja": 25000.0,
+          "catalogo": 4500.0
+        },
+        {
+          "material": "EMBALADA",
+          "hoja": 20000.0,
+          "catalogo": 150000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: ESMALTE NEGRO",
+        "referencia: NEGRO MESCLA",
+        "referencia: CABLE # 12",
+        "referencia: LUS LET",
+        "referencia: CAFETERO",
+        "referencia: TERMICOINGIBLE",
+        "referencia: POSTURA DE LUZ",
+        "referencia: CAPACITADORES",
+        "... y 7 más"
+      ]
+    },
+    {
+      "hoja": "CAMA YISED   8-08-25 (5)",
+      "producto": "CAMA MODELO YISED DE 2X2 8/08/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 52,
+      "costos_prod": 6,
+      "total_calc": 2923374.75,
+      "total_hoja": 3038578.75,
+      "delta": -3.791377794635074,
+      "diagnostico": null,
+      "total_catalog": 2918374.75,
+      "cobertura_catalog": 96.40579864485296,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: LAMINA DE 15",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: VIDRIOS",
+        "referencia: TOPES",
+        "referencia: SELLADOR",
+        "... y 17 más"
+      ]
+    },
+    {
+      "hoja": "CAMA LONDRES  8-08-25 (4)",
+      "producto": "CAMA MODELO LONDRES DE 2X2 8/08/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 50,
+      "costos_prod": 6,
+      "total_calc": 2880014.75,
+      "total_hoja": 2995218.75,
+      "delta": -3.8462633154923993,
+      "diagnostico": null,
+      "total_catalog": 2883214.75,
+      "cobertura_catalog": 96.32085421589227,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: LAMINA DE 15",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: VIDRIOS",
+        "referencia: TOPES",
+        "referencia: SELLADOR",
+        "... y 19 más"
+      ]
+    },
+    {
+      "hoja": "CAMA TURKIA  8-08-25 (3)",
+      "producto": "CAMA MODELO TURKIA DE 2X2 8/08/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 52,
+      "costos_prod": 6,
+      "total_calc": 3153387.75,
+      "total_hoja": 3247808.75,
+      "delta": -2.907221676768991,
+      "diagnostico": null,
+      "total_catalog": 3174237.75,
+      "cobertura_catalog": 96.76608751685826,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: VIDRIOS",
+        "referencia: TOPES",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "... y 17 más"
+      ]
+    },
+    {
+      "hoja": "CAMA KATY 8-08-25 (4)",
+      "producto": "CAMA MODELO KATI DE 2X2 18/08/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 52,
+      "costos_prod": 6,
+      "total_calc": 2832354.75,
+      "total_hoja": 2947458.75,
+      "delta": -3.9051946019600785,
+      "diagnostico": null,
+      "total_catalog": 2836954.75,
+      "cobertura_catalog": 96.22251882444786,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: LAMINA DE 15",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: VIDRIOS",
+        "referencia: TOPES",
+        "referencia: SELLADOR",
+        "... y 17 más"
+      ]
+    },
+    {
+      "hoja": "CAMA TABAY  8-08-25 (2)",
+      "producto": "CAMA MODELO TABAY DE 2X2 18/08/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 53,
+      "costos_prod": 6,
+      "total_calc": 2866274.75,
+      "total_hoja": 2981378.75,
+      "delta": -3.860764084402225,
+      "diagnostico": null,
+      "total_catalog": 2879774.75,
+      "cobertura_catalog": 96.29288921230761,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        },
+        {
+          "material": "ESPUMA BLANCA DE 1/2",
+          "hoja": 12500.0,
+          "catalogo": 19900.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: LAMINA DE 15",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: VIDRIOS",
+        "referencia: TOPES",
+        "referencia: SELLADOR",
+        "... y 14 más"
+      ]
+    },
+    {
+      "hoja": "CAMA GRECIA 8-08-25 (2)",
+      "producto": "CAMA MODELO GRECIA DE 2X2 18/08/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 53,
+      "costos_prod": 6,
+      "total_calc": 2998726.25,
+      "total_hoja": 3100186.25,
+      "delta": -3.272706599482531,
+      "diagnostico": null,
+      "total_catalog": 3012728.75,
+      "cobertura_catalog": 96.51995932219118,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        },
+        {
+          "material": "ESPUMA BLANCA DE 1/2",
+          "hoja": 12500.0,
+          "catalogo": 19900.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: VIDRIOS",
+        "referencia: TOPES",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "... y 13 más"
+      ]
+    },
+    {
+      "hoja": "CAMA WUALPANEL ",
+      "producto": "CAMA MODELO WUALPANEL DE 2X2 28/08/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 61,
+      "costos_prod": 8,
+      "total_calc": 4061660.0011,
+      "total_hoja": 4030593.75,
+      "delta": 0.770761158948356,
+      "diagnostico": null,
+      "total_catalog": 4073610.0011,
+      "cobertura_catalog": 96.78823905223538,
+      "precios_devian_catalog": [
+        {
+          "material": "CLAVILLO",
+          "hoja": 1200.0,
+          "catalogo": 2000.0
+        },
+        {
+          "material": "ESPUMA BLANCA DE 1/2",
+          "hoja": 12500.0,
+          "catalogo": 19900.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 210.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "RIATA",
+          "hoja": 50000.0,
+          "catalogo": 1000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 9",
+        "referencia: VIDRIOS",
+        "referencia: TOPES",
+        "referencia: NITRO",
+        "referencia: LIJA 150",
+        "... y 9 más"
+      ]
+    },
+    {
+      "hoja": "CAMA EMILI 27-10-2025",
+      "producto": "CAMA EMILI 1.60 CON SUS NOCHEROS 16/09/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 41,
+      "costos_prod": 6,
+      "total_calc": 2910527.25,
+      "total_hoja": 2953459.75,
+      "delta": -1.453634165828737,
+      "diagnostico": null,
+      "total_catalog": 2933657.25,
+      "cobertura_catalog": 93.8730877932798,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 1142.86,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 217.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 125.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "CIERRE MAGICO",
+          "hoja": 5000.0,
+          "catalogo": 1000.0
+        },
+        {
+          "material": "COLA DE RATA",
+          "hoja": 1570.0,
+          "catalogo": 7222.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF 15",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: PINTURA DE PATAS ALEX",
+        "... y 28 más"
+      ]
+    },
+    {
+      "hoja": "CAMA BRISA 27-10-2025",
+      "producto": "CAMA BRISA 2X2 CON SUS NOCHEROS 16/09/2025",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 52,
+      "costos_prod": 7,
+      "total_calc": 4134268.24,
+      "total_hoja": 4188696.75,
+      "delta": -1.2994139525617365,
+      "diagnostico": null,
+      "total_catalog": 4274038.24,
+      "cobertura_catalog": 96.84821342937313,
+      "precios_devian_catalog": [
+        {
+          "material": "MULTIUSOS",
+          "hoja": 12000.0,
+          "catalogo": 24000.0
+        },
+        {
+          "material": "CORREDERAS",
+          "hoja": 76000.0,
+          "catalogo": 120000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 1142.86,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 217.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 125.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "GASOLINA",
+          "hoja": 4.5,
+          "catalogo": 4500.0
+        },
+        {
+          "material": "APAGADORES",
+          "hoja": 1500.0,
+          "catalogo": 29000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: LIJA 400",
+        "referencia: NITRO",
+        "... y 15 más"
+      ]
+    },
+    {
+      "hoja": "CAMA PATSI 28-10-2025",
+      "producto": "27-10-2025 CAMA PATSI 2X2 CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 47,
+      "costos_prod": 7,
+      "total_calc": 3395241.24,
+      "total_hoja": 3441884.75,
+      "delta": -1.3551734990545514,
+      "diagnostico": null,
+      "total_catalog": 3405211.24,
+      "cobertura_catalog": 95.61505527474479,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 1142.86,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 217.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 125.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "GASOLINA",
+          "hoja": 4.5,
+          "catalogo": 4500.0
+        },
+        {
+          "material": "COLA DE RATA",
+          "hoja": 1444.4,
+          "catalogo": 7222.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF 15",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: LIJA 400",
+        "... y 21 más"
+      ]
+    },
+    {
+      "hoja": "CAMA SAFIRO 28-10-2025 (2)",
+      "producto": "CAMA SAFIRO 1.40 CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 54,
+      "costos_prod": 8,
+      "total_calc": 3430859.25,
+      "total_hoja": 3528127.85,
+      "delta": -2.756946577205245,
+      "diagnostico": null,
+      "total_catalog": 3364199.25,
+      "cobertura_catalog": 95.96354674022528,
+      "precios_devian_catalog": [
+        {
+          "material": "PATAS",
+          "hoja": 128000.0,
+          "catalogo": 40000.0
+        },
+        {
+          "material": "JALADORES",
+          "hoja": 16000.0,
+          "catalogo": 40000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 1142.86,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "LAM MDF 15",
+          "hoja": 217.0,
+          "catalogo": 220000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 125.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "ESPUMA 1 1/2'' AZUL",
+          "hoja": 1000.0,
+          "catalogo": 26000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: INDUPLAX",
+        "referencia: SUPER",
+        "referencia: CORREDERAS",
+        "referencia: MDF 15",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: PINTURA DE PATAS ALEX",
+        "... y 13 más"
+      ]
+    },
+    {
+      "hoja": "CAMA HERAJE 28-9-2025",
+      "producto": "CAMA HERRAJE 1.60 CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 39,
+      "costos_prod": 6,
+      "total_calc": 2943029.25,
+      "total_hoja": 3004902.35,
+      "delta": -2.0590719029521876,
+      "diagnostico": null,
+      "total_catalog": 2968599.25,
+      "cobertura_catalog": 98.32337367615509,
+      "precios_devian_catalog": [
+        {
+          "material": "COSTAL",
+          "hoja": 4480.0,
+          "catalogo": 8000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 2,7",
+          "hoja": 65.0,
+          "catalogo": 65000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 21875.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "SUPER",
+          "hoja": 19.0,
+          "catalogo": 19000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: INDUPLAX",
+        "referencia: CORREDERAS",
+        "referencia: MDF DE 3",
+        "referencia: LAM MDF 15",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "... y 32 más"
+      ]
+    },
+    {
+      "hoja": "CAMA DE MELAMINA 2X2 ISIDRO",
+      "producto": "03/11/25 CAMA 2X2 ISIDRO MELAMINA",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 26,
+      "costos_prod": 2,
+      "total_calc": 2386097.25,
+      "total_hoja": 2838167.85,
+      "delta": -15.928254560420026,
+      "diagnostico": "total_declarado_obsoleto",
+      "total_catalog": 2367462.25,
+      "cobertura_catalog": 98.78125803722551,
+      "precios_devian_catalog": [
+        {
+          "material": "CANTO 19",
+          "hoja": 51000.0,
+          "catalogo": 24000.0
+        },
+        {
+          "material": "TORNILLOS TUERCA UÑA",
+          "hoja": 13800.0,
+          "catalogo": 6000.0
+        },
+        {
+          "material": "COSTAL",
+          "hoja": 4480.0,
+          "catalogo": 8000.0
+        },
+        {
+          "material": "LENCILLO",
+          "hoja": 14575.0,
+          "catalogo": 22000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 2,7",
+          "hoja": 65.0,
+          "catalogo": 65000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 21875.0,
+          "catalogo": 140000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: CORREDERAS 40 PUFF",
+        "referencia: MDF DE 3",
+        "referencia: LAM MDF 15",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: SELLADOR",
+        "... y 45 más"
+      ]
+    },
+    {
+      "hoja": " CAMA DE MELAMINA 1.60 ISIDRO",
+      "producto": "03/11/25 CAMA 2X2 ISIDRO MELAMINA",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 26,
+      "costos_prod": 2,
+      "total_calc": 1664108.5,
+      "total_hoja": 2144170.85,
+      "delta": -22.38918367908975,
+      "diagnostico": "total_declarado_obsoleto",
+      "total_catalog": 1688238.5,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "COSTAL",
+          "hoja": 4480.0,
+          "catalogo": 8000.0
+        },
+        {
+          "material": "LENCILLO",
+          "hoja": 14575.0,
+          "catalogo": 22000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: MELAMINA",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: TALCO",
+        "referencia: TINER",
+        "... y 44 más"
+      ]
+    },
+    {
+      "hoja": "CAMA 1.60 ISIDRO",
+      "producto": "01/11/25 CAMA 1.60 ISIDRO",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 37,
+      "costos_prod": 4,
+      "total_calc": 2038537.75,
+      "total_hoja": 2419683.85,
+      "delta": -15.751896678568153,
+      "diagnostico": "desglose_incompleto",
+      "total_catalog": 2068905.75,
+      "cobertura_catalog": 97.08799590242349,
+      "precios_devian_catalog": [
+        {
+          "material": "ESPUMA 1/2 ROSADA",
+          "hoja": 6630.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "F40",
+          "hoja": 28000.0,
+          "catalogo": 1000.0
+        },
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 12000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 21875.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: COLBON",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: TALCO",
+        "referencia: TINER",
+        "referencia: TOPES",
+        "referencia: ENCINA",
+        "referencia: GASOLINA",
+        "... y 32 más"
+      ]
+    },
+    {
+      "hoja": " CAMA 1.40 ISIDRO",
+      "producto": "01/11/25 CAMA 1.60 ISIDRO",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 35,
+      "costos_prod": 4,
+      "total_calc": 1428608.75,
+      "total_hoja": 1852822.85,
+      "delta": -22.895556366870153,
+      "diagnostico": "desglose_incompleto",
+      "total_catalog": 1449423.75,
+      "cobertura_catalog": 93.56848695797599,
+      "precios_devian_catalog": [
+        {
+          "material": "ESPUMA 1/2 ROSADA",
+          "hoja": 3315.0,
+          "catalogo": 12500.0
+        },
+        {
+          "material": "COSTAL",
+          "hoja": 4480.0,
+          "catalogo": 8000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 65000.0,
+          "catalogo": 65.0
+        },
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 12000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 21875.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 600.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 5.5",
+        "referencia: COLBON",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: TALCO",
+        "referencia: TINER",
+        "referencia: TOPES",
+        "referencia: ENCINA",
+        "... y 34 más"
+      ]
+    },
+    {
+      "hoja": "CAMA HERRAJE 20-10-25",
+      "producto": "CAMA HERRAJE 1.60 CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 35,
+      "costos_prod": 5,
+      "total_calc": 2173561.0,
+      "total_hoja": 2399877.85,
+      "delta": -9.430348715456496,
+      "diagnostico": null,
+      "total_catalog": 2232081.0,
+      "cobertura_catalog": 98.47685195762602,
+      "precios_devian_catalog": [
+        {
+          "material": "MDF DE 15",
+          "hoja": 63000.0,
+          "catalogo": 99000.0
+        },
+        {
+          "material": "COSTAL",
+          "hoja": 4480.0,
+          "catalogo": 8000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 11000.0,
+          "catalogo": 250000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: NITRO",
+        "... y 33 más"
+      ]
+    },
+    {
+      "hoja": "CAMA MILANO 02-10-25",
+      "producto": "CAMA MILANO 1.40 CON SUS NOCHEROS",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 23,
+      "costos_prod": 4,
+      "total_calc": 1433297.25,
+      "total_hoja": 1745177.85,
+      "delta": -17.870992346138244,
+      "diagnostico": "desglose_incompleto",
+      "total_catalog": 1429686.25,
+      "cobertura_catalog": 94.80877969940025,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 11000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "LAM MDF 9",
+          "hoja": 21875.0,
+          "catalogo": 140000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 5.5",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: NITRO",
+        "... y 47 más"
+      ]
+    },
+    {
+      "hoja": "CAMA NIVE  1",
+      "producto": "CAMA ABANANADO 1.60 CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 35,
+      "costos_prod": 8,
+      "total_calc": 3198379.1,
+      "total_hoja": 3405749.1,
+      "delta": -6.08882198632894,
+      "diagnostico": null,
+      "total_catalog": 3230479.1,
+      "cobertura_catalog": 95.18034332412897,
+      "precios_devian_catalog": [
+        {
+          "material": "GRAPAS",
+          "hoja": 15000.0,
+          "catalogo": 36000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 19000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 1000.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 5.5",
+        "referencia: CORREDERAS 35 PUFF",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "... y 34 más"
+      ]
+    },
+    {
+      "hoja": "CAMA HOLAS ",
+      "producto": "CAMA HOLAS 1.60 CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 38,
+      "costos_prod": 6,
+      "total_calc": 3292053.25,
+      "total_hoja": 3519263.0,
+      "delta": -6.456174204655918,
+      "diagnostico": null,
+      "total_catalog": 3365248.25,
+      "cobertura_catalog": 90.80584821130743,
+      "precios_devian_catalog": [
+        {
+          "material": "GRAPAS",
+          "hoja": 50000.0,
+          "catalogo": 120000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 28000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 1000.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "RIATA",
+          "hoja": 43000.0,
+          "catalogo": 1000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 5.5",
+        "referencia: CORREDERAS 35 PUFF",
+        "referencia: MANIJAS",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "... y 37 más"
+      ]
+    },
+    {
+      "hoja": "CAMA MODELO MILANO ",
+      "producto": "CAMA MILANO 2X2CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 43,
+      "costos_prod": 8,
+      "total_calc": 3075540.7,
+      "total_hoja": 3282380.7,
+      "delta": -6.301523769013143,
+      "diagnostico": null,
+      "total_catalog": 3102113.5,
+      "cobertura_catalog": 95.13643930004645,
+      "precios_devian_catalog": [
+        {
+          "material": "PEGANTE DE PISTOLA",
+          "hoja": 6500.0,
+          "catalogo": 21500.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "GRAPAS",
+          "hoja": 500.0,
+          "catalogo": 12000.0
+        },
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 28000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 1000.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: CORREDERAS 35 PUFF",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: NITRO",
+        "... y 28 más"
+      ]
+    },
+    {
+      "hoja": "CAMA ABANANADO 12-11-25",
+      "producto": "CAMA ABANANADO 1.60 CON SUS NOCHEROS",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 35,
+      "costos_prod": 6,
+      "total_calc": 3091715.0,
+      "total_hoja": 3358365.0,
+      "delta": -7.9398755048959835,
+      "diagnostico": null,
+      "total_catalog": 3117065.0,
+      "cobertura_catalog": 96.48924122310306,
+      "precios_devian_catalog": [
+        {
+          "material": "GRAPAS",
+          "hoja": 15000.0,
+          "catalogo": 36000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 28000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "GRAPAS",
+          "hoja": 1000.0,
+          "catalogo": 12000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 5.5",
+        "referencia: CORREDERAS 35 PUFF",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "... y 34 más"
+      ]
+    },
+    {
+      "hoja": "MODELO BUBALU",
+      "producto": "CAMA BUBALU 2X2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 42,
+      "costos_prod": 7,
+      "total_calc": 3295306.5,
+      "total_hoja": 3337862.6,
+      "delta": -1.274950622593033,
+      "diagnostico": null,
+      "total_catalog": 3349494.0,
+      "cobertura_catalog": 98.59589561426947,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 60000.0,
+          "catalogo": 120000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 67000.0,
+          "catalogo": 65.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "... y 29 más"
+      ]
+    },
+    {
+      "hoja": "MODELO MINIMALISTA ",
+      "producto": "CAMA MODELO MINIMALISTA 2X2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 43,
+      "costos_prod": 7,
+      "total_calc": 3155195.0,
+      "total_hoja": 3210080.0,
+      "delta": -1.7097704730100185,
+      "diagnostico": null,
+      "total_catalog": 3205320.0,
+      "cobertura_catalog": 96.21879678133368,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 60000.0,
+          "catalogo": 120000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 67000.0,
+          "catalogo": 65.0
+        },
+        {
+          "material": "RIATA",
+          "hoja": 37000.0,
+          "catalogo": 1000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 5.5",
+        "referencia: LAMINA DE 9",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "... y 29 más"
+      ]
+    },
+    {
+      "hoja": "MODELO CHEMBER ",
+      "producto": "CAMA CHEMBER 2X2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 43,
+      "costos_prod": 7,
+      "total_calc": 3714444.0,
+      "total_hoja": 3757000.1,
+      "delta": -1.1327149019772451,
+      "diagnostico": null,
+      "total_catalog": 3728294.0,
+      "cobertura_catalog": 97.58710722967498,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 60000.0,
+          "catalogo": 120000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 67000.0,
+          "catalogo": 65.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 15",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: NITRO",
+        "... y 29 más"
+      ]
+    },
+    {
+      "hoja": "MODELO RUZO ",
+      "producto": "CAMA RUZO 2X2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 42,
+      "costos_prod": 7,
+      "total_calc": 3415934.0,
+      "total_hoja": 3458490.1,
+      "delta": -1.2304820534255685,
+      "diagnostico": null,
+      "total_catalog": 3472184.0,
+      "cobertura_catalog": 98.11377666954895,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 60000.0,
+          "catalogo": 120000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 67000.0,
+          "catalogo": 65.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "... y 29 más"
+      ]
+    },
+    {
+      "hoja": "MODELO TINAJA ",
+      "producto": "CAMA TINAJA 2X2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 40,
+      "costos_prod": 7,
+      "total_calc": 3396502.0,
+      "total_hoja": 3439058.1,
+      "delta": -1.2374347499392349,
+      "diagnostico": null,
+      "total_catalog": 3492752.0,
+      "cobertura_catalog": 96.39340706133778,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 60000.0,
+          "catalogo": 120000.0
+        },
+        {
+          "material": "CASQUETES",
+          "hoja": 78000.0,
+          "catalogo": 156000.0
+        },
+        {
+          "material": "RIATA",
+          "hoja": 30000.0,
+          "catalogo": 10000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 67000.0,
+          "catalogo": 65.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: NITRO",
+        "... y 31 más"
+      ]
+    },
+    {
+      "hoja": " MINIMALISTA ",
+      "producto": "CAMA MINIMALISTA 2X2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 40,
+      "costos_prod": 7,
+      "total_calc": 3160223.0,
+      "total_hoja": 3179274.85,
+      "delta": -0.5992514299290607,
+      "diagnostico": null,
+      "total_catalog": 3132908.0,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "LENCILLO",
+          "hoja": 8215.0,
+          "catalogo": 12400.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: MDF DE 3",
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "... y 30 más"
+      ]
+    },
+    {
+      "hoja": "CAMA TURKIA DE 1.60 DE MADERA ",
+      "producto": "CAMA TURQUIA DE 1,60 24/02/2026",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 44,
+      "costos_prod": 8,
+      "total_calc": 3806318.6,
+      "total_hoja": 4326118.6,
+      "delta": -12.015389499492686,
+      "diagnostico": null,
+      "total_catalog": 3754593.6,
+      "cobertura_catalog": 74.5230924367945,
+      "precios_devian_catalog": [
+        {
+          "material": "COLOR TABACO",
+          "hoja": 77000.0,
+          "catalogo": 22000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 16800.0,
+          "catalogo": 65.0
+        },
+        {
+          "material": "LAMINA DE 9\"",
+          "hoja": 32000.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 10000.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "PEOPE METROS",
+          "hoja": 51100.0,
+          "catalogo": 3000.0
+        },
+        {
+          "material": "PATA DE TENDIDO",
+          "hoja": 7000.0,
+          "catalogo": 1050.0
+        },
+        {
+          "material": "MDF DE 9",
+          "hoja": 3600.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "COLBON",
+          "hoja": 700000.0,
+          "catalogo": 14000.0
+        },
+        {
+          "material": "LENCILLO",
+          "hoja": 210000.0,
+          "catalogo": 4000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: NITRO",
+        "... y 26 más"
+      ]
+    },
+    {
+      "hoja": "MODELO MANANTIAL ",
+      "producto": "CAMA MANANTIAL 2X2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 40,
+      "costos_prod": 7,
+      "total_calc": 3137434.0,
+      "total_hoja": 3181284.85,
+      "delta": -1.3784006169708443,
+      "diagnostico": null,
+      "total_catalog": 3110119.0,
+      "cobertura_catalog": 96.27672698739423,
+      "precios_devian_catalog": [
+        {
+          "material": "LENCILLO",
+          "hoja": 8215.0,
+          "catalogo": 12400.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "MDF DE 3",
+          "hoja": 67000.0,
+          "catalogo": 65.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAMINA DE 15",
+        "referencia: LAMINA DE",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "... y 30 más"
+      ]
+    },
+    {
+      "hoja": "SOMIER Y ESPALDAR EVELYN JARAMI",
+      "producto": "SOMIER Y ESPALDAR EVELYN TRUJILLO",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 24,
+      "costos_prod": 3,
+      "total_calc": 1101268.49945,
+      "total_hoja": 1101268.5,
+      "delta": -4.9942407323917825e-08,
+      "diagnostico": null,
+      "total_catalog": 1113755.99945,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "LENCILLO",
+          "hoja": 24512.5,
+          "catalogo": 37000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: MDF DE 3",
+        "referencia: GANCHOS",
+        "referencia: SUPER",
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: MDF DE 2,7",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "... y 49 más"
+      ]
+    },
+    {
+      "hoja": "CAMA ESTRELLA..",
+      "producto": "1 CAMAS ESTRELLAS DE 1,60 24/02/2026",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 62,
+      "costos_prod": 9,
+      "total_calc": 4938459.6,
+      "total_hoja": 4319850.8,
+      "delta": 14.320142723447763,
+      "diagnostico": null,
+      "total_catalog": 4945479.6,
+      "cobertura_catalog": 94.23737346880313,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "CABLE DE 12",
+          "hoja": 300.0,
+          "catalogo": 3000.0
+        },
+        {
+          "material": "HERRAJES DE CAMA",
+          "hoja": 2000.0,
+          "catalogo": 160000.0
+        },
+        {
+          "material": "LENCILLO",
+          "hoja": 210000.0,
+          "catalogo": 4000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF DE 3",
+        "referencia: SUPER",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "referencia: TINER",
+        "referencia: TOPES",
+        "referencia: COLOR TABACO",
+        "referencia: ENCINA",
+        "... y 18 más"
+      ]
+    },
+    {
+      "hoja": "ALDEMARYN MONTILVA",
+      "producto": "ALDEMARYN MONTILVA",
+      "estado": "BLOQUEADA",
+      "secciones": 7,
+      "total_insumos": 34,
+      "costos_prod": 4,
+      "total_calc": 1655607.534,
+      "total_hoja": 1339211.37,
+      "delta": 23.625558376195684,
+      "diagnostico": "total_declarado_obsoleto",
+      "total_catalog": 1668095.034,
+      "cobertura_catalog": 72.00666805901515,
+      "precios_devian_catalog": [
+        {
+          "material": "LENCILLO",
+          "hoja": 24512.5,
+          "catalogo": 37000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "LAMINA DE 5,5\"",
+          "hoja": 29114.0,
+          "catalogo": 130000.0
+        },
+        {
+          "material": "LAMINA DE 2,7\"",
+          "hoja": 15229.0,
+          "catalogo": 68000.0
+        },
+        {
+          "material": "LAMINA DE 9\"",
+          "hoja": 31900.0,
+          "catalogo": 140000.0
+        },
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 17500.0,
+          "catalogo": 250000.0
+        },
+        {
+          "material": "MDF DE 2,7",
+          "hoja": 15229.0,
+          "catalogo": 65000.0
+        },
+        {
+          "material": "LAM MDF 15\"",
+          "hoja": 49270.0,
+          "catalogo": 220000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: TABLAS",
+        "referencia: SUPER",
+        "referencia: LAM MDF 9",
+        "referencia: GRAPAS",
+        "referencia: SELLADOR",
+        "referencia: LIJA 400",
+        "referencia: NITRO",
+        "referencia: VIDRIOS",
+        "... y 42 más"
+      ]
+    },
+    {
+      "hoja": "CAMA NUBE EL SOL",
+      "producto": "10/03/2026 CAMA EL SOL 2*2",
+      "estado": "OK",
+      "secciones": 6,
+      "total_insumos": 42,
+      "costos_prod": 9,
+      "total_calc": 2852314.02,
+      "total_hoja": 2856550.0,
+      "delta": -0.14829007018956433,
+      "diagnostico": null,
+      "total_catalog": 2996099.02,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 40000.0,
+          "catalogo": 120000.0
+        },
+        {
+          "material": "ESPUMA 1/2 ROSADA",
+          "hoja": 4000.0,
+          "catalogo": 12500.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: TOMAS NEGROS",
+        "referencia: REGLETA ANCHA",
+        "referencia: REGLETA DELGADA",
+        "referencia: LAMPARAS DE LUZ",
+        "referencia: CABLE DE 12",
+        "referencia: APAGADORES",
+        "referencia: ENCHUFLES BLANCO MACHO",
+        "referencia: HERRAJES DE CAMA",
+        "... y 3 más"
+      ]
+    },
+    {
+      "hoja": "CAMA NUBE EL SOL1,40",
+      "producto": "10/03/2026 CAMA NUBE 1,40",
+      "estado": "OK",
+      "secciones": 6,
+      "total_insumos": 40,
+      "costos_prod": 8,
+      "total_calc": 2668156.25,
+      "total_hoja": 2676132.5,
+      "delta": -0.29805138572174583,
+      "diagnostico": null,
+      "total_catalog": 2646255.0,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "ESPUMA 1\" ROSADA",
+          "hoja": 4000.0,
+          "catalogo": 10000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: LAMINA DE 15",
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: CORREDERAS",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "... y 31 más"
+      ]
+    },
+    {
+      "hoja": "CAMA NUBE  DIVERSA",
+      "producto": "10/03/2026 CAMA NUBE EL SOL 2*2",
+      "estado": "OK",
+      "secciones": 6,
+      "total_insumos": 20,
+      "costos_prod": 3,
+      "total_calc": 1217349.75,
+      "total_hoja": 1249044.5,
+      "delta": -2.537519680043425,
+      "diagnostico": null,
+      "total_catalog": 1190717.25,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: LAMINA DE 15",
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: CORREDERAS",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "... y 52 más"
+      ]
+    },
+    {
+      "hoja": "CAMA NUBE 1,60",
+      "producto": "10/03/2026 CAMA EL SOL 1,60",
+      "estado": "OK",
+      "secciones": 6,
+      "total_insumos": 19,
+      "costos_prod": 3,
+      "total_calc": 1058599.75,
+      "total_hoja": 1090294.5,
+      "delta": -2.906989808716819,
+      "diagnostico": null,
+      "total_catalog": 1043217.25,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: LAMINA DE 15",
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: CORREDERAS",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS N F 40",
+        "... y 53 más"
+      ]
+    },
+    {
+      "hoja": "CAMA MANANTIAL 1,60",
+      "producto": "10/03/2026 CAMA MANANTIAL EL SOL 2*2",
+      "estado": "BLOQUEADA",
+      "secciones": 6,
+      "total_insumos": 16,
+      "costos_prod": 5,
+      "total_calc": 984528.5,
+      "total_hoja": 1252482.0,
+      "delta": -21.39380046978719,
+      "diagnostico": "desglose_incompleto",
+      "total_catalog": 971197.25,
+      "cobertura_catalog": 99.97781081500877,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "LIJA 150",
+          "hoja": 200.0,
+          "catalogo": 2000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: MDF 2,7",
+        "referencia: GANCHOS",
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: CORREDERAS",
+        "referencia: LAM MDF 5",
+        "referencia: LAM MDF 9",
+        "referencia: COLBON",
+        "referencia: GRAPAS",
+        "... y 56 más"
+      ]
+    },
+    {
+      "hoja": "CAMA MANANTIAL 2 2",
+      "producto": "10/03/2026 CAMA MANANTIAL EL SOL 2*2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 45,
+      "costos_prod": 8,
+      "total_calc": 3190290.0,
+      "total_hoja": 3164290.0,
+      "delta": 0.8216693160234998,
+      "diagnostico": null,
+      "total_catalog": 3240190.0,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 20000.0,
+          "catalogo": 60000.0
+        },
+        {
+          "material": "ESPUMA 1/2 ROSADA",
+          "hoja": 8000.0,
+          "catalogo": 25000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: TOMAS NEGROS",
+        "referencia: MULTIUSOS",
+        "referencia: CORREDERAS"
+      ]
+    },
+    {
+      "hoja": "CAMA TAUPE",
+      "producto": "25/03/2026 CAMA TAUPE EL SOL 2*2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 45,
+      "costos_prod": 7,
+      "total_calc": 3122170.0044,
+      "total_hoja": 3122170.0,
+      "delta": 1.4092762405634541e-07,
+      "diagnostico": null,
+      "total_catalog": 3116245.0044,
+      "cobertura_catalog": 98.22412438232826,
+      "precios_devian_catalog": [
+        {
+          "material": "ESPUMA 1/2\" ROSADA",
+          "hoja": 4000.0,
+          "catalogo": 12500.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 10000.0,
+          "catalogo": 250000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: TOMAS NEGROS",
+        "referencia: JALADORES",
+        "referencia: MULTIUSOS",
+        "referencia: CORREDERAS"
+      ]
+    },
+    {
+      "hoja": "CAMA MINIMALISTA OLAYA",
+      "producto": "10/03/2026 CAMA MINIMALISTA EL SOL 2*2",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 44,
+      "costos_prod": 8,
+      "total_calc": 2780085.0,
+      "total_hoja": 2786570.0,
+      "delta": -0.23272338394513686,
+      "diagnostico": null,
+      "total_catalog": 2830520.0,
+      "cobertura_catalog": 99.90610622515727,
+      "precios_devian_catalog": [
+        {
+          "material": "ESPUMA 1/2\" ROSADA",
+          "hoja": 4000.0,
+          "catalogo": 12500.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "CASQUETES",
+          "hoja": 100.0,
+          "catalogo": 600.0
+        }
+      ],
+      "advertencias": [
+        "referencia: CORREDERAS 35 NORMAL",
+        "referencia: TORNILLOS DE 2\"",
+        "referencia: TOMAS NEGROS",
+        "referencia: CORREDERAS"
+      ]
+    },
+    {
+      "hoja": "CAMA MARIANY",
+      "producto": "18/03/2026 CAMA CADENETA SIN ESPEJO Y USB DE 1.60",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 57,
+      "costos_prod": 10,
+      "total_calc": 4060384.84,
+      "total_hoja": 4057390.0,
+      "delta": 0.07381198257993439,
+      "diagnostico": null,
+      "total_catalog": 4092998.94,
+      "cobertura_catalog": 98.57278442622366,
+      "precios_devian_catalog": [
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 5000.0,
+          "catalogo": 10000.0
+        },
+        {
+          "material": "CABLE",
+          "hoja": 10500.0,
+          "catalogo": 21000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "CORREDERAS 35 NORMAL",
+          "hoja": 10000.0,
+          "catalogo": 250000.0
+        }
+      ],
+      "advertencias": []
+    },
+    {
+      "hoja": "CAMA NAUTICA WILMER",
+      "producto": "26/03/20266 CAMA NAUTICA 2*2",
+      "estado": "OK",
+      "secciones": 8,
+      "total_insumos": 42,
+      "costos_prod": 9,
+      "total_calc": 3114585.0,
+      "total_hoja": 3114585.0,
+      "delta": 0.0,
+      "diagnostico": null,
+      "total_catalog": 3227830.0,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 40000.0,
+          "catalogo": 120000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: COLAPATO",
+        "referencia: MULTIUSO",
+        "referencia: PATAS DE CAMAS",
+        "referencia: TORNILLOS"
+      ]
+    },
+    {
+      "hoja": "CAMA DECO CHOCOLATINA ",
+      "producto": "2026-04-27 00:00:00",
+      "estado": "OK",
+      "secciones": 6,
+      "total_insumos": 20,
+      "costos_prod": 6,
+      "total_calc": 2310788.29725,
+      "total_hoja": 2188220.0,
+      "delta": 5.601278539177962,
+      "diagnostico": null,
+      "total_catalog": 2375088.29725,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 3000.0,
+          "catalogo": 6000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: MADERA",
+        "referencia: LAM MFF 9\"",
+        "referencia: LAM MDF 5,5\"",
+        "referencia: LAM MDF 2.7",
+        "referencia: COLBON",
+        "referencia: GANCHOS",
+        "referencia: GRAPAS",
+        "referencia: CLAVILLOS",
+        "... y 17 más"
+      ]
+    },
+    {
+      "hoja": "CAMA DE 1 METRO ABANANADO ",
+      "producto": "8//05/2026 CAMA DE 1 METRO CON SU BUTACO Y NOCHERO",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 36,
+      "costos_prod": 8,
+      "total_calc": 2512166.000135,
+      "total_hoja": 2484461.0,
+      "delta": 1.1151312149798287,
+      "diagnostico": null,
+      "total_catalog": 2599550.000135,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: LAM MDF 5,5\"",
+        "referencia: LAM MDF 2.7",
+        "referencia: LIJA 2000",
+        "referencia: COLOR",
+        "referencia: CORREDERAS",
+        "referencia: COLOR NACARADO",
+        "referencia: SAMBLASTIADA DEL ESPEJO",
+        "referencia: TOMA EXPANDIBLE",
+        "... y 3 más"
+      ]
+    },
+    {
+      "hoja": "CAMA CLASICA DE 1.60 ",
+      "producto": "8//05/2026 CAMA CLASICO EN BEMGUEY",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 28,
+      "costos_prod": 7,
+      "total_calc": 2808908.6968395,
+      "total_hoja": 2806486.0,
+      "delta": 0.0863249216101559,
+      "diagnostico": null,
+      "total_catalog": 2879297.4968395,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: LAM MDF 2.7",
+        "referencia: LIJA 2000",
+        "referencia: COLOR",
+        "referencia: CORREDERAS",
+        "referencia: COLOR NACARADO",
+        "referencia: PVC",
+        "referencia: ESPEJO",
+        "referencia: SAMBLASTIADA DEL ESPEJO",
+        "... y 11 más"
+      ]
+    },
+    {
+      "hoja": "CAMA PVC ",
+      "producto": "8//05/2026 CAMA PVC",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 40,
+      "costos_prod": 8,
+      "total_calc": 4056423.1028905,
+      "total_hoja": 4053211.0,
+      "delta": 0.07924835125780523,
+      "diagnostico": null,
+      "total_catalog": 4139508.7028905,
+      "cobertura_catalog": 95.09896016271452,
+      "precios_devian_catalog": [
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "ESPEJO",
+          "hoja": 12000.0,
+          "catalogo": 50000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LIJA 2000",
+        "referencia: COLOR NACARADO",
+        "referencia: CABLE",
+        "referencia: TOMA EXPANDIBLE",
+        "referencia: ESPUMA DE",
+        "referencia: COSTAL",
+        "referencia: HILO"
+      ]
+    },
+    {
+      "hoja": "CAMA DOBLE BANANA",
+      "producto": "18/5/2026 CAMA NUBE",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 28,
+      "costos_prod": 3,
+      "total_calc": 2055916.30165,
+      "total_hoja": 2051090.0,
+      "delta": 0.23530423579657644,
+      "diagnostico": null,
+      "total_catalog": 2103839.10165,
+      "cobertura_catalog": 97.82553546189251,
+      "precios_devian_catalog": [],
+      "catalogo_dudoso": [
+        {
+          "material": "ESPUMA DE 1/2 ROSADA",
+          "hoja": 30000.0,
+          "catalogo": 6630.0
+        }
+      ],
+      "advertencias": [
+        "referencia: LAM MFF 9\"",
+        "referencia: SELLADOR",
+        "referencia: LIJA",
+        "referencia: LIJA 2000",
+        "referencia: COLOR NACARADO",
+        "referencia: COLOR BLANCO",
+        "referencia: RESANE",
+        "referencia: LACA",
+        "... y 13 más"
+      ]
+    },
+    {
+      "hoja": "CAMA YURAIMA R",
+      "producto": "13/04/2026 CAMA CADENETA",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 38,
+      "costos_prod": 11,
+      "total_calc": 2881300.0,
+      "total_hoja": 2877140.6,
+      "delta": 0.14456714419865335,
+      "diagnostico": null,
+      "total_catalog": 3033177.6,
+      "cobertura_catalog": 91.59827313548269,
+      "precios_devian_catalog": [
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        },
+        {
+          "material": "CORREDERAS",
+          "hoja": 40000.0,
+          "catalogo": 120000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        }
+      ],
+      "catalogo_dudoso": [
+        {
+          "material": "LAM MDF 5,5\"",
+          "hoja": 29114.0,
+          "catalogo": 130000.0
+        }
+      ],
+      "advertencias": [
+        "referencia: DANIEL",
+        "referencia: ESPEJO",
+        "referencia: APAGADOR CAFETERO",
+        "referencia: CABLE",
+        "referencia: TOMA EXPANDIBLE",
+        "referencia: GRAPAS",
+        "referencia: HILO"
+      ]
+    },
+    {
+      "hoja": "CAMA CHAMBRAY",
+      "producto": "26/5/2026 CAMA CHAMBRAY",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 26,
+      "costos_prod": 6,
+      "total_calc": 2124489.4,
+      "total_hoja": 2120330.0,
+      "delta": 0.1961675776883787,
+      "diagnostico": null,
+      "total_catalog": 2258367.0,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 40000.0,
+          "catalogo": 120000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: SELLADOR",
+        "referencia: LIJA",
+        "referencia: LIJA 2000",
+        "referencia: COLOR NACARADO",
+        "referencia: COLOR BLANCO",
+        "referencia: RESANE",
+        "referencia: LACA",
+        "referencia: ESPEJO",
+        "... y 12 más"
+      ]
+    },
+    {
+      "hoja": "CAMA DE 2X2  FILA ",
+      "producto": "27/05/2026 CAMA DE 2X2 FILA",
+      "estado": "OK",
+      "secciones": 7,
+      "total_insumos": 16,
+      "costos_prod": 6,
+      "total_calc": 1727059.4,
+      "total_hoja": 1722900.0,
+      "delta": 0.24141853851065065,
+      "diagnostico": null,
+      "total_catalog": 1866437.0,
+      "cobertura_catalog": 100.0,
+      "precios_devian_catalog": [
+        {
+          "material": "CORREDERAS",
+          "hoja": 40000.0,
+          "catalogo": 120000.0
+        },
+        {
+          "material": "RESANE",
+          "hoja": 10000.0,
+          "catalogo": 20000.0
+        }
+      ],
+      "catalogo_dudoso": [],
+      "advertencias": [
+        "referencia: MADERA",
+        "referencia: 1 TABLA",
+        "referencia: LAM MFF 9\"",
+        "referencia: LAM MDF 15",
+        "referencia: LAM MDF 2.5",
+        "referencia: COLBON",
+        "referencia: GANCHOS",
+        "referencia: GRAPAS",
+        "... y 22 más"
+      ]
+    }
+  ]
+}

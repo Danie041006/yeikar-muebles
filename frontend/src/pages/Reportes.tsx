@@ -219,7 +219,7 @@ export default function Reportes() {
               
               {pnlLoading ? (
                 <div className="flex flex-col items-center justify-center py-12 space-y-2">
-                  <div className="w-8 h-8 border-3 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
+                  <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
                   <p className="text-xs font-mono text-yeikar-neutral/50">Cargando cuentas...</p>
                 </div>
               ) : pnlDetails.length === 0 ? (
@@ -273,7 +273,7 @@ export default function Reportes() {
               <div className="flex-1 min-h-[280px] w-full">
                 {chartLoading ? (
                   <div className="h-full flex flex-col items-center justify-center space-y-2">
-                    <div className="w-8 h-8 border-3 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
+                    <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
                     <p className="text-xs font-mono text-yeikar-neutral/50">Generando gráfico...</p>
                   </div>
                 ) : (

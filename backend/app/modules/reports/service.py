@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func, extract
+from sqlalchemy import func, extract, orm as sa_orm
 from typing import List, Dict, Optional
 from decimal import Decimal
 from datetime import datetime, date
@@ -770,6 +770,14 @@ def eliminar_metodo_caja(db: Session, metodo_id: int) -> bool:
     obj = db.query(model.MetodoCaja).filter(model.MetodoCaja.id == metodo_id).first()
     if not obj:
         return False
+    en_uso = db.query(model.MovimientoCaja).filter(
+        model.MovimientoCaja.metodo_caja_id == metodo_id
+    ).first()
+    if en_uso:
+        raise ValueError(
+            "El método de caja tiene movimientos asociados; "
+            "desactívalo (activo=false) en lugar de eliminarlo."
+        )
     db.delete(obj)
     db.commit()
     return True
@@ -788,11 +796,12 @@ def listar_movimientos_caja(db: Session, metodo_id: Optional[int] = None, fecha_
         query = query.filter(model.MovimientoCaja.fecha <= fecha_hasta)
     return query.order_by(model.MovimientoCaja.fecha.desc(), model.MovimientoCaja.id.desc()).all()
 
-def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate) -> model.MovimientoCaja:
+def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, usuario_id: Optional[int] = None) -> model.MovimientoCaja:
     datos = esquema.model_dump()
     monto = Decimal(str(datos["monto"]))
     tasa = Decimal(str(datos.get("tasa_cambio") or 1.0))
     datos["monto_en_moneda_base"] = round(monto * tasa, 2)
+    datos["usuario_id"] = usuario_id
     obj = model.MovimientoCaja(**datos)
     db.add(obj)
     db.commit()
@@ -819,6 +828,50 @@ def eliminar_movimiento_caja(db: Session, movimiento_id: int) -> bool:
     db.delete(obj)
     db.commit()
     return True
+
+
+def resumen_cuentas(db: Session) -> List[dict]:
+    """
+    Saldo por cada cuenta activa: desglosado por moneda (en su propia moneda
+    y en COP) y total en COP. Usa la misma convención que _saldo_caja_en_cop:
+    SALIDA resta; APERTURA/ENTRADA/AJUSTE suman (AJUSTE puede ser negativo).
+    """
+    metodos = listar_metodos_caja(db)
+    movs = (
+        db.query(model.MovimientoCaja)
+        .options(sa_orm.joinedload(model.MovimientoCaja.moneda))
+        .order_by(model.MovimientoCaja.metodo_caja_id, model.MovimientoCaja.id)
+        .all()
+    )
+    monedas: dict = {}  # moneda_id -> {codigo, simbolo}
+    for m in movs:
+        if m.moneda and m.moneda_id not in monedas:
+            monedas[m.moneda_id] = {"codigo": m.moneda.codigo, "simbolo": m.moneda.simbolo}
+
+    resumen: List[schemas.ResumenCuentaResponse] = []
+    for mc in metodos:
+        lineas: List[schemas.LineaSaldoMoneda] = []
+        total_cop = Decimal("0.0")
+        for m in movs:
+            if m.metodo_caja_id != mc.id:
+                continue
+            signo = Decimal("-1") if m.tipo == "SALIDA" else Decimal("1")
+            cop = Decimal(str(m.monto_en_moneda_base)) if m.monto_en_moneda_base is not None else (
+                Decimal(str(m.monto)) * Decimal(str(m.tasa_cambio or 1.0))
+            )
+            linea = next((l for l in lineas if l.moneda_id == m.moneda_id), None)
+            if linea is None:
+                meta = monedas.get(m.moneda_id, {"codigo": "?", "simbolo": "?"})
+                linea = schemas.LineaSaldoMoneda(
+                    moneda_id=m.moneda_id, codigo=meta["codigo"], simbolo=meta["simbolo"],
+                    monto=Decimal("0.0"), monto_cop=Decimal("0.0"),
+                )
+                lineas.append(linea)
+            linea.monto += signo * Decimal(str(m.monto))
+            linea.monto_cop += signo * cop
+            total_cop += signo * cop
+        resumen.append(schemas.ResumenCuentaResponse(metodo_caja=mc, saldo_por_moneda=lineas, saldo_cop=total_cop))
+    return resumen
 
 
 # ------------------------------------------------------------

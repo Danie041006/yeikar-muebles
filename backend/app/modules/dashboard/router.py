@@ -14,4 +14,4 @@ def get_dashboard_metrics(
     current_user: Usuario = Depends(get_current_user)
 ):
     """Retorna las métricas consolidadas para la pantalla de inicio del ERP (Dashboard)."""
-    return service.obtener_metricas_dashboard(db)
+    return service.obtener_metricas_dashboard(db, current_user)

@@ -14,17 +14,51 @@ from app.modules.productos.model import Material
 from app.modules.catalogos.model import Ubicacion, TipoGasto
 from app.modules.inventory.service import registrar_movimiento
 from app.modules.inventory.schemas import MovimientoCreate
+from app.modules.auditoria.service import record_event
+from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
+from app.modules.users.model import Usuario
+
+
+def _scope_orders(query, usuario: Usuario | None):
+    if usuario is None or tiene_alcance_total(usuario):
+        return query
+    return filtrar_registros_propios(query, OrdenProduccion.creado_por_id, usuario)
+
+
+def _scope_stages(query, usuario: Usuario | None):
+    if usuario is None or tiene_alcance_total(usuario):
+        return query
+    return query.join(EtapaProduccion.orden).filter(OrdenProduccion.creado_por_id == usuario.id)
+
+
+def _snapshot_orden(orden: OrdenProduccion) -> dict:
+    return {
+        "detalle_pedido_id": orden.detalle_pedido_id,
+        "estado": orden.estado,
+        "fecha_inicio": orden.fecha_inicio,
+        "fecha_fin": orden.fecha_fin,
+    }
 # ------------------------------------------------------------
 # Servicios para Órdenes de Producción
 # ------------------------------------------------------------
-def obtener_orden_produccion(db: Session, id_orden: int):
-    return db.query(OrdenProduccion).options(
+def obtener_orden_produccion(db: Session, id_orden: int, usuario: Usuario | None = None):
+    query = db.query(OrdenProduccion).options(
         joinedload(OrdenProduccion.detalle_pedido).joinedload(DetallePedido.producto)
-    ).filter(OrdenProduccion.id == id_orden).first()
-def obtener_ordenes_produccion(db: Session, salto: int = 0, limite: int = 100, buscar: str = None):
+    ).filter(OrdenProduccion.id == id_orden)
+    return _scope_orders(query, usuario).first()
+
+
+def obtener_ordenes_produccion(
+    db: Session,
+    salto: int = 0,
+    limite: int = 100,
+    buscar: str = None,
+    usuario: Usuario | None = None,
+):
     query = db.query(OrdenProduccion).options(
         joinedload(OrdenProduccion.detalle_pedido).joinedload(DetallePedido.producto)
     )
+    query = _scope_orders(query, usuario)
     if buscar:
         if buscar.isdigit():
             id_val = int(buscar)
@@ -38,22 +72,37 @@ def obtener_ordenes_produccion(db: Session, salto: int = 0, limite: int = 100, b
         else:
             query = query.filter(OrdenProduccion.estado.ilike(f"%{buscar}%"))
     return query.offset(salto).limit(limite).all()
-def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate):
+def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario: Usuario | None = None):
+    detalle_query = db.query(DetallePedido).join(Pedido, Pedido.id == DetallePedido.pedido_id).filter(
+        DetallePedido.id == esquema.detalle_pedido_id
+    )
+    if usuario is not None and not tiene_alcance_total(usuario):
+        detalle_query = detalle_query.filter(Pedido.creado_por_id == usuario.id)
+    if not detalle_query.first():
+        raise ValueError("El detalle de pedido no existe o no está disponible para este usuario.")
+
     db_orden = OrdenProduccion(
         detalle_pedido_id=esquema.detalle_pedido_id,
         estado=esquema.estado,
         fecha_inicio=esquema.fecha_inicio,
-        fecha_fin=esquema.fecha_fin
+        fecha_fin=esquema.fecha_fin,
+        creado_por_id=usuario.id if usuario is not None else None,
+        actualizado_por_id=usuario.id if usuario is not None else None,
     )
     db.add(db_orden)
+    db.flush()
+    record_event(db, actor=usuario, action="CREATE", entity_type="orden_produccion", entity_id=db_orden.id, after=_snapshot_orden(db_orden))
     db.commit()
     db.refresh(db_orden)
     return db_orden
-def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int):
+def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuario: Usuario | None = None):
     # Verificar que el detalle del pedido exista.
     # FOR UPDATE sobre el detalle: dos requests simultáneos para el mismo detalle
     # se serializan y solo el primero crea la orden (evita IntegrityError 500).
-    detalle = db.query(DetallePedido).filter(DetallePedido.id == detalle_pedido_id).with_for_update().first()
+    detalle_query = db.query(DetallePedido).join(Pedido, Pedido.id == DetallePedido.pedido_id).filter(DetallePedido.id == detalle_pedido_id)
+    if usuario is not None and not tiene_alcance_total(usuario):
+        detalle_query = detalle_query.filter(Pedido.creado_por_id == usuario.id)
+    detalle = detalle_query.with_for_update().first()
     if not detalle:
         raise ValueError("El detalle de pedido especificado no existe.")
     
@@ -66,24 +115,30 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int):
         detalle_pedido_id=detalle_pedido_id,
         estado="PENDIENTE",
         fecha_inicio=None,
-        fecha_fin=None
+        fecha_fin=None,
+        creado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
+        actualizado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
     )
     db.add(db_orden)
     db.commit()
     db.refresh(db_orden)
     return db_orden
-def actualizar_orden_produccion(db: Session, id_orden: int, esquema: OrdenProduccionUpdate):
-    db_orden = obtener_orden_produccion(db, id_orden)
+def actualizar_orden_produccion(db: Session, id_orden: int, esquema: OrdenProduccionUpdate, usuario: Usuario | None = None):
+    db_orden = obtener_orden_produccion(db, id_orden, usuario)
     if not db_orden:
         return None
+    antes = _snapshot_orden(db_orden)
     data = esquema.model_dump(exclude_unset=True)
     for clave, valor in data.items():
         setattr(db_orden, clave, valor)
+    if usuario is not None:
+        db_orden.actualizado_por_id = usuario.id
+    record_event(db, actor=usuario, action="UPDATE", entity_type="orden_produccion", entity_id=db_orden.id, before=antes, after=_snapshot_orden(db_orden))
     db.commit()
     db.refresh(db_orden)
     return db_orden
-def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: str):
-    db_orden = obtener_orden_produccion(db, id_orden)
+def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: str, usuario: Usuario | None = None):
+    db_orden = obtener_orden_produccion(db, id_orden, usuario)
     if not db_orden:
         return None
     
@@ -91,6 +146,7 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
     if nuevo_estado not in estados_validos:
         raise ValueError(f"Estado de orden invalido. Debe ser uno de: {estados_validos}")
     
+    antes = _snapshot_orden(db_orden)
     db_orden.estado = nuevo_estado
     if nuevo_estado == 'EN_PRODUCCION' and not db_orden.fecha_inicio:
         db_orden.fecha_inicio = date.today()
@@ -143,26 +199,33 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
                         pedido.estado = "TERMINADO"
                         # Generar envío automático
                         from app.modules.envios.service import crear_envio_automatico
-                        crear_envio_automatico(db, pedido.id)
+                        crear_envio_automatico(db, pedido.id, usuario)
         except Exception as e:
             print(f"Error al verificar estado del pedido e iniciar envío para orden {id_orden}: {e}")
 
+    if usuario is not None:
+        db_orden.actualizado_por_id = usuario.id
+    record_event(db, actor=usuario, action="STATE_CHANGE", entity_type="orden_produccion", entity_id=db_orden.id, before=antes, after=_snapshot_orden(db_orden))
     db.commit()
     db.refresh(db_orden)
     return db_orden
-def eliminar_orden_produccion(db: Session, id_orden: int):
-    db_orden = obtener_orden_produccion(db, id_orden)
+def eliminar_orden_produccion(db: Session, id_orden: int, usuario: Usuario | None = None):
+    db_orden = obtener_orden_produccion(db, id_orden, usuario)
     if not db_orden:
         return False
+    record_event(db, actor=usuario, action="DELETE", entity_type="orden_produccion", entity_id=db_orden.id, before=_snapshot_orden(db_orden))
     db.delete(db_orden)
     db.commit()
     return True
 # ------------------------------------------------------------
 # Servicios para Etapas de Producción
 # ------------------------------------------------------------
-def obtener_etapa_produccion(db: Session, id_etapa: int):
-    return db.query(EtapaProduccion).filter(EtapaProduccion.id == id_etapa).first()
-def crear_etapa_produccion(db: Session, esquema: EtapaProduccionCreate):
+def obtener_etapa_produccion(db: Session, id_etapa: int, usuario: Usuario | None = None):
+    query = db.query(EtapaProduccion).filter(EtapaProduccion.id == id_etapa)
+    return _scope_stages(query, usuario).first()
+
+
+def crear_etapa_produccion(db: Session, esquema: EtapaProduccionCreate, usuario: Usuario | None = None):
     db_etapa = EtapaProduccion(
         orden_produccion_id=esquema.orden_produccion_id,
         area_id=esquema.area_id,
@@ -172,11 +235,16 @@ def crear_etapa_produccion(db: Session, esquema: EtapaProduccionCreate):
         fecha_inicio=esquema.fecha_inicio,
         fecha_fin=esquema.fecha_fin
     )
+    orden = _scope_orders(
+        db.query(OrdenProduccion).filter(OrdenProduccion.id == esquema.orden_produccion_id),
+        usuario,
+    ).with_for_update().first()
+    if not orden:
+        raise ValueError("La orden de producción no existe o no está disponible para este usuario.")
     db.add(db_etapa)
-    
+
     # Si la orden está en estado PENDIENTE, cambiarla a EN_PRODUCCION al crear su primera etapa.
     # FOR UPDATE: dos primeras etapas simultáneas se serializan y no pisan fecha/estado.
-    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == esquema.orden_produccion_id).with_for_update().first()
     if orden and orden.estado == "PENDIENTE":
         orden.estado = "EN_PRODUCCION"
         if not orden.fecha_inicio:
@@ -185,8 +253,8 @@ def crear_etapa_produccion(db: Session, esquema: EtapaProduccionCreate):
     db.commit()
     db.refresh(db_etapa)
     return db_etapa
-def actualizar_etapa_produccion(db: Session, id_etapa: int, esquema: EtapaProduccionUpdate):
-    db_etapa = obtener_etapa_produccion(db, id_etapa)
+def actualizar_etapa_produccion(db: Session, id_etapa: int, esquema: EtapaProduccionUpdate, usuario: Usuario | None = None):
+    db_etapa = obtener_etapa_produccion(db, id_etapa, usuario)
     if not db_etapa:
         return None
     data = esquema.model_dump(exclude_unset=True)
@@ -195,10 +263,13 @@ def actualizar_etapa_produccion(db: Session, id_etapa: int, esquema: EtapaProduc
     db.commit()
     db.refresh(db_etapa)
     return db_etapa
-def cambiar_estado_etapa_produccion(db: Session, id_etapa: int, nuevo_estado: str):
+def cambiar_estado_etapa_produccion(db: Session, id_etapa: int, nuevo_estado: str, usuario: Usuario | None = None):
     # FOR UPDATE: evita el lost-update cuando dos finalizaciones/cambios de estado
     # concurrentes leen el mismo estado base y se pisan entre sí.
-    db_etapa = db.query(EtapaProduccion).filter(EtapaProduccion.id == id_etapa).with_for_update().first()
+    db_etapa = _scope_stages(
+        db.query(EtapaProduccion).filter(EtapaProduccion.id == id_etapa),
+        usuario,
+    ).with_for_update().first()
     if not db_etapa:
         return None
     
@@ -215,8 +286,8 @@ def cambiar_estado_etapa_produccion(db: Session, id_etapa: int, nuevo_estado: st
     db.commit()
     db.refresh(db_etapa)
     return db_etapa
-def eliminar_etapa_produccion(db: Session, id_etapa: int):
-    db_etapa = obtener_etapa_produccion(db, id_etapa)
+def eliminar_etapa_produccion(db: Session, id_etapa: int, usuario: Usuario | None = None):
+    db_etapa = obtener_etapa_produccion(db, id_etapa, usuario)
     if not db_etapa:
         return False
     db.delete(db_etapa)

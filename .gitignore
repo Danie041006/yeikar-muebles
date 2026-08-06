@@ -51,3 +51,14 @@ Thumbs.db
 logs/
 tmp/
 *.tmp
+
+# Backups de la base de datos (datos, no fuente)
+backups/
+*.sql
+*.dump
+backend/backup_pre_limpieza_*.sql
+
+# Herramientas de agente / entorno local (no parte del ERP)
+.agents/
+skills-lock.json
+videos/

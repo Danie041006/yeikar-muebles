@@ -51,6 +51,15 @@ export interface ConvertDetail {
   observaciones?: string;
 }
 
+export interface ConvertQuoteBody {
+  detalles: ConvertDetail[];
+  fecha_entrega_estimada?: string;
+  adelanto?: number;
+  moneda_adelanto_id?: number;
+  tasa_cambio_adelanto?: number;
+  metodo_pago?: string;
+}
+
 export const pedidoService = {
   getAll: async (
     search?: string,
@@ -81,20 +90,8 @@ export const pedidoService = {
     await api.delete(`/pedido/${id}`);
   },
 
-  convertQuote: async (
-    quoteId: number,
-    details: ConvertDetail[],
-    estimatedDeliveryDate?: string
-  ): Promise<Order> => {
-    const response = await api.post<Order>(
-      `/pedido/convertir/${quoteId}`,
-      details,
-      {
-        params: estimatedDeliveryDate
-          ? { fecha_entrega_estimada: estimatedDeliveryDate }
-          : {},
-      }
-    );
+  convertQuote: async (quoteId: number, body: ConvertQuoteBody): Promise<Order> => {
+    const response = await api.post<Order>(`/pedido/convertir/${quoteId}`, body);
     return response.data;
   },
 };

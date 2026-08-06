@@ -15,7 +15,9 @@ import Ventas from './pages/Ventas';
 import Despachos from './pages/Despachos';
 import Usuarios from './pages/Usuarios';
 import Gastos from './pages/Gastos';
+import Cuentas from './pages/Cuentas';
 import CotizadorInteligente from './pages/CotizadorInteligente';
+import Auditoria from './pages/Auditoria';
 import DashboardLayout from './components/Layout/DashboardLayout';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
@@ -34,7 +36,9 @@ const ROUTE_MODULES: Record<string, string> = {
   '/ventas': 'ventas',
   '/envios': 'envios',
   '/gastos': 'gastos',
+  '/cuentas': 'cuentas',
   '/usuarios': 'usuarios',
+  '/auditoria': 'usuarios',
 };
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -46,8 +50,15 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-yeikar-tertiary">
-        <div className="text-yeikar-secondary font-headline font-bold animate-pulse">Cargando…</div>
+      <div className="premium-grid flex min-h-screen items-center justify-center bg-yeikar-tertiary p-6">
+        <div className="flex w-full max-w-xs flex-col items-center rounded-2xl border border-yeikar-secondary-light/10 bg-white/75 p-8 text-center shadow-card backdrop-blur-xl">
+          <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-2xl font-black text-yeikar-neutral shadow-gold">Y</div>
+          <div className="mb-4 h-1 w-24 overflow-hidden rounded-full bg-yeikar-tertiary">
+            <div className="h-full w-1/2 animate-pulse rounded-full bg-yeikar-primary" />
+          </div>
+          <p className="font-headline text-sm font-bold text-yeikar-secondary">Preparando tu espacio</p>
+          <p className="mt-1 text-xs text-yeikar-neutral/45">Validando la sesión de YEIKAR</p>
+        </div>
       </div>
     );
   }
@@ -119,9 +130,17 @@ const pageMeta: Record<string, { title: string; description: string }> = {
     title: 'Gastos',
     description: 'Control de gastos operativos y administrativos.',
   },
+  '/cuentas': {
+    title: 'Cuentas',
+    description: 'Medios de pago (efectivo, Zelle, bancos) y movimientos de cada cuenta con responsable.',
+  },
   '/usuarios': {
     title: 'Usuarios',
     description: 'Administración de usuarios y roles del sistema.',
+  },
+  '/auditoria': {
+    title: 'Actividad del sistema',
+    description: 'Trazabilidad de acciones, cambios y responsables dentro de YEIKAR.',
   },
 };
 
@@ -264,11 +283,31 @@ function App() {
             }
           />
           <Route
+            path="/cuentas"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/cuentas']} /><Cuentas /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/usuarios"
             element={
               <PrivateRoute>
                 <DashboardLayout>
                   <><SEO {...pageMeta['/usuarios']} /><Usuarios /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/auditoria"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/auditoria']} /><Auditoria /></>
                 </DashboardLayout>
               </PrivateRoute>
             }

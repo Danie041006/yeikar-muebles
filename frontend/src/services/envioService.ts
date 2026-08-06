@@ -13,8 +13,29 @@ export interface Envio {
   observaciones?: string | null;
   created_at?: string;
   updated_at?: string;
+  creado_por_id?: number | null;
+  actualizado_por_id?: number | null;
+  asignado_por_usuario_id?: number | null;
+  creador_nombre?: string | null;
+  asignado_por_nombre?: string | null;
   pedido?: Order;
   empleado?: Empleado | null;
+}
+
+export interface EnvioUbicacion {
+  id: number;
+  envio_id: number;
+  empleado_id?: number | null;
+  reportado_por_id?: number | null;
+  latitud: number;
+  longitud: number;
+  precision_m?: number | null;
+  velocidad?: number | null;
+  rumbo?: number | null;
+  capturada_en?: string | null;
+  recibida_en: string;
+  fuente: string;
+  secuencia?: number | null;
 }
 export interface EnvioUpdate {
   empleado_id?: number | null;
@@ -51,5 +72,17 @@ export const envioService = {
   },
   delete: async (id: number): Promise<void> => {
     await api.delete(`/envio/${id}`);
+  },
+  reportLocation: async (id: number, data: Omit<EnvioUbicacion, 'id' | 'envio_id' | 'empleado_id' | 'reportado_por_id' | 'recibida_en'>): Promise<EnvioUbicacion> => {
+    const response = await api.post<EnvioUbicacion>(`/envio/${id}/ubicaciones`, data);
+    return response.data;
+  },
+  getLatestLocation: async (id: number): Promise<EnvioUbicacion | null> => {
+    const response = await api.get<EnvioUbicacion | null>(`/envio/${id}/ubicacion-actual`);
+    return response.data;
+  },
+  getLocationHistory: async (id: number): Promise<EnvioUbicacion[]> => {
+    const response = await api.get<EnvioUbicacion[]>(`/envio/${id}/ubicaciones`);
+    return response.data;
   },
 };

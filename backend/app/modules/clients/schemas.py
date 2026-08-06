@@ -28,6 +28,9 @@ class ClientResponse(ClientBase):
     id: int
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    creado_por_id: Optional[int] = None
+    actualizado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
 
     class Config:
         from_attributes = True

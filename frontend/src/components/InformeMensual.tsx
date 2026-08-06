@@ -370,7 +370,7 @@ export default function InformeMensual() {
               w.focus();
               setTimeout(() => w.print(), 300);
             }}
-            className="bg-yeikar-primary text-white font-headline font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-yeikar-secondary transition-colors shadow-sm"
+            className="bg-yeikar-primary text-yeikar-neutral font-headline font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-yeikar-secondary transition-colors shadow-sm"
           >
             Imprimir / PDF
           </button>
@@ -723,7 +723,7 @@ export default function InformeMensual() {
                       <button
                         onClick={guardarValores}
                         disabled={guardando}
-                        className="bg-yeikar-primary text-white font-headline font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-yeikar-secondary transition-colors disabled:opacity-50"
+                        className="bg-yeikar-primary text-yeikar-neutral font-headline font-bold text-sm px-5 py-2.5 rounded-xl hover:bg-yeikar-secondary transition-colors disabled:opacity-50"
                       >
                         {guardando ? 'Guardando...' : 'Guardar Corte'}
                       </button>
@@ -770,7 +770,7 @@ export default function InformeMensual() {
                       </select>
                       <input type="number" min="0" step="0.01" value={cajaForm.tasa_cambio} onChange={(e) => setCajaForm((f) => ({ ...f, tasa_cambio: e.target.value }))} placeholder="Tasa (COP/1) si no es COP" className={inputCls} />
                       <input value={cajaForm.referencia} onChange={(e) => setCajaForm((f) => ({ ...f, referencia: e.target.value }))} placeholder="Referencia" className={inputCls} />
-                      <button onClick={registrarMovimiento} disabled={guardando} className="bg-yeikar-primary text-white font-bold text-sm rounded-lg hover:bg-yeikar-secondary transition-colors disabled:opacity-50 py-2">
+                      <button onClick={registrarMovimiento} disabled={guardando} className="bg-yeikar-primary text-yeikar-neutral font-bold text-sm rounded-lg hover:bg-yeikar-secondary transition-colors disabled:opacity-50 py-2">
                         {guardando ? '...' : '+ Registrar'}
                       </button>
                     </div>

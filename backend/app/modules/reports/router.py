@@ -7,10 +7,14 @@ from datetime import date
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
-from app.modules.users.deps import require_module
+from app.modules.users.deps import es_admin, require_module
 from app.modules.reports import service, schemas
 
-router = APIRouter(prefix="/reports", tags=["Reportes"], dependencies=[Depends(require_module('reportes'))])
+router = APIRouter(
+    prefix="/reports",
+    tags=["Reportes"],
+    dependencies=[Depends(require_module('reportes')), Depends(es_admin)],
+)
 
 @router.get("/pnl", response_model=schemas.PnLResponse)
 def get_pnl(

@@ -7,15 +7,40 @@ from app.modules.orders.model import Pedido, DetallePedido
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
 from app.modules.tasas_cambio import service as tasa_cambio_service
+from app.modules.auditoria.service import record_event
+from app.modules.users.deps import filtrar_registros_propios
+from app.modules.users.model import Usuario
 
 # ------------------------------------------------------------
 # Servicios para Ventas (Facturas)
 # ------------------------------------------------------------
-def obtener_venta(db: Session, id_venta: int):
-    return db.query(Venta).filter(Venta.id == id_venta).first()
+def _snapshot_venta(venta: Venta) -> dict:
+    return {
+        "pedido_id": venta.pedido_id,
+        "cliente_id": venta.cliente_id,
+        "fecha": venta.fecha,
+        "total": venta.total,
+        "estado": venta.estado,
+        "observaciones": venta.observaciones,
+    }
 
-def obtener_ventas(db: Session, salto: int = 0, limite: int = 100, buscar: str = None):
+
+def obtener_venta(db: Session, id_venta: int, usuario: Usuario | None = None):
+    query = db.query(Venta).filter(Venta.id == id_venta)
+    if usuario is not None:
+        query = filtrar_registros_propios(query, Venta.creado_por_id, usuario)
+    return query.first()
+
+def obtener_ventas(
+    db: Session,
+    salto: int = 0,
+    limite: int = 100,
+    buscar: str = None,
+    usuario: Usuario | None = None,
+):
     query = db.query(Venta)
+    if usuario is not None:
+        query = filtrar_registros_propios(query, Venta.creado_por_id, usuario)
     if buscar:
         query = query.join(Client).filter(
             or_(
@@ -26,9 +51,18 @@ def obtener_ventas(db: Session, salto: int = 0, limite: int = 100, buscar: str =
         )
     return query.offset(salto).limit(limite).all()
 
-def crear_venta_desde_pedido(db: Session, esquema: VentaCreate, permitir_estado_cotizado: bool = False, commit: bool = True):
+def crear_venta_desde_pedido(
+    db: Session,
+    esquema: VentaCreate,
+    permitir_estado_cotizado: bool = False,
+    commit: bool = True,
+    usuario: Usuario | None = None,
+):
     
-    pedido = db.query(Pedido).filter(Pedido.id == esquema.pedido_id).with_for_update().first()
+    pedido_query = db.query(Pedido).filter(Pedido.id == esquema.pedido_id)
+    if usuario is not None:
+        pedido_query = filtrar_registros_propios(pedido_query, Pedido.creado_por_id, usuario)
+    pedido = pedido_query.with_for_update().first()
     if not pedido:
         raise ValueError("El pedido especificado no existe.")
 
@@ -78,7 +112,9 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate, permitir_estado_
         estado="PENDIENTE",
         tasa_cambio=tasa_cambio,
         total_en_moneda_base=0.0,
-        observaciones=esquema.observaciones
+        observaciones=esquema.observaciones,
+        creado_por_id=usuario.id if usuario is not None else pedido.creado_por_id,
+        actualizado_por_id=usuario.id if usuario is not None else pedido.creado_por_id,
     )
     db.add(db_venta)
     db.flush()  # Para obtener db_venta.id
@@ -112,6 +148,14 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate, permitir_estado_
     # 6. Actualizar el total de la venta
     db_venta.total = total
     db_venta.total_en_moneda_base = round(total * float(tasa_cambio), 2)
+    record_event(
+        db,
+        actor=usuario,
+        action="CREATE",
+        entity_type="venta",
+        entity_id=db_venta.id,
+        after=_snapshot_venta(db_venta),
+    )
     # commit=False: el llamador mantiene la transacción atómica (p.ej. conversión de cotización)
     if commit:
         db.commit()
@@ -120,19 +164,31 @@ def crear_venta_desde_pedido(db: Session, esquema: VentaCreate, permitir_estado_
     db.refresh(db_venta)
     return db_venta
 
-def actualizar_venta(db: Session, id_venta: int, esquema: VentaUpdate):
-    db_venta = obtener_venta(db, id_venta)
+def actualizar_venta(db: Session, id_venta: int, esquema: VentaUpdate, usuario: Usuario | None = None):
+    db_venta = obtener_venta(db, id_venta, usuario)
     if not db_venta:
         return None
+    antes = _snapshot_venta(db_venta)
     data = esquema.model_dump(exclude_unset=True)
     for clave, valor in data.items():
         setattr(db_venta, clave, valor)
+    if usuario is not None:
+        db_venta.actualizado_por_id = usuario.id
+    record_event(
+        db,
+        actor=usuario,
+        action="STATE_CHANGE" if "estado" in data else "UPDATE",
+        entity_type="venta",
+        entity_id=db_venta.id,
+        before=antes,
+        after=_snapshot_venta(db_venta),
+    )
     db.commit()
     db.refresh(db_venta)
     return db_venta
 
-def eliminar_venta(db: Session, id_venta: int):
-    db_venta = obtener_venta(db, id_venta)
+def eliminar_venta(db: Session, id_venta: int, usuario: Usuario | None = None):
+    db_venta = obtener_venta(db, id_venta, usuario)
     if not db_venta:
         return False
     # No permitir eliminar una factura con abonos: el FK pago.venta_id es
@@ -144,6 +200,14 @@ def eliminar_venta(db: Session, id_venta: int):
         )
     # La eliminacion en cascada eliminara detalle_venta (ondelete=CASCADE); pago
     # tiene ON DELETE RESTRICT, de modo que sin pagos asociados la BD falla de forma segura.
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="venta",
+        entity_id=db_venta.id,
+        before=_snapshot_venta(db_venta),
+    )
     db.delete(db_venta)
     db.commit()
     return True
@@ -155,10 +219,13 @@ def eliminar_venta(db: Session, id_venta: int):
 def obtener_pago(db: Session, id_pago: int):
     return db.query(Pago).filter(Pago.id == id_pago).first()
 
-def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True):
+def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: Usuario | None = None):
     # 1. Obtener la venta con FOR UPDATE para serializar pagos concurrentes:
     #    dos abonos simultáneos no pueden validar el saldo al mismo tiempo.
-    venta = db.query(Venta).filter(Venta.id == esquema.venta_id).with_for_update().first()
+    venta_query = db.query(Venta).filter(Venta.id == esquema.venta_id)
+    if usuario is not None:
+        venta_query = filtrar_registros_propios(venta_query, Venta.creado_por_id, usuario)
+    venta = venta_query.with_for_update().first()
     if not venta:
         raise ValueError("La venta especificada no existe.")
 
@@ -226,6 +293,17 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True):
         venta.estado = "ABONADA"
     else:
         venta.estado = "PENDIENTE"
+
+    if usuario is not None:
+        venta.actualizado_por_id = usuario.id
+    record_event(
+        db,
+        actor=usuario,
+        action="CREATE",
+        entity_type="pago",
+        entity_id=db_pago.id,
+        after={"venta_id": db_pago.venta_id, "monto": db_pago.monto, "metodo_pago": db_pago.metodo_pago},
+    )
 
     # commit=False: el llamador mantiene la transacción atómica (p.ej. conversión de cotización)
     if commit:

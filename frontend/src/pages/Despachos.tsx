@@ -5,6 +5,7 @@ import { envioService, Envio, EnvioUpdate } from '../services/envioService';
 import { OrderDetail } from '../services/pedidoService';
 import { Empleado } from '../services/produccionService';
 import api from '../services/api';
+import LocationTracker from '../components/LocationTracker';
 export default function Despachos() {
   const [envios, setEnvios] = useState<Envio[]>([]);
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
@@ -359,6 +360,7 @@ export default function Despachos() {
                     Entrega: {new Date(envio.fecha_entrega).toLocaleString('es-CO')}
                   </div>
                 )}
+                <LocationTracker envioId={envio.id} estado={envio.estado} />
                 {envio.observaciones && (
                   <p className="text-xs text-yeikar-neutral/60 bg-yellow-50/50 p-2 rounded border border-yellow-100 text-[11px]">
                     Obs: {envio.observaciones}
@@ -571,7 +573,7 @@ export default function Despachos() {
                       onClick={() => setFormaPagoGuia(fp)}
                       className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
                         formaPagoGuia === fp
-                          ? 'bg-yeikar-primary text-white border-yeikar-primary shadow-sm'
+                          ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary shadow-sm'
                           : 'bg-white text-yeikar-neutral/70 border-yeikar-secondary-light/20 hover:border-yeikar-primary/40'
                       }`}
                     >

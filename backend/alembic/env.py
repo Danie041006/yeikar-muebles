@@ -25,6 +25,7 @@ import app.modules.empleados.model   # noqa: F401
 import app.modules.envios.model      # noqa: F401
 import app.modules.tasas_cambio.model # noqa: F401
 import app.modules.reports.model     # noqa: F401
+import app.modules.auditoria.model   # noqa: F401
 
 from alembic import context
 

@@ -1,0 +1,179 @@
+{
+ "materiales": 746,
+ "nombres": 358,
+ "grupos": [
+  {
+   "nombre": "ESTOPEROLES",
+   "estado": "INCIERTO",
+   "precio_hojas": null,
+   "n_hojas": 0,
+   "precios_db": [
+    500.0,
+    1800.0
+   ],
+   "materiales": [
+    {
+     "id": 282,
+     "nombre": "ESTOPEROLES",
+     "precio": 1800.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 281,
+     "nombre": "ESTOPEROLES",
+     "precio": 500.0,
+     "activo": true,
+     "en_uso": 0
+    }
+   ]
+  },
+  {
+   "nombre": "PINTURA ALEX",
+   "estado": "INCIERTO",
+   "precio_hojas": null,
+   "n_hojas": 0,
+   "precios_db": [
+    2000.0,
+    2100.0,
+    3150.0,
+    20000.0,
+    26250.0,
+    30000.0,
+    31000.0,
+    36750.0,
+    63000.0,
+    73500.0,
+    78750.0
+   ],
+   "materiales": [
+    {
+     "id": 571,
+     "nombre": "PINTURA ALEX",
+     "precio": 78750.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 570,
+     "nombre": "PINTURA ALEX",
+     "precio": 73500.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 569,
+     "nombre": "PINTURA ALEX",
+     "precio": 63000.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 568,
+     "nombre": "PINTURA ALEX",
+     "precio": 36750.0,
+     "activo": true,
+     "en_uso": 0
+    },
+    {
+     "id": 566,
+     "nombre": "PINTURA ALEX",
+     "precio": 31000.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 565,
+     "nombre": "PINTURA ALEX",
+     "precio": 30000.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 564,
+     "nombre": "PINTURA ALEX",
+     "precio": 26250.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 562,
+     "nombre": "PINTURA ALEX",
+     "precio": 20000.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 567,
+     "nombre": "PINTURA ALEX",
+     "precio": 3150.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 572,
+     "nombre": "PINTURA ALEX",
+     "precio": 3150.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 563,
+     "nombre": "PINTURA ALEX",
+     "precio": 2100.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 561,
+     "nombre": "PINTURA ALEX",
+     "precio": 2000.0,
+     "activo": false,
+     "en_uso": 0
+    }
+   ]
+  },
+  {
+   "nombre": "TABULACIÓN (PAGO)",
+   "estado": "INCIERTO",
+   "precio_hojas": null,
+   "n_hojas": 0,
+   "precios_db": [
+    10000.0,
+    15000.0,
+    200000.0,
+    300000.0
+   ],
+   "materiales": [
+    {
+     "id": 649,
+     "nombre": "TABULACIÓN (PAGO)",
+     "precio": 300000.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 648,
+     "nombre": "TABULACIÓN (PAGO)",
+     "precio": 200000.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 647,
+     "nombre": "TABULACIÓN (PAGO)",
+     "precio": 15000.0,
+     "activo": false,
+     "en_uso": 0
+    },
+    {
+     "id": 646,
+     "nombre": "TABULACIÓN (PAGO)",
+     "precio": 10000.0,
+     "activo": true,
+     "en_uso": 0
+    }
+   ]
+  }
+ ]
+}

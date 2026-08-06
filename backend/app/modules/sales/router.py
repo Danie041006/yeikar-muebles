@@ -21,7 +21,7 @@ def crear_factura_venta(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        return service.crear_venta_desde_pedido(db, esquema)
+        return service.crear_venta_desde_pedido(db, esquema, usuario=usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -33,7 +33,7 @@ def listar_facturas_venta(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_ventas(db, salto=salto, limite=limite, buscar=buscar)
+    return service.obtener_ventas(db, salto=salto, limite=limite, buscar=buscar, usuario=usuario_actual)
 
 @router.get("/cuentas-por-cobrar/", response_model=List[schemas.CuentaPorCobrarResponse])
 def listar_cuentas_por_cobrar(
@@ -48,7 +48,7 @@ def ver_factura_venta(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.obtener_venta(db, id)
+    db_obj = service.obtener_venta(db, id, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Factura de venta no encontrada")
     
@@ -66,7 +66,7 @@ def eliminar_factura_venta(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        exito = service.eliminar_venta(db, id)
+        exito = service.eliminar_venta(db, id, usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not exito:
@@ -84,6 +84,6 @@ def registrar_pago(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        return service.crear_pago(db, esquema)
+        return service.crear_pago(db, esquema, usuario=usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

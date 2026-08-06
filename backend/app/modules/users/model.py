@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, Table, Index
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, String, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -8,17 +8,17 @@ from app.modules.catalogos.model import Rol
 usuario_rol = Table(
     "usuario_rol",
     Base.metadata,
-    Column("id", Integer, primary_key=True),
-    Column("usuario_id", Integer, ForeignKey("usuario.id", ondelete="CASCADE")),
-    Column("rol_id", Integer, ForeignKey("rol.id", ondelete="RESTRICT")),
+    Column("id", BigInteger, primary_key=True),
+    Column("usuario_id", BigInteger, ForeignKey("usuario.id", ondelete="CASCADE")),
+    Column("rol_id", BigInteger, ForeignKey("rol.id", ondelete="RESTRICT")),
     extend_existing=True
 )
 
 class Usuario(Base):
     __tablename__ = "usuario"   # Debe coincidir exactamente con el nombre de la tabla
 
-    id = Column(Integer, primary_key=True, index=True)
-    empleado_id = Column(Integer, nullable=True)  # Puede ser NULL
+    id = Column(BigInteger, primary_key=True, index=True)
+    empleado_id = Column(BigInteger, ForeignKey("empleado.id", ondelete="SET NULL"), nullable=True, index=True)
     nombre_usuario = Column(String(100), unique=True, nullable=False, index=True)
     email = Column(String(150), unique=True, nullable=True)
     password_hash = Column(String, nullable=False)
@@ -29,6 +29,7 @@ class Usuario(Base):
 
     # Relación Muchos a Muchos
     roles = relationship("Rol", secondary=usuario_rol, backref="usuarios")
+    empleado = relationship("Empleado", foreign_keys=[empleado_id])
 
 class LoginIntento(Base):
     __tablename__ = "login_intento"

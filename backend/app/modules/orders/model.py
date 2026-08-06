@@ -16,11 +16,19 @@ class Pedido(Base):
     estado = Column(String(50), nullable=False)
     observaciones = Column(Text, nullable=True)
     fecha_entrega_estimada = Column(Date, nullable=True)
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+    actualizado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
     cliente = relationship("Client")
     cotizacion = relationship("Cotizacion")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+    actualizador = relationship("Usuario", foreign_keys=[actualizado_por_id])
+
+    @property
+    def creador_nombre(self):
+        return self.creador.nombre_usuario if self.creador else None
     detalles = relationship("DetallePedido", back_populates="pedido", cascade="all, delete-orphan")
 
 class DetallePedido(Base):

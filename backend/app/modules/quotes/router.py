@@ -16,7 +16,7 @@ def crear_cotizacion(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.crear_cotizacion(db, esquema)
+    return service.crear_cotizacion(db, esquema, usuario_actual)
 
 @router.get("/", response_model=List[schemas.CotizacionResponse])
 def listar_cotizaciones(
@@ -31,7 +31,7 @@ def listar_cotizaciones(
 ):
     return service.obtener_cotizaciones(
         db, salto=salto, limite=limite, buscar=buscar,
-        solo_mes_actual=solo_mes_actual, mes=mes, anio=anio
+        solo_mes_actual=solo_mes_actual, mes=mes, anio=anio, usuario=usuario_actual
     )
 
 @router.get("/{id_cotizacion}", response_model=schemas.CotizacionResponse)
@@ -40,7 +40,7 @@ def ver_cotizacion(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.obtener_cotizacion(db, id_cotizacion)
+    db_obj = service.obtener_cotizacion(db, id_cotizacion, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Cotizacion no encontrada")
     return db_obj
@@ -53,7 +53,7 @@ def actualizar_cotizacion(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        db_obj = service.actualizar_cotizacion(db, id_cotizacion, esquema)
+        db_obj = service.actualizar_cotizacion(db, id_cotizacion, esquema, usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not db_obj:
@@ -67,10 +67,9 @@ def eliminar_cotizacion(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        exito = service.eliminar_cotizacion(db, id_cotizacion)
+        exito = service.eliminar_cotizacion(db, id_cotizacion, usuario_actual)
         if not exito:
             raise HTTPException(status_code=404, detail="Cotizacion no encontrada")
         return None
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-

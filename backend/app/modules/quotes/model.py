@@ -17,11 +17,19 @@ class Cotizacion(Base):
     tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
     total_en_moneda_base = Column(Numeric(15, 2), nullable=True)
     observaciones = Column(Text, nullable=True)
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+    actualizado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
     cliente = relationship("Client")
     moneda = relationship("Moneda")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+    actualizador = relationship("Usuario", foreign_keys=[actualizado_por_id])
+
+    @property
+    def creador_nombre(self):
+        return self.creador.nombre_usuario if self.creador else None
     detalles = relationship("DetalleCotizacion", back_populates="cotizacion", cascade="all, delete-orphan")
 
 class DetalleCotizacion(Base):
@@ -85,4 +93,3 @@ class CotizacionDetalleMaterial(Base):
 
     detalle_cotizacion = relationship("DetalleCotizacion", back_populates="materiales")
     material = relationship("Material")
-
