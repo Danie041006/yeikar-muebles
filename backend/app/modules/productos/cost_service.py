@@ -416,14 +416,27 @@ def calcular_costo_producto(
             costo_total_elementos = Decimal("0")
             detalle_elementos = []
             desglose_por_seccion = {}
+            # Pre-cargar materiales normalizados para usar el costo VIGENTE del insumo.
+            # Regla: si el elemento está mapeado a un material (material_id_normalizado),
+            # el costo se toma de material.costo_base en vivo (así subir el precio del
+            # insumo actualiza el mueble). Si no hay material mapeado, se usa el
+            # precio_unitario guardado en el elemento.
+            ids_materiales = {el.material_id_normalizado for sec in secciones for el in sec.elementos if el.material_id_normalizado}
+            materiales_map = {
+                m.id: m for m in db.query(Material).filter(Material.id.in_(ids_materiales)).all()
+            } if ids_materiales else {}
             for sec in secciones:
                 # --- Sumar insumos de la sección ---
                 costo_insumos = Decimal("0")
                 for el in sec.elementos:
-                    if el.precio_unitario:
-                        subtotal = Decimal(str(el.cantidad)) * Decimal(str(el.precio_unitario))
+                    mat_vivo = materiales_map.get(el.material_id_normalizado) if el.material_id_normalizado else None
+                    if mat_vivo is not None and mat_vivo.costo_base is not None:
+                        costo_unitario_efectivo = Decimal(str(mat_vivo.costo_base))
+                    elif el.precio_unitario:
+                        costo_unitario_efectivo = Decimal(str(el.precio_unitario))
                     else:
-                        subtotal = Decimal("0")
+                        costo_unitario_efectivo = Decimal("0")
+                    subtotal = Decimal(str(el.cantidad)) * costo_unitario_efectivo
                     costo_insumos += subtotal
                     detalle_elementos.append({
                         "seccion": sec.nombre,
@@ -437,7 +450,7 @@ def calcular_costo_producto(
                         "cantidad_calculada": float(el.cantidad),
                         "unidad_medida": el.unidad_medida or "",
                         "unidad": el.unidad_medida or "",
-                        "costo_unitario": float(el.precio_unitario or 0),
+                        "costo_unitario": float(costo_unitario_efectivo),
                         "costo_subtotal": float(subtotal),
                         "costo_total": float(subtotal),
                     })
