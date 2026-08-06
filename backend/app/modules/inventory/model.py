@@ -28,6 +28,7 @@ class MovimientoInventario(Base):
     ubicacion_id = Column(BigInteger, ForeignKey("ubicacion.id", ondelete="RESTRICT"), nullable=False)
     tipo = Column(String(50), nullable=False)   # ENTRADA, SALIDA, AJUSTE, DAÑO, DEVOLUCION
     cantidad = Column(Numeric(12, 2), nullable=False)
+    costo_unitario = Column(Numeric(15, 2), nullable=True)  # precio del material en el movimiento (entrada)
     fecha = Column(DateTime, server_default=func.now())
     referencia_tipo = Column(String(100), nullable=True)
     referencia_id = Column(BigInteger, nullable=True)

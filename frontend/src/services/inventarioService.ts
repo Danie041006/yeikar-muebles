@@ -34,6 +34,7 @@ export interface MovimientoCreate {
   ubicacion_id: number;
   tipo: 'ENTRADA' | 'SALIDA' | 'AJUSTE' | 'DAÑO' | 'DEVOLUCION';
   cantidad: number;
+  costo_unitario?: number;
   referencia_tipo?: string;
   referencia_id?: number;
   observaciones?: string;
@@ -45,6 +46,7 @@ export interface MovimientoResponse {
   ubicacion_id: number;
   tipo: string;
   cantidad: number;
+  costo_unitario?: number;
   referencia_tipo?: string;
   referencia_id?: number;
   observaciones?: string;

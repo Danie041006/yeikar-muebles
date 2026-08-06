@@ -11,8 +11,10 @@ interface Ubicacion {
 interface Material {
   id: number;
   nombre: string;
+  unidad_medida_id: number;
   unidad_medida?: {
     abreviatura: string;
+    nombre: string;
   };
   costo_base: number;
   stock_minimo?: number;
@@ -27,6 +29,8 @@ interface Product {
 }
 
 type Tab = 'insumos' | 'productos';
+
+const TIPOS_MOVIMIENTO = ['ENTRADA', 'SALIDA', 'AJUSTE', 'DAÑO', 'DEVOLUCION'];
 
 export default function Inventario() {
   interface UnidadMedida {
@@ -48,9 +52,22 @@ export default function Inventario() {
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [search, setSearch] = useState('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
-  const [selectedMaterialNombre, setSelectedMaterialNombre] = useState<string>('');
   const [kardex, setKardex] = useState<MovimientoResponse[]>([]);
   const [loadingKardex, setLoadingKardex] = useState(false);
+
+  // Formulario de movimiento de MATERIAL (dentro del panel)
+  const [movMaterial, setMovMaterial] = useState({
+    ubicacion_id: '',
+    tipo: 'ENTRADA',
+    cantidad: '',
+    costo_unitario: '',
+    observaciones: '',
+  });
+  const [savingMov, setSavingMov] = useState(false);
+
+  // Edición de insumo (dentro del panel)
+  const [editMaterial, setEditMaterial] = useState({ nombre: '', costo_base: '', stock_minimo: '8' });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // ---- Productos (terminados / reventa) ----
   const [invProductos, setInvProductos] = useState<ProductoInventarioItem[]>([]);
@@ -58,19 +75,18 @@ export default function Inventario() {
   const [productos, setProductos] = useState<Product[]>([]);
   const [searchProducto, setSearchProducto] = useState('');
   const [selectedProductoId, setSelectedProductoId] = useState<number | null>(null);
-  const [selectedProductoNombre, setSelectedProductoNombre] = useState<string>('');
   const [kardexProducto, setKardexProducto] = useState<MovimientoProductoResponse[]>([]);
   const [loadingKardexProducto, setLoadingKardexProducto] = useState(false);
 
-  // Modal State (insumos)
-  const [showMoveModal, setShowMoveModal] = useState(false);
-  const [newMovement, setNewMovement] = useState({
-    material_id: '',
+  // Formulario de movimiento de PRODUCTO (dentro del panel)
+  const [movProducto, setMovProducto] = useState({
     ubicacion_id: '',
     tipo: 'ENTRADA',
     cantidad: '',
+    costo_unitario: '',
     observaciones: '',
   });
+  const [savingMovProd, setSavingMovProd] = useState(false);
 
   const [showMaterialModal, setShowMaterialModal] = useState(false);
   const [newMaterial, setNewMaterial] = useState({
@@ -78,17 +94,6 @@ export default function Inventario() {
     costo_base: '',
     unidad_medida_id: '',
     stock_minimo: '8',
-  });
-
-  // Modal State (productos)
-  const [showMoveProductoModal, setShowMoveProductoModal] = useState(false);
-  const [newMovementProducto, setNewMovementProducto] = useState({
-    producto_id: '',
-    ubicacion_id: '',
-    tipo: 'ENTRADA',
-    cantidad: '',
-    costo_unitario: '',
-    observaciones: '',
   });
 
   const fetchData = useCallback(async () => {
@@ -171,12 +176,18 @@ export default function Inventario() {
     }
   };
 
-  const handleOpenKardex = async (materialId: number, nombre: string) => {
-    setSelectedMaterialId(materialId);
-    setSelectedMaterialNombre(nombre);
+  // ---- Abrir panel de material (kardex + edición + movimiento) ----
+  const handleOpenMaterial = async (mat: Material) => {
+    setSelectedMaterialId(mat.id);
+    setEditMaterial({
+      nombre: mat.nombre,
+      costo_base: mat.costo_base != null ? String(mat.costo_base) : '',
+      stock_minimo: mat.stock_minimo != null ? String(mat.stock_minimo) : '8',
+    });
+    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', observaciones: '' });
     try {
       setLoadingKardex(true);
-      const data = await inventarioService.getKardex(materialId);
+      const data = await inventarioService.getKardex(mat.id);
       setKardex(data);
     } catch (error) {
       console.error('Error fetching kardex:', error);
@@ -185,36 +196,60 @@ export default function Inventario() {
     }
   };
 
-  const handleRegisterMovement = async (e: React.FormEvent) => {
+  // ---- Guardar edición del insumo ----
+  const handleSaveMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMovement.material_id || !newMovement.ubicacion_id || !newMovement.cantidad) return;
-
+    if (!selectedMaterialId) return;
     try {
-      await inventarioService.crearMovimiento({
-        material_id: parseInt(newMovement.material_id),
-        ubicacion_id: parseInt(newMovement.ubicacion_id),
-        tipo: newMovement.tipo as any,
-        cantidad: parseFloat(newMovement.cantidad),
-        observaciones: newMovement.observaciones || undefined,
+      setSavingEdit(true);
+      await api.put(`/material/${selectedMaterialId}`, {
+        nombre: editMaterial.nombre.toUpperCase().trim(),
+        costo_base: editMaterial.costo_base ? parseFloat(editMaterial.costo_base) : 0.0,
+        stock_minimo: editMaterial.stock_minimo ? parseFloat(editMaterial.stock_minimo) : 8.0,
       });
-
-      setShowMoveModal(false);
-      setNewMovement({ material_id: '', ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', observaciones: '' });
       fetchInsumos();
-      if (selectedMaterialId && selectedMaterialId === parseInt(newMovement.material_id)) {
-        handleOpenKardex(selectedMaterialId, selectedMaterialNombre);
-      }
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al registrar el movimiento.');
+      alert(error.response?.data?.detail || 'Error al guardar el insumo.');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
-  const handleOpenKardexProducto = async (productoId: number, nombre: string) => {
-    setSelectedProductoId(productoId);
-    setSelectedProductoNombre(nombre);
+  // ---- Registrar movimiento de material (desde el panel) ----
+  const handleRegisterMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMaterialId || !movMaterial.ubicacion_id || !movMaterial.cantidad) return;
+
+    const esEntrada = movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION';
+    try {
+      setSavingMov(true);
+      await inventarioService.crearMovimiento({
+        material_id: selectedMaterialId,
+        ubicacion_id: parseInt(movMaterial.ubicacion_id),
+        tipo: movMaterial.tipo as any,
+        cantidad: parseFloat(movMaterial.cantidad),
+        costo_unitario: esEntrada && movMaterial.costo_unitario ? parseFloat(movMaterial.costo_unitario) : undefined,
+        observaciones: movMaterial.observaciones || undefined,
+      });
+
+      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '' });
+      fetchInsumos();
+      const mat = materiales.find(m => m.id === selectedMaterialId);
+      if (mat) handleOpenMaterial(mat);
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Error al registrar el movimiento.');
+    } finally {
+      setSavingMov(false);
+    }
+  };
+
+  // ---- Abrir panel de producto ----
+  const handleOpenProducto = async (p: Product) => {
+    setSelectedProductoId(p.id);
+    setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '' });
     try {
       setLoadingKardexProducto(true);
-      const data = await inventarioService.getKardexProducto(productoId);
+      const data = await inventarioService.getKardexProducto(p.id);
       setKardexProducto(data);
     } catch (error) {
       console.error('Error fetching product kardex:', error);
@@ -223,28 +258,31 @@ export default function Inventario() {
     }
   };
 
+  // ---- Registrar movimiento de producto (desde el panel) ----
   const handleRegisterMovementProducto = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMovementProducto.producto_id || !newMovementProducto.ubicacion_id || !newMovementProducto.cantidad) return;
+    if (!selectedProductoId || !movProducto.ubicacion_id || !movProducto.cantidad) return;
 
+    const esEntrada = movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION';
     try {
+      setSavingMovProd(true);
       await inventarioService.crearMovimientoProducto({
-        producto_id: parseInt(newMovementProducto.producto_id),
-        ubicacion_id: parseInt(newMovementProducto.ubicacion_id),
-        tipo: newMovementProducto.tipo as any,
-        cantidad: parseFloat(newMovementProducto.cantidad),
-        costo_unitario: newMovementProducto.costo_unitario ? parseFloat(newMovementProducto.costo_unitario) : undefined,
-        observaciones: newMovementProducto.observaciones || undefined,
+        producto_id: selectedProductoId,
+        ubicacion_id: parseInt(movProducto.ubicacion_id),
+        tipo: movProducto.tipo as any,
+        cantidad: parseFloat(movProducto.cantidad),
+        costo_unitario: esEntrada && movProducto.costo_unitario ? parseFloat(movProducto.costo_unitario) : undefined,
+        observaciones: movProducto.observaciones || undefined,
       });
 
-      setShowMoveProductoModal(false);
-      setNewMovementProducto({ producto_id: '', ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '' });
+      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '' });
       fetchProductos();
-      if (selectedProductoId && selectedProductoId === parseInt(newMovementProducto.producto_id)) {
-        handleOpenKardexProducto(selectedProductoId, selectedProductoNombre);
-      }
+      const p = productos.find(x => x.id === selectedProductoId);
+      if (p) handleOpenProducto(p);
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Error al registrar el movimiento.');
+    } finally {
+      setSavingMovProd(false);
     }
   };
 
@@ -269,6 +307,12 @@ export default function Inventario() {
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
     .filter((p) => p.nombre.toLowerCase().includes(searchProducto.toLowerCase()));
 
+  const materialSeleccionado = materiales.find(m => m.id === selectedMaterialId);
+  const productoSeleccionado = productos.find(p => p.id === selectedProductoId);
+
+  const inputCls = "w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono";
+  const selectCls = "w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary";
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -283,33 +327,12 @@ export default function Inventario() {
         </div>
 
         <div className="flex items-center gap-3">
-          {tab === 'insumos' ? (
-            <>
-              <button
-                onClick={() => setShowMaterialModal(true)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
-              >
-                ➕ Nuevo Material
-              </button>
-              <button
-                onClick={() => setShowMoveModal(true)}
-                className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                </svg>
-                Nuevo Movimiento
-              </button>
-            </>
-          ) : (
+          {tab === 'insumos' && (
             <button
-              onClick={() => setShowMoveProductoModal(true)}
-              className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
+              onClick={() => setShowMaterialModal(true)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-              </svg>
-              Nuevo Movimiento de Producto
+              ➕ Nuevo Material
             </button>
           )}
         </div>
@@ -353,7 +376,7 @@ export default function Inventario() {
             {tab === 'insumos' ? 'Materiales Registrados' : 'Productos Registrados'}
           </p>
           <p className="text-3xl font-black font-headline text-yeikar-secondary">
-            {tab === 'insumos' ? materiales.length : productos.length}
+            {tab === 'insumos' ? materiales.length : productosReventa.length}
           </p>
         </div>
 
@@ -407,13 +430,12 @@ export default function Inventario() {
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Mín.</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Unidad</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Precio Unitario</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-yeikar-secondary-light/5 text-sm">
                   {filteredInv.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-yeikar-neutral/40 italic">
+                      <td colSpan={6} className="p-8 text-center text-yeikar-neutral/40 italic">
                         {search ? `Sin resultados para "${search}"` : 'No hay materiales registrados. Haz clic en ➕ Nuevo Material para comenzar.'}
                       </td>
                     </tr>
@@ -430,7 +452,7 @@ export default function Inventario() {
                           className={`hover:bg-yeikar-tertiary/25 transition-colors cursor-pointer ${
                             selectedMaterialId === mat.id ? 'bg-yeikar-primary/5' : ''
                           }`}
-                          onClick={() => handleOpenKardex(mat.id, mat.nombre)}
+                          onClick={() => handleOpenMaterial(mat)}
                         >
                           <td className="p-4 font-semibold text-yeikar-secondary">{mat.nombre}</td>
                           <td className="p-4 text-yeikar-neutral/75">
@@ -439,9 +461,7 @@ export default function Inventario() {
                           <td className="p-4 font-mono font-bold">
                             <span
                               className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                !tieneStock
-                                  ? 'bg-red-50 text-red-700 border border-red-200'
-                                  : isLowStock
+                                !tieneStock || isLowStock
                                   ? 'bg-red-50 text-red-700 border border-red-200'
                                   : 'bg-green-50 text-green-700 border border-green-200'
                               }`}
@@ -457,17 +477,6 @@ export default function Inventario() {
                           </td>
                           <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
                             {mat.costo_base > 0 ? mat.costo_base.toLocaleString('es-ES') : <span className="text-yeikar-neutral/30 italic">Sin precio</span>}
-                          </td>
-                          <td className="p-4 text-right">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenKardex(mat.id, mat.nombre);
-                              }}
-                              className="text-yeikar-primary hover:text-yeikar-primary-dark font-bold font-headline text-xs bg-yeikar-primary/10 hover:bg-yeikar-primary/20 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                              Ver Movimientos
-                            </button>
                           </td>
                         </tr>
                       );
@@ -487,14 +496,13 @@ export default function Inventario() {
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Actual</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Mín.</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Último Precio</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5 text-right">Acciones</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-yeikar-secondary-light/5 text-sm">
                   {filteredProductos.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="p-8 text-center text-yeikar-neutral/40 italic">
-                        {searchProducto ? `Sin resultados para "${searchProducto}"` : 'No hay productos de reventa (colchones, neveras, etc.). Marca un producto como "Reventa" en Productos o usa "Nuevo Movimiento de Producto".'}
+                      <td colSpan={6} className="p-8 text-center text-yeikar-neutral/40 italic">
+                        {searchProducto ? `Sin resultados para "${searchProducto}"` : 'No hay productos de reventa (colchones, neveras, etc.). Marca un producto como "Reventa" en Productos.'}
                       </td>
                     </tr>
                   ) : (
@@ -510,7 +518,7 @@ export default function Inventario() {
                           className={`hover:bg-yeikar-tertiary/25 transition-colors cursor-pointer ${
                             selectedProductoId === p.id ? 'bg-yeikar-primary/5' : ''
                           }`}
-                          onClick={() => handleOpenKardexProducto(p.id, p.nombre)}
+                          onClick={() => handleOpenProducto(p)}
                         >
                           <td className="p-4 font-semibold text-yeikar-secondary">{p.nombre}</td>
                           <td className="p-4 font-mono text-xs text-yeikar-neutral/60">{p.codigo || '—'}</td>
@@ -534,17 +542,6 @@ export default function Inventario() {
                           <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
                             {stockItem?.costo_promedio ? `$${Number(stockItem.costo_promedio).toLocaleString('es-ES')}` : <span className="text-yeikar-neutral/30 italic">—</span>}
                           </td>
-                          <td className="p-4 text-right">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenKardexProducto(p.id, p.nombre);
-                              }}
-                              className="text-yeikar-primary hover:text-yeikar-primary-dark font-bold font-headline text-xs bg-yeikar-primary/10 hover:bg-yeikar-primary/20 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                              Ver Movimientos
-                            </button>
-                          </td>
                         </tr>
                       );
                     })
@@ -555,14 +552,14 @@ export default function Inventario() {
           )}
         </div>
 
-        {/* Kardex Sidebar */}
-        {tab === 'insumos' && selectedMaterialId && (
-          <div className="w-full lg:w-96 bg-white border border-yeikar-secondary-light/10 rounded-3xl p-5 shadow-sm space-y-5 flex flex-col h-[600px] overflow-hidden">
+        {/* ================= PANEL LATERAL (Insumo: editar + movimiento + historial) ================= */}
+        {tab === 'insumos' && selectedMaterialId && materialSeleccionado && (
+          <div className="w-full lg:w-[28rem] bg-white border border-yeikar-secondary-light/10 rounded-3xl p-5 shadow-sm space-y-5 flex flex-col max-h-[800px] overflow-hidden">
             <div className="flex items-start justify-between border-b border-yeikar-secondary-light/5 pb-3">
               <div>
-                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">MOVIMIENTOS DE MATERIAL</span>
-                <h3 className="font-headline font-black text-yeikar-secondary text-base truncate max-w-[200px]" title={selectedMaterialNombre}>
-                  {selectedMaterialNombre}
+                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">DETALLE DE INSUMO</span>
+                <h3 className="font-headline font-black text-yeikar-secondary text-base truncate max-w-[240px]" title={materialSeleccionado.nombre}>
+                  {materialSeleccionado.nombre}
                 </h3>
               </div>
               <button
@@ -575,60 +572,142 @@ export default function Inventario() {
               </button>
             </div>
 
-            {loadingKardex ? (
-              <div className="flex-1 flex flex-col items-center justify-center space-y-3">
-                <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                {kardex.length === 0 ? (
-                  <p className="text-xs text-yeikar-neutral/40 italic text-center py-8">
-                    No se registran movimientos para este material.
-                  </p>
+            <div className="flex-1 overflow-y-auto space-y-5 pr-1">
+              {/* Editar insumo */}
+              <form onSubmit={handleSaveMaterial} className="space-y-3 bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-2xl p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-secondary">Editar Insumo</span>
+                  <span className="text-[10px] font-mono text-yeikar-neutral/40">{materialSeleccionado.unidad_medida?.nombre || ''}</span>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Nombre</label>
+                  <input type="text" required value={editMaterial.nombre} onChange={(e) => setEditMaterial(p => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '').replace(' uppercase', '')} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario</label>
+                    <input type="number" min="0" step="0.01" value={editMaterial.costo_base} onChange={(e) => setEditMaterial(p => ({ ...p, costo_base: e.target.value }))} className={inputCls} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Stock Mínimo</label>
+                    <input type="number" min="0" step="0.5" value={editMaterial.stock_minimo} onChange={(e) => setEditMaterial(p => ({ ...p, stock_minimo: e.target.value }))} className={inputCls} />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="w-full py-2 bg-yeikar-secondary hover:bg-yeikar-secondary-light text-white rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                >
+                  {savingEdit ? 'Guardando...' : 'Guardar Cambios'}
+                </button>
+              </form>
+
+              {/* Registrar movimiento */}
+              <form onSubmit={handleRegisterMovement} className="space-y-3 bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-2xl p-4">
+                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-primary">Registrar Movimiento</span>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Tipo Movimiento</label>
+                  <select value={movMaterial.tipo} onChange={(e) => setMovMaterial(p => ({ ...p, tipo: e.target.value }))} className={selectCls}>
+                    {TIPOS_MOVIMIENTO.map(t => (
+                      <option key={t} value={t}>
+                        {t === 'ENTRADA' ? 'ENTRADA (Compra/Carga)' : t === 'SALIDA' ? 'SALIDA (Consumo/Despacho)' : t === 'AJUSTE' ? 'AJUSTE (Inventario físico)' : t === 'DAÑO' ? 'DAÑO (Mermas)' : 'DEVOLUCION'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
+                  <select required value={movMaterial.ubicacion_id} onChange={(e) => setMovMaterial(p => ({ ...p, ubicacion_id: e.target.value }))} className={selectCls}>
+                    <option value="">Seleccione una ubicación</option>
+                    {ubicaciones.map((u) => (<option key={u.id} value={u.id}>{u.nombre}</option>))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
+                  <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
+                </div>
+                {(movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION') && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(Actualiza el precio al instante)</span></label>
+                    <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.costo_unitario} onChange={(e) => setMovMaterial(p => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
+                  <textarea rows={2} placeholder="Detalle o referencia..." value={movMaterial.observaciones} onChange={(e) => setMovMaterial(p => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingMov}
+                  className="w-full py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                >
+                  {savingMov ? 'Registrando...' : 'Registrar Movimiento'}
+                </button>
+              </form>
+
+              {/* Historial */}
+              <div>
+                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-secondary">Historial</span>
+                {loadingKardex ? (
+                  <div className="flex flex-col items-center justify-center py-8 space-y-3">
+                    <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
+                  </div>
                 ) : (
-                  kardex.map((mov) => {
-                    const isEntry = mov.tipo === 'ENTRADA' || mov.tipo === 'DEVOLUCION';
-                    const isAdjustment = mov.tipo === 'AJUSTE';
-                    return (
-                      <div key={mov.id} className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-xl p-3 text-xs space-y-1 relative">
-                        <div className="flex items-center justify-between">
-                          <span className={`font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded border ${
-                            isAdjustment ? 'bg-slate-50 text-slate-700 border-slate-200' : isEntry ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
-                          }`}>
-                            {mov.tipo}
-                          </span>
-                          <span className="font-mono text-[10px] text-yeikar-neutral/40">
-                            {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <div className="flex items-baseline justify-between mt-1.5">
-                          <span className="text-yeikar-neutral/60 font-medium">Cantidad:</span>
-                          <span className={`font-mono font-bold text-sm ${isEntry ? 'text-green-600' : 'text-yeikar-secondary'}`}>
-                            {isEntry ? '+' : isAdjustment ? '' : '-'}{parseFloat(mov.cantidad.toString()).toLocaleString('es-ES')}
-                          </span>
-                        </div>
-                        {mov.observaciones && (
-                          <p className="text-[11px] text-yeikar-neutral/50 italic mt-1 bg-white/40 p-1.5 rounded border border-yeikar-secondary-light/5">
-                            {mov.observaciones}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })
+                  <div className="mt-3 space-y-3">
+                    {kardex.length === 0 ? (
+                      <p className="text-xs text-yeikar-neutral/40 italic text-center py-4">No se registran movimientos para este material.</p>
+                    ) : (
+                      kardex.map((mov) => {
+                        const isEntry = mov.tipo === 'ENTRADA' || mov.tipo === 'DEVOLUCION';
+                        const isAdjustment = mov.tipo === 'AJUSTE';
+                        return (
+                          <div key={mov.id} className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-xl p-3 text-xs space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className={`font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded border ${
+                                isAdjustment ? 'bg-slate-50 text-slate-700 border-slate-200' : isEntry ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
+                              }`}>
+                                {mov.tipo}
+                              </span>
+                              <span className="font-mono text-[10px] text-yeikar-neutral/40">
+                                {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1.5">
+                              <span className="text-yeikar-neutral/60 font-medium">Cantidad:</span>
+                              <span className={`font-mono font-bold text-sm ${isEntry ? 'text-green-600' : 'text-yeikar-secondary'}`}>
+                                {isEntry ? '+' : isAdjustment ? '' : '-'}{parseFloat(mov.cantidad.toString()).toLocaleString('es-ES')}
+                              </span>
+                            </div>
+                            {mov.costo_unitario != null && isEntry && (
+                              <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
+                                Precio: <span className="font-mono font-semibold">${Number(mov.costo_unitario).toLocaleString('es-ES')}</span>
+                              </p>
+                            )}
+                            {mov.observaciones && (
+                              <p className="text-[11px] text-yeikar-neutral/50 italic mt-1 bg-white/40 p-1.5 rounded border border-yeikar-secondary-light/5">
+                                {mov.observaciones}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 )}
               </div>
-            )}
+            </div>
           </div>
         )}
 
-        {tab === 'productos' && selectedProductoId && (
-          <div className="w-full lg:w-96 bg-white border border-yeikar-secondary-light/10 rounded-3xl p-5 shadow-sm space-y-5 flex flex-col h-[600px] overflow-hidden">
+        {/* ================= PANEL LATERAL (Producto: movimiento + historial) ================= */}
+        {tab === 'productos' && selectedProductoId && productoSeleccionado && (
+          <div className="w-full lg:w-[28rem] bg-white border border-yeikar-secondary-light/10 rounded-3xl p-5 shadow-sm space-y-5 flex flex-col max-h-[800px] overflow-hidden">
             <div className="flex items-start justify-between border-b border-yeikar-secondary-light/5 pb-3">
               <div>
-                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">MOVIMIENTOS DE PRODUCTO</span>
-                <h3 className="font-headline font-black text-yeikar-secondary text-base truncate max-w-[200px]" title={selectedProductoNombre}>
-                  {selectedProductoNombre}
+                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">DETALLE DE PRODUCTO</span>
+                <h3 className="font-headline font-black text-yeikar-secondary text-base truncate max-w-[240px]" title={productoSeleccionado.nombre}>
+                  {productoSeleccionado.nombre}
                 </h3>
               </div>
               <button
@@ -641,114 +720,103 @@ export default function Inventario() {
               </button>
             </div>
 
-            {loadingKardexProducto ? (
-              <div className="flex-1 flex flex-col items-center justify-center space-y-3">
-                <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
-              </div>
-            ) : (
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                {kardexProducto.length === 0 ? (
-                  <p className="text-xs text-yeikar-neutral/40 italic text-center py-8">
-                    No se registran movimientos para este producto.
-                  </p>
-                ) : (
-                  kardexProducto.map((mov) => {
-                    const isEntry = mov.tipo === 'ENTRADA' || mov.tipo === 'DEVOLUCION';
-                    const isAdjustment = mov.tipo === 'AJUSTE';
-                    return (
-                      <div key={mov.id} className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-xl p-3 text-xs space-y-1 relative">
-                        <div className="flex items-center justify-between">
-                          <span className={`font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded border ${
-                            isAdjustment ? 'bg-slate-50 text-slate-700 border-slate-200' : isEntry ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
-                          }`}>
-                            {mov.tipo}
-                          </span>
-                          <span className="font-mono text-[10px] text-yeikar-neutral/40">
-                            {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <div className="flex items-baseline justify-between mt-1.5">
-                          <span className="text-yeikar-neutral/60 font-medium">Cantidad:</span>
-                          <span className={`font-mono font-bold text-sm ${isEntry ? 'text-green-600' : 'text-yeikar-secondary'}`}>
-                            {isEntry ? '+' : isAdjustment ? '' : '-'}{parseFloat(mov.cantidad.toString()).toLocaleString('es-ES')}
-                          </span>
-                        </div>
-                        {mov.costo_unitario != null && mov.tipo === 'ENTRADA' && (
-                          <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
-                            Costo unitario: <span className="font-mono font-semibold">${Number(mov.costo_unitario).toLocaleString('es-ES')}</span>
-                          </p>
-                        )}
-                        {mov.observaciones && (
-                          <p className="text-[11px] text-yeikar-neutral/50 italic mt-1 bg-white/40 p-1.5 rounded border border-yeikar-secondary-light/5">
-                            {mov.observaciones}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Register Movement Modal (Insumos) */}
-      {showMoveModal && (
-        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl border border-yeikar-secondary-light/10 shadow-xl max-w-md w-full p-6 space-y-5 relative">
-            <div className="flex items-start justify-between border-b border-yeikar-secondary-light/5 pb-3">
-              <h2 className="text-xl font-black font-headline text-yeikar-secondary tracking-tight">Registrar Movimiento de Material</h2>
-              <button onClick={() => setShowMoveModal(false)} className="p-1 hover:bg-yeikar-tertiary rounded-lg text-yeikar-neutral/40 hover:text-yeikar-neutral/70">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <form onSubmit={handleRegisterMovement} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Material</label>
-                <select required value={newMovement.material_id} onChange={(e) => setNewMovement(prev => ({ ...prev, material_id: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary">
-                  <option value="">Seleccione un material</option>
-                  {materiales.map((m) => (<option key={m.id} value={m.id}>{m.nombre}</option>))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
-                <select required value={newMovement.ubicacion_id} onChange={(e) => setNewMovement(prev => ({ ...prev, ubicacion_id: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary">
-                  <option value="">Seleccione una ubicación</option>
-                  {ubicaciones.map((u) => (<option key={u.id} value={u.id}>{u.nombre}</option>))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+            <div className="flex-1 overflow-y-auto space-y-5 pr-1">
+              <form onSubmit={handleRegisterMovementProducto} className="space-y-3 bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-2xl p-4">
+                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-primary">Registrar Movimiento</span>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Tipo Movimiento</label>
-                  <select value={newMovement.tipo} onChange={(e) => setNewMovement(prev => ({ ...prev, tipo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary">
-                    <option value="ENTRADA">ENTRADA (Compra/Carga)</option>
-                    <option value="SALIDA">SALIDA (Consumo/Despacho)</option>
-                    <option value="AJUSTE">AJUSTE (Inventario físico)</option>
-                    <option value="DAÑO">DAÑO (Mermas)</option>
-                    <option value="DEVOLUCION">DEVOLUCION</option>
+                  <select value={movProducto.tipo} onChange={(e) => setMovProducto(p => ({ ...p, tipo: e.target.value }))} className={selectCls}>
+                    {TIPOS_MOVIMIENTO.map(t => (
+                      <option key={t} value={t}>
+                        {t === 'ENTRADA' ? 'ENTRADA (Compra/Carga)' : t === 'SALIDA' ? 'SALIDA (Despacho)' : t === 'AJUSTE' ? 'AJUSTE (Inventario físico)' : t === 'DAÑO' ? 'DAÑO (Mermas)' : 'DEVOLUCION'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
+                  <select required value={movProducto.ubicacion_id} onChange={(e) => setMovProducto(p => ({ ...p, ubicacion_id: e.target.value }))} className={selectCls}>
+                    <option value="">Seleccione una ubicación</option>
+                    {ubicaciones.map((u) => (<option key={u.id} value={u.id}>{u.nombre}</option>))}
                   </select>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
-                  <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={newMovement.cantidad} onChange={(e) => setNewMovement(prev => ({ ...prev, cantidad: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movProducto.cantidad} onChange={(e) => setMovProducto(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
                 </div>
+                {(movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION') && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(Actualiza el precio al instante)</span></label>
+                    <input type="number" step="0.01" min="0" placeholder="0.00" value={movProducto.costo_unitario} onChange={(e) => setMovProducto(p => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
+                  <textarea rows={2} placeholder="Detalle o referencia..." value={movProducto.observaciones} onChange={(e) => setMovProducto(p => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingMovProd}
+                  className="w-full py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                >
+                  {savingMovProd ? 'Registrando...' : 'Registrar Movimiento'}
+                </button>
+              </form>
+
+              <div>
+                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-secondary">Historial</span>
+                {loadingKardexProducto ? (
+                  <div className="flex flex-col items-center justify-center py-8 space-y-3">
+                    <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {kardexProducto.length === 0 ? (
+                      <p className="text-xs text-yeikar-neutral/40 italic text-center py-4">No se registran movimientos para este producto.</p>
+                    ) : (
+                      kardexProducto.map((mov) => {
+                        const isEntry = mov.tipo === 'ENTRADA' || mov.tipo === 'DEVOLUCION';
+                        const isAdjustment = mov.tipo === 'AJUSTE';
+                        return (
+                          <div key={mov.id} className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-xl p-3 text-xs space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className={`font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded border ${
+                                isAdjustment ? 'bg-slate-50 text-slate-700 border-slate-200' : isEntry ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
+                              }`}>
+                                {mov.tipo}
+                              </span>
+                              <span className="font-mono text-[10px] text-yeikar-neutral/40">
+                                {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1.5">
+                              <span className="text-yeikar-neutral/60 font-medium">Cantidad:</span>
+                              <span className={`font-mono font-bold text-sm ${isEntry ? 'text-green-600' : 'text-yeikar-secondary'}`}>
+                                {isEntry ? '+' : isAdjustment ? '' : '-'}{parseFloat(mov.cantidad.toString()).toLocaleString('es-ES')}
+                              </span>
+                            </div>
+                            {mov.costo_unitario != null && isEntry && (
+                              <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
+                                Precio: <span className="font-mono font-semibold">${Number(mov.costo_unitario).toLocaleString('es-ES')}</span>
+                              </p>
+                            )}
+                            {mov.observaciones && (
+                              <p className="text-[11px] text-yeikar-neutral/50 italic mt-1 bg-white/40 p-1.5 rounded border border-yeikar-secondary-light/5">
+                                {mov.observaciones}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
-                <textarea rows={2} placeholder="Detalle o referencia del movimiento..." value={newMovement.observaciones} onChange={(e) => setNewMovement(prev => ({ ...prev, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
-              </div>
-              <div className="flex justify-end gap-3 pt-3 border-t border-yeikar-secondary-light/5">
-                <button type="button" onClick={() => setShowMoveModal(false)} className="bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary px-5 py-2.5 rounded-xl text-sm font-bold font-headline transition-colors">Cancelar</button>
-                <button type="submit" className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl text-sm font-bold font-headline transition-colors">Registrar</button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Modal para Crear Material/Insumo */}
       {showMaterialModal && (
@@ -783,66 +851,6 @@ export default function Inventario() {
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowMaterialModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all">Crear Insumo</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Register Movement Modal (Productos) */}
-      {showMoveProductoModal && (
-        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl border border-yeikar-secondary-light/10 shadow-xl max-w-md w-full p-6 space-y-5 relative">
-            <div className="flex items-start justify-between border-b border-yeikar-secondary-light/5 pb-3">
-              <h2 className="text-xl font-black font-headline text-yeikar-secondary tracking-tight">Registrar Movimiento de Producto</h2>
-              <button onClick={() => setShowMoveProductoModal(false)} className="p-1 hover:bg-yeikar-tertiary rounded-lg text-yeikar-neutral/40 hover:text-yeikar-neutral/70">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <form onSubmit={handleRegisterMovementProducto} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Producto</label>
-                <select required value={newMovementProducto.producto_id} onChange={(e) => setNewMovementProducto(prev => ({ ...prev, producto_id: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary">
-                  <option value="">Seleccione un producto</option>
-                  {productosReventa.map((p) => (<option key={p.id} value={p.id}>{p.nombre}{p.codigo ? ` (${p.codigo})` : ''}</option>))}
-                </select>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
-                <select required value={newMovementProducto.ubicacion_id} onChange={(e) => setNewMovementProducto(prev => ({ ...prev, ubicacion_id: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary">
-                  <option value="">Seleccione una ubicación</option>
-                  {ubicaciones.map((u) => (<option key={u.id} value={u.id}>{u.nombre}</option>))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Tipo Movimiento</label>
-                  <select value={newMovementProducto.tipo} onChange={(e) => setNewMovementProducto(prev => ({ ...prev, tipo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary">
-                    <option value="ENTRADA">ENTRADA (Compra/Carga)</option>
-                    <option value="SALIDA">SALIDA (Despacho)</option>
-                    <option value="AJUSTE">AJUSTE (Inventario físico)</option>
-                    <option value="DAÑO">DAÑO (Mermas)</option>
-                    <option value="DEVOLUCION">DEVOLUCION</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
-                  <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={newMovementProducto.cantidad} onChange={(e) => setNewMovementProducto(prev => ({ ...prev, cantidad: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Costo Unitario <span className="text-yeikar-neutral/40 font-normal">(Solo entrada; actualiza el precio al instante)</span></label>
-                <input type="number" step="0.01" min="0" placeholder="0.00" value={newMovementProducto.costo_unitario} onChange={(e) => setNewMovementProducto(prev => ({ ...prev, costo_unitario: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
-                <textarea rows={2} placeholder="Detalle o referencia del movimiento..." value={newMovementProducto.observaciones} onChange={(e) => setNewMovementProducto(prev => ({ ...prev, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
-              </div>
-              <div className="flex justify-end gap-3 pt-3 border-t border-yeikar-secondary-light/5">
-                <button type="button" onClick={() => setShowMoveProductoModal(false)} className="bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary px-5 py-2.5 rounded-xl text-sm font-bold font-headline transition-colors">Cancelar</button>
-                <button type="submit" className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl text-sm font-bold font-headline transition-colors">Registrar</button>
               </div>
             </form>
           </div>

@@ -95,6 +95,11 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate) -> m
     # Aplicar cambio según tipo de movimiento
     if movimiento.tipo == "ENTRADA":
         inventario.cantidad += movimiento.cantidad
+        # Actualizar costo_base del material al instante con el último precio de entrada
+        if movimiento.costo_unitario is not None:
+            material = db.query(Material).filter(Material.id == movimiento.material_id).first()
+            if material:
+                material.costo_base = Decimal(str(movimiento.costo_unitario))
     elif movimiento.tipo in ("SALIDA", "DAÑO"):
         if inventario.cantidad < movimiento.cantidad:
             raise ValueError(f"Stock insuficiente. Disponible: {inventario.cantidad}")
@@ -112,6 +117,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate) -> m
         ubicacion_id=movimiento.ubicacion_id,
         tipo=movimiento.tipo,
         cantidad=movimiento.cantidad,
+        costo_unitario=movimiento.costo_unitario,
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,

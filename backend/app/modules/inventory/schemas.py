@@ -25,6 +25,7 @@ class MovimientoCreate(BaseModel):
     ubicacion_id: int
     tipo: str = Field(..., pattern="^(ENTRADA|SALIDA|AJUSTE|DAÑO|DEVOLUCION)$")
     cantidad: Decimal = Field(..., gt=0)
+    costo_unitario: Optional[Decimal] = Field(None, gt=0)
     referencia_tipo: Optional[str] = None
     referencia_id: Optional[int] = None
     observaciones: Optional[str] = None
