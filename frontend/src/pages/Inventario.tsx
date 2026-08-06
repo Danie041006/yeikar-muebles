@@ -96,6 +96,17 @@ export default function Inventario() {
     stock_minimo: '8',
   });
 
+  // Modal "Nuevo Producto de Reventa"
+  const [showProductoModal, setShowProductoModal] = useState(false);
+  const [newProducto, setNewProducto] = useState({
+    nombre: '',
+    codigo: '',
+    costo_base: '',
+    precio_venta: '',
+    stock_minimo: '8',
+  });
+  const [savingProducto, setSavingProducto] = useState(false);
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -173,6 +184,48 @@ export default function Inventario() {
       fetchInsumos();
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Error al crear el insumo.');
+    }
+  };
+
+  // ---- Crear producto de REVENTA (comprado para revender) ----
+  const handleCreateProducto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProducto.nombre.trim()) return;
+    try {
+      setSavingProducto(true);
+      const creado = await productosService.crearProducto({
+        nombre: newProducto.nombre.toUpperCase().trim(),
+        codigo: newProducto.codigo ? newProducto.codigo.trim() : undefined,
+        tipo_producto_id: 2, // Revendido
+        descripcion: 'Producto de reventa',
+        activo: true,
+        ancho_base: 0,
+        largo_base: 0,
+        stock_minimo: newProducto.stock_minimo ? parseFloat(newProducto.stock_minimo) : 8.0,
+        es_reventa: true,
+      });
+      setShowProductoModal(false);
+      setNewProducto({ nombre: '', codigo: '', costo_base: '', precio_venta: '', stock_minimo: '8' });
+
+      // Si viene con costo, registrar entrada inicial en Depósito Principal
+      if (newProducto.costo_base && parseFloat(newProducto.costo_base) > 0 && creado.id) {
+        const ubi = ubicaciones[0];
+        if (ubi) {
+          await inventarioService.crearMovimientoProducto({
+            producto_id: creado.id,
+            ubicacion_id: ubi.id,
+            tipo: 'ENTRADA',
+            cantidad: 1,
+            costo_unitario: parseFloat(newProducto.costo_base),
+            observaciones: 'Carga inicial de producto de reventa',
+          });
+        }
+      }
+      fetchProductos();
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Error al crear el producto.');
+    } finally {
+      setSavingProducto(false);
     }
   };
 
@@ -333,6 +386,14 @@ export default function Inventario() {
               className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
             >
               ➕ Nuevo Material
+            </button>
+          )}
+          {tab === 'productos' && (
+            <button
+              onClick={() => setShowProductoModal(true)}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
+            >
+              ➕ Nuevo Producto de Reventa
             </button>
           )}
         </div>
@@ -851,6 +912,53 @@ export default function Inventario() {
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowMaterialModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all">Crear Insumo</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Crear Producto de Reventa */}
+      {showProductoModal && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10">
+            <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
+              <h3 className="font-headline font-black text-lg">Nuevo Producto de Reventa</h3>
+              <p className="text-xs text-white/70">Producto que se compra y revende (colchón, nevera, electrodoméstico...)</p>
+            </div>
+            <form onSubmit={handleCreateProducto} className="p-6 space-y-4 font-body">
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre del Producto *</label>
+                <input type="text" required placeholder="Ej. COLCHON QUEEN, NEVERA 12 PIES..." value={newProducto.nombre} onChange={(e) => setNewProducto(prev => ({ ...prev, nombre: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Código <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
+                  <input type="text" placeholder="Ej. COL-Q, NV-12" value={newProducto.codigo} onChange={(e) => setNewProducto(prev => ({ ...prev, codigo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Stock Mínimo <span className="text-yeikar-neutral/40 font-normal">(Alerta)</span></label>
+                  <input type="number" min="0" step="0.5" value={newProducto.stock_minimo} onChange={(e) => setNewProducto(prev => ({ ...prev, stock_minimo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo de Compra <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
+                  <input type="number" min="0" step="0.01" placeholder="0.00" value={newProducto.costo_base} onChange={(e) => setNewProducto(prev => ({ ...prev, costo_base: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio de Venta <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
+                  <input type="number" min="0" step="0.01" placeholder="0.00" value={newProducto.precio_venta} onChange={(e) => setNewProducto(prev => ({ ...prev, precio_venta: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+              </div>
+              {parseFloat(newProducto.costo_base || '0') > 0 && (
+                <p className="text-[11px] text-yeikar-neutral/50 italic bg-yeikar-tertiary/30 border border-yeikar-secondary-light/5 rounded-lg px-3 py-2">
+                  Se registrará una entrada inicial de 1 unidad en {ubicaciones[0]?.nombre || 'Depósito Principal'} con ese costo.
+                </p>
+              )}
+              <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                <button type="button" onClick={() => setShowProductoModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
+                <button type="submit" disabled={savingProducto} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingProducto ? 'Creando...' : 'Crear Producto'}</button>
               </div>
             </form>
           </div>
