@@ -38,6 +38,8 @@ def read_client(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
+    # Lectura compartida: todos los usuarios con acceso al módulo pueden
+    # identificar clientes existentes para trabajar sobre sus operaciones.
     db_client = service.get_client(db, client_id, current_user)
     if db_client is None:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")

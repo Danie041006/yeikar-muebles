@@ -5,6 +5,74 @@ from datetime import datetime
 
 from app.modules.purchases import model, schemas
 from app.modules.inventory import service as inventory_service, schemas as inventory_schemas
+from app.modules.productos.model import Material
+
+
+def _ubicacion_entrada(db: Session, preferida: Optional[int] = None) -> int:
+    """Resuelve la ubicación destino de una entrada por compra.
+
+    Usa la ubicación preferida si se indica; si no, busca el depósito principal
+    (tipo DEPOSITO) con nombre que contenga 'PRINCIPAL'/'DEPOSITO', y cae a la
+    primera ubicación activa. Nunca hardcodea a un id mágico.
+    """
+    from app.modules.catalogos.model import Ubicacion
+
+    if preferida:
+        ubi = db.query(Ubicacion).filter(Ubicacion.id == preferida, Ubicacion.activo == True).first()
+        if ubi:
+            return ubi.id
+
+    ubi = db.query(Ubicacion).filter(
+        Ubicacion.activo == True,
+        Ubicacion.tipo == "DEPOSITO",
+    ).order_by(Ubicacion.nombre).first()
+    if ubi:
+        return ubi.id
+
+    ubi = db.query(Ubicacion).filter(Ubicacion.activo == True).order_by(Ubicacion.id).first()
+    if ubi:
+        return ubi.id
+    raise ValueError("No hay ninguna ubicación activa. Crea una antes de recibir compras.")
+
+
+def _actualizar_costo_promedio_material(
+    db: Session,
+    material_id: int,
+    cantidad: Decimal,
+    costo_unitario: Decimal,
+    ubicacion_id: int,
+) -> None:
+    """
+    Actualiza material.costo_base con el promedio ponderado tras una entrada.
+
+    nuevo_costo = (stock_anterior * costo_anterior + cantidad * costo_nuevo)
+                  / (stock_anterior + cantidad)
+
+    Los pedidos/cotizaciones YA creados conservan su precio congelado
+    (snapshot), así que solo impacta nuevas cotizaciones y nuevos pedidos.
+    """
+    material = db.query(Material).filter(Material.id == material_id).first()
+    if not material:
+        return
+
+    from app.modules.inventory.model import Inventario
+    inv = db.query(Inventario).filter(
+        Inventario.material_id == material_id,
+        Inventario.ubicacion_id == ubicacion_id,
+    ).first()
+
+    stock_anterior = inv.cantidad if inv else Decimal("0")
+    costo_anterior = material.costo_base if material.costo_base is not None else Decimal("0")
+    cantidad = Decimal(str(cantidad))
+    costo_nuevo = Decimal(str(costo_unitario))
+
+    total_stock = stock_anterior + cantidad
+    if total_stock <= 0:
+        material.costo_base = costo_nuevo
+    else:
+        material.costo_base = round(
+            (stock_anterior * costo_anterior + cantidad * costo_nuevo) / total_stock, 2
+        )
 
 
 def obtener_compra(db: Session, compra_id: int) -> Optional[model.Compra]:
@@ -62,10 +130,11 @@ def crear_compra(db: Session, compra: schemas.CompraCreate) -> model.Compra:
 
     # Registrar movimiento de inventario (entrada) ÚNICAMENTE si está RECIBIDA
     if db_compra.estado == "RECIBIDA":
+        ubicacion_id = _ubicacion_entrada(db)
         for detalle in compra.detalle:
             movimiento = inventory_schemas.MovimientoCreate(
                 material_id=detalle.material_id,
-                ubicacion_id=1,  # Depósito principal
+                ubicacion_id=ubicacion_id,
                 tipo="ENTRADA",
                 cantidad=detalle.cantidad,
                 referencia_tipo="COMPRA",
@@ -73,6 +142,10 @@ def crear_compra(db: Session, compra: schemas.CompraCreate) -> model.Compra:
                 observaciones="Entrada por compra",
             )
             inventory_service.registrar_movimiento(db, movimiento)
+            # Actualizar costo promedio ponderado del material
+            _actualizar_costo_promedio_material(
+                db, detalle.material_id, detalle.cantidad, detalle.costo_unitario, ubicacion_id
+            )
 
     db.commit()
     db.refresh(db_compra)
@@ -97,10 +170,11 @@ def actualizar_compra(db: Session, compra_id: int, compra_update: schemas.Compra
         ).first()
         
         if not existe_mov:
+            ubicacion_id = _ubicacion_entrada(db)
             for detalle in db_compra.detalles:
                 movimiento = inventory_schemas.MovimientoCreate(
                     material_id=detalle.material_id,
-                    ubicacion_id=1,  # Depósito principal
+                    ubicacion_id=ubicacion_id,
                     tipo="ENTRADA",
                     cantidad=detalle.cantidad,
                     referencia_tipo="COMPRA",
@@ -108,6 +182,9 @@ def actualizar_compra(db: Session, compra_id: int, compra_update: schemas.Compra
                     observaciones="Entrada por compra (actualizada a recibida)",
                 )
                 inventory_service.registrar_movimiento(db, movimiento)
+                _actualizar_costo_promedio_material(
+                    db, detalle.material_id, detalle.cantidad, detalle.costo_unitario, ubicacion_id
+                )
 
     # Revertir stock si la compra SALIÓ de RECIBIDA (CANCELADA, BORRADOR, EMITIDA).
     # La entrada de inventario solo tiene validez mientras la compra siga RECIBIDA.

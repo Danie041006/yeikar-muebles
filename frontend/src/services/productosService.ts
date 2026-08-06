@@ -15,6 +15,8 @@ export interface Product {
   ancho_base?: number;
   largo_base?: number;
   alto_base?: number;
+  stock_minimo?: number;
+  es_reventa?: boolean;
   tipo_producto?: TipoProducto;
 }
 

@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from datetime import date, datetime
+from decimal import Decimal
 from app.modules.sales.model import Venta, DetalleVenta, Pago
 from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate
 from app.modules.orders.model import Pedido, DetallePedido
@@ -10,7 +11,6 @@ from app.modules.tasas_cambio import service as tasa_cambio_service
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios
 from app.modules.users.model import Usuario
-
 # ------------------------------------------------------------
 # Servicios para Ventas (Facturas)
 # ------------------------------------------------------------
@@ -148,6 +148,8 @@ def crear_venta_desde_pedido(
     # 6. Actualizar el total de la venta
     db_venta.total = total
     db_venta.total_en_moneda_base = round(total * float(tasa_cambio), 2)
+    # 6b. Descontar stock de producto terminado / reventa al facturar.
+    _descontar_stock_productos(db, pedido, db_venta, usuario)
     record_event(
         db,
         actor=usuario,
@@ -344,3 +346,64 @@ def obtener_cuentas_por_cobrar(db: Session):
             })
 
     return cuentas
+
+
+# ------------------------------------------------------------
+# Descuento de stock de producto terminado / reventa al facturar
+# ------------------------------------------------------------
+def _descontar_stock_productos(db: Session, pedido: Pedido, db_venta: Venta, usuario: Usuario | None = None):
+    """
+    Al facturar un pedido, descuenta del inventario de productos de REVENTA
+    (producto_inventario) las cantidades vendidas. Registra un movimiento SALIDA.
+
+    SOLO aplica a productos marcados como es_reventa (colchones, neveras,
+    electrodomésticos que la empresa compra para revender). Los muebles que
+    YEIKAR fabrica no llevan stock de producto terminado y NO se descuentan.
+    """
+    from app.modules.productos.model import Producto
+    from app.modules.inventory.model import ProductoInventario, MovimientoProductoInventario
+
+    for dp in pedido.detalles:
+        if not dp.producto_id:
+            continue
+        producto = db.query(Producto).filter(Producto.id == dp.producto_id).first()
+        if not producto or not producto.es_reventa:
+            continue  # solo productos de reventa tienen stock que descontar
+
+        filas = db.query(ProductoInventario).filter(
+            ProductoInventario.producto_id == dp.producto_id
+        ).with_for_update().all()
+        if not filas:
+            raise ValueError(
+                f"El producto '{producto.nombre}' es de reventa pero no tiene stock "
+                f"registrado en inventario. Registra una entrada primero."
+            )
+
+        cantidad_a_vender = Decimal(str(dp.cantidad))
+        disponible = sum(f.cantidad or Decimal("0") for f in filas)
+        if disponible < cantidad_a_vender:
+            raise ValueError(
+                f"Stock insuficiente del producto '{producto.nombre}'. "
+                f"Disponible: {disponible}, requerido: {cantidad_a_vender}."
+            )
+
+        # Descontar de la primera ubicación con suficiente stock (por fila).
+        restante = cantidad_a_vender
+        for fila in filas:
+            if restante <= 0:
+                break
+            a_descontar = min(restante, fila.cantidad or Decimal("0"))
+            if a_descontar <= 0:
+                continue
+            fila.cantidad = (fila.cantidad or Decimal("0")) - a_descontar
+            db.add(MovimientoProductoInventario(
+                producto_id=dp.producto_id,
+                ubicacion_id=fila.ubicacion_id,
+                tipo="SALIDA",
+                cantidad=a_descontar,
+                costo_unitario=fila.costo_promedio,
+                referencia_tipo="VENTA",
+                referencia_id=db_venta.id,
+                observaciones=f"Descuento por factura Venta #{db_venta.id}",
+            ))
+            restante -= a_descontar

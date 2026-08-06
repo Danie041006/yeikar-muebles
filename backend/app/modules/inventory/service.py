@@ -8,7 +8,7 @@ from typing import Optional, List
 
 
 from app.modules.inventory import model, schemas
-from app.modules.productos.model import Material
+from app.modules.productos.model import Material, Producto
 from app.modules.catalogos.model import Ubicacion
 
 
@@ -141,27 +141,226 @@ def obtener_movimientos_por_material(
 
 def obtener_alertas_stock(
     db: Session,
-    umbral: Decimal = Decimal(5)   # puedes cambiar este valor o leerlo desde configuración
+    umbral: Decimal = Decimal(8)   # umbral por defecto si el material no tiene stock_minimo
 ) -> List[schemas.AlertaStockResponse]:
     """
-    Retorna todos los materiales cuyo stock actual es menor o igual al umbral.
-    El umbral se puede pasar como parámetro o definirse en el frontend.
-    Si la tabla material tuviera una columna 'stock_minimo', la usaríamos.
+    Retorna todos los materiales cuyo stock actual es menor o igual a su
+    stock_minimo configurado (columna material.stock_minimo, default 8).
+    Los materiales sin fila de inventario con cantidad 0 también alertan.
     """
-    # Consultamos inventario junto con material y ubicación
+    # Todos los materiales activos + su stock actual agregado
     resultados = db.query(model.Inventario).options(
         joinedload(model.Inventario.material),
         joinedload(model.Inventario.ubicacion)
-    ).filter(model.Inventario.cantidad <= umbral).all()
+    ).all()
 
+    alertas = []
+    por_material = {}
+    for inv in resultados:
+        key = (inv.material_id, inv.ubicacion_id)
+        por_material[key] = inv
+
+    # Materiales que SÍ tienen fila de inventario
+    for (mat_id, ubi_id), inv in por_material.items():
+        minimo = inv.material.stock_minimo if inv.material.stock_minimo is not None else umbral
+        if inv.cantidad <= minimo:
+            alertas.append(schemas.AlertaStockResponse(
+                material_id=inv.material_id,
+                material_nombre=inv.material.nombre,
+                stock_actual=inv.cantidad,
+                stock_minimo=minimo,
+                ubicacion_id=inv.ubicacion_id,
+                ubicacion_nombre=inv.ubicacion.nombre,
+            ))
+
+    # Materiales activos SIN ninguna fila de inventario (stock = 0) también alertan
+    mats_con_stock = {mat_id for (mat_id, _) in por_material}
+    materiales_sin_fila = db.query(Material).options(
+        joinedload(Material.unidad_medida)
+    ).filter(Material.activo == True).all()
+    for mat in materiales_sin_fila:
+        if mat.id in mats_con_stock:
+            continue
+        minimo = mat.stock_minimo if mat.stock_minimo is not None else umbral
+        if Decimal("0") <= minimo:
+            alertas.append(schemas.AlertaStockResponse(
+                material_id=mat.id,
+                material_nombre=mat.nombre,
+                stock_actual=Decimal("0"),
+                stock_minimo=minimo,
+                ubicacion_id=0,
+                ubicacion_nombre="Sin ubicación",
+            ))
+
+    return alertas
+
+
+# =========================================================================
+# Inventario de PRODUCTOS (terminados / de reventa)
+# =========================================================================
+
+def obtener_inventario_productos(
+    db: Session,
+    producto_id: Optional[int] = None,
+    ubicacion_id: Optional[int] = None,
+    solo_reventa: bool = False,
+) -> List[schemas.ProductoInventarioResponse]:
+    """Stock actual de productos (terminados/de reventa) por ubicación.
+
+    Con solo_reventa=True solo devuelve productos marcados es_reventa
+    (los que la empresa compra para revender: colchones, neveras, etc.).
+    """
+    query = db.query(model.ProductoInventario).options(
+        joinedload(model.ProductoInventario.producto),
+        joinedload(model.ProductoInventario.ubicacion),
+    )
+    if solo_reventa:
+        query = query.join(Producto, model.ProductoInventario.producto_id == Producto.id).filter(Producto.es_reventa == True)
+    if producto_id:
+        query = query.filter(model.ProductoInventario.producto_id == producto_id)
+    if ubicacion_id:
+        query = query.filter(model.ProductoInventario.ubicacion_id == ubicacion_id)
+
+    resultados = query.all()
     return [
-        schemas.AlertaStockResponse(
-            material_id=inv.material_id,
-            material_nombre=inv.material.nombre,
-            stock_actual=inv.cantidad,
-            stock_minimo=umbral,
+        schemas.ProductoInventarioResponse(
+            id=inv.id,
+            producto_id=inv.producto_id,
+            producto_nombre=inv.producto.nombre if inv.producto else None,
+            producto_codigo=inv.producto.codigo if inv.producto else None,
+            es_reventa=inv.producto.es_reventa if inv.producto else None,
             ubicacion_id=inv.ubicacion_id,
-            ubicacion_nombre=inv.ubicacion.nombre
+            ubicacion_nombre=inv.ubicacion.nombre if inv.ubicacion else None,
+            cantidad=inv.cantidad,
+            costo_promedio=inv.costo_promedio,
+            stock_minimo=inv.producto.stock_minimo if inv.producto else None,
+            created_at=inv.created_at,
+            updated_at=inv.updated_at,
         )
         for inv in resultados
     ]
+
+
+def registrar_movimiento_producto(
+    db: Session,
+    movimiento: schemas.MovimientoProductoCreate,
+) -> model.MovimientoProductoInventario:
+    """
+    Registra un movimiento de inventario de producto (entrada, salida, ajuste...)
+    y actualiza la cantidad + costo promedio en producto_inventario.
+
+    Si el movimiento es ENTRADA y trae costo_unitario, recalcula el costo
+    promedio ponderado del producto en esa ubicación.
+    """
+    if movimiento.cantidad <= 0:
+        raise ValueError("La cantidad debe ser positiva")
+
+    producto = db.query(Producto).filter(Producto.id == movimiento.producto_id).first()
+    if not producto:
+        raise ValueError(f"El producto con id {movimiento.producto_id} no existe.")
+
+    inv = db.query(model.ProductoInventario).filter(
+        model.ProductoInventario.producto_id == movimiento.producto_id,
+        model.ProductoInventario.ubicacion_id == movimiento.ubicacion_id,
+    ).with_for_update().first()
+
+    if not inv:
+        try:
+            with db.begin_nested():
+                inv = model.ProductoInventario(
+                    producto_id=movimiento.producto_id,
+                    ubicacion_id=movimiento.ubicacion_id,
+                    cantidad=Decimal(0),
+                    costo_promedio=None,
+                )
+                db.add(inv)
+                db.flush()
+        except IntegrityError:
+            inv = db.query(model.ProductoInventario).filter(
+                model.ProductoInventario.producto_id == movimiento.producto_id,
+                model.ProductoInventario.ubicacion_id == movimiento.ubicacion_id,
+            ).with_for_update().first()
+            if not inv:
+                raise
+
+    # Aplicar cambio según tipo de movimiento
+    if movimiento.tipo == "ENTRADA":
+        inv.cantidad += movimiento.cantidad
+        # Recalcular costo promedio ponderado
+        if movimiento.costo_unitario is not None:
+            costo_nuevo = Decimal(str(movimiento.costo_unitario))
+            stock_antes = inv.cantidad - movimiento.cantidad
+            costo_viejo = inv.costo_promedio if inv.costo_promedio is not None else Decimal("0")
+            if stock_antes <= 0:
+                inv.costo_promedio = costo_nuevo
+            else:
+                inv.costo_promedio = (stock_antes * costo_viejo + movimiento.cantidad * costo_nuevo) / (stock_antes + movimiento.cantidad)
+    elif movimiento.tipo in ("SALIDA", "DAÑO"):
+        if inv.cantidad < movimiento.cantidad:
+            raise ValueError(f"Stock insuficiente. Disponible: {inv.cantidad}")
+        inv.cantidad -= movimiento.cantidad
+    elif movimiento.tipo == "AJUSTE":
+        inv.cantidad = movimiento.cantidad
+    elif movimiento.tipo == "DEVOLUCION":
+        inv.cantidad += movimiento.cantidad
+    else:
+        raise ValueError(f"Tipo de movimiento inválido: {movimiento.tipo}")
+
+    db_mov = model.MovimientoProductoInventario(
+        producto_id=movimiento.producto_id,
+        ubicacion_id=movimiento.ubicacion_id,
+        tipo=movimiento.tipo,
+        cantidad=movimiento.cantidad,
+        costo_unitario=movimiento.costo_unitario,
+        referencia_tipo=movimiento.referencia_tipo,
+        referencia_id=movimiento.referencia_id,
+        observaciones=movimiento.observaciones,
+        fecha=datetime.utcnow(),
+    )
+    db.add(db_mov)
+    db.flush()
+    db.refresh(db_mov)
+    return db_mov
+
+
+def obtener_movimientos_producto(
+    db: Session,
+    producto_id: int,
+    limit: int = 100,
+) -> List[model.MovimientoProductoInventario]:
+    """Historial (kardex) de movimientos de un producto."""
+    return db.query(model.MovimientoProductoInventario).filter(
+        model.MovimientoProductoInventario.producto_id == producto_id
+    ).order_by(model.MovimientoProductoInventario.fecha.desc()).limit(limit).all()
+
+
+def obtener_alertas_stock_productos(
+    db: Session,
+    umbral: Decimal = Decimal(8),
+) -> List[schemas.AlertaStockProductoResponse]:
+    """Productos de REVENTA cuyo stock actual es menor o igual a su stock_minimo."""
+    resultados = db.query(model.ProductoInventario).join(
+        Producto, model.ProductoInventario.producto_id == Producto.id
+    ).options(
+        joinedload(model.ProductoInventario.producto),
+        joinedload(model.ProductoInventario.ubicacion),
+    ).filter(Producto.es_reventa == True).all()
+
+    alertas = []
+    por_producto = {}
+    for inv in resultados:
+        por_producto[(inv.producto_id, inv.ubicacion_id)] = inv
+
+    for (prod_id, ubi_id), inv in por_producto.items():
+        minimo = inv.producto.stock_minimo if inv.producto and inv.producto.stock_minimo is not None else umbral
+        if inv.cantidad <= minimo:
+            alertas.append(schemas.AlertaStockProductoResponse(
+                producto_id=inv.producto_id,
+                producto_nombre=inv.producto.nombre if inv.producto else str(prod_id),
+                stock_actual=inv.cantidad,
+                stock_minimo=minimo,
+                ubicacion_id=inv.ubicacion_id,
+                ubicacion_nombre=inv.ubicacion.nombre if inv.ubicacion else "",
+            ))
+
+    return alertas

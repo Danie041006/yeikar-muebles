@@ -15,6 +15,8 @@ class ProductoBase(BaseModel):
     ancho_base: Optional[float] = 1.60
     largo_base: Optional[float] = 1.90
     alto_base: Optional[float] = None
+    stock_minimo: Optional[float] = 8.0
+    es_reventa: Optional[bool] = False
 
 class ProductoCreate(ProductoBase):
     pass
@@ -28,6 +30,8 @@ class ProductoUpdate(BaseModel):
     ancho_base: Optional[float] = None
     largo_base: Optional[float] = None
     alto_base: Optional[float] = None
+    stock_minimo: Optional[float] = None
+    es_reventa: Optional[bool] = None
 
 class ProductoResponse(ProductoBase):
     id: int
@@ -48,6 +52,7 @@ class MaterialBase(BaseModel):
     unidad_medida_id: int
     costo_base: Optional[float] = 0.0
     activo: Optional[bool] = True
+    stock_minimo: Optional[float] = 8.0
 
 class MaterialCreate(MaterialBase):
     pass
@@ -57,6 +62,7 @@ class MaterialUpdate(BaseModel):
     unidad_medida_id: Optional[int] = None
     costo_base: Optional[float] = None
     activo: Optional[bool] = None
+    stock_minimo: Optional[float] = None
 
 class MaterialResponse(MaterialBase):
     id: int

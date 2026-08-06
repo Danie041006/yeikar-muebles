@@ -56,6 +56,10 @@ MODULOS_CATALOGO: List[Dict[str, str]] = [
 
 CLAVES_MODULOS = {m["clave"] for m in MODULOS_CATALOGO}
 
+# Catálogos operativos: se pueden consultar para trabajar, pero sus mutaciones
+# siguen requiriendo el permiso de gestión del módulo correspondiente.
+MODULOS_LECTURA_COMPARTIDA = {"clientes", "productos", "materiales", "tasas", "catalogos"}
+
 
 # Configura el esquema OAuth2: espera token en la URL /api/auth/login
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
@@ -190,6 +194,8 @@ def require_module(modulo: str, solo_escritura: bool = False):
         if es_lectura and solo_escritura:
             return usuario_actual
         accesos = obtener_accesos_usuario(db, usuario_actual)
+        if es_lectura and modulo in MODULOS_LECTURA_COMPARTIDA:
+            return usuario_actual
         if modulo not in accesos:
             raise HTTPException(status_code=403, detail="No tienes permisos para acceder a este módulo")
         if not es_lectura and not accesos[modulo]:

@@ -25,6 +25,8 @@ class Producto(Base):
     precio_venta_base   = Column(Numeric(15, 2), nullable=True)   # Precio de Venta sin IVA (con ganancia)
     precio_venta_con_iva= Column(Numeric(15, 2), nullable=True)   # Total a Pagar (con IVA 16%)
     hoja_excel          = Column(String(150), nullable=True)       # Nombre de la hoja fuente en el Excel
+    stock_minimo        = Column(Numeric(10, 2), nullable=False, server_default="8")
+    es_reventa          = Column(Boolean, default=False, nullable=False)  # True = se revende (colchón, nevera...); False = se fabrica
     # --------------------------------------------------------------
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, onupdate=func.now())
@@ -41,6 +43,7 @@ class Material(Base):
     nombre          = Column(String(150), nullable=False)
     unidad_medida_id= Column(BigInteger, ForeignKey("unidad_medida.id"), nullable=False)
     costo_base      = Column(Numeric(15, 2), nullable=False)
+    stock_minimo    = Column(Numeric(10, 2), nullable=False, server_default="8")
     activo          = Column(Boolean, default=True)
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, onupdate=func.now())
