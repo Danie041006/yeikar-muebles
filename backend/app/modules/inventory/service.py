@@ -247,10 +247,10 @@ def registrar_movimiento_producto(
 ) -> model.MovimientoProductoInventario:
     """
     Registra un movimiento de inventario de producto (entrada, salida, ajuste...)
-    y actualiza la cantidad + costo promedio en producto_inventario.
+    y actualiza la cantidad + costo en producto_inventario.
 
-    Si el movimiento es ENTRADA y trae costo_unitario, recalcula el costo
-    promedio ponderado del producto en esa ubicación.
+    Si el movimiento es ENTRADA y trae costo_unitario, el costo_promedio del
+    producto se actualiza AL INSTANTE con el último precio (no promedio).
     """
     if movimiento.cantidad <= 0:
         raise ValueError("La cantidad debe ser positiva")
@@ -286,15 +286,11 @@ def registrar_movimiento_producto(
     # Aplicar cambio según tipo de movimiento
     if movimiento.tipo == "ENTRADA":
         inv.cantidad += movimiento.cantidad
-        # Recalcular costo promedio ponderado
+        # El costo se actualiza AL INSTANTE con el último precio de entrada.
+        # No se usa promedio ponderado: si el insumo sube, el nuevo precio
+        # rige desde ya para nuevas cotizaciones/pedidos.
         if movimiento.costo_unitario is not None:
-            costo_nuevo = Decimal(str(movimiento.costo_unitario))
-            stock_antes = inv.cantidad - movimiento.cantidad
-            costo_viejo = inv.costo_promedio if inv.costo_promedio is not None else Decimal("0")
-            if stock_antes <= 0:
-                inv.costo_promedio = costo_nuevo
-            else:
-                inv.costo_promedio = (stock_antes * costo_viejo + movimiento.cantidad * costo_nuevo) / (stock_antes + movimiento.cantidad)
+            inv.costo_promedio = Decimal(str(movimiento.costo_unitario))
     elif movimiento.tipo in ("SALIDA", "DAÑO"):
         if inv.cantidad < movimiento.cantidad:
             raise ValueError(f"Stock insuficiente. Disponible: {inv.cantidad}")

@@ -35,7 +35,7 @@ def _ubicacion_entrada(db: Session, preferida: Optional[int] = None) -> int:
     raise ValueError("No hay ninguna ubicación activa. Crea una antes de recibir compras.")
 
 
-def _actualizar_costo_promedio_material(
+def _actualizar_costo_material(
     db: Session,
     material_id: int,
     cantidad: Decimal,
@@ -43,36 +43,16 @@ def _actualizar_costo_promedio_material(
     ubicacion_id: int,
 ) -> None:
     """
-    Actualiza material.costo_base con el promedio ponderado tras una entrada.
+    Actualiza material.costo_base AL INSTANTE con el último precio de compra.
 
-    nuevo_costo = (stock_anterior * costo_anterior + cantidad * costo_nuevo)
-                  / (stock_anterior + cantidad)
-
-    Los pedidos/cotizaciones YA creados conservan su precio congelado
-    (snapshot), así que solo impacta nuevas cotizaciones y nuevos pedidos.
+    No se usa promedio ponderado: si el insumo sube, el nuevo precio rige desde
+    ya para nuevas cotizaciones/pedidos. Los pedidos YA creados conservan su
+    precio congelado (snapshot), así que solo impacta lo nuevo.
     """
     material = db.query(Material).filter(Material.id == material_id).first()
     if not material:
         return
-
-    from app.modules.inventory.model import Inventario
-    inv = db.query(Inventario).filter(
-        Inventario.material_id == material_id,
-        Inventario.ubicacion_id == ubicacion_id,
-    ).first()
-
-    stock_anterior = inv.cantidad if inv else Decimal("0")
-    costo_anterior = material.costo_base if material.costo_base is not None else Decimal("0")
-    cantidad = Decimal(str(cantidad))
-    costo_nuevo = Decimal(str(costo_unitario))
-
-    total_stock = stock_anterior + cantidad
-    if total_stock <= 0:
-        material.costo_base = costo_nuevo
-    else:
-        material.costo_base = round(
-            (stock_anterior * costo_anterior + cantidad * costo_nuevo) / total_stock, 2
-        )
+    material.costo_base = Decimal(str(costo_unitario))
 
 
 def obtener_compra(db: Session, compra_id: int) -> Optional[model.Compra]:
@@ -143,7 +123,7 @@ def crear_compra(db: Session, compra: schemas.CompraCreate) -> model.Compra:
             )
             inventory_service.registrar_movimiento(db, movimiento)
             # Actualizar costo promedio ponderado del material
-            _actualizar_costo_promedio_material(
+            _actualizar_costo_material(
                 db, detalle.material_id, detalle.cantidad, detalle.costo_unitario, ubicacion_id
             )
 
@@ -182,7 +162,7 @@ def actualizar_compra(db: Session, compra_id: int, compra_update: schemas.Compra
                     observaciones="Entrada por compra (actualizada a recibida)",
                 )
                 inventory_service.registrar_movimiento(db, movimiento)
-                _actualizar_costo_promedio_material(
+                _actualizar_costo_material(
                     db, detalle.material_id, detalle.cantidad, detalle.costo_unitario, ubicacion_id
                 )
 

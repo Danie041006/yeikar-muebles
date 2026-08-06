@@ -486,7 +486,7 @@ export default function Inventario() {
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Ubicación</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Actual</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Mín.</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Costo Promedio</th>
+                    <th className="p-4 border-b border-yeikar-secondary-light/5">Último Precio</th>
                     <th className="p-4 border-b border-yeikar-secondary-light/5 text-right">Acciones</th>
                   </tr>
                 </thead>
@@ -833,7 +833,7 @@ export default function Inventario() {
                 </div>
               </div>
               <div className="space-y-1">
-                <label className="text-xs font-bold text-yeikar-secondary">Costo Unitario <span className="text-yeikar-neutral/40 font-normal">(Solo entrada, para promedio)</span></label>
+                <label className="text-xs font-bold text-yeikar-secondary">Costo Unitario <span className="text-yeikar-neutral/40 font-normal">(Solo entrada; actualiza el precio al instante)</span></label>
                 <input type="number" step="0.01" min="0" placeholder="0.00" value={newMovementProducto.costo_unitario} onChange={(e) => setNewMovementProducto(prev => ({ ...prev, costo_unitario: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
               </div>
               <div className="space-y-1">
