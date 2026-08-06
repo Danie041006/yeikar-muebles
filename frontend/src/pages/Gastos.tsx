@@ -111,6 +111,18 @@ export default function Gastos() {
     produccion: gastos.filter((g) => g.tipo_gasto?.categoria === 'PRODUCCION').reduce((s, g) => s + Number(g.monto_en_moneda_base), 0),
   };
 
+  // Desglose de egresos por moneda (total en su moneda + equivalente COP)
+  const porMoneda: Record<string, { codigo: string; simbolo: string; total: number; totalCOP: number; count: number }> = {};
+  gastos.forEach((g) => {
+    const codigo = g.moneda?.codigo || '—';
+    const simbolo = g.moneda?.simbolo || '$';
+    if (!porMoneda[codigo]) porMoneda[codigo] = { codigo, simbolo, total: 0, totalCOP: 0, count: 0 };
+    porMoneda[codigo].total += Number(g.monto);
+    porMoneda[codigo].totalCOP += Number(g.monto_en_moneda_base);
+    porMoneda[codigo].count += 1;
+  });
+  const monedasResumen = Object.values(porMoneda).sort((a, b) => b.totalCOP - a.totalCOP);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -155,6 +167,53 @@ export default function Gastos() {
           iconText="text-green-600"
         />
       </div>
+
+      {/* Egresos por moneda */}
+      {monedasResumen.length > 0 && (
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-headline font-black text-yeikar-secondary text-sm uppercase tracking-wider">
+              Egresos por moneda
+            </h3>
+            <span className="text-xs font-mono text-yeikar-neutral/40">
+              {monedasResumen.length} {monedasResumen.length === 1 ? 'moneda' : 'monedas'} en la selección
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {monedasResumen.map((m) => {
+              const pct = totales.total > 0 ? (m.totalCOP / totales.total) * 100 : 0;
+              return (
+                <div key={m.codigo} className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 font-headline font-black text-yeikar-secondary">
+                      {m.simbolo}
+                      <span className="text-xs uppercase">{m.codigo}</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-yeikar-neutral/40">{m.count} registros</span>
+                  </div>
+                  <p className="font-mono text-2xl font-black text-yeikar-dark">
+                    {m.simbolo} {m.total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}
+                  </p>
+                  <div className="space-y-1">
+                    <div className="h-1.5 rounded-full bg-yeikar-secondary-light/10 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-yeikar-primary"
+                        style={{ width: `${Math.min(100, pct)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-mono text-yeikar-neutral/60">
+                        ≈ $ {m.totalCOP.toLocaleString('es-CO')} COP
+                      </span>
+                      <span className="font-bold text-yeikar-primary">{pct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-3 items-center">
         <div className="flex items-center gap-1 bg-white border border-yeikar-secondary-light/10 rounded-xl p-1 shadow-card">
