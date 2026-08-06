@@ -38,6 +38,7 @@ from app.modules.quotes.intelligent_schemas import (
     FindSimilarResponse,
     FurnitureAttributesOut,
     MaterialLineaOut,
+    PreguntaFaltanteOut,
     RecalculateRequest,
     SimilarityResultOut,
     FinalizeRequest,
@@ -107,7 +108,11 @@ def _persistir_analisis(db: Session, file: UploadFile, attrs: FurnitureAttribute
         tipo_patas=attrs.tipo_patas,
         estilo_general=attrs.estilo_general,
         nivel_confianza=attrs.nivel_confianza,
-        observaciones=f"[Contexto: {contexto_adicional[:50]}...] {attrs.observaciones}" if (contexto_adicional and attrs.observaciones) else (attrs.observaciones or contexto_adicional),
+        observaciones=(
+            f"[Contexto: {contexto_adicional[:50]}...] {attrs.observaciones}"
+            if (contexto_adicional and attrs.observaciones)
+            else (attrs.observaciones or contexto_adicional)
+        ),
     )
     db.add(analisis)
     db.commit()
@@ -119,19 +124,26 @@ def _persistir_analisis(db: Session, file: UploadFile, attrs: FurnitureAttribute
 async def analyze_image(
     file: UploadFile = File(...),
     contexto_adicional: Optional[str] = Form(None),
+    datos_proyecto: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     """
     Paso 1: Analiza la imagen del mueble y extrae atributos visuales.
 
     - El archivo debe ser una imagen (JPEG, PNG, WEBP).
-    - La respuesta incluye el nivel de confianza de la IA.
+    - `datos_proyecto` es un JSON opcional con las medidas/opciones que el
+      vendedor definió ANTES de analizar (ancho, largo, alto, fondo, material,
+      acabado, etc.). La IA calcula las cantidades para ESAS medidas.
+    - La respuesta incluye el nivel de confianza de la IA, la percepcion
+      (qué vio / qué no vio) y las preguntas_faltantes dinámicas.
     - Si confianza < 0.70, se marca `requiere_revision_humana: true`.
     - El vendedor SIEMPRE debe revisar los atributos antes del paso 2.
 
     El ERP NO usa estos atributos para calcular costos.
     Solo los usa para buscar estructuras similares.
     """
+    import json
+
     if not file.content_type or file.content_type not in ("image/jpeg", "image/png", "image/webp"):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -146,9 +158,17 @@ async def analyze_image(
             detail=f"La imagen supera el límite de {settings.MAX_UPLOAD_MB} MB.",
         )
 
+    # Parsear datos estructurados del proyecto (JSON opcional)
+    datos_proyecto_dict: Optional[dict] = None
+    if datos_proyecto:
+        try:
+            datos_proyecto_dict = json.loads(datos_proyecto)
+            if not isinstance(datos_proyecto_dict, dict):
+                datos_proyecto_dict = None
+        except json.JSONDecodeError:
+            datos_proyecto_dict = None
+
     # Llamar al proveedor de visión.
-    # La creación del provider (lectura síncrona del prompt) se mueve a un
-    # thread para no bloquear el event loop.
     import asyncio
     try:
         provider = await asyncio.to_thread(_get_vision_provider)
@@ -156,6 +176,7 @@ async def analyze_image(
             image_bytes=image_bytes,
             mime_type=file.content_type,
             contexto_adicional=contexto_adicional,
+            datos_proyecto=datos_proyecto_dict,
         )
     except (ImportError, ValueError) as e:
         raise HTTPException(
@@ -171,8 +192,6 @@ async def analyze_image(
     requiere_revision = attrs.nivel_confianza < CONFIANZA_MINIMA
 
     # Guardar el análisis en la BD para trazabilidad.
-    # SQLAlchemy aquí es síncrono: la persistencia se ejecuta en un thread
-    # (asyncio.to_thread) para no bloquear el event loop con I/O de red a PG.
     analisis = await asyncio.to_thread(
         _persistir_analisis, db, file, attrs, contexto_adicional,
     )
@@ -190,7 +209,84 @@ async def analyze_image(
         requiere_revision_humana=requiere_revision,
         estructura_propuesta=attrs.estructura_propuesta,
         analisis_id=analisis.id,
+        percepcion=attrs.percepcion,
+        dimensiones_referencia=attrs.dimensiones_referencia,
+        preguntas_faltantes=[
+            PreguntaFaltanteOut(
+                clave=p.clave,
+                pregunta=p.pregunta,
+                tipo=p.tipo,
+                opciones=p.opciones,
+                requerida=p.requerida,
+                por_que=p.por_que,
+            )
+            for p in attrs.preguntas_faltantes
+        ],
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /generate-questions
+# ---------------------------------------------------------------------------
+
+@router.post("/generate-questions", response_model=list[PreguntaFaltanteOut], dependencies=[Depends(require_module('cotizaciones_ia'))])
+async def generate_questions(
+    file: UploadFile = File(...),
+    contexto_adicional: Optional[str] = Form(None),
+    datos_proyecto: Optional[str] = Form(None),
+):
+    """
+    Paso 1.5 (opcional): La IA genera dinámicamente SOLO las preguntas críticas
+    que la imagen no respondió y que SÍ afectan la estructura de costos.
+
+    Actúa como ingeniero de producción: NUNCA pregunta por datos de venta.
+    Cada pregunta mapea a una clave del vocabulario que el motor de costos sabe
+    consumir (material_principal, espesor_tablero, acabado, herrajes, etc.).
+    """
+    import json
+
+    if not file.content_type or file.content_type not in ("image/jpeg", "image/png", "image/webp"):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Formato de imagen no soportado. Usa JPG, PNG o WebP.",
+        )
+    image_bytes = await file.read()
+
+    datos_proyecto_dict: Optional[dict] = None
+    if datos_proyecto:
+        try:
+            datos_proyecto_dict = json.loads(datos_proyecto)
+            if not isinstance(datos_proyecto_dict, dict):
+                datos_proyecto_dict = None
+        except json.JSONDecodeError:
+            datos_proyecto_dict = None
+
+    import asyncio
+    try:
+        provider = await asyncio.to_thread(_get_vision_provider)
+        preguntas = await provider.generate_questions(
+            image_bytes=image_bytes,
+            mime_type=file.content_type,
+            contexto_adicional=contexto_adicional,
+            datos_proyecto=datos_proyecto_dict,
+        )
+    except (ImportError, ValueError, RuntimeError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"El servicio de preguntas IA no está disponible: {e}",
+        )
+
+    return [
+        PreguntaFaltanteOut(
+            clave=p.clave,
+            pregunta=p.pregunta,
+            tipo=p.tipo,
+            opciones=p.opciones,
+            requerida=p.requerida,
+            por_que=p.por_que,
+        )
+        for p in preguntas
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -578,6 +674,10 @@ def generate_structure(payload: GenerateStructureRequest, db: Session = Depends(
             estructura_ia=payload.estructura_propuesta,
             nuevo_ancho=payload.nuevo_ancho,
             nuevo_largo=payload.nuevo_largo,
+            nuevo_alto=payload.nuevo_alto,
+            nuevo_fondo=payload.nuevo_fondo,
+            respuestas=payload.respuestas,
+            dimensiones_referencia=payload.dimensiones_referencia,
             ganancia_porcentaje=payload.ganancia_porcentaje,
             iva_porcentaje=payload.iva_porcentaje,
             pct_mano_obra=payload.pct_mano_obra,
@@ -683,6 +783,7 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
             tipo_producto_id=payload.tipo_producto_id,
             ancho_base=D(str(payload.nuevo_ancho)),
             largo_base=D(str(payload.nuevo_largo)),
+            alto_base=D(str(payload.nuevo_alto)) if payload.nuevo_alto else None,
             precio_costo_base=costo_prod,
             precio_venta_base=precio_sin_iva,
             precio_venta_con_iva=precio_con_iva,
@@ -791,6 +892,7 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
             precio=precio_con_iva,
             ancho=D(str(payload.nuevo_ancho)),
             largo=D(str(payload.nuevo_largo)),
+            alto=D(str(payload.nuevo_alto)) if payload.nuevo_alto else None,
             observaciones="Estructura personalizada inteligente v2",
             costo_materiales=total_materiales,
             costo_mano_obra=costo_mo,

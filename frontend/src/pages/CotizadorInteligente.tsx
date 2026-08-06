@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   iqeService,
   type FurnitureAttributesOut,
+  type PreguntaFaltanteOut,
   type SeccionCostoOut,
   type ResumenCostosOut,
   type UnidadMedida,
@@ -19,11 +20,17 @@ interface AtributosEditables extends FurnitureAttributesOut {}
 interface ParametrosForm {
   ancho: string;
   largo: string;
+  alto: string;
+  fondo: string;
   ganancia: string;
   iva: string;
   pct_mano_obra: string;
   pct_gastos: string;
 }
+
+const MATERIALES_PRINCIPALES = ['melamina', 'madera solida', 'mdf', 'aglomerado', 'triplex'];
+const ESPESORES = ['15', '18', '25', '32'];
+const ACABADOS = ['pintura', 'laca', 'barniz', 'tinte', 'natural'];
 
 // ─── Constantes de la UI ──────────────────────────────────────────────────────
 
@@ -44,10 +51,94 @@ const PASOS: { id: Paso; label: string; num: number }[] = [
 ];
 
 const CONFIANZA_COLOR = (c: number) => {
-  if (c >= 0.85) return 'text-emerald-600 bg-emerald-50';
-  if (c >= 0.70) return 'text-amber-600 bg-amber-50';
-  return 'text-red-600 bg-red-50';
+  if (c >= 0.85) return 'bg-yeikar-primary/15 text-yeikar-primary-dark';
+  if (c >= 0.70) return 'bg-yeikar-secondary-light/10 text-yeikar-secondary';
+  return 'bg-red-50 text-red-700';
 };
+
+const INPUT_CLS =
+  'w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white';
+
+/** Renderiza el control de entrada según el tipo de pregunta de la IA */
+function renderPreguntaInput(
+  p: PreguntaFaltanteOut,
+  valor: any,
+  onChange: (v: any) => void
+) {
+  switch (p.tipo) {
+    case 'select':
+      return (
+        <select value={valor ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={INPUT_CLS}>
+          <option value="">Seleccione...</option>
+          {(p.opciones || []).map((o) => <option key={o} value={o}>{o}</option>)}
+        </select>
+      );
+    case 'multi':
+      return (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {(p.opciones || []).map((o) => {
+            const activo = Array.isArray(valor) && valor.includes(o);
+            return (
+              <button
+                key={o}
+                type="button"
+                onClick={() => {
+                  const arr = Array.isArray(valor) ? [...valor] : [];
+                  const idx = arr.indexOf(o);
+                  if (idx >= 0) arr.splice(idx, 1);
+                  else arr.push(o);
+                  onChange(arr.length > 0 ? arr : undefined);
+                }}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all
+                  ${activo ? 'bg-yeikar-primary/20 border-yeikar-primary text-yeikar-primary-dark' : 'bg-white border-yeikar-secondary-light/20 text-yeikar-neutral/60 hover:border-yeikar-primary/40'}`}
+              >
+                {o}
+              </button>
+            );
+          })}
+        </div>
+      );
+    case 'si_no':
+      return (
+        <div className="flex gap-2 pt-1">
+          {['Si', 'No'].map((op) => {
+            const activo = valor === op.toLowerCase();
+            return (
+              <button
+                key={op}
+                type="button"
+                onClick={() => onChange(activo ? undefined : op.toLowerCase())}
+                className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-all
+                  ${activo ? 'bg-yeikar-primary/20 border-yeikar-primary text-yeikar-primary-dark' : 'bg-white border-yeikar-secondary-light/20 text-yeikar-neutral/60 hover:border-yeikar-primary/40'}`}
+              >
+                {op}
+              </button>
+            );
+          })}
+        </div>
+      );
+    case 'numero':
+      return (
+        <input
+          type="number"
+          min="0"
+          step="any"
+          value={valor ?? ''}
+          onChange={(e) => onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
+          className={INPUT_CLS}
+        />
+      );
+    default:
+      return (
+        <input
+          type="text"
+          value={valor ?? ''}
+          onChange={(e) => onChange(e.target.value || undefined)}
+          className={INPUT_CLS}
+        />
+      );
+  }
+}
 
 export default function CotizadorInteligente() {
   // ── Estado de navegación ──
@@ -64,10 +155,17 @@ export default function CotizadorInteligente() {
   // ── Paso 2: Atributos de la IA (editables) ──
   const [atributos, setAtributos] = useState<AtributosEditables | null>(null);
 
+  // ── Preguntas dinámicas de la IA (Fase 5) ──
+  const [preguntas, setPreguntas] = useState<PreguntaFaltanteOut[]>([]);
+  const [respuestas, setRespuestas] = useState<Record<string, any>>({});
+  const [generandoPreguntas, setGenerandoPreguntas] = useState(false);
+
   // ── Parámetros de dimensiones y costos ──
   const [parametros, setParametros] = useState<ParametrosForm>({
     ancho: '1.60',
     largo: '1.90',
+    alto: '0.50',
+    fondo: '',
     ganancia: '40',
     iva: '0',
     pct_mano_obra: '15',
@@ -150,10 +248,13 @@ export default function CotizadorInteligente() {
     setAnalizando(true);
     setErrorAnalisis('');
     try {
-      const resultado = await iqeService.analyzeImage(imagenFile, contextoAdicional);
+      const datosProyecto = buildDatosProyecto();
+      const resultado = await iqeService.analyzeImage(imagenFile, contextoAdicional, datosProyecto);
       setAtributos(resultado);
       // Prellenado de nombre si se crea producto después
       setNombreProducto(`NUEVO MUEBLE ${resultado.tipo_mueble.toUpperCase()}`);
+      setPreguntas(resultado.preguntas_faltantes ?? []);
+      setRespuestas({});
       setPaso('validar');
     } catch (err: any) {
       setErrorAnalisis(
@@ -163,6 +264,48 @@ export default function CotizadorInteligente() {
     } finally {
       setAnalizando(false);
     }
+  };
+
+  /** Construye el JSON datos_proyecto que se envía ANTES del análisis */
+  const buildDatosProyecto = () => {
+    const datos: Record<string, any> = {};
+    const ancho = parseFloat(parametros.ancho);
+    const largo = parseFloat(parametros.largo);
+    const alto = parseFloat(parametros.alto);
+    const fondo = parseFloat(parametros.fondo);
+    if (ancho > 0) datos.ancho = ancho;
+    if (largo > 0) datos.largo = largo;
+    if (alto > 0) datos.alto = alto;
+    if (fondo > 0) datos.fondo = fondo;
+    const mat = respuestas.material_principal;
+    if (mat) datos.material_principal = mat;
+    const esp = respuestas.espesor_tablero;
+    if (esp) datos.espesor_tablero = esp;
+    const acabado = respuestas.acabado;
+    if (acabado) datos.acabado = acabado;
+    return Object.keys(datos).length > 0 ? datos : undefined;
+  };
+
+  /** Regenera las preguntas de la IA de forma explícita (Paso 2) */
+  const handleGenerarPreguntas = async () => {
+    if (!imagenFile) return;
+    setGenerandoPreguntas(true);
+    setErrorAnalisis('');
+    try {
+      const nuevas = await iqeService.generateQuestions(imagenFile, contextoAdicional, buildDatosProyecto());
+      setPreguntas(nuevas);
+    } catch (err: any) {
+      setErrorAnalisis(
+        err?.response?.data?.detail || 'Error al generar preguntas de la IA.'
+      );
+    } finally {
+      setGenerandoPreguntas(false);
+    }
+  };
+
+  /** Actualiza la respuesta a una pregunta dinámica */
+  const setRespuesta = (clave: string, valor: any) => {
+    setRespuestas((prev) => ({ ...prev, [clave]: valor }));
   };
 
   /** Paso 2 → Paso 3: Generar la estructura de costos inteligente */
@@ -185,6 +328,10 @@ export default function CotizadorInteligente() {
         estructura_propuesta: atributos.estructura_propuesta,
         nuevo_ancho: parseFloat(parametros.ancho) || 1.60,
         nuevo_largo: parseFloat(parametros.largo) || 1.90,
+        nuevo_alto: parseFloat(parametros.alto) || null,
+        nuevo_fondo: parseFloat(parametros.fondo) || null,
+        respuestas,
+        dimensiones_referencia: atributos.dimensiones_referencia ?? undefined,
         ganancia_porcentaje: parseFloat(parametros.ganancia) || 40,
         iva_porcentaje: parseFloat(parametros.iva) || 0,
         pct_mano_obra: parseFloat(parametros.pct_mano_obra) || 15,
@@ -268,6 +415,7 @@ export default function CotizadorInteligente() {
         secciones,
         nuevo_ancho: parseFloat(parametros.ancho) || 1.60,
         nuevo_largo: parseFloat(parametros.largo) || 1.90,
+        nuevo_alto: parseFloat(parametros.alto) || null,
         ganancia_porcentaje: parseFloat(parametros.ganancia) || 40,
         iva_porcentaje: parseFloat(parametros.iva) || 0,
         pct_mano_obra: parseFloat(parametros.pct_mano_obra) || 15,
@@ -324,22 +472,22 @@ export default function CotizadorInteligente() {
                   >
                     <div
                       className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all
-                      ${activo ? 'bg-yeikar-primary text-white shadow-md scale-110' :
-                        completado ? 'bg-emerald-500 text-white shadow' :
-                        'bg-gray-200 text-gray-400'}`}
+                      ${activo ? 'bg-yeikar-primary text-yeikar-neutral shadow-md scale-110' :
+                        completado ? 'bg-yeikar-primary/25 text-yeikar-primary-dark shadow' :
+                        'bg-yeikar-secondary-light/10 text-yeikar-neutral/40'}`}
                     >
                       {completado ? '✓' : p.num}
                     </div>
                     <span
                       className={`text-xs font-bold hidden sm:block
                       ${activo ? 'text-yeikar-secondary' :
-                        completado ? 'text-emerald-600' : 'text-gray-400'}`}
+                        completado ? 'text-yeikar-primary-dark' : 'text-yeikar-neutral/40'}`}
                     >
                       {p.label}
                     </span>
                   </div>
                   {i < PASOS.length - 1 && (
-                    <div className={`flex-1 h-0.5 mx-2 rounded ${p.num < pasoActualNum ? 'bg-emerald-400' : 'bg-gray-200'}`} />
+                    <div className={`flex-1 h-0.5 mx-2 rounded ${p.num < pasoActualNum ? 'bg-yeikar-primary' : 'bg-yeikar-secondary-light/10'}`} />
                   )}
                 </div>
               );
@@ -354,7 +502,7 @@ export default function CotizadorInteligente() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl sm:text-2xl font-headline font-bold text-yeikar-secondary">Analizar Mueble</h2>
-              <p className="text-sm text-gray-500 mt-1">Sube la foto del mueble para que la IA proponga los materiales y fases de producción.</p>
+              <p className="text-sm text-yeikar-neutral/60 mt-1">Sube la foto del mueble para que la IA proponga los materiales y fases de producción.</p>
             </div>
 
             <div
@@ -362,7 +510,7 @@ export default function CotizadorInteligente() {
               onDragOver={(e) => e.preventDefault()}
               onClick={() => fileInputRef.current?.click()}
               className={`relative border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200
-                ${imagenPreview ? 'border-yeikar-primary bg-yeikar-primary/5 shadow-inner' : 'border-gray-300 bg-white hover:border-yeikar-primary hover:bg-yeikar-primary/5'}`}
+                ${imagenPreview ? 'border-yeikar-primary bg-yeikar-primary/5 shadow-inner' : 'border-yeikar-secondary-light/15 bg-white hover:border-yeikar-primary hover:bg-yeikar-primary/5'}`}
             >
               <input
                 ref={fileInputRef}
@@ -373,8 +521,8 @@ export default function CotizadorInteligente() {
               />
               {imagenPreview ? (
                 <div className="flex flex-col items-center gap-4">
-                  <img src={imagenPreview} alt="Preview del mueble" className="max-h-72 max-w-full rounded-xl shadow-md object-contain border border-gray-100" />
-                  <p className="text-xs text-gray-400 font-mono">{imagenFile?.name} · {((imagenFile?.size || 0) / 1024).toFixed(0)} KB</p>
+                  <img src={imagenPreview} alt="Preview del mueble" className="max-h-72 max-w-full rounded-xl shadow-md object-contain border border-yeikar-secondary-light/10" />
+                  <p className="text-xs text-yeikar-neutral/50 font-mono">{imagenFile?.name} · {((imagenFile?.size || 0) / 1024).toFixed(0)} KB</p>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -387,28 +535,110 @@ export default function CotizadorInteligente() {
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-3 text-gray-400">
-                  <svg className="w-16 h-16 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="flex flex-col items-center gap-3 text-yeikar-neutral/40">
+                  <svg className="w-16 h-16 text-yeikar-secondary-light/25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
                   <div>
-                    <p className="font-semibold text-gray-600 text-sm">Arrastra la imagen aquí</p>
+                    <p className="font-semibold text-yeikar-neutral/70 text-sm">Arrastra la imagen aquí</p>
                     <p className="text-xs mt-1">o haz clic para explorar · JPEG, PNG, WEBP · Max 10 MB</p>
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Contexto o mensaje adicional</label>
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card">
+              <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Contexto o mensaje adicional</label>
               <textarea
                 value={contextoAdicional}
                 onChange={(e) => setContextoAdicional(e.target.value)}
                 placeholder='Ej: "Cama King Size tapizada en lino con patas ocultas" o "Closet modular de melamina Rovere"'
                 rows={3}
-                className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 resize-none font-body"
+                className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 resize-none font-body"
               />
-              <p className="text-xs text-gray-400 mt-2">💡 Indique dimensiones solicitadas o materiales preferidos para guiar mejor a la IA.</p>
+              <p className="text-xs text-yeikar-neutral/50 mt-2">💡 Indique dimensiones solicitadas o materiales preferidos para guiar mejor a la IA.</p>
+            </div>
+
+            {/* Datos del proyecto — la IA calcula cantidades para ESTAS medidas */}
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card space-y-4">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">Datos del proyecto</h3>
+                <span className="text-[10px] bg-yeikar-primary/15 text-yeikar-primary-dark font-bold px-2 py-0.5 rounded-full">OPCIONAL</span>
+              </div>
+              <p className="text-xs text-yeikar-neutral/50 -mt-2">Las cantidades se calcularán para estas medidas exactas, no para un estándar.</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Ancho (m) *</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={parametros.ancho}
+                    onChange={(e) => setParametros({ ...parametros, ancho: e.target.value })}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Largo (m) *</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={parametros.largo}
+                    onChange={(e) => setParametros({ ...parametros, largo: e.target.value })}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Alto (m)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={parametros.alto}
+                    onChange={(e) => setParametros({ ...parametros, alto: e.target.value })}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Fondo (m)</label>
+                  <input
+                    type="number" step="0.01" min="0"
+                    value={parametros.fondo}
+                    onChange={(e) => setParametros({ ...parametros, fondo: e.target.value })}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Material principal</label>
+                  <select
+                    value={respuestas.material_principal ?? ''}
+                    onChange={(e) => setRespuesta('material_principal', e.target.value || undefined)}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                  >
+                    <option value="">No sé / Lo decide la IA</option>
+                    {MATERIALES_PRINCIPALES.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Espesor tablero (mm)</label>
+                  <select
+                    value={respuestas.espesor_tablero ?? ''}
+                    onChange={(e) => setRespuesta('espesor_tablero', e.target.value || undefined)}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                  >
+                    <option value="">No sé</option>
+                    {ESPESORES.map(ep => <option key={ep} value={ep}>{ep} mm</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Acabado</label>
+                  <select
+                    value={respuestas.acabado ?? ''}
+                    onChange={(e) => setRespuesta('acabado', e.target.value || undefined)}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                  >
+                    <option value="">No sé</option>
+                    {ACABADOS.map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
+                </div>
+              </div>
             </div>
 
             {errorAnalisis && (
@@ -443,10 +673,10 @@ export default function CotizadorInteligente() {
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="text-xl sm:text-2xl font-headline font-bold text-yeikar-secondary">Configuración del Producto</h2>
-                <p className="text-sm text-gray-500 mt-1">Revisa los atributos detectados por la IA y define las medidas finales de costeo.</p>
+                <p className="text-sm text-yeikar-neutral/60 mt-1">Revisa los atributos detectados por la IA y define las medidas finales de costeo.</p>
               </div>
               {imagenPreview && (
-                <img src={imagenPreview} alt="Miniatura" className="w-16 h-16 rounded-xl object-cover border border-gray-200 shadow" />
+                <img src={imagenPreview} alt="Miniatura" className="w-16 h-16 rounded-xl object-cover border border-yeikar-secondary-light/10 shadow" />
               )}
             </div>
 
@@ -455,27 +685,44 @@ export default function CotizadorInteligente() {
               {atributos.requiere_revision_humana && <span className="bg-red-200 text-red-800 text-[10px] px-1.5 py-0.5 rounded font-bold">REVISIÓN RECOMENDADA</span>}
             </div>
 
+            {/* Qué vio la IA y qué medidas asumió */}
+            {atributos.percepcion && (
+              <div className="bg-yeikar-secondary-light/5 border border-yeikar-secondary-light/15 rounded-2xl p-5 shadow-card space-y-2">
+                <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">Percepción de la IA</h3>
+                <p className="text-sm text-yeikar-neutral/80">{atributos.percepcion}</p>
+                {atributos.dimensiones_referencia && Object.keys(atributos.dimensiones_referencia).length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {Object.entries(atributos.dimensiones_referencia).map(([k, v]) => (
+                      <span key={k} className="bg-white border border-yeikar-secondary-light/15 text-xs font-mono font-semibold text-yeikar-secondary px-2.5 py-1 rounded-lg">
+                        {k}: {v}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Atributos generales */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-2">Atributos generales</h3>
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-6 shadow-card space-y-4">
+              <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider mb-2">Atributos generales</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1">Tipo de Mueble</label>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Tipo de Mueble</label>
                   <select
                     value={atributos.tipo_mueble}
                     onChange={(e) => setAtributos({ ...atributos, tipo_mueble: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
                   >
                     {TIPOS_MUEBLE.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1">Familia de Material</label>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Familia de Material</label>
                   <select
                     value={atributos.familia_probable || ''}
                     onChange={(e) => setAtributos({ ...atributos, familia_probable: e.target.value || null })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
                   >
                     <option value="">Sin definir</option>
                     {FAMILIAS.map(f => <option key={f} value={f}>{f}</option>)}
@@ -483,11 +730,11 @@ export default function CotizadorInteligente() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1">Estilo General</label>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Estilo General</label>
                   <select
                     value={atributos.estilo_general || ''}
                     onChange={(e) => setAtributos({ ...atributos, estilo_general: e.target.value || null })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
                   >
                     <option value="">Sin definir</option>
                     {ESTILOS.map(e => <option key={e} value={e}>{e}</option>)}
@@ -495,11 +742,11 @@ export default function CotizadorInteligente() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1">Tipo de Patas</label>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Tipo de Patas</label>
                   <select
                     value={atributos.tipo_patas || ''}
                     onChange={(e) => setAtributos({ ...atributos, tipo_patas: e.target.value || null })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
                   >
                     <option value="">Sin definir</option>
                     {PATAS.map(p => <option key={p} value={p}>{p}</option>)}
@@ -508,21 +755,21 @@ export default function CotizadorInteligente() {
               </div>
 
               <div className="flex gap-6 pt-2">
-                <label className="flex items-center gap-2 cursor-pointer font-semibold text-sm text-gray-700">
+                <label className="flex items-center gap-2 cursor-pointer font-semibold text-sm text-yeikar-neutral">
                   <input
                     type="checkbox"
                     checked={atributos.tiene_tapiceria}
                     onChange={(e) => setAtributos({ ...atributos, tiene_tapiceria: e.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300 text-yeikar-primary focus:ring-yeikar-primary/40 accent-yeikar-primary"
+                    className="w-4 h-4 rounded border-yeikar-secondary-light/25 text-yeikar-primary focus:ring-yeikar-primary/40 accent-yeikar-primary"
                   />
                   Tiene Tapicería
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer font-semibold text-sm text-gray-700">
+                <label className="flex items-center gap-2 cursor-pointer font-semibold text-sm text-yeikar-neutral">
                   <input
                     type="checkbox"
                     checked={atributos.tiene_luces}
                     onChange={(e) => setAtributos({ ...atributos, tiene_luces: e.target.checked })}
-                    className="w-4 h-4 rounded border-gray-300 text-yeikar-primary focus:ring-yeikar-primary/40 accent-yeikar-primary"
+                    className="w-4 h-4 rounded border-yeikar-secondary-light/25 text-yeikar-primary focus:ring-yeikar-primary/40 accent-yeikar-primary"
                   />
                   Tiene Iluminación LED
                 </label>
@@ -530,46 +777,105 @@ export default function CotizadorInteligente() {
             </div>
 
             {/* Medidas y Parámetros Iniciales */}
-            <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-2">Medidas y Parámetros del Proyecto</h3>
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-6 shadow-card space-y-4">
+              <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider mb-2">Medidas y Parámetros del Proyecto</h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1">Ancho (metros) *</label>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Ancho (metros) *</label>
                   <input
                     type="number"
                     step="0.01"
                     value={parametros.ancho}
                     onChange={(e) => setParametros({ ...parametros, ancho: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-500 mb-1">Largo (metros) *</label>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Largo (metros) *</label>
                   <input
                     type="number"
                     step="0.01"
                     value={parametros.largo}
                     onChange={(e) => setParametros({ ...parametros, largo: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Alto (metros)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={parametros.alto}
+                    onChange={(e) => setParametros({ ...parametros, alto: e.target.value })}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Fondo (metros)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={parametros.fondo}
+                    onChange={(e) => setParametros({ ...parametros, fondo: e.target.value })}
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
                   />
                 </div>
                 <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-xs font-semibold text-gray-500 mb-1">Ganancia / Margen (%)</label>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Ganancia / Margen (%)</label>
                   <input
                     type="number"
                     value={parametros.ganancia}
                     onChange={(e) => setParametros({ ...parametros, ganancia: e.target.value })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
                   />
                 </div>
               </div>
+            </div>
+
+            {/* Preguntas dinámicas de la IA (ingeniero de producción) */}
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-6 shadow-card space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">
+                    Preguntas de la IA <span className="text-yeikar-primary-dark">(ingeniero de producción)</span>
+                  </h3>
+                  <p className="text-xs text-yeikar-neutral/50 mt-1">
+                    {preguntas.length > 0
+                      ? 'Solo preguntas que la imagen no respondió y que afectan el costo. Respóndelas para afinar la estructura.'
+                      : 'La IA no encontró preguntas críticas. Las cantidades se estimarán con lo visible en la imagen.'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGenerarPreguntas}
+                  disabled={generandoPreguntas || !imagenFile}
+                  className="shrink-0 text-xs font-bold text-yeikar-primary-dark border border-yeikar-primary/40 hover:bg-yeikar-primary/10 rounded-lg px-3 py-2 transition-all disabled:opacity-40"
+                >
+                  {generandoPreguntas ? 'Generando...' : '🔄 Regenerar preguntas'}
+                </button>
+              </div>
+
+              {preguntas.length > 0 && (
+                <div className="space-y-4 pt-2">
+                  {preguntas.map((p) => (
+                    <div key={p.clave} className="border border-yeikar-secondary-light/15 rounded-xl p-4 bg-yeikar-tertiary/40">
+                      <label className="block text-sm font-semibold text-yeikar-neutral">
+                        {p.pregunta}
+                        {p.requerida && <span className="text-red-500 ml-1">*</span>}
+                      </label>
+                      {p.por_que && <p className="text-xs text-yeikar-neutral/50 mt-0.5 mb-2">{p.por_que}</p>}
+                      {renderPreguntaInput(p, respuestas[p.clave], (v) => setRespuesta(p.clave, v))}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex gap-3">
               <button
                 type="button"
                 onClick={() => setPaso('upload')}
-                className="flex-1 py-3 border border-gray-300 text-gray-600 rounded-xl font-semibold hover:bg-gray-50 transition-all"
+                className="flex-1 py-3 border border-yeikar-secondary-light/15 text-yeikar-neutral/70 rounded-xl font-semibold hover:bg-yeikar-tertiary transition-all"
               >
                 ← Volver a Foto
               </button>
@@ -598,15 +904,15 @@ export default function CotizadorInteligente() {
                   Estructura de Costos del Borrador
                 </h2>
                 {productoBaseNombre && (
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-xs text-yeikar-neutral/50 mt-1">
                     Fusión inteligente guiada por plantilla: <strong>{productoBaseNombre}</strong> ({scoreSimilitud}% similitud)
                   </p>
                 )}
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-xs font-semibold text-gray-500">Medidas:</span>
+                <span className="text-xs font-semibold text-yeikar-neutral/60">Medidas:</span>
                 <span className="bg-yeikar-primary/10 border border-yeikar-primary/30 text-yeikar-secondary text-xs font-bold font-mono px-3 py-1 rounded-lg">
-                  {parametros.ancho}m × {parametros.largo}m
+                  {parametros.ancho}m × {parametros.largo}m{parametros.alto ? ` × ${parametros.alto}m` : ''}
                 </span>
               </div>
             </div>
@@ -633,43 +939,43 @@ export default function CotizadorInteligente() {
               {/* ERP Summary sidebar */}
               <div className="space-y-6">
                 {/* Parámetros Rápidos */}
-                <div className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm space-y-3">
-                  <h4 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Parámetros Financieros</h4>
+                <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card space-y-3">
+                  <h4 className="text-xs font-bold text-yeikar-neutral/60 uppercase tracking-wider mb-2">Parámetros Financieros</h4>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
-                      <label className="block text-gray-400 font-medium mb-1">Mano de Obra %</label>
+                      <label className="block text-yeikar-neutral/50 font-medium mb-1">Mano de Obra %</label>
                       <input
                         type="number"
                         value={parametros.pct_mano_obra}
                         onChange={(e) => setParametros({ ...parametros, pct_mano_obra: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
+                        className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-gray-400 font-medium mb-1">Gastos %</label>
+                      <label className="block text-yeikar-neutral/50 font-medium mb-1">Gastos %</label>
                       <input
                         type="number"
                         value={parametros.pct_gastos}
                         onChange={(e) => setParametros({ ...parametros, pct_gastos: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
+                        className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-gray-400 font-medium mb-1">Ganancia %</label>
+                      <label className="block text-yeikar-neutral/50 font-medium mb-1">Ganancia %</label>
                       <input
                         type="number"
                         value={parametros.ganancia}
                         onChange={(e) => setParametros({ ...parametros, ganancia: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
+                        className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
                       />
                     </div>
                     <div>
-                      <label className="block text-gray-400 font-medium mb-1">IVA %</label>
+                      <label className="block text-yeikar-neutral/50 font-medium mb-1">IVA %</label>
                       <input
                         type="number"
                         value={parametros.iva}
                         onChange={(e) => setParametros({ ...parametros, iva: e.target.value })}
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
+                        className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
                       />
                     </div>
                   </div>
@@ -677,7 +983,7 @@ export default function CotizadorInteligente() {
 
                 {/* Resumen de totales */}
                 {resumen && (
-                  <div className="bg-yeikar-secondary text-white rounded-2xl p-6 shadow-md space-y-4">
+                  <div className="bg-yeikar-secondary text-white rounded-2xl p-6 shadow-lift space-y-4">
                     <h3 className="font-headline font-bold text-base border-b border-white/10 pb-2">
                       Resumen del ERP
                     </h3>
@@ -728,7 +1034,7 @@ export default function CotizadorInteligente() {
               <button
                 type="button"
                 onClick={() => setPaso('validar')}
-                className="flex-1 py-3 border border-gray-300 text-gray-600 rounded-xl font-semibold hover:bg-gray-50 transition-all"
+                className="flex-1 py-3 border border-yeikar-secondary-light/15 text-yeikar-neutral/70 rounded-xl font-semibold hover:bg-yeikar-tertiary transition-all"
               >
                 ← Configurar Atributos
               </button>
@@ -749,7 +1055,7 @@ export default function CotizadorInteligente() {
           <div className="space-y-6">
             <div>
               <h2 className="text-xl sm:text-2xl font-headline font-bold text-yeikar-secondary">Confirmar Guardado</h2>
-              <p className="text-sm text-gray-500 mt-1">
+              <p className="text-sm text-yeikar-neutral/60 mt-1">
                 Elige si deseas registrar la estructura como una Cotización formal de venta o como una nueva Plantilla de Producto.
               </p>
             </div>
@@ -763,21 +1069,21 @@ export default function CotizadorInteligente() {
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
-                <span className="text-gray-400">Ancho/Largo:</span>
-                <span className="font-semibold text-gray-800">{parametros.ancho}m × {parametros.largo}m</span>
-                <span className="text-gray-400">Costo Prod:</span>
-                <span className="font-semibold font-mono text-gray-800">${resumen.costo_produccion.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
+                <span className="text-yeikar-neutral/50">Ancho/Largo:</span>
+                <span className="font-semibold text-yeikar-neutral">{parametros.ancho}m × {parametros.largo}m{parametros.alto ? ` × ${parametros.alto}m` : ''}</span>
+                <span className="text-yeikar-neutral/50">Costo Prod:</span>
+                <span className="font-semibold font-mono text-yeikar-neutral">${resumen.costo_produccion.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
 
             {/* Toggle tipo guardado */}
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-              <div className="grid grid-cols-2 divide-x divide-gray-100 border-b border-gray-100">
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 shadow-card overflow-hidden">
+              <div className="grid grid-cols-2 divide-x divide-yeikar-secondary-light/10 border-b border-yeikar-secondary-light/10">
                 <button
                   type="button"
                   onClick={() => setGuardarComo('cotizacion')}
                   className={`py-4 text-center font-semibold text-sm transition-all flex items-center justify-center gap-2
-                    ${guardarComo === 'cotizacion' ? 'bg-yeikar-primary/10 text-yeikar-secondary font-bold' : 'text-gray-400 hover:bg-gray-50'}`}
+                    ${guardarComo === 'cotizacion' ? 'bg-yeikar-primary/10 text-yeikar-secondary font-bold' : 'text-yeikar-neutral/50 hover:bg-yeikar-tertiary'}`}
                 >
                   📄 Guardar como Cotización
                 </button>
@@ -785,7 +1091,7 @@ export default function CotizadorInteligente() {
                   type="button"
                   onClick={() => setGuardarComo('producto')}
                   className={`py-4 text-center font-semibold text-sm transition-all flex items-center justify-center gap-2
-                    ${guardarComo === 'producto' ? 'bg-yeikar-primary/10 text-yeikar-secondary font-bold' : 'text-gray-400 hover:bg-gray-50'}`}
+                    ${guardarComo === 'producto' ? 'bg-yeikar-primary/10 text-yeikar-secondary font-bold' : 'text-yeikar-neutral/50 hover:bg-yeikar-tertiary'}`}
                 >
                   📦 Guardar como Nuevo Producto
                 </button>
@@ -795,66 +1101,66 @@ export default function CotizadorInteligente() {
                 {guardarComo === 'cotizacion' ? (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Cliente *</label>
+                      <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Cliente *</label>
                       <select
                         required
                         value={clienteId}
                         onChange={(e) => setClienteId(e.target.value)}
-                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                        className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
                       >
                         <option value="">Seleccione un cliente...</option>
                         {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                       </select>
                     </div>
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Observaciones</label>
+                      <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Observaciones</label>
                       <textarea
                         value={observacionesFinal}
                         onChange={(e) => setObservacionesFinal(e.target.value)}
                         placeholder="Observaciones de venta o requerimientos específicos del cliente..."
                         rows={3}
-                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 resize-none"
+                        className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 resize-none"
                       />
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-sm font-semibold text-gray-700 mb-2">Nombre de la Plantilla / Producto *</label>
+                      <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Nombre de la Plantilla / Producto *</label>
                       <input
                         type="text"
                         required
                         placeholder="Ej. CAMA FLOTANTE NÓRDICA V2"
                         value={nombreProducto}
                         onChange={(e) => setNombreProducto(e.target.value)}
-                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 uppercase"
+                        className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 uppercase"
                       />
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Categoría de Producto *</label>
+                        <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Categoría de Producto *</label>
                         <select
                           required
                           value={tipoProductoId}
                           onChange={(e) => setTipoProductoId(e.target.value)}
-                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
+                          className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
                         >
                           <option value="">Seleccione categoría...</option>
                           {tiposProducto.map(tp => <option key={tp.id} value={tp.id}>{tp.nombre}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-semibold text-gray-700 mb-2">Descripción del Producto</label>
+                        <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Descripción del Producto</label>
                         <input
                           type="text"
                           placeholder="Notas o especificaciones para catálogo..."
                           value={observacionesFinal}
                           onChange={(e) => setObservacionesFinal(e.target.value)}
-                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                          className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
                         />
                       </div>
                     </div>
-                    <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3 font-semibold">
+                    <p className="text-xs text-yeikar-primary-dark bg-yeikar-primary/10 border border-yeikar-primary/30 rounded-lg p-3 font-semibold">
                       💡 Al guardar como Producto, la receta detallada se almacenará como receta paramétrica base. Esto te permitirá usar este producto como plantilla idéntica para cotizaciones futuras.
                     </p>
                   </div>
@@ -872,7 +1178,7 @@ export default function CotizadorInteligente() {
               <button
                 type="button"
                 onClick={() => setPaso('borrador')}
-                className="flex-1 py-3 border border-gray-300 text-gray-600 rounded-xl font-semibold hover:bg-gray-50 transition-all"
+                className="flex-1 py-3 border border-yeikar-secondary-light/15 text-yeikar-neutral/70 rounded-xl font-semibold hover:bg-yeikar-tertiary transition-all"
               >
                 ← Volver a Estructura
               </button>
@@ -880,7 +1186,7 @@ export default function CotizadorInteligente() {
                 type="button"
                 onClick={handleGuardarFinal}
                 disabled={guardando}
-                className="flex-2 flex-grow-[2] py-4 bg-emerald-600 text-white rounded-xl font-bold hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2"
+                className="flex-2 flex-grow-[2] py-4 bg-yeikar-primary text-yeikar-neutral rounded-xl font-bold hover:bg-yeikar-primary-dark transition-all shadow-md flex items-center justify-center gap-2"
               >
                 {guardando ? (
                   <><svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Guardando...</>
@@ -894,22 +1200,22 @@ export default function CotizadorInteligente() {
 
         {/* ── Cotización / Producto creado exitosamente ── */}
         {paso === 'finalizar' && cotizacionCreada && (
-          <div className="text-center space-y-6 py-10 bg-white border border-gray-200 rounded-2xl shadow-sm max-w-2xl mx-auto p-8">
-            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto shadow-inner">
-              <svg className="w-10 h-10 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div className="text-center space-y-6 py-10 bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-card max-w-2xl mx-auto p-8">
+            <div className="w-20 h-20 bg-yeikar-primary/15 rounded-full flex items-center justify-center mx-auto shadow-inner">
+              <svg className="w-10 h-10 text-yeikar-primary-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
             <div className="space-y-2">
-              <h2 className="text-2xl font-headline font-bold text-emerald-700">¡Registro exitoso!</h2>
-              <p className="text-sm text-gray-500">{cotizacionCreada.mensaje}</p>
+              <h2 className="text-2xl font-headline font-bold text-yeikar-primary-dark">¡Registro exitoso!</h2>
+              <p className="text-sm text-yeikar-neutral/60">{cotizacionCreada.mensaje}</p>
               {cotizacionCreada.id > 0 ? (
-                <p className="text-xs text-gray-400 font-mono">
+                <p className="text-xs text-yeikar-neutral/50 font-mono">
                   Cotización #{cotizacionCreada.id} registrada con un monto final de{' '}
                   <strong className="text-yeikar-secondary">${cotizacionCreada.total.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</strong>
                 </p>
               ) : (
-                <p className="text-xs text-gray-400 font-mono">
+                <p className="text-xs text-yeikar-neutral/50 font-mono">
                   Producto de catálogo guardado con un costo sugerido de{' '}
                   <strong className="text-yeikar-secondary">${cotizacionCreada.total.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</strong>
                 </p>
@@ -939,6 +1245,8 @@ export default function CotizadorInteligente() {
                   setImagenPreview(null);
                   setContextoAdicional('');
                   setAtributos(null);
+                  setPreguntas([]);
+                  setRespuestas({});
                   setSecciones([]);
                   setResumen(null);
                   setCotizacionCreada(null);
@@ -952,7 +1260,7 @@ export default function CotizadorInteligente() {
                   setProductoBaseNombre(null);
                   setScoreSimilitud(0);
                 }}
-                className="px-6 py-3 border border-gray-300 text-gray-600 rounded-xl font-semibold hover:bg-gray-50 transition-all"
+                className="px-6 py-3 border border-yeikar-secondary-light/15 text-yeikar-neutral/70 rounded-xl font-semibold hover:bg-yeikar-tertiary transition-all"
               >
                 Nueva Cotización
               </button>

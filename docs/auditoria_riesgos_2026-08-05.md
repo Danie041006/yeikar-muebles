@@ -3,7 +3,7 @@
 **Fecha:** 2026-08-05
 **Alcance:** módulos de dinero (cotización → pedido → venta → pago), producción/costeo, inventario, compras, seguridad, gastos, clientes, proveedores y concurrencia.
 **Método:** suite de tests de riesgo (`backend/test/`) contra BD real (PostgreSQL), con limpieza estricta del teardown.
-**Resultado:** 69/69 tests en verde (fase 1: 56; fase 2: +11; fase 3: +2), 0 residuos en BD, frontend compila.
+**Resultado:** 88/88 tests en verde (fase 1: 56; fase 2: +11; fase 3: +2; fase 5: +19), 0 residuos en BD, frontend compila.
 
 ---
 
@@ -72,6 +72,22 @@ Además: `pytest test/` ahora ignora `test_integracion_api.py` (script standalon
 | F4-4 | Baja | Backend | `ProductoMaterialUpdate` omitía `seccion` → edit silenciosamente ignoraba cambios de sección | `seccion: Optional[str]` añadido al schema |
 
 **Estado:** 69/69 tests, `test_por_rango_aplica_cantidad_segun_largo` end-to-end (receta → calcular-precio), 0 residuos en BD, frontend `npm run build` OK.
+
+---
+
+## Resumen fase 5 (IQE — preguntas dinámicas del ingeniero de producción)
+
+La IA del Cotizador Inteligente actúa como **ingeniero de producción**: analiza la foto, declara lo que percibe (`percepcion` + `dimensiones_referencia`) y genera dinámicamente **solo** las preguntas que no puede responder de la imagen y que SÍ afectan la estructura de costos. Las respuestas alimentan el motor de costos real vía `_aplicar_respuestas`.
+
+| # | Severidad | Módulo | Hallazgo | Fix |
+|---|-----------|--------|----------|-----|
+| F5-1 | Crítica | IQE | La IA preguntaba datos de venta (ciudad, presupuesto, plazos) que no afectan costos → costo incorrecto y preguntas inútiles | Rol fijo "ingeniero de producción" en `preguntas_prompt.md`: prohíbe datos de venta; vocabulario restringido `VOCABULARIO_PREGUNTAS` (18 claves costeables) + filtro de claves inválidas en `_parse_preguntas` |
+| F5-2 | Alta | IQE | Preguntaba medidas obvias en la foto (alto visible) → fricción | Reglas 5–7 en `vision_prompt.md`: solo preguntar lo NO visible; `dimensiones_referencia` obligatoria; si el vendedor responde "no conozco medidas" → la IA estima |
+| F5-3 | Alta | IQE | Las respuestas no llegaban al motor de costos → preguntas decorativas | `_aplicar_respuestas` mapea cada clave a ajustes en secciones/líneas (material principal, espesor, acabado, activar/desactivar secciones, CNC/torno, estructura reforzada) + reescalado `_reescalar_cantidad_ia` cuando no hay histórico |
+| F5-4 | Media | Costeo | Materiales que escalan con alto (espuma, rellenos) solo usaban ancho×largo | Escala **VOLUMEN** en `_escalar_cantidad` (ancho×largo×alto) |
+| F5-5 | Media | IQE | Columnas `alto_base`/`DetalleCotizacion.alto` existían pero nunca se usaban | `build_cost_structure` recibe alto/fondo; `generate-structure`/`finalize-structure` persisten alto en `Producto` y `DetalleCotizacion` |
+
+**Estado:** 88/88 tests (`test_iqe_fase5.py`: 19), 0 residuos en BD, frontend `npm run build` OK.
 
 ---
 
@@ -204,6 +220,7 @@ Archivo: `backend/test/conftest.py`.
 | `test_security.py` | 14 | JWT, refresh rotation, permisos por módulo |
 | `test_auditoria2.py` | 11 | regresiones fase 2: TRM COP→USD, DELETE con FK 409, gastos, cotización, moneda de venta |
 | `test_iqe.py` + `test_permisos.py` | 7 | legacy (verificación de no-regresión) |
+| `test_iqe_fase5.py` | 19 | fase 5: reescalado de cantidades IA, escala VOLUMEN, `_aplicar_respuestas`, integración generate-structure con alto/fondo |
 
 **Comando de verificación:**
 ```sh

@@ -16,6 +16,26 @@ from decimal import Decimal
 # Respuesta del análisis de imagen (CAPA 2: Attribute Extractor)
 # ---------------------------------------------------------------------------
 
+class PreguntaOpcionOut(BaseModel):
+    """Una opción de una pregunta dinámica (select/multi)."""
+    valor: str
+    etiqueta: str
+
+
+class PreguntaFaltanteOut(BaseModel):
+    """
+    Pregunta que la IA hace al vendedor porque no pudo responderla desde la
+    imagen pero SÍ afecta la estructura de costos. La clave DEBE pertenecer
+    al vocabulario que el motor de costos sabe consumir.
+    """
+    clave: str
+    pregunta: str
+    tipo: str = "texto"       # select | multi | si_no | numero | texto
+    opciones: list[PreguntaOpcionOut] = []
+    requerida: bool = False
+    por_que: str = ""
+
+
 class FurnitureAttributesOut(BaseModel):
     """JSON de atributos que devuelve la IA tras analizar la foto."""
     tipo_mueble: str = "otro"
@@ -30,6 +50,10 @@ class FurnitureAttributesOut(BaseModel):
     requiere_revision_humana: bool = False
     estructura_propuesta: list[dict] = []
     analisis_id: Optional[int] = None
+    # Conciencia del modelo (v2)
+    percepcion: Optional[str] = None
+    dimensiones_referencia: dict = {}
+    preguntas_faltantes: list[PreguntaFaltanteOut] = []
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +274,10 @@ class GenerateStructureRequest(BaseModel):
     estructura_propuesta: list[dict]
     nuevo_ancho: float
     nuevo_largo: float
+    nuevo_alto: Optional[float] = None
+    nuevo_fondo: Optional[float] = None
+    respuestas: dict = {}               # Respuestas del vendedor a las preguntas de la IA
+    dimensiones_referencia: dict = {}   # Medidas que la IA asumió al proponer cantidades
     ganancia_porcentaje: float = 40.0
     iva_porcentaje: float = 0.0
     pct_mano_obra: float = 15.0
@@ -274,6 +302,8 @@ class FinalizeStructureRequest(BaseModel):
     secciones: list[SeccionCostoIn]
     nuevo_ancho: float
     nuevo_largo: float
+    nuevo_alto: Optional[float] = None
+    nuevo_fondo: Optional[float] = None
     ganancia_porcentaje: float = 40.0
     iva_porcentaje: float = 0.0
     pct_mano_obra: float = 15.0

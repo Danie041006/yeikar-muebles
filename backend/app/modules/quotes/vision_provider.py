@@ -39,6 +39,61 @@ ESTILOS_VALIDOS = {"moderno", "clasico", "rustico", "minimalista", "industrial"}
 # Tipos de patas soportados
 PATAS_VALIDAS = {"metal", "madera", "sin_patas", "ruedas"}
 
+# Vocabulario de preguntas que el motor de costos SABE consumir.
+# La IA SOLO puede preguntar sobre estas claves; cada respuesta mapea
+# a una regla real de _aplicar_respuestas en structure_builder.py.
+VOCABULARIO_PREGUNTAS: dict[str, str] = {
+    "dimensiones": "Medidas del mueble (ancho, largo, alto, fondo) en metros",
+    "material_principal": "Material principal del cuerpo: pino, mdf, melamina, triplex, madera_maciza",
+    "espesor_tablero": "Espesor del tablero en mm: 15, 18, 25",
+    "acabado": "Tipo de acabado: pintura, laca, poliuretano, melamina, enchapado, natural",
+    "herrajes": "Herrajes: bisagras, correderas, minifix, tornillos, tarugos, pistones, ruedas, jaladeras",
+    "tiene_tapizado": "¿Tiene partes tapizadas?",
+    "tiene_espuma": "¿Lleva espuma o relleno?",
+    "tiene_vidrio": "¿Incluye vidrio o espejos?",
+    "tiene_metal": "¿Incluye piezas metálicas (tubos, platinas, estructura interna)?",
+    "tiene_led": "¿Lleva iluminación LED?",
+    "tiene_espejos": "¿Incluye espejos?",
+    "estructura_reforzada": "Refuerzo de estructura: liviana, normal, reforzada",
+    "piezas_cnc": "¿Hay piezas que requieren CNC?",
+    "piezas_torno": "¿Hay piezas que requieren torno?",
+    "piezas_doblado": "¿Hay piezas que requieren doblado de metal?",
+    "piezas_curvas": "¿Hay piezas curvas?",
+    "partes_ocultas": "Materiales, herrajes o procesos ocultos que el vendedor conoce",
+    "medidas_conocidas": "¿Conoce las medidas finales?",
+}
+
+
+@dataclass
+class PreguntaFaltante:
+    """
+    Una pregunta que la IA hace al vendedor porque NO pudo responderla
+    desde la imagen y SÍ afecta el costo de producción.
+
+    - clave: identificador machine-readable del vocabulario (VOCABULARIO_PREGUNTAS)
+    - pregunta: texto natural mostrado al vendedor
+    - tipo: "select" | "si_no" | "numero" | "multi" | "texto"
+    - opciones: [{valor, etiqueta}] para select/multi
+    - requerida: si la respuesta es imprescindible para costear
+    - por_que: explicación corta de por qué afecta el costo
+    """
+    clave: str
+    pregunta: str
+    tipo: str = "texto"
+    opciones: list = field(default_factory=list)
+    requerida: bool = False
+    por_que: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "clave": self.clave,
+            "pregunta": self.pregunta,
+            "tipo": self.tipo,
+            "opciones": self.opciones,
+            "requerida": self.requerida,
+            "por_que": self.por_que,
+        }
+
 
 @dataclass
 class FurnitureAttributes:
@@ -69,6 +124,12 @@ class FurnitureAttributes:
     # Atributos específicos del tipo de mueble (sin cambiar schema de BD)
     atributos_extra: dict = field(default_factory=dict)
     estructura_propuesta: list[dict] = field(default_factory=list)
+
+    # Conciencia del modelo (v2): qué vio, qué dimensiones asumió y qué
+    # información crítica le falta para costear con precisión.
+    percepcion: Optional[str] = None                    # Resumen en lenguaje natural
+    dimensiones_referencia: dict = field(default_factory=dict)  # {"ancho":..,"largo":..,"alto":..,"fondo":..}
+    preguntas_faltantes: list = field(default_factory=list)     # list[PreguntaFaltante]
 
     # --- Helpers para acceder a atributos extra ---
 
@@ -178,5 +239,24 @@ class VisionProvider(ABC):
           - No inventar materiales, cantidades ni costos.
           - Devolver un nivel_confianza honesto.
           - Funcionar para CUALQUIER mueble que YEIKAR fabrica.
+        """
+        ...
+
+    @abstractmethod
+    async def generate_questions(
+        self,
+        image_bytes: bytes,
+        mime_type: str = "image/jpeg",
+        contexto_adicional: Optional[str] = None,
+        datos_proyecto: Optional[dict] = None,
+    ) -> list:
+        """
+        Analiza la imagen y devuelve la lista de PreguntaFaltante que la IA
+        no pudo responder desde la foto pero que SÍ afectan la estructura
+        de costos (restricción: SOLO claves del VOCABULARIO_PREGUNTAS).
+
+        La IA actúa como ingeniero de producción: no pregunta por datos de
+        venta (ciudad, presupuesto, plazos), solo por lo que el motor de
+        costos necesita para construir la estructura.
         """
         ...

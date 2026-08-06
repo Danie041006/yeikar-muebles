@@ -30,6 +30,30 @@ export interface FurnitureAttributesOut {
   requiere_revision_humana: boolean;
   estructura_propuesta: any[];
   analisis_id?: number | null;
+  percepcion?: string | null;
+  dimensiones_referencia?: Record<string, any>;
+  preguntas_faltantes?: PreguntaFaltanteOut[];
+}
+
+export interface PreguntaFaltanteOut {
+  clave: string;
+  pregunta: string;
+  tipo: 'select' | 'multi' | 'si_no' | 'numero' | 'texto';
+  opciones: string[];
+  requerida: boolean;
+  por_que: string;
+}
+
+export interface DatosProyecto {
+  ancho?: number | null;
+  largo?: number | null;
+  alto?: number | null;
+  fondo?: number | null;
+  material_principal?: string;
+  espesor_tablero?: string;
+  acabado?: string;
+  cantidad_puertas?: number | null;
+  tiene_espejo?: boolean;
 }
 
 export interface SimilarityResultOut {
@@ -192,6 +216,10 @@ export interface GenerateStructureRequest {
   estructura_propuesta: any[];
   nuevo_ancho: number;
   nuevo_largo: number;
+  nuevo_alto?: number | null;
+  nuevo_fondo?: number | null;
+  respuestas?: Record<string, any>;
+  dimensiones_referencia?: Record<string, any>;
   ganancia_porcentaje?: number;
   iva_porcentaje?: number;
   pct_mano_obra?: number;
@@ -215,6 +243,7 @@ export interface FinalizeStructureRequest {
   secciones: SeccionCostoOut[];
   nuevo_ancho: number;
   nuevo_largo: number;
+  nuevo_alto?: number | null;
   ganancia_porcentaje?: number;
   iva_porcentaje?: number;
   pct_mano_obra?: number;
@@ -241,14 +270,38 @@ export const iqeService = {
   /**
    * Paso 1: Sube imagen y extrae atributos visuales con IA.
    * Usa multipart/form-data. El campo `contexto_adicional` es opcional.
+   * `datosProyecto` son las medidas/opciones que el vendedor definió ANTES
+   * del análisis (ancho, largo, alto, fondo, material, acabado…).
    */
-  async analyzeImage(file: File, contextoAdicional?: string): Promise<FurnitureAttributesOut> {
+  async analyzeImage(file: File, contextoAdicional?: string, datosProyecto?: DatosProyecto): Promise<FurnitureAttributesOut> {
     const formData = new FormData();
     formData.append('file', file);
     if (contextoAdicional?.trim()) {
       formData.append('contexto_adicional', contextoAdicional.trim());
     }
+    if (datosProyecto && Object.keys(datosProyecto).length > 0) {
+      formData.append('datos_proyecto', JSON.stringify(datosProyecto));
+    }
     const res = await api.post('/intelligent-quotation/analyze-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return res.data;
+  },
+
+  /**
+   * Paso 1.5: La IA genera dinámicamente SOLO las preguntas críticas que la
+   * imagen no respondió y que SÍ afectan la estructura de costos.
+   */
+  async generateQuestions(file: File, contextoAdicional?: string, datosProyecto?: DatosProyecto): Promise<PreguntaFaltanteOut[]> {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (contextoAdicional?.trim()) {
+      formData.append('contexto_adicional', contextoAdicional.trim());
+    }
+    if (datosProyecto && Object.keys(datosProyecto).length > 0) {
+      formData.append('datos_proyecto', JSON.stringify(datosProyecto));
+    }
+    const res = await api.post('/intelligent-quotation/generate-questions', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return res.data;
