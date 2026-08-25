@@ -69,3 +69,7 @@ videos/
 *.xlsx
 *.xls
 *:Zone.Identifier
+
+# Artefactos generados de tests E2E (screenshots con datos en pantalla)
+frontend/e2e/screenshots/
+frontend/e2e/test-results/
