@@ -1,4 +1,5 @@
 import api from './api';
+import type { AdjuntoInfo } from './adjuntosService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,8 @@ export interface Pago {
   referencia?: string;
   observaciones?: string;
   moneda?: MonedaInfo;
+  /** Comprobantes digitales del pago (recibos). */
+  recibos?: AdjuntoInfo[];
 }
 
 export interface Venta {
@@ -62,6 +65,8 @@ export interface VentaDetalle extends Venta {
   pagos: Pago[];
   total_pagado: number;
   saldo_pendiente: number;
+  total_en_moneda_base?: number;
+  tasa_cambio?: number;
 }
 
 export interface CuentaPorCobrar {
@@ -95,9 +100,9 @@ export interface PagoCreate {
 
 // Métodos de pago disponibles
 export const METODOS_PAGO = [
-  { value: 'EFECTIVO_COP', label: 'Efectivo COP 🇨🇴', moneda: 'COP' },
-  { value: 'EFECTIVO_USD', label: 'Efectivo USD 🇺🇸', moneda: 'USD' },
-  { value: 'EFECTIVO_VES', label: 'Efectivo Bs 🇻🇪', moneda: 'VES' },
+  { value: 'EFECTIVO_COP', label: 'Efectivo COP', moneda: 'COP' },
+  { value: 'EFECTIVO_USD', label: 'Efectivo USD', moneda: 'USD' },
+  { value: 'EFECTIVO_VES', label: 'Efectivo Bs', moneda: 'VES' },
   { value: 'BANCOLOMBIA', label: 'Bancolombia', moneda: 'COP' },
   { value: 'BANCARIBE', label: 'Bancaribe', moneda: 'VES' },
   { value: 'ZELLE', label: 'Zelle', moneda: 'USD' },

@@ -1,6 +1,19 @@
 import React, { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { produccionService, OrdenProduccion, EtapaProduccion, Area, ReferenciaReceta } from '../services/produccionService';
+import { inventarioService } from '../services/inventarioService';
 import api from '../services/api';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { SearchSelect } from '../components/ui';
+import { useToast } from '../context/ToastContext';
+
+// Transiciones legales de etapa (mismas que la máquina de estados del backend).
+const TRANSICIONES_ETAPA: Record<string, string[]> = {
+  ASIGNADA: ['EN_PROCESO'],
+  EN_PROCESO: ['PAUSADA', 'COMPLETADA'],
+  PAUSADA: ['EN_PROCESO'],
+  COMPLETADA: [],
+};
 
 // Empleado interface for selection
 interface Empleado {
@@ -37,7 +50,7 @@ interface ColumnProps {
 function KanbanColumn({ area, stages, onCardClick, onStatusChange, onPassToArea, updatingStageId }: ColumnProps) {
   return (
     <div
-      className="flex flex-col min-h-[500px] w-72 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-2xl p-4 shadow-sm"
+      className="flex flex-col min-h-[500px] w-72 snap-start bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-2xl p-4 shadow-sm"
     >
       {/* Column Header */}
       <div className="flex items-center justify-between mb-4 border-b border-yeikar-secondary-light/5 pb-2">
@@ -111,22 +124,26 @@ function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdati
           ORDEN #{stage.orden_produccion_id}
         </span>
         
-        {/* Status selector */}
+        {/* Status selector: solo transiciones legales (la máquina de estados
+            del backend rechaza el resto; antes se ofrecían las 4 siempre y el
+            400 fallaba en silencio) */}
         <select
           value={stage.estado}
-          disabled={statusUpdating}
+          disabled={statusUpdating || TRANSICIONES_ETAPA[stage.estado]?.length === 0}
+          aria-label={`Estado de la etapa ${stage.id}`}
           onChange={(e) => {
             e.stopPropagation();
             onStatusChange(stage.id, e.target.value);
           }}
-          className={`text-[10px] font-bold px-2 py-0.5 rounded border disabled:opacity-50 disabled:cursor-wait ${
+          className={`text-[10px] font-bold px-2 py-0.5 rounded border disabled:opacity-50 disabled:cursor-not-allowed ${
             statusColors[stage.estado]
           } focus:outline-none focus:ring-1 focus:ring-yeikar-primary cursor-pointer`}
         >
-          <option value="ASIGNADA">ASIGNADA</option>
-          <option value="EN_PROCESO">EN PROCESO</option>
-          <option value="PAUSADA">PAUSADA</option>
-          <option value="COMPLETADA">COMPLETADA</option>
+          {[stage.estado, ...(TRANSICIONES_ETAPA[stage.estado] || [])].map((st) => (
+            <option key={st} value={st}>
+              {st.replace('_', ' ')}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -203,6 +220,8 @@ function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdati
 
 // Main Production Kanban Page
 export default function ProduccionKanban() {
+  const toast = useToast();
+  const [confirmFinalizarId, setConfirmFinalizarId] = useState<number | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [stages, setStages] = useState<EtapaProduccion[]>([]);
   const [ordenesSinEtapaActiva, setOrdenesSinEtapaActiva] = useState<OrdenProduccion[]>([]);
@@ -242,6 +261,128 @@ export default function ProduccionKanban() {
   const [nuevaEtapaSubmitting, setNuevaEtapaSubmitting] = useState(false);
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
 
+  // Paginación del listado de órdenes (antes solo se cargaban ~100 y las
+  // órdenes antiguas desaparecían del tablero en silencio)
+  const [ordenes, setOrdenes] = useState<OrdenProduccion[]>([]);
+  const [salto, setSalto] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const LIMITE = 100;
+
+  // Stock disponible por material (para mostrarlo al registrar consumos)
+  const [inventario, setInventario] = useState<Record<number, number>>({});
+
+  // Confirmaciones de borrado (acciones destructivas: revierten stock y gastos)
+  const [consumoAEliminar, setConsumoAEliminar] = useState<number | null>(null);
+  const [manoObraAEliminar, setManoObraAEliminar] = useState<number | null>(null);
+
+  const cargarInventario = async () => {
+    try {
+      const data = await inventarioService.getInventario();
+      const mapa: Record<number, number> = {};
+      data.forEach((inv) => {
+        mapa[inv.material_id] = inv.cantidad;
+      });
+      setInventario(mapa);
+    } catch {
+      // El inventario es informativo: no romper el kanban si falla
+    }
+  };
+
+  const procesarOrdenes = (ordenesData: OrdenProduccion[]) => {
+    // Extraer TODAS las etapas (incluidas completadas, se filtran en la UI)
+    const allStages: EtapaProduccion[] = [];
+    const sinActiva: OrdenProduccion[] = [];
+
+    ordenesData.forEach((orden) => {
+      if (orden.etapas && orden.etapas.length > 0) {
+        orden.etapas.forEach((etapa) => allStages.push(etapa));
+        // Órdenes activas sin ninguna etapa activa
+        const tieneActiva = orden.etapas.some(
+          (e) => e.estado !== 'COMPLETADA'
+        );
+        if (!tieneActiva && ['PENDIENTE', 'EN_PRODUCCION', 'PAUSADA'].includes(orden.estado)) {
+          sinActiva.push(orden);
+        }
+      } else if (['PENDIENTE', 'EN_PRODUCCION', 'PAUSADA'].includes(orden.estado)) {
+        // Órdenes sin etapas en absoluto
+        sinActiva.push(orden);
+      }
+    });
+
+    setStages(allStages);
+    setOrdenesSinEtapaActiva(sinActiva);
+  };
+
+  const fetchKanbanData = async () => {
+    try {
+      setLoading(true);
+      const [areasData, ordenesData] = await Promise.all([
+        produccionService.getAreas(),
+        produccionService.getOrdenes(search || undefined, 0, LIMITE),
+      ]);
+
+      setAreas(areasData.filter(a => a.nombre !== 'Depósito'));
+      setOrdenes(ordenesData);
+      setSalto(ordenesData.length);
+      setHasMore(ordenesData.length === LIMITE);
+      procesarOrdenes(ordenesData);
+    } catch (error) {
+      console.error('Error fetching production kanban data:', error);
+      toast.error('No fue posible cargar el taller de producción. Reintenta en un momento.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const cargarMasOrdenes = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const data = await produccionService.getOrdenes(search || undefined, salto, LIMITE);
+      setOrdenes((prev) => [...prev, ...data]);
+      setSalto((prev) => prev + data.length);
+      setHasMore(data.length === LIMITE);
+      procesarOrdenes([...ordenes, ...data]);
+    } catch (error) {
+      console.error('Error loading more orders:', error);
+      toast.error('Error al cargar más órdenes.');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Carga inicial + búsqueda con debounce (la búsqueda ahora es server-side)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      fetchKanbanData();
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  useEffect(() => {
+    // Cargar empleados, materiales e inventario para los modales
+    api.get('/empleado/').then((r) => setEmpleados(r.data)).catch(() => {});
+    api.get('/material/').then((r) => setMateriales(r.data)).catch(() => {});
+    cargarInventario();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cerrar modales con ESC
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedStage(null);
+        setShowPasarModal(false);
+        setOrdenParaNuevaEtapa(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Receta de referencia del producto de la etapa (escalada a las dimensiones)
   useEffect(() => {
     if (selectedStage?.orden?.detalle_pedido?.producto?.id) {
       setLoadingReceta(true);
@@ -254,53 +395,6 @@ export default function ProduccionKanban() {
     }
   }, [selectedStage]);
 
-  const fetchKanbanData = async () => {
-    try {
-      setLoading(true);
-      const [areasData, ordenesData] = await Promise.all([
-        produccionService.getAreas(),
-        produccionService.getOrdenes(),
-      ]);
-      
-      setAreas(areasData.filter(a => a.nombre !== 'Depósito'));
-
-      // Extraer TODAS las etapas (incluidas completadas, se filtran en la UI)
-      const allStages: EtapaProduccion[] = [];
-      const sinActiva: OrdenProduccion[] = [];
-
-      ordenesData.forEach((orden) => {
-        if (orden.etapas && orden.etapas.length > 0) {
-          orden.etapas.forEach((etapa) => allStages.push(etapa));
-          // Órdenes activas sin ninguna etapa activa
-          const tieneActiva = orden.etapas.some(
-            (e) => e.estado !== 'COMPLETADA'
-          );
-          if (!tieneActiva && ['PENDIENTE', 'EN_PRODUCCION', 'PAUSADA'].includes(orden.estado)) {
-            sinActiva.push(orden);
-          }
-        } else if (['PENDIENTE', 'EN_PRODUCCION', 'PAUSADA'].includes(orden.estado)) {
-          // Órdenes sin etapas en absoluto
-          sinActiva.push(orden);
-        }
-      });
-
-
-      setStages(allStages);
-      setOrdenesSinEtapaActiva(sinActiva);
-    } catch (error) {
-      console.error('Error fetching production kanban data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchKanbanData();
-    // Cargar empleados y materiales para el modal
-    api.get('/empleado/').then((r) => setEmpleados(r.data)).catch(() => {});
-    api.get('/material/').then((r) => setMateriales(r.data)).catch(() => {});
-  }, []);
-
   const handleStatusChange = async (stageId: number, newStatus: string) => {
     if (statusUpdatingId !== null) return; // evita PUTs concurrentes sobre estados
     setStatusUpdatingId(stageId);
@@ -312,8 +406,9 @@ export default function ProduccionKanban() {
         const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${stageId}`);
         setSelectedStage(updated.data);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error changing stage status:', error);
+      toast.error(error.response?.data?.detail || 'No fue posible cambiar el estado de la etapa.');
     } finally {
       setStatusUpdatingId(null);
     }
@@ -349,7 +444,7 @@ export default function ProduccionKanban() {
       await fetchKanbanData();
     } catch (error: any) {
       console.error('Error pasando etapa a otra area:', error);
-      alert(error.response?.data?.detail || 'No fue posible pasar la etapa al area seleccionada.');
+      toast.error(error.response?.data?.detail || 'No fue posible pasar la etapa al area seleccionada.');
     } finally {
       setPasarSubmitting(false);
     }
@@ -369,35 +464,49 @@ export default function ProduccionKanban() {
     if (!selectedStage || !newConsumo.material_id || !newConsumo.cantidad) return;
     setConsumoSubmitting(true);
     try {
+      const materialId = parseInt(newConsumo.material_id);
+      const cantidad = parseFloat(newConsumo.cantidad);
+      const stockAntes = inventario[materialId];
       await produccionService.registrarConsumo({
         etapa_produccion_id: selectedStage.id,
-        material_id: parseInt(newConsumo.material_id),
-        cantidad: parseFloat(newConsumo.cantidad),
+        material_id: materialId,
+        cantidad,
         fecha: new Date().toISOString(),
+        seccion: referenciaReceta?.seccion_actual || undefined,
         observaciones: newConsumo.observaciones || undefined,
       });
-      // Recargar etapa
+      // Recargar etapa + inventario (el consumo descontó stock)
       const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${selectedStage.id}`);
       setSelectedStage(updated.data);
       setNewConsumo({ material_id: '', cantidad: '', observaciones: '' });
       setMaterialSearch('');
+      await cargarInventario();
       fetchKanbanData();
+      toast.success(
+        stockAntes !== undefined
+          ? `Material registrado y descontado del inventario. Stock restante: ${Math.max(0, stockAntes - cantidad)}`
+          : 'Material registrado y descontado del inventario.'
+      );
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al registrar consumo. Verifique el inventario.');
+      toast.error(error.response?.data?.detail || 'Error al registrar consumo. Verifique el inventario.');
     } finally {
       setConsumoSubmitting(false);
     }
   };
 
-  const handleDeleteConsumo = async (consumoId: number) => {
-    if (!selectedStage) return;
+  const ejecutarEliminarConsumo = async () => {
+    const consumoId = consumoAEliminar;
+    if (consumoId === null || !selectedStage) return;
+    setConsumoAEliminar(null);
     try {
       await produccionService.eliminarConsumo(consumoId);
       const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${selectedStage.id}`);
       setSelectedStage(updated.data);
+      await cargarInventario();
       fetchKanbanData();
-    } catch (error) {
-      console.error('Error deleting consumption:', error);
+      toast.success('Consumo eliminado. El stock fue repuesto y el egreso revertido.');
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Error al eliminar el consumo.');
     }
   };
 
@@ -417,20 +526,24 @@ export default function ProduccionKanban() {
       setSelectedStage(updated.data);
       setNewManoObra({ empleado_id: '', monto: '', observaciones: '' });
       fetchKanbanData();
-    } catch (error) {
-      console.error('Error adding labor cost:', error);
+      toast.success('Mano de obra registrada para la etapa.');
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Error al registrar la mano de obra. La etapa debe estar EN PROCESO.');
     }
   };
 
-  const handleDeleteManoObra = async (manoObraId: number) => {
-    if (!selectedStage) return;
+  const ejecutarEliminarManoObra = async () => {
+    const manoObraId = manoObraAEliminar;
+    if (manoObraId === null || !selectedStage) return;
+    setManoObraAEliminar(null);
     try {
       await produccionService.eliminarManoObra(manoObraId);
       const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${selectedStage.id}`);
       setSelectedStage(updated.data);
       fetchKanbanData();
-    } catch (error) {
-      console.error('Error deleting labor cost:', error);
+      toast.success('Mano de obra eliminada.');
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Error al eliminar la mano de obra.');
     }
   };
 
@@ -442,24 +555,32 @@ export default function ProduccionKanban() {
         setSelectedStage(updated.data);
       }
       fetchKanbanData();
+      toast.success(!currentPagado
+        ? 'Mano de obra marcada como pagada. El egreso quedó registrado en Gastos.'
+        : 'Pago revertido. El egreso de Gastos fue eliminado.');
     } catch (error) {
       console.error('Error toggling labor payment status:', error);
-      alert('Error al actualizar el estado de pago.');
+      toast.error('Error al actualizar el estado de pago.');
     }
   };
 
-  const handleFinalizarOrden = async (ordenId: number) => {
-    if (finalizandoOrdenId !== null) return; // evita doble finalización
-    if (!window.confirm(`¿Estás seguro de finalizar la orden #${ordenId}? Esto calculará sus costos definitivos y la cerrará.`)) return;
+  const handleFinalizarOrden = (ordenId: number) => {
+    setConfirmFinalizarId(ordenId);
+  };
+  const ejecutarFinalizarOrden = async () => {
+    const ordenId = confirmFinalizarId;
+    if (ordenId === null || finalizandoOrdenId !== null) return; // evita doble finalización
+    setConfirmFinalizarId(null);
     setFinalizandoOrdenId(ordenId);
     try {
-      // Una sola petición: el backend calcula costos al pasar a FINALIZADA
+      // Una sola petición: el backend calcula costos al pasar a FINALIZADA.
+      // Si el cálculo falla, el backend devuelve 400 y la orden NO se cierra.
       await api.put(`/produccion/orden/${ordenId}/estado?estado=FINALIZADA`);
-      alert(`Orden #${ordenId} finalizada. Los costos se calcularon automáticamente en el servidor.`);
+      toast.success(`Orden #${ordenId} finalizada con sus costos calculados.`);
       fetchKanbanData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error finalizing order:', error);
-      alert('Error al finalizar la orden.');
+      toast.error(error.response?.data?.detail || 'Error al finalizar la orden.');
     } finally {
       setFinalizandoOrdenId(null);
     }
@@ -483,9 +604,10 @@ export default function ProduccionKanban() {
       setOrdenParaNuevaEtapa(null);
       setNuevaEtapaForm({ area_id: '', empleado_id: '', observaciones: '' });
       fetchKanbanData();
-    } catch (error) {
+      toast.success('Etapa creada.');
+    } catch (error: any) {
       console.error('Error creating stage:', error);
-      alert('Error al crear la etapa.');
+      toast.error(error.response?.data?.detail || 'Error al crear la etapa.');
     } finally {
       setNuevaEtapaSubmitting(false);
     }
@@ -640,35 +762,89 @@ export default function ProduccionKanban() {
           <div className="w-12 h-12 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
           <p className="text-sm font-mono text-yeikar-neutral/60">Cargando datos de fábrica...</p>
         </div>
-      ) : (
-        <div className="flex gap-5 overflow-x-auto pb-4 pt-1">
-          {areas.map((area) => {
-            const areaStages = filteredStages.filter((s) => s.area_id === area.id);
-            return (
-              <KanbanColumn
-                key={area.id}
-                area={area}
-                stages={areaStages}
-                onCardClick={setSelectedStage}
-                onStatusChange={handleStatusChange}
-                onPassToArea={openPasarModal}
-                updatingStageId={statusUpdatingId}
-              />
-            );
-          })}
+      ) : ordenes.length === 0 && !search ? (
+        /* Estado vacío global: el flujo principal arranca en Pedidos */
+        <div className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-yeikar-secondary-light/15 rounded-3xl text-center px-6">
+          <div className="w-14 h-14 bg-yeikar-tertiary/40 rounded-2xl flex items-center justify-center mb-4">
+            <svg className="w-7 h-7 text-yeikar-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-black font-headline text-yeikar-neutral">Aún no hay órdenes de producción</h2>
+          <p className="text-sm text-yeikar-neutral/60 mt-1 max-w-md">
+            Las órdenes se generan desde los pedidos aprobados. Cuando un pedido entre a producción,
+            sus órdenes y etapas aparecerán aquí por área.
+          </p>
+          <Link
+            to="/pedidos"
+            className="mt-5 bg-yeikar-primary text-yeikar-neutral px-6 py-2.5 rounded-xl text-sm font-bold font-headline shadow-sm hover:bg-yeikar-primary-dark transition-colors"
+          >
+            Ir a Pedidos
+          </Link>
         </div>
+      ) : ordenes.length === 0 && search ? (
+        <div className="flex flex-col items-center justify-center py-16 border border-dashed border-yeikar-secondary-light/15 rounded-3xl text-center">
+          <p className="text-sm text-yeikar-neutral/60">Sin resultados para «{search}».</p>
+          <p className="text-xs text-yeikar-neutral/40 mt-1">Prueba con otro cliente, producto, orden o responsable.</p>
+        </div>
+      ) : (
+        <>
+          <div className="scroll-edge-r flex gap-5 overflow-x-auto pb-4 pt-1 scroll-touch [scroll-snap-type:x_proximity]">
+            {areas.map((area) => {
+              const areaStages = filteredStages.filter((s) => s.area_id === area.id);
+              return (
+                <KanbanColumn
+                  key={area.id}
+                  area={area}
+                  stages={areaStages}
+                  onCardClick={setSelectedStage}
+                  onStatusChange={handleStatusChange}
+                  onPassToArea={openPasarModal}
+                  updatingStageId={statusUpdatingId}
+                />
+              );
+            })}
+          </div>
+
+          {hasMore && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={cargarMasOrdenes}
+                disabled={loadingMore}
+                className="bg-white border border-yeikar-secondary-light/15 text-yeikar-primary px-6 py-2.5 rounded-xl text-sm font-bold font-headline hover:border-yeikar-primary disabled:opacity-50 transition-colors"
+              >
+                {loadingMore ? 'Cargando...' : 'Cargar más órdenes'}
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Details Modal */}
       {selectedStage && (
-        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto relative">
-            
+        (() => {
+          // La etapa anidada trae el orden "mínimo"; el historial y el costo
+          // salen de la orden completa cargada en el tablero.
+          const ordenCompleta = ordenes.find((o) => o.id === selectedStage.orden_produccion_id);
+          return (
+        <div
+          className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto"
+          onClick={() => setSelectedStage(null)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-3xl w-full p-6 space-y-6 max-h-[90vh] overflow-y-auto relative"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Etapa ${selectedStage.id} de ${selectedStage.orden?.detalle_pedido?.producto?.nombre || 'producción'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Modal Header */}
             <div className="flex items-start justify-between border-b border-yeikar-secondary-light/10 pb-4">
               <div className="space-y-1">
                 <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40 tracking-wider uppercase block">
                   ETAPA #{selectedStage.id} — ÁREA: {selectedStage.area?.nombre} ({selectedStage.estado})
+                  {selectedStage.es_retrabajo ? ' · RETRABAJO' : ''}
                 </span>
                 <h2 className="text-2xl font-black font-headline text-yeikar-secondary tracking-tight">
                   {selectedStage.orden?.detalle_pedido?.producto?.nombre
@@ -692,12 +868,54 @@ export default function ProduccionKanban() {
                       {selectedStage.orden.detalle_pedido.ancho}m × {selectedStage.orden.detalle_pedido.largo}m
                     </span>
                   )}
+                  {/* Cantidad del detalle: cuántas unidades de este producto */}
+                  {selectedStage.orden?.detalle_pedido?.cantidad != null && (
+                    <span className="bg-yeikar-primary/10 text-yeikar-primary font-mono text-xs font-bold px-2.5 py-1 rounded-lg border border-yeikar-primary/20">
+                      × {selectedStage.orden.detalle_pedido.cantidad} und
+                    </span>
+                  )}
+                  {selectedStage.orden?.estado && (
+                    <span className={`text-[10px] font-mono font-bold px-2 py-1 rounded-lg border ${
+                      selectedStage.orden.estado === 'FINALIZADA' ? 'bg-green-50 text-green-700 border-green-200'
+                      : selectedStage.orden.estado === 'PAUSADA' ? 'bg-red-50 text-red-700 border-red-200'
+                      : 'bg-blue-50 text-blue-700 border-blue-200'
+                    }`}>
+                      ORDEN: {selectedStage.orden.estado.replace('_', ' ')}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 pt-2 flex-wrap text-[10px] font-mono text-yeikar-neutral/50">
+                  <span className="flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                    Encargado: {selectedStage.empleado_responsable
+                      ? `${selectedStage.empleado_responsable.nombre} ${selectedStage.empleado_responsable.apellido}`
+                      : 'Sin asignar'}
+                  </span>
+                  {selectedStage.fecha_inicio && (
+                    <span>Inicio: {new Date(selectedStage.fecha_inicio).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                  )}
+                  {selectedStage.fecha_fin && (
+                    <span>Fin: {new Date(selectedStage.fecha_fin).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                  )}
                 </div>
               </div>
+              {selectedStage.orden?.detalle_pedido?.pedido?.id && (
+                <button
+                  onClick={() => { window.location.href = `/historial?tipo=pedido&id=${selectedStage.orden!.detalle_pedido!.pedido!.id}`; }}
+                  className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-primary hover:bg-yeikar-secondary-light rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
+                  title="Ver expediente completo del pedido"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  Expediente
+                </button>
+              )}
               <button
                 onClick={() => setSelectedStage(null)}
                 className="p-2 hover:bg-yeikar-tertiary rounded-xl text-yeikar-neutral/40 hover:text-yeikar-neutral/80 transition-colors"
                 title="Cerrar modal"
+                aria-label="Cerrar modal"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -718,7 +936,7 @@ export default function ProduccionKanban() {
               <form onSubmit={handleAddConsumo} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
                 <div className="sm:col-span-7 relative">
                   <div className="relative">
-                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-xs">🔍</span>
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-xs"></span>
                     <input
                       type="text"
                       placeholder="Buscar material..."
@@ -734,7 +952,7 @@ export default function ProduccionKanban() {
                       className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl pl-7 pr-3 py-2.5 focus:outline-none focus:border-yeikar-primary"
                     />
                     {newConsumo.material_id && (
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-green-500 text-xs">✓</span>
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-green-500 text-xs"></span>
                     )}
                   </div>
                   {showMaterialDropdown && (
@@ -758,6 +976,11 @@ export default function ProduccionKanban() {
                             <span className="font-medium text-yeikar-secondary">{m.nombre}</span>
                             {m.unidad_medida?.abreviatura && (
                               <span className="text-yeikar-neutral/40 ml-1">({m.unidad_medida.abreviatura})</span>
+                            )}
+                            {inventario[m.id] !== undefined && (
+                              <span className={`ml-2 font-mono text-[10px] ${inventario[m.id] <= 0 ? 'text-red-500 font-bold' : 'text-yeikar-neutral/50'}`}>
+                                Stock: {inventario[m.id]}
+                              </span>
                             )}
                             {m.costo_base > 0 && (
                               <span className="text-emerald-600 font-mono ml-auto float-right">
@@ -806,20 +1029,32 @@ export default function ProduccionKanban() {
                     const subtotal = c.cantidad * costo;
                     return (
                       <div key={c.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/10 p-3.5 rounded-xl shadow-xs text-xs hover:border-yeikar-primary/30 transition-colors">
-                        <div>
-                          <p className="font-bold text-yeikar-secondary text-sm">{c.material?.nombre}</p>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-yeikar-secondary text-sm">{c.material?.nombre}</p>
+                            {c.seccion && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-stone-100 text-stone-500 border border-stone-200 uppercase">
+                                {c.seccion}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-yeikar-neutral/60 font-mono mt-0.5">
                             Cantidad: <span className="font-bold text-yeikar-secondary">{c.cantidad}</span> | Costo unitario: <span className="font-bold">${costo.toLocaleString('es-CO')}</span>
                           </p>
+                          <p className="text-[10px] text-yeikar-neutral/40 mt-0.5">
+                            {c.creador_nombre ? `Registrado por ${c.creador_nombre}` : ''}
+                            {' · '}
+                            <span className="text-emerald-600/70 font-medium">Egreso generado en Gastos</span>
+                          </p>
                         </div>
-                        <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-4 shrink-0">
                           <span className="font-mono font-bold text-sm text-yeikar-primary">
                             ${subtotal.toLocaleString('es-CO')}
                           </span>
                           <button
-                            onClick={() => handleDeleteConsumo(c.id)}
+                            onClick={() => setConsumoAEliminar(c.id)}
                             className="text-red-500 hover:text-red-700 font-medium text-xs p-1 transition-colors"
-                            title="Quitar material"
+                            title="Quitar material (repondrá el stock y revertirá el egreso)"
                           >
                             Eliminar
                           </button>
@@ -856,6 +1091,98 @@ export default function ProduccionKanban() {
               );
             })()}
 
+            {/* Mano de obra de la etapa */}
+            <div className="space-y-4">
+              <h3 className="text-base font-bold font-headline text-yeikar-secondary border-b border-yeikar-secondary-light/5 pb-2 flex items-center justify-between">
+                <span>Mano de obra de la etapa</span>
+                <span className="text-xs font-mono font-normal text-yeikar-neutral/50">
+                  ({selectedStage.mano_obras?.length || 0} registrados) · alimenta el costo de la orden
+                </span>
+              </h3>
+
+              <form onSubmit={handleAddManoObra} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
+                <div className="sm:col-span-5">
+                  <SearchSelect
+                    value={newManoObra.empleado_id}
+                    onChange={(v) => setNewManoObra(prev => ({ ...prev, empleado_id: String(v) }))}
+                    options={empleados.map((e) => ({ value: e.id, label: `${e.nombre} ${e.apellido}` }))}
+                    placeholder="Empleado..."
+                  />
+                </div>
+                <div className="sm:col-span-4">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    placeholder="Monto ($)"
+                    value={newManoObra.monto}
+                    onChange={(e) => setNewManoObra(prev => ({ ...prev, monto: e.target.value }))}
+                    required
+                    className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                  />
+                </div>
+                <div className="sm:col-span-3">
+                  <button
+                    type="submit"
+                    disabled={selectedStage.estado !== 'EN_PROCESO'}
+                    className="w-full h-full bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2 px-3 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                    title={selectedStage.estado !== 'EN_PROCESO' ? 'La etapa debe estar EN PROCESO para registrar mano de obra' : undefined}
+                  >
+                    + Agregar MO
+                  </button>
+                </div>
+              </form>
+
+              <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {selectedStage.mano_obras && selectedStage.mano_obras.length > 0 ? (
+                  selectedStage.mano_obras.map((mo) => (
+                    <div key={mo.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/10 p-3.5 rounded-xl shadow-xs text-xs hover:border-yeikar-primary/30 transition-colors">
+                      <div className="min-w-0">
+                        <p className="font-bold text-yeikar-secondary text-sm">
+                          {mo.empleado ? `${mo.empleado.nombre} ${mo.empleado.apellido}` : `Empleado #${mo.empleado_id}`}
+                        </p>
+                        <p className="text-[10px] text-yeikar-neutral/40 mt-0.5">
+                          {mo.creador_nombre ? `Registrado por ${mo.creador_nombre}` : ''}
+                          {mo.pagado ? ' · Egreso generado en Gastos' : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span className={`font-mono font-bold text-sm ${mo.pagado ? 'text-emerald-600' : 'text-yeikar-primary'}`}>
+                          ${(mo.monto * (1 + (mo.porcentaje_recargo || 0) / 100)).toLocaleString('es-CO')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleTogglePagoManoObra(mo.id, !!mo.pagado)}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors ${
+                            mo.pagado
+                              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              : 'bg-yeikar-tertiary text-yeikar-neutral/60 hover:bg-yeikar-secondary-light/20'
+                          }`}
+                          title={mo.pagado ? 'Revertir pago (elimina el egreso)' : 'Marcar como pagada (genera el egreso en Gastos)'}
+                        >
+                          {mo.pagado ? 'Pagada' : 'Marcar pago'}
+                        </button>
+                        {!mo.pagado && (
+                          <button
+                            type="button"
+                            onClick={() => setManoObraAEliminar(mo.id)}
+                            className="text-red-500 hover:text-red-700 font-medium text-xs p-1 transition-colors"
+                            title="Eliminar mano de obra"
+                          >
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="p-6 text-center border border-dashed border-yeikar-secondary-light/15 rounded-2xl text-yeikar-neutral/40 text-xs">
+                    No se ha registrado mano de obra en esta etapa.
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Referencia de Componentes del Producto */}
             {(() => {
               const SECCION_COLORS: Record<string, string> = {
@@ -866,8 +1193,8 @@ export default function ProduccionKanban() {
                 NOCHEROS: 'bg-rose-100 text-rose-800 border-rose-200',
                 MANO_DE_OBRA: 'bg-blue-100 text-blue-800 border-blue-200',
               };
-              const badge = (s: string) =>
-                `text-[10px] font-bold px-2 py-0.5 rounded-md border ${SECCION_COLORS[s] || 'bg-stone-100 text-stone-600 border-stone-200'}`;
+              const badge = (s: string, activa = false) =>
+                `${activa ? 'ring-2 ring-yeikar-primary/60 ' : ''}text-[10px] font-bold px-2 py-0.5 rounded-md border ${SECCION_COLORS[s] || 'bg-stone-100 text-stone-600 border-stone-200'}`;
 
               if (loadingReceta) {
                 return (
@@ -878,8 +1205,18 @@ export default function ProduccionKanban() {
               }
 
               if (!referenciaReceta || referenciaReceta.materiales.length === 0) {
-                return null;
+                return (
+                  <div className="border border-dashed border-yeikar-secondary-light/10 rounded-2xl p-4 text-center text-xs text-yeikar-neutral/40">
+                    Este producto no tiene receta de materiales definida.
+                  </div>
+                );
               }
+
+              // Agrupar por sección y resaltar la sección del área actual de la etapa
+              const porSeccion: Record<string, typeof referenciaReceta.materiales> = {};
+              referenciaReceta.materiales.forEach((m) => {
+                (porSeccion[m.seccion] = porSeccion[m.seccion] || []).push(m);
+              });
 
               return (
                 <div className="border border-dashed border-yeikar-primary/20 bg-yeikar-primary/5 rounded-2xl p-4 space-y-3">
@@ -897,28 +1234,125 @@ export default function ProduccionKanban() {
                         : ''}
                     </span>
                   </div>
-                  <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                    {referenciaReceta.materiales.map((m, i) => (
-                      <div key={`${m.material_id}-${i}`} className="flex items-center justify-between bg-white/70 border border-yeikar-secondary-light/5 p-2.5 rounded-xl text-xs">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <span className={badge(m.seccion)}>{m.seccion}</span>
-                          <span className="font-semibold text-yeikar-secondary truncate">{m.nombre}</span>
+                  {referenciaReceta.seccion_actual && (
+                    <p className="text-[10px] font-bold text-yeikar-primary bg-yeikar-primary/10 rounded-lg px-2.5 py-1 w-fit">
+                      Esta área trabaja con la sección «{referenciaReceta.seccion_actual}» — cantidades escaladas a las medidas del pedido
+                    </p>
+                  )}
+                  <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+                    {Object.entries(porSeccion).map(([seccion, materiales]) => {
+                      const activa = referenciaReceta.seccion_actual === seccion;
+                      return (
+                        <div key={seccion}>
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className={badge(seccion, activa)}>{seccion}</span>
+                            <span className="text-[10px] font-mono text-yeikar-neutral/40">
+                              {materiales.length} material(es)
+                            </span>
+                          </div>
+                          <div className="space-y-1.5">
+                            {materiales.map((m, i) => (
+                              <div
+                                key={`${m.material_id}-${i}`}
+                                className={`flex items-center justify-between bg-white/70 border border-yeikar-secondary-light/5 p-2.5 rounded-xl text-xs ${m.condicion_cumplida ? '' : 'opacity-50'}`}
+                              >
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
+                                  <span className="font-semibold text-yeikar-secondary truncate">{m.nombre}</span>
+                                  <span className="text-[9px] font-mono text-yeikar-neutral/40 uppercase">{m.tipo_escala}</span>
+                                  {!m.condicion_cumplida && (
+                                    <span className="text-[9px] font-bold text-red-500 uppercase">No aplica para estas medidas</span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 shrink-0 ml-2">
+                                  <span className="font-mono font-bold text-yeikar-neutral/80">
+                                    {m.cantidad_esperada}
+                                    {Math.abs(m.cantidad_esperada - m.cantidad_base) > 0.001 && (
+                                      <span className="text-yeikar-neutral/40 font-normal"> (base {m.cantidad_base})</span>
+                                    )}
+                                  </span>
+                                  <span className="text-yeikar-neutral/40 w-6 text-right">{m.unidad}</span>
+                                  <span className="font-mono text-yeikar-neutral/50 w-20 text-right">
+                                    ${m.costo_unitario.toLocaleString('es-CO')}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-3 shrink-0 ml-2">
-                          <span className="font-mono font-bold text-yeikar-neutral/70">
-                            {m.cantidad_base}
-                          </span>
-                          <span className="text-yeikar-neutral/40 w-6 text-right">{m.unidad}</span>
-                          <span className="font-mono text-yeikar-neutral/50 w-20 text-right">
-                            ${m.costo_unitario.toLocaleString('es-CO')}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );
             })()}
+
+            {/* Historial de la orden: todas las áreas por las que pasó */}
+            {ordenCompleta?.etapas && ordenCompleta.etapas.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-base font-bold font-headline text-yeikar-secondary border-b border-yeikar-secondary-light/5 pb-2">
+                  Historial de la orden #{selectedStage.orden_produccion_id}
+                </h3>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {[...ordenCompleta.etapas]
+                    .sort((a, b) => (a.id || 0) - (b.id || 0))
+                    .map((et) => (
+                      <div key={et.id} className="flex items-center justify-between bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 p-2.5 rounded-xl text-xs">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${
+                            et.estado === 'COMPLETADA' ? 'bg-green-500' : et.estado === 'EN_PROCESO' ? 'bg-amber-400' : et.estado === 'PAUSADA' ? 'bg-red-400' : 'bg-blue-400'
+                          }`} />
+                          <span className="font-bold text-yeikar-secondary">{et.area?.nombre || `Área #${et.area_id}`}</span>
+                          {et.es_retrabajo && (
+                            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 uppercase">Retrabajo</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0 text-[10px] font-mono text-yeikar-neutral/50">
+                          {et.empleado_responsable && (
+                            <span>{et.empleado_responsable.nombre} {et.empleado_responsable.apellido}</span>
+                          )}
+                          <span className="font-bold">{et.estado.replace('_', ' ')}</span>
+                          {et.fecha_fin && <span>{new Date(et.fecha_fin).toLocaleDateString('es-CO')}</span>}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {/* Costo calculado de la orden (si ya se finalizó o se calculó) */}
+            {ordenCompleta?.costo && (
+              <div className="bg-stone-50 border border-yeikar-secondary-light/10 rounded-2xl p-4">
+                <h3 className="text-xs font-bold font-headline text-yeikar-neutral/60 uppercase tracking-wider mb-3">
+                  Costo calculado de la orden
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
+                  <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 p-2.5">
+                    <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase">Materiales</span>
+                    <span className="font-mono font-bold text-sm text-yeikar-secondary">${ordenCompleta.costo.costo_material.toLocaleString('es-CO')}</span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 p-2.5">
+                    <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase">Mano de obra</span>
+                    <span className="font-mono font-bold text-sm text-yeikar-secondary">${ordenCompleta.costo.costo_mano_obra.toLocaleString('es-CO')}</span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 p-2.5">
+                    <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase">Gastos</span>
+                    <span className="font-mono font-bold text-sm text-yeikar-secondary">${ordenCompleta.costo.costo_gastos.toLocaleString('es-CO')}</span>
+                  </div>
+                  <div className="bg-yeikar-primary/10 rounded-xl border border-yeikar-primary/20 p-2.5">
+                    <span className="text-[9px] font-bold text-yeikar-primary/70 block uppercase">Costo total</span>
+                    <span className="font-mono font-bold text-sm text-yeikar-primary">${ordenCompleta.costo.costo_total.toLocaleString('es-CO')}</span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 p-2.5">
+                    <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase">Precio venta (ganancia {ordenCompleta.costo.ganancia_porcentaje}%)</span>
+                    <span className="font-mono font-bold text-sm text-yeikar-secondary">${ordenCompleta.costo.precio_venta_calculado.toLocaleString('es-CO')}</span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 p-2.5">
+                    <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase">Impuestos base</span>
+                    <span className="font-mono font-bold text-sm text-yeikar-secondary">${ordenCompleta.costo.precio_impuestos_base.toLocaleString('es-CO')}</span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Modal Footer */}
             <div className="flex items-center justify-end pt-4 border-t border-yeikar-secondary-light/10">
@@ -933,12 +1367,17 @@ export default function ProduccionKanban() {
 
           </div>
         </div>
+          );
+        })()
       )}
 
       {/* Modal Pasar a Area */}
       {showPasarModal && pasarStage && (
-        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+        <div
+          className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onClick={closePasarModal}
+        >
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-label="Mover etapa a nueva área" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between mb-5">
               <div>
                 <p className="text-[10px] font-mono font-bold text-yeikar-neutral/40 uppercase">
@@ -959,6 +1398,7 @@ export default function ProduccionKanban() {
                 onClick={closePasarModal}
                 className="p-2 hover:bg-yeikar-tertiary rounded-xl text-yeikar-neutral/40"
                 title="Cerrar modal"
+                aria-label="Cerrar modal"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -969,36 +1409,32 @@ export default function ProduccionKanban() {
             <form onSubmit={handlePasarAArea} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Área destino</label>
-                <select
+                <SearchSelect
                   value={pasarAreaId}
-                  onChange={(event) => setPasarAreaId(event.target.value)}
-                  required
-                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
-                >
-                  <option value="">Seleccione área...</option>
-                  {areas.filter((area) => area.id !== pasarStage.area_id).map((area) => (
-                    <option key={area.id} value={area.id}>{area.nombre}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setPasarAreaId(String(v))}
+                  options={areas.filter((area) => area.id !== pasarStage.area_id).map((area) => ({
+                    value: area.id,
+                    label: area.nombre,
+                  }))}
+                  placeholder="Seleccione área..."
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Responsable principal</label>
-                <select
+                <SearchSelect
                   value={pasarEmpleadoPrincipal}
-                  onChange={(event) => {
-                    const empleadoId = Number(event.target.value);
-                    setPasarEmpleadoPrincipal(event.target.value);
+                  onChange={(v) => {
+                    const empleadoId = Number(v);
+                    setPasarEmpleadoPrincipal(String(v));
                     setPasarEmpleadosAdicionales((actuales) => actuales.filter((id) => id !== empleadoId));
                   }}
-                  required
-                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
-                >
-                  <option value="">Seleccione empleado...</option>
-                  {empleados.filter((empleado) => empleado.id !== pasarStage.empleado_responsable_id).map((empleado) => (
-                    <option key={empleado.id} value={empleado.id}>{empleado.nombre} {empleado.apellido}</option>
-                  ))}
-                </select>
+                  options={empleados.filter((empleado) => empleado.id !== pasarStage.empleado_responsable_id).map((empleado) => ({
+                    value: empleado.id,
+                    label: `${empleado.nombre} ${empleado.apellido}`,
+                  }))}
+                  placeholder="Seleccione empleado..."
+                />
               </div>
 
               <div>
@@ -1061,40 +1497,33 @@ export default function ProduccionKanban() {
 
       {/* Modal Nueva Etapa */}
       {ordenParaNuevaEtapa && (
-        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-6">
+        <div
+          className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+          onClick={() => setOrdenParaNuevaEtapa(null)}
+        >
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-6" role="dialog" aria-modal="true" aria-label="Añadir etapa a orden" onClick={(e) => e.stopPropagation()}>
             <h2 className="text-xl font-black font-headline text-yeikar-secondary tracking-tight mb-4">
               Añadir Etapa a Orden #{ordenParaNuevaEtapa}
             </h2>
             <form onSubmit={handleSubmitNuevaEtapa} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Área de Producción</label>
-                <select
+                <SearchSelect
                   value={nuevaEtapaForm.area_id}
-                  onChange={(e) => setNuevaEtapaForm(prev => ({ ...prev, area_id: e.target.value }))}
-                  required
-                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
-                >
-                  <option value="">Seleccione Área...</option>
-                  {areas.map(a => (
-                    <option key={a.id} value={a.id}>{a.nombre}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setNuevaEtapaForm(prev => ({ ...prev, area_id: String(v) }))}
+                  options={areas.map(a => ({ value: a.id, label: a.nombre }))}
+                  placeholder="Seleccione Área..."
+                />
               </div>
               
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Responsable</label>
-                <select
+                <SearchSelect
                   value={nuevaEtapaForm.empleado_id}
-                  onChange={(e) => setNuevaEtapaForm(prev => ({ ...prev, empleado_id: e.target.value }))}
-                  required
-                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
-                >
-                  <option value="">Seleccione Empleado...</option>
-                  {empleados.map(e => (
-                    <option key={e.id} value={e.id}>{e.nombre} {e.apellido}</option>
-                  ))}
-                </select>
+                  onChange={(v) => setNuevaEtapaForm(prev => ({ ...prev, empleado_id: String(v) }))}
+                  options={empleados.map(e => ({ value: e.id, label: `${e.nombre} ${e.apellido}` }))}
+                  placeholder="Seleccione Empleado..."
+                />
               </div>
 
               <div>
@@ -1127,6 +1556,33 @@ export default function ProduccionKanban() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={confirmFinalizarId !== null}
+        title="Finalizar orden de producción"
+        message={`¿Estás seguro de finalizar la orden #${confirmFinalizarId ?? ''}? Esto calculará sus costos definitivos y la cerrará.`}
+        confirmLabel="Sí, finalizar"
+        danger={false}
+        onConfirm={ejecutarFinalizarOrden}
+        onCancel={() => setConfirmFinalizarId(null)}
+      />
+      <ConfirmDialog
+        open={consumoAEliminar !== null}
+        title="Eliminar consumo de material"
+        message="Se repondrá el stock descontado y se revertirá el egreso generado en Gastos. ¿Continuar?"
+        confirmLabel="Sí, eliminar"
+        danger
+        onConfirm={ejecutarEliminarConsumo}
+        onCancel={() => setConsumoAEliminar(null)}
+      />
+      <ConfirmDialog
+        open={manoObraAEliminar !== null}
+        title="Eliminar mano de obra"
+        message="Se quitará el registro de mano de obra de la etapa. ¿Continuar?"
+        confirmLabel="Sí, eliminar"
+        danger
+        onConfirm={ejecutarEliminarManoObra}
+        onCancel={() => setManoObraAEliminar(null)}
+      />
     </div>
   );
 }

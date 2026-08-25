@@ -35,6 +35,16 @@ class Producto(Base):
     materiales      = relationship("ProductoMaterial", back_populates="producto", cascade="all, delete-orphan")
     secciones       = relationship("SeccionProducto", back_populates="producto", cascade="all, delete-orphan")
 
+    @property
+    def fotos(self):
+        """Fotos de referencia del mueble (adjuntos tipo PRODUCTO)."""
+        from sqlalchemy.orm import object_session
+        from app.modules.adjuntos.service import adjuntos_info
+        s = object_session(self)
+        if s is None:
+            return []
+        return adjuntos_info(s, "PRODUCTO", self.id)
+
 
 class Material(Base):
     __tablename__ = "material"

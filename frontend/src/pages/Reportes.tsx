@@ -76,8 +76,8 @@ export default function Reportes() {
         try {
           const res = await reportesService.getPnL(m);
           // Agrupar ingresos y gastos de todas las monedas convirtiendo a un valor base o sumando
-          const ingresos = res.detalles.reduce((acc, curr) => acc + curr.ingresos, 0);
-          const gastos = res.detalles.reduce((acc, curr) => acc + curr.gastos, 0);
+          const ingresos = res.detalles.reduce((acc, curr) => acc + Number(curr.ingresos), 0);
+          const gastos = res.detalles.reduce((acc, curr) => acc + Number(curr.gastos), 0);
           return {
             name: m,
             Ingresos: ingresos,
@@ -149,10 +149,10 @@ export default function Reportes() {
       </div>
 
       {/* Tabs Menu */}
-      <div className="flex border-b border-yeikar-secondary-light/10 overflow-x-auto">
+      <div className="flex border-b border-yeikar-secondary-light/10 overflow-x-auto scroll-touch [scroll-snap-type:x_proximity]">
         <button
           onClick={() => setActiveTab('informe')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap snap-start ${
             activeTab === 'informe'
               ? 'border-yeikar-primary text-yeikar-primary'
               : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
@@ -162,7 +162,7 @@ export default function Reportes() {
         </button>
         <button
           onClick={() => setActiveTab('pnl')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap snap-start ${
             activeTab === 'pnl'
               ? 'border-yeikar-primary text-yeikar-primary'
               : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
@@ -172,7 +172,7 @@ export default function Reportes() {
         </button>
         <button
           onClick={() => setActiveTab('rentabilidad')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap snap-start ${
             activeTab === 'rentabilidad'
               ? 'border-yeikar-primary text-yeikar-primary'
               : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
@@ -182,7 +182,7 @@ export default function Reportes() {
         </button>
         <button
           onClick={() => setActiveTab('alertas')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap ${
+          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all whitespace-nowrap snap-start ${
             activeTab === 'alertas'
               ? 'border-yeikar-primary text-yeikar-primary'
               : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
@@ -241,21 +241,28 @@ export default function Reportes() {
                       <div className="flex justify-between text-xs">
                         <span className="text-yeikar-neutral/60">Ingresos (+)</span>
                         <span className="font-mono font-bold text-green-600">
-                          ${detail.ingresos.toLocaleString('es-ES')}
+                          ${Number(detail.ingresos_cop).toLocaleString('es-ES')} COP
                         </span>
                       </div>
 
                       <div className="flex justify-between text-xs">
                         <span className="text-yeikar-neutral/60">Costos/Gastos (-)</span>
                         <span className="font-mono font-bold text-red-500">
-                          ${detail.gastos.toLocaleString('es-ES')}
+                          ${Number(detail.gastos_cop).toLocaleString('es-ES')} COP
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between text-xs">
+                        <span className="text-yeikar-neutral/40 italic">Monto original</span>
+                        <span className="font-mono text-yeikar-neutral/50">
+                          {Number(detail.ingresos).toLocaleString('es-ES')} / {Number(detail.gastos).toLocaleString('es-ES')} {detail.moneda}
                         </span>
                       </div>
 
                       <div className="flex justify-between text-sm pt-2 border-t border-dashed border-yeikar-secondary-light/5">
-                        <span className="font-headline font-bold text-yeikar-secondary">Utilidad Neta</span>
-                        <span className={`font-mono font-bold ${detail.balance >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                          ${detail.balance.toLocaleString('es-ES')}
+                        <span className="font-headline font-bold text-yeikar-secondary">Utilidad Neta (COP)</span>
+                        <span className={`font-mono font-bold ${Number(detail.balance_cop) >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                          ${Number(detail.balance_cop).toLocaleString('es-ES')}
                         </span>
                       </div>
                     </div>
@@ -399,7 +406,7 @@ export default function Reportes() {
                   {alertas.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="p-8 text-center text-green-600 font-semibold italic">
-                        ✓ Todos los niveles de stock están saludables.
+                        Todos los niveles de stock están saludables.
                       </td>
                     </tr>
                   ) : (

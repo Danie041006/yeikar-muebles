@@ -1,4 +1,5 @@
 import api from './api';
+import type { AdjuntoInfo } from './adjuntosService';
 
 export interface TipoProducto {
   id: number;
@@ -18,6 +19,8 @@ export interface Product {
   stock_minimo?: number;
   es_reventa?: boolean;
   tipo_producto?: TipoProducto;
+  /** Fotos de referencia del mueble. */
+  fotos?: AdjuntoInfo[];
 }
 
 export interface Material {

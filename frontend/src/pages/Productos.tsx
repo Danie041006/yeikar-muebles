@@ -1,6 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { productosService, Product, ProductoMaterial, TipoProducto, SeccionProducto } from '../services/productosService';
 import api from '../services/api';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { SearchSelect, Modal } from '../components/ui';
+import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
+import EstructuraCostos from '../components/EstructuraCostos';
+import { normalizarEstructuraCostos, EstructuraCostos as EstructuraCostosData } from '../utils/estructuraCostos';
+import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 
 interface Material {
   id: number;
@@ -14,6 +21,8 @@ interface PrecioSimulado {
   costo_mano_obra: number;
   costo_gastos: number;
   costo_total: number;
+  impuesto_porcentaje: number;
+  impuestos: number;
   precio_venta: number;
   ganancia_monto: number;
   detalle: { nombre: string; cantidad: number; costo_unitario: number; subtotal: number }[];
@@ -43,6 +52,9 @@ const fmt = (n: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(n);
 
 export default function Productos() {
+  const toast = useToast();
+  const { esAdmin } = useAuth();
+  const [confirmState, setConfirmState] = useState<{ titulo: string; mensaje: string; accion: () => void } | null>(null);
   const [productos, setProductos] = useState<Product[]>([]);
   const [tiposProducto, setTiposProducto] = useState<TipoProducto[]>([]);
   const [materiales, setMateriales] = useState<Material[]>([]);
@@ -63,10 +75,15 @@ export default function Productos() {
   const [simAncho, setSimAncho] = useState('1.60');
   const [simLargo, setSimLargo] = useState('1.90');
   const [simGanancia, setSimGanancia] = useState('40');
+  const [simImpuesto, setSimImpuesto] = useState('7');
   const [simManoObra, setSimManoObra] = useState('15');
   const [simGastos, setSimGastos] = useState('10');
   const [precioSimulado, setPrecioSimulado] = useState<PrecioSimulado | null>(null);
+  const [estructura, setEstructura] = useState<EstructuraCostosData | null>(null);
   const [simLoading, setSimLoading] = useState(false);
+  const [showRecalcular, setShowRecalcular] = useState(false);
+  const [recPropuesta, setRecPropuesta] = useState<any[] | null>(null);
+  const [recAplicando, setRecAplicando] = useState(false);
 
   // Section modal
   const [showSectionModal, setShowSectionModal] = useState(false);
@@ -122,6 +139,9 @@ export default function Productos() {
     largo_base: '1.90',
     alto_base: '',
   });
+  const [fotoArchivo, setFotoArchivo] = useState<File | null>(null);
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [subiendoFoto, setSubiendoFoto] = useState(false);
 
   const [showRecipeModal, setShowRecipeModal] = useState(false);
   const [recipeForm, setRecipeForm] = useState({
@@ -201,6 +221,7 @@ export default function Productos() {
     setSimAncho(String(product.ancho_base ?? '1.60'));
     setSimLargo(String(product.largo_base ?? '1.90'));
     setPrecioSimulado(null);
+    setEstructura(null);
     try {
       setRecetaLoading(true);
       const [legacyData, secData] = await Promise.all([
@@ -217,6 +238,32 @@ export default function Productos() {
   }, []);
 
 
+  const verRecalcular = async () => {
+    setRecAplicando(true);
+    try {
+      const res = await api.post('/producto/recalcular-precios', { aplicar: false });
+      setRecPropuesta(res.data);
+      setShowRecalcular(true);
+    } catch {
+      toast.error('No se pudo generar la vista previa de precios.');
+    } finally {
+      setRecAplicando(false);
+    }
+  };
+
+  const aplicarRecalcular = async () => {
+    setRecAplicando(true);
+    try {
+      const res = await api.post('/producto/recalcular-precios', { aplicar: true });
+      setRecPropuesta(res.data);
+      toast.success('Precios recalculados. Revisa los que quedaron en revisión.');
+      setRecAplicando(false);
+    } catch {
+      setRecAplicando(false);
+      toast.error('No se pudieron aplicar los precios.');
+    }
+  };
+
   const handleSimularPrecio = async () => {
     if (!selectedProduct) return;
     try {
@@ -226,6 +273,7 @@ export default function Productos() {
           ancho: parseFloat(simAncho),
           largo: parseFloat(simLargo),
           ganancia: parseFloat(simGanancia),
+          impuesto: parseFloat(simImpuesto),
           iva: 0,
         },
       });
@@ -236,6 +284,8 @@ export default function Productos() {
       const costo_mano_obra = data.costo_mano_obra !== undefined ? data.costo_mano_obra : 0;
       const costo_gastos = data.costo_gastos !== undefined ? data.costo_gastos : 0;
       const costo_total = data.costo_total !== undefined ? data.costo_total : 0;
+      const impuesto_porcentaje = data.impuesto_porcentaje !== undefined ? data.impuesto_porcentaje : 7;
+      const impuestos = data.impuestos !== undefined ? data.impuestos : 0;
       const precio_venta = data.precio_venta !== undefined ? data.precio_venta : 0;
       
       setPrecioSimulado({
@@ -243,6 +293,8 @@ export default function Productos() {
         costo_mano_obra,
         costo_gastos,
         costo_total,
+        impuesto_porcentaje,
+        impuestos,
         precio_venta,
         ganancia_monto: precio_venta - costo_total,
         detalle: (data.materiales || []).map((m: any) => ({
@@ -253,9 +305,10 @@ export default function Productos() {
         })),
         desglose_por_seccion: data.desglose_por_seccion || {},
       });
+      setEstructura(normalizarEstructuraCostos(res.data));
     } catch (error) {
       console.error('Error simulating price:', error);
-      alert('Error al calcular el precio. Verifique que el producto tenga materiales en la receta.');
+      toast.error('Error al calcular el precio. Verifique que el producto tenga materiales en la receta.');
     } finally {
       setSimLoading(false);
     }
@@ -274,11 +327,14 @@ export default function Productos() {
       alto_base: productForm.alto_base ? parseFloat(productForm.alto_base) : undefined,
     };
     try {
+      let productoId: number;
       if (productForm.id) {
         await productosService.actualizarProducto(productForm.id, body);
+        productoId = productForm.id;
       } else {
         const nuevoProducto = await productosService.crearProducto(body);
-        
+        productoId = nuevoProducto.id;
+
         // Crear secciones por defecto automáticamente
         const seccionesDefault = ['EBANISTERÍA', 'PINTURA', 'TAPICERÍA', 'TENDIDO', 'TERMINACIÓN'];
         for (let i = 0; i < seccionesDefault.length; i++) {
@@ -289,15 +345,30 @@ export default function Productos() {
           });
         }
       }
+      // Foto de referencia (opcional): se sube y el servidor la optimiza
+      if (fotoArchivo) {
+        setSubiendoFoto(true);
+        await subirAdjunto(fotoArchivo, TIPO_ADJUNTO.PRODUCTO, productoId);
+      }
       setShowProductModal(false);
+      setFotoArchivo(null);
+      setFotoPreview(null);
       fetchData();
     } catch (error) {
       console.error('Error saving product:', error);
+    } finally {
+      setSubiendoFoto(false);
     }
   };
 
-  const handleDuplicar = async (p: Product) => {
-    if (!window.confirm(`¿Duplicar "${p.nombre}"? Se creará una copia con la misma receta de materiales.`)) return;
+  const handleDuplicar = (p: Product) => {
+    setConfirmState({
+      titulo: 'Duplicar producto',
+      mensaje: `¿Duplicar "${p.nombre}"? Se creará una copia con la misma receta de materiales.`,
+      accion: () => ejecutarDuplicar(p),
+    });
+  };
+  const ejecutarDuplicar = async (p: Product) => {
     try {
       // 1. Crear el producto nuevo con los mismos datos
       const nuevo = await productosService.crearProducto({
@@ -328,12 +399,12 @@ export default function Productos() {
           })
         )
       );
-      alert(`¡Producto duplicado con éxito! Puedes editar "${nuevo.nombre}" desde el listado.`);
+      toast.success(`¡Producto duplicado con éxito! Puedes editar "${nuevo.nombre}" desde el listado.`);
       await fetchData();
       handleOpenRecipe(nuevo);
     } catch (error) {
       console.error('Error duplicating product:', error);
-      alert('Error al duplicar el producto.');
+      toast.error('Error al duplicar el producto.');
     }
   };
 
@@ -369,8 +440,14 @@ export default function Productos() {
     }
   };
 
-  const handleDeleteProduct = async (id: number) => {
-    if (!window.confirm('¿Está seguro de eliminar este producto?')) return;
+  const handleDeleteProduct = (id: number) => {
+    setConfirmState({
+      titulo: 'Eliminar producto',
+      mensaje: '¿Está seguro de eliminar este producto?',
+      accion: () => ejecutarDeleteProduct(id),
+    });
+  };
+  const ejecutarDeleteProduct = async (id: number) => {
     try {
       await productosService.eliminarProducto(id);
       if (selectedProduct?.id === id) setSelectedProduct(null);
@@ -380,11 +457,18 @@ export default function Productos() {
     }
   };
 
-  const handleDeleteRecipeItem = async (recetaId: number) => {
-    if (!selectedProduct || !window.confirm('¿Remover este material de la receta?')) return;
+  const handleDeleteRecipeItem = (recetaId: number) => {
+    if (!selectedProduct) return;
+    setConfirmState({
+      titulo: 'Remover material',
+      mensaje: '¿Remover este material de la receta?',
+      accion: () => ejecutarDeleteRecipeItem(recetaId),
+    });
+  };
+  const ejecutarDeleteRecipeItem = async (recetaId: number) => {
     try {
       await productosService.eliminarMaterialReceta(recetaId);
-      handleOpenRecipe(selectedProduct);
+      if (selectedProduct) handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error removing recipe item:', error);
     }
@@ -404,18 +488,25 @@ export default function Productos() {
       handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error creating section:', error);
-      alert('Error al crear la sección');
+      toast.error('Error al crear la sección');
     }
   };
 
-  const handleDeleteSection = async (seccionId: number) => {
-    if (!selectedProduct || !window.confirm('¿Eliminar esta sección completa? Se borrarán todos sus insumos y políticas.')) return;
+  const handleDeleteSection = (seccionId: number) => {
+    if (!selectedProduct) return;
+    setConfirmState({
+      titulo: 'Eliminar sección',
+      mensaje: '¿Eliminar esta sección completa? Se borrarán todos sus insumos y políticas.',
+      accion: () => ejecutarDeleteSection(seccionId),
+    });
+  };
+  const ejecutarDeleteSection = async (seccionId: number) => {
     try {
       await productosService.eliminarSeccion(seccionId);
-      handleOpenRecipe(selectedProduct);
+      if (selectedProduct) handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error deleting section:', error);
-      alert('Error al eliminar la sección');
+      toast.error('Error al eliminar la sección');
     }
   };
 
@@ -437,18 +528,25 @@ export default function Productos() {
       handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error creating element:', error);
-      alert('Error al crear el insumo');
+      toast.error('Error al crear el insumo');
     }
   };
 
-  const handleDeleteElement = async (elementoId: number) => {
-    if (!selectedProduct || !window.confirm('¿Eliminar este insumo de la sección?')) return;
+  const handleDeleteElement = (elementoId: number) => {
+    if (!selectedProduct) return;
+    setConfirmState({
+      titulo: 'Eliminar insumo',
+      mensaje: '¿Eliminar este insumo de la sección?',
+      accion: () => ejecutarDeleteElement(elementoId),
+    });
+  };
+  const ejecutarDeleteElement = async (elementoId: number) => {
     try {
       await productosService.eliminarElementoSeccion(elementoId);
-      handleOpenRecipe(selectedProduct);
+      if (selectedProduct) handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error deleting element:', error);
-      alert('Error al eliminar el insumo');
+      toast.error('Error al eliminar el insumo');
     }
   };
 
@@ -468,7 +566,7 @@ export default function Productos() {
       handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error creating costo produccion:', error);
-      alert('Error al crear el costo de producción');
+      toast.error('Error al crear el costo de producción');
     }
   };
 
@@ -486,18 +584,25 @@ export default function Productos() {
       handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error editing costo produccion:', error);
-      alert('Error al actualizar el costo de producción');
+      toast.error('Error al actualizar el costo de producción');
     }
   };
 
-  const handleDeleteCostoProduccion = async (itemId: number) => {
-    if (!selectedProduct || !window.confirm('¿Eliminar este costo de producción?')) return;
+  const handleDeleteCostoProduccion = (itemId: number) => {
+    if (!selectedProduct) return;
+    setConfirmState({
+      titulo: 'Eliminar costo de producción',
+      mensaje: '¿Eliminar este costo de producción?',
+      accion: () => ejecutarDeleteCostoProduccion(itemId),
+    });
+  };
+  const ejecutarDeleteCostoProduccion = async (itemId: number) => {
     try {
       await productosService.eliminarCostoProduccion(itemId);
-      handleOpenRecipe(selectedProduct);
+      if (selectedProduct) handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error deleting costo produccion:', error);
-      alert('Error al eliminar el costo de producción');
+      toast.error('Error al eliminar el costo de producción');
     }
   };
 
@@ -515,7 +620,7 @@ export default function Productos() {
       handleOpenRecipe(selectedProduct);
     } catch (error) {
       console.error('Error actualizando política:', error);
-      alert('Error al guardar la política de la sección');
+      toast.error('Error al guardar la política de la sección');
     }
   };
 
@@ -552,20 +657,29 @@ export default function Productos() {
             </svg>
           </div>
 
-          <button
-            onClick={() => {
-              setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '1.60', largo_base: '1.90', alto_base: '' });
-              setShowProductModal(true);
-            }}
-            className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm whitespace-nowrap"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Nuevo Mueble
-          </button>
+            <button
+              onClick={() => {
+                setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '1.60', largo_base: '1.90', alto_base: '' });
+                setShowProductModal(true);
+              }}
+              className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm whitespace-nowrap"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Nuevo Mueble
+            </button>
+            {esAdmin && (
+              <button
+                onClick={verRecalcular}
+                className="border border-yeikar-secondary-light/20 text-yeikar-secondary px-4 py-2.5 rounded-xl font-bold font-headline hover:bg-yeikar-tertiary transition-all text-sm whitespace-nowrap"
+                title="Recalcula los precios base de los productos con receta cuando cambian los insumos (vista previa)"
+              >
+                Recalcular precios
+              </button>
+            )}
+          </div>
         </div>
-      </div>
 
       {/* ── Main Layout ── */}
       <div className="flex flex-col xl:flex-row gap-6">
@@ -601,6 +715,24 @@ export default function Productos() {
                   {selectedProduct?.id === p.id && (
                     <div className="absolute top-3 right-3 w-2.5 h-2.5 bg-yeikar-primary rounded-full shadow" />
                   )}
+
+                  {/* Foto de referencia */}
+                  <div className="mb-3 h-32 rounded-xl overflow-hidden bg-yeikar-tertiary/30">
+                    {p.fotos && p.fotos.length > 0 && p.fotos[0].url ? (
+                      <img
+                        src={p.fotos[0].url}
+                        alt={p.nombre}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-yeikar-neutral/30">
+                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Type badge */}
                   <span className="text-[10px] font-black font-headline uppercase tracking-wider text-yeikar-neutral/40">
@@ -749,11 +881,7 @@ export default function Productos() {
                               {sec.elementos.length} insumos
                             </span>
                             <button
-                              onClick={() => {
-                                if (window.confirm(`¿Eliminar la sección "${sec.nombre}"? Se borrarán todos sus insumos y políticas.`)) {
-                                  handleDeleteSection(sec.id);
-                                }
-                              }}
+                              onClick={() => handleDeleteSection(sec.id)}
                               className="p-1 hover:bg-red-50 hover:text-red-600 text-yeikar-neutral/40 rounded-lg transition-colors"
                               title={`Eliminar sección ${sec.nombre}`}
                             >
@@ -1010,6 +1138,7 @@ export default function Productos() {
                   { label: 'Ancho (m)', value: simAncho, setter: setSimAncho },
                   { label: 'Largo (m)', value: simLargo, setter: setSimLargo },
                   { label: '% Ganancia', value: simGanancia, setter: setSimGanancia },
+                  { label: '% Impuestos', value: simImpuesto, setter: setSimImpuesto },
                 ].map(({ label, value, setter }) => (
                   <div key={label}>
                     <label className="text-[10px] font-bold text-yeikar-neutral/50 uppercase block mb-1">{label}</label>
@@ -1042,45 +1171,23 @@ export default function Productos() {
               {/* Results */}
               {precioSimulado && (
                 <div className="space-y-3 animate-fade-in">
-                  {/* ── Desglose por Sección ── */}
-                  {Object.keys(precioSimulado.desglose_por_seccion).length > 0 && (
-                    <div className="bg-amber-50/70 rounded-xl p-3 space-y-2 border border-amber-100">
-                      <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Desglose por Sección</span>
-                      {Object.entries(precioSimulado.desglose_por_seccion).map(([nombre, datos]) => (
-                        <div key={nombre} className="text-[11px]">
-                          <div className="flex justify-between font-bold text-yeikar-secondary mb-1">
-                            <span>{nombre}</span>
-                            <span className="font-mono">{fmt(datos.total_seccion)}</span>
-                          </div>
-                          <div className="space-y-0.5 text-[10px] text-yeikar-neutral/60 pl-2 font-mono">
-                            {datos.costo_insumos > 0 && <div className="flex justify-between"><span>Insumos</span><span>{fmt(datos.costo_insumos)}</span></div>}
-                            {datos.costos_produccion?.map((cp: any, i: number) => (
-                              <div key={i} className="flex justify-between text-amber-700">
-                                <span>{cp.nombre}{cp.porcentaje > 0 ? ` (${cp.porcentaje}%)` : ''}</span>
-                                <span>{fmt(cp.aporte)}</span>
-                              </div>
-                            ))}
-                            {datos.total_costos_produccion > 0 && <div className="flex justify-between font-semibold"><span>Total Costos Producción</span><span>{fmt(datos.total_costos_produccion)}</span></div>}
-                            <div className="flex justify-between"><span>Subtotal</span><span>{fmt(datos.subtotal)}</span></div>
-                            {datos.gasto_seccion > 0 && <div className="flex justify-between"><span>% Gastos Sección ({datos.pct_gastos_seccion}%)</span><span>{fmt(datos.gasto_seccion)}</span></div>}
-                            {datos.costo_negocio > 0 && <div className="flex justify-between"><span>% Negocio ({datos.pct_negocio}%)</span><span>{fmt(datos.costo_negocio)}</span></div>}
-                            <div className="flex justify-between font-bold text-amber-700 border-t border-amber-200/50 pt-0.5 mt-0.5"><span>Total Sección</span><span>{fmt(datos.total_seccion)}</span></div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  {/* ── Estructura de Costos (estilo Excel) ── */}
+                  {estructura && (
+                    <EstructuraCostos data={estructura} />
                   )}
 
-                  <div className="space-y-1.5 text-xs font-mono">
-                    <div className="flex justify-between">
-                      <span className="text-yeikar-neutral/70">Costo Total de Secciones</span>
-                      <span className="font-bold text-yeikar-secondary">{fmt(precioSimulado.costo_material)}</span>
+                  {estructura && estructura.sin_desglose && (
+                    <div className="space-y-1.5 text-xs font-mono">
+                      <div className="flex justify-between">
+                        <span className="text-yeikar-neutral/70">Costo Total</span>
+                        <span className="font-bold text-yeikar-secondary">{fmt(precioSimulado.costo_total)}</span>
+                      </div>
+                      <div className="flex justify-between text-green-600 border-t border-yeikar-secondary-light/10 pt-1.5">
+                        <span>Ganancia ({simGanancia}%)</span>
+                        <span className="font-bold">+ {fmt(precioSimulado.ganancia_monto)}</span>
+                      </div>
                     </div>
-                    <div className="flex justify-between text-green-600 border-t border-yeikar-secondary-light/10 pt-1.5">
-                      <span>Ganancia ({simGanancia}%)</span>
-                      <span className="font-bold">+ {fmt(precioSimulado.ganancia_monto)}</span>
-                    </div>
-                  </div>
+                  )}
 
                   {/* Price highlight */}
                   <div className="bg-gradient-to-r from-yeikar-primary to-yeikar-primary-dark rounded-xl p-4 text-center">
@@ -1089,7 +1196,7 @@ export default function Productos() {
                       {fmt(precioSimulado.precio_venta)}
                     </span>
                     <span className="text-[11px] text-yeikar-secondary/60 font-mono">
-                      Para {simAncho}m × {simLargo}m
+                      Para {simAncho}m × {simLargo}m · redondeado al millar
                     </span>
                   </div>
                 </div>
@@ -1107,7 +1214,7 @@ export default function Productos() {
           <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-lg w-full p-6 space-y-5">
             <div>
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">
-                {productForm.id ? 'Editar Mueble' : 'Registrar Nuevo Mueble 🛋️'}
+                {productForm.id ? 'Editar Mueble' : 'Registrar Nuevo Mueble '}
               </h3>
               <p className="text-xs text-yeikar-neutral/50 mt-1">
                 {productForm.id ? 'Modifica los datos del producto.' : 'Define el mueble base. Luego puedes agregarle su receta de materiales.'}
@@ -1128,17 +1235,12 @@ export default function Productos() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">Tipo de Producto *</label>
-                  <select
-                    required
+                  <SearchSelect
                     value={productForm.tipo_producto_id}
-                    onChange={(e) => setProductForm({ ...productForm, tipo_producto_id: e.target.value })}
-                    className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
-                  >
-                    <option value="">Selecciona...</option>
-                    {tiposProducto.map((t) => (
-                      <option key={t.id} value={t.id}>{t.nombre}</option>
-                    ))}
-                  </select>
+                    onChange={(v) => setProductForm({ ...productForm, tipo_producto_id: String(v) })}
+                    options={tiposProducto.map((t) => ({ value: t.id, label: t.nombre }))}
+                    placeholder="Selecciona..."
+                  />
                 </div>
               </div>
 
@@ -1191,12 +1293,64 @@ export default function Productos() {
                 />
               </div>
 
+              {/* Foto de referencia (opcional) */}
+              <div>
+                <label className="block text-xs font-bold text-yeikar-neutral/55 mb-2">
+                  Foto de referencia del mueble (opcional)
+                </label>
+                <div className="flex items-start gap-3">
+                  {/* Fotos existentes */}
+                  {(productForm.id ? productos.find((p) => p.id === productForm.id)?.fotos ?? [] : []).map((f) => (
+                    <div key={f.id} className="relative group">
+                      <img src={f.url} alt={`Foto de referencia de ${productForm.nombre || 'la pieza'}`} className="h-16 w-16 rounded-xl object-cover border border-yeikar-secondary-light/10" />
+                      <button
+                        type="button"
+                        title="Quitar foto"
+                        onClick={async () => {
+                          await eliminarAdjunto(f.id);
+                          fetchData();
+                        }}
+                        className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {/* Preview de la nueva foto */}
+                  {fotoPreview && (
+                    <img src={fotoPreview} alt="Vista previa de la nueva foto de referencia" className="h-16 w-16 rounded-xl object-cover border border-yeikar-primary/40" />
+                  )}
+                  {/* Selector de archivo */}
+                  <label className="flex items-center justify-center gap-1.5 h-16 px-3 rounded-xl border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-[11px] font-bold text-yeikar-neutral/50 transition-colors">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    {subiendoFoto ? 'Subiendo…' : 'Subir foto'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        setFotoArchivo(f);
+                        if (fotoPreview) URL.revokeObjectURL(fotoPreview);
+                        setFotoPreview(URL.createObjectURL(f));
+                      }}
+                    />
+                  </label>
+                </div>
+                <p className="text-[10px] text-yeikar-neutral/40 mt-1.5">
+                  La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
+                </p>
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowProductModal(false)} className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors">
                   Cancelar
                 </button>
                 <button type="submit" className="bg-yeikar-primary text-yeikar-neutral px-5 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow transition-all">
-                  {productForm.id ? 'Guardar Cambios' : 'Crear Mueble 🛋️'}
+                  {productForm.id ? 'Guardar Cambios' : 'Crear Mueble '}
                 </button>
               </div>
             </form>
@@ -1224,7 +1378,7 @@ export default function Productos() {
                 <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">Material del Inventario *</label>
                 {/* Buscador */}
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-sm">🔍</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-sm"></span>
                   <input
                     type="text"
                     placeholder="Buscar material..."
@@ -1239,7 +1393,7 @@ export default function Productos() {
                     className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
                   />
                   {recipeForm.material_id && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 text-sm">✓</span>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 text-sm"></span>
                   )}
                 </div>
                 {/* Dropdown filtrado */}
@@ -1389,7 +1543,7 @@ export default function Productos() {
                           className="p-1 text-orange-400 hover:text-red-600 shrink-0 transition-colors"
                           title="Quitar rango"
                         >
-                          ✕
+                          ×
                         </button>
                       </div>
                     ))}
@@ -1527,7 +1681,7 @@ export default function Productos() {
                   Buscar en Inventario <span className="font-normal text-yeikar-neutral/40">(opcional)</span>
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-sm">🔍</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-sm"></span>
                   <input
                     type="text"
                     placeholder="Buscar material del inventario..."
@@ -1541,7 +1695,7 @@ export default function Productos() {
                     className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl pl-8 pr-3 py-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
                   />
                   {elementForm.material_id_normalizado && (
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 text-sm">✓</span>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500 text-sm"></span>
                   )}
                 </div>
                 {showElementMaterialDropdown && (
@@ -1823,6 +1977,90 @@ export default function Productos() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={confirmState !== null}
+        title={confirmState?.titulo ?? '¿Estás seguro?'}
+        message={confirmState?.mensaje ?? ''}
+        confirmLabel="Confirmar"
+        danger
+        onConfirm={async () => {
+          const accion = confirmState?.accion;
+          setConfirmState(null);
+          await accion?.();
+        }}
+        onCancel={() => setConfirmState(null)}
+      />
+
+      {/* Modal: recálculo de precios (vista previa antes → después) */}
+      <Modal
+        open={showRecalcular}
+        onClose={() => setShowRecalcular(false)}
+        title="Recalcular precios"
+        subtitle="Al subir un insumo, los productos con receta actualizan su precio base automáticamente (sin inflar). Aquí ves antes → después."
+        size="4xl"
+        footer={
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowRecalcular(false)}
+              className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors"
+            >
+              Cerrar
+            </button>
+            <button
+              onClick={aplicarRecalcular}
+              disabled={recAplicando}
+              className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2 rounded-xl text-sm font-bold shadow-sm transition-all"
+            >
+              {recAplicando ? 'Aplicando...' : 'Aplicar cambios'}
+            </button>
+          </div>
+        }
+      >
+        {recPropuesta === null ? (
+          <p className="text-sm text-yeikar-neutral/50">Generando vista previa...</p>
+        ) : recPropuesta.length === 0 ? (
+          <p className="text-sm text-yeikar-neutral/50">No hay productos con receta para recalcular.</p>
+        ) : (
+          <div className="overflow-x-auto max-h-96">
+            <table className="w-full text-left border-collapse text-sm">
+              <thead className="bg-yeikar-tertiary/30 text-yeikar-secondary text-[11px] uppercase tracking-wider">
+                <tr>
+                  <th className="px-3 py-2">Producto</th>
+                  <th className="px-3 py-2 text-right">Costo actual</th>
+                  <th className="px-3 py-2 text-right">Costo nuevo</th>
+                  <th className="px-3 py-2 text-right">Precio actual</th>
+                  <th className="px-3 py-2 text-right">Precio nuevo</th>
+                  <th className="px-3 py-2 text-center">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-yeikar-secondary-light/10">
+                {recPropuesta.map((p) => (
+                  <tr key={p.producto_id} className={p.requiere_revision ? 'bg-amber-50' : ''}>
+                    <td className="px-3 py-2 font-medium text-yeikar-secondary">{p.producto_nombre}</td>
+                    <td className="px-3 py-2 text-right font-mono">{p.costo_anterior != null ? fmt(p.costo_anterior) : '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono">{fmt(p.costo_nuevo)}</td>
+                    <td className="px-3 py-2 text-right font-mono">{p.precio_anterior != null ? fmt(p.precio_anterior) : '—'}</td>
+                    <td className="px-3 py-2 text-right font-mono font-bold">{fmt(p.precio_nuevo)}</td>
+                    <td className="px-3 py-2 text-center">
+                      {p.requiere_revision ? (
+                        <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                          Revisar ({Math.round(Math.abs(p.pct_cambio))}%)
+                        </span>
+                      ) : p.pct_cambio != null && Math.abs(p.pct_cambio) > 0.01 ? (
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${p.pct_cambio > 0 ? 'text-green-700 bg-green-100' : 'text-slate-600 bg-slate-100'}`}>
+                          {p.pct_cambio > 0 ? '+' : ''}{p.pct_cambio.toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-yeikar-neutral/40">Sin cambio</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

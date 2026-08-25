@@ -30,7 +30,9 @@ def obtener_password_hash(password: str) -> str:
 # Funciones de búsqueda
 # ------------------------------------------------------------
 def obtener_usuario_por_nombre(db: Session, username: str):
-    return db.query(model.Usuario).filter(model.Usuario.nombre_usuario == username).first()
+    # Case-insensitive: evita cuentas duplicadas por mayúsculas y eludir
+    # el contador de intentos variando la caja del nombre de usuario.
+    return db.query(model.Usuario).filter(func.lower(model.Usuario.nombre_usuario) == username.lower()).first()
 
 def obtener_usuario_por_email(db: Session, email: str):
     return db.query(model.Usuario).filter(model.Usuario.email == email).first()
@@ -112,24 +114,33 @@ def registrar_intento(db: Session, username: str, ip: str, exito: bool):
     db.query(model.LoginIntento).filter(
         model.LoginIntento.created_at < func.now() - timedelta(hours=1)
     ).delete(synchronize_session=False)
-    db.add(model.LoginIntento(username=username, ip=ip, exito=exito))
+    db.add(model.LoginIntento(username=username.lower(), ip=ip, exito=exito))
     db.commit()
 
 def usuario_bloqueado(db: Session, username: str, ip: str) -> bool:
+    """Anti-brute-force sin DoS trivial:
+    - por combinación (cuenta, IP): un atacante solo se bloquea a sí mismo;
+    - por IP global: tope duro por origen;
+    - cuenta atacada desde >= 3 IPs distintas en la ventana: brute-force distribuido."""
+    username = username.lower()
     ventana = func.now() - timedelta(minutes=settings.LOGIN_VENTANA_MINUTOS)
-    fallos_username = db.query(model.LoginIntento).filter(
+    base = db.query(model.LoginIntento).filter(
+        model.LoginIntento.exito == False,
+        model.LoginIntento.created_at >= ventana,
+    )
+    fallos_combo = base.filter(
         model.LoginIntento.username == username,
-        model.LoginIntento.exito == False,
-        model.LoginIntento.created_at >= ventana,
-    ).count()
-    if fallos_username >= settings.LOGIN_MAX_INTENTOS:
-        return True
-    fallos_ip = db.query(model.LoginIntento).filter(
         model.LoginIntento.ip == ip,
-        model.LoginIntento.exito == False,
-        model.LoginIntento.created_at >= ventana,
     ).count()
-    return fallos_ip >= settings.LOGIN_MAX_INTENTOS_IP
+    if fallos_combo >= settings.LOGIN_MAX_INTENTOS:
+        return True
+    fallos_ip = base.filter(model.LoginIntento.ip == ip).count()
+    if fallos_ip >= settings.LOGIN_MAX_INTENTOS_IP:
+        return True
+    ips_distintas = base.filter(
+        model.LoginIntento.username == username
+    ).with_entities(model.LoginIntento.ip).distinct().count()
+    return ips_distintas >= settings.LOGIN_IP_DISTINTAS_PARA_BLOQUEO
 
 # ------------------------------------------------------------
 # Refresh tokens con rotación

@@ -20,6 +20,7 @@ interface AuthContextValue {
   user: UsuarioMe | null;
   loading: boolean;
   modulos: ModuloAcceso[];
+  esAdmin: boolean;
   hasModulo: (modulo: string, gestionar?: boolean) => boolean;
   logout: () => void;
   refresh: () => Promise<void>;
@@ -61,6 +62,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [user],
   );
 
+  const esAdmin = user?.roles?.some((role) => ['Dueño', 'Administrador'].includes(role.nombre)) ?? false;
+
   const logout = useCallback(() => {
     localStorage.removeItem('token');
     localStorage.removeItem('refresh_token');
@@ -68,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, modulos: user?.modulos || [], hasModulo, logout, refresh }}>
+    <AuthContext.Provider value={{ user, loading, modulos: user?.modulos || [], esAdmin, hasModulo, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

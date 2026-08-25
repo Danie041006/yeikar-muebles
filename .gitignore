@@ -62,3 +62,10 @@ backend/backup_pre_limpieza_*.sql
 .agents/
 skills-lock.json
 videos/
+# Logs del túnel de acceso móvil / utilidades locales
+.celular-logs/
+
+# Datos de negocio (costeos Excel) y basura de Windows
+*.xlsx
+*.xls
+*:Zone.Identifier

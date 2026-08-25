@@ -56,7 +56,10 @@ def actualizar_pedido(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.actualizar_pedido(db, id_pedido, esquema, usuario_actual)
+    try:
+        db_obj = service.actualizar_pedido(db, id_pedido, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not db_obj:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return db_obj

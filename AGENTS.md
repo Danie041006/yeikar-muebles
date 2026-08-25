@@ -12,8 +12,11 @@
 # backend
 cd backend && python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # edit DATABASE_URL + SECRET_KEY
-uvicorn app.main:app --reload        # http://localhost:8000
+cp .env.example .env   # edit DATABASE_URL + SECRET_KEY (pon DEBUG=true en dev)
+# --no-proxy-headers: NO confiar en X-Forwarded-For (anti-spoofing del rate
+# limit y del lockout de login). En dev detrás de otro proxy, configura
+# FORWARDED_ALLOW_IPS en .env en su lugar.
+uvicorn app.main:app --reload --no-proxy-headers   # http://localhost:8000
 
 # frontend (separate terminal)
 cd frontend && npm install
@@ -59,11 +62,12 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 |--------|---------------|----------------|------------------|
 | Products | `/api/v1/producto/...` + `/api/v1/material/...` | `/productos` | `productosService.ts` |
 | Quotes | `/api/v1/cotizacion/...` | `/cotizaciones` | `cotizacionService.ts` |
-| IQE (AI quotes) | `/api/v1/intelligent-quotation/...` | `/cotizaciones-ia` | `iqeService.ts` |
+| IQE (cotizador manual) | `/api/v1/intelligent-quotation/...` | `/cotizaciones-ia` | `iqeService.ts` |
 | Orders | `/api/v1/pedido/...` | `/pedidos` | `pedidoService.ts` |
 | Production (Kanban) | `/api/v1/produccion/...` | `/produccion` | `produccionService.ts` |
 | Inventory | `/api/v1/inventory/...` | `/inventario` | `inventarioService.ts` |
 | Sales | `/api/v1/venta/...` + `/api/v1/pago/...` | `/ventas` | `ventaService.ts` |
+| Facturación (fiscal SENIAT) | `/api/v1/factura/...` | `/facturacion` | `facturacionService.ts` |
 
 ## Production Kanban specifics
 
@@ -106,7 +110,7 @@ docker compose up -d --build    # builds backend + frontend + db
 
 ## Gotchas
 
-- `.env.example` has IQE-specific vars (OPENAI_API_KEY, vision model) — not needed for basic dev
+- El Cotizador IA es 100% manual (sin APIs de pago): `contexto-exportar` arma el paquete (inventario + receta similar + ejemplos reales + esquema JSON) para una IA de navegador, e `import-structure` importa el JSON pegado. No requiere `OPENAI_API_KEY` ni claves de Gemini
 - Frontend `api.ts` has two axios instances: `api` (for `/api/v1/`) and `authApi` (for `/api/auth/`) — use the right one
 - Alembic env has an explicit import list for all models — adding a new module means adding its model import there
 - `ALLOWED_ORIGINS` default includes `localhost:5173` (Vite dev) — add yours if using a different port

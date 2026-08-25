@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import api from '../services/api';
+import { useToast } from '../context/ToastContext';
+import { SearchInput, SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
 import {
   ventaService,
   pagoService,
@@ -11,6 +13,9 @@ import {
   METODOS_PAGO,
   type PagoCreate,
 } from '../services/ventaService';
+import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural } from '../utils/format';
+import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
+import AdjuntoImagen from '../components/AdjuntoImagen';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 interface Moneda {
@@ -70,6 +75,7 @@ function ModalDetalle({
   onClose: () => void;
   onPagoRegistrado: () => void;
 }) {
+  const toast = useToast();
   const [detalle, setDetalle] = useState<VentaDetalle | null>(null);
   const [loading, setLoading] = useState(true);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
@@ -79,11 +85,14 @@ function ModalDetalle({
   const [monedaPagoId, setMonedaPagoId] = useState<number | null>(null);
   const [monto, setMonto] = useState('');
   const [metodoPago, setMetodoPago] = useState('EFECTIVO_USD');
-  const [trmInput, setTrmInput] = useState('');       // TRM ingresada manualmente
+  const [tasaNaturalInput, setTasaNaturalInput] = useState('');      // tasa en sentido natural: 1 [V] = X [P]
   const [referencia, setReferencia] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorPago, setErrorPago] = useState('');
+  const [reciboArchivo, setReciboArchivo] = useState<File | null>(null);
+  const [reciboPreview, setReciboPreview] = useState<string | null>(null);
+  const [reciboVer, setReciboVer] = useState<{ id: number; mime: string } | null>(null);
   const [monedas, setMonedas] = useState<{ id: number; codigo: string; nombre: string; simbolo: string }[]>([]);
   const [tasaBsInput, setTasaBsInput] = useState<string>('50');
 
@@ -127,7 +136,7 @@ function ModalDetalle({
       pdf.save(`Factura_Yeikar_${detalle.id}.pdf`);
     } catch (err) {
       console.error('Error al generar PDF:', err);
-      alert('Hubo un error al generar el archivo PDF.');
+      toast.error('Hubo un error al generar el archivo PDF.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -167,9 +176,12 @@ function ModalDetalle({
   // Si monedaPagoId coincide con la moneda de la venta, TRM no aplica
   const monedaVentaId = detalle?.moneda_id ?? null;
   const necesitaTRM = monedaPagoId !== null && monedaVentaId !== null && monedaPagoId !== monedaVentaId;
-  const trm = parseFloat(trmInput) || 0;
+  // tasa_natural va en el sentido natural: 1 [V] = X [P] (p. ej. 1 USD = 4500 COP).
+  // El backend guarda la inversa (tasa_almacenada = 1 / tasa_natural): 1 [P] = tasa [V].
+  const tasaNatural = parseFloat(tasaNaturalInput) || 0;
+  const tasaAlmacenada = tasaNatural > 0 ? tasaNaturalAAlmacenada(tasaNatural) : 0;
   const montoNum = parseFloat(monto) || 0;
-  const montoEquivalente = necesitaTRM && trm > 0 ? montoNum * trm : montoNum;
+  const montoEquivalente = necesitaTRM && tasaNatural > 0 ? convertirConTasaNatural(montoNum, tasaNatural) : montoNum;
   const monedaPago = monedas.find(m => m.id === monedaPagoId);
   const monedaVenta = monedas.find(m => m.id === monedaVentaId);
   const saldoRestante = detalle ? Number(detalle.saldo_pendiente) : 0;
@@ -204,8 +216,8 @@ function ModalDetalle({
       setErrorPago('Selecciona la moneda del pago.');
       return;
     }
-    if (necesitaTRM && (!trmInput || trm <= 0)) {
-      setErrorPago('La moneda del pago difiere de la de la factura. Ingresa la tasa de cambio (TRM).');
+    if (necesitaTRM && (!tasaNaturalInput || tasaNatural <= 0)) {
+      setErrorPago('La moneda del pago difiere de la de la factura. Ingresa la tasa de cambio (1 factura = ? pago).');
       return;
     }
     try {
@@ -218,13 +230,20 @@ function ModalDetalle({
         metodo_pago: metodoPago,
         referencia: referencia || undefined,
         observaciones: observaciones || undefined,
-        ...(necesitaTRM ? { tasa_cambio: trm } : {}),
+        ...(necesitaTRM ? { tasa_cambio: tasaNaturalAAlmacenada(tasaNatural) } : {}),
       };
-      await pagoService.registrar(payload);
+      const pagoCreado = await pagoService.registrar(payload);
+      // Recibo digital (opcional): comprobante del pago
+      if (reciboArchivo && pagoCreado) {
+        await subirAdjunto(reciboArchivo, TIPO_ADJUNTO.PAGO, pagoCreado.id);
+      }
       setMonto('');
       setReferencia('');
       setObservaciones('');
-      setTrmInput('');
+      setTasaNaturalInput('');
+      setReciboArchivo(null);
+      if (reciboPreview) URL.revokeObjectURL(reciboPreview);
+      setReciboPreview(null);
       setShowForm(false);
       await cargar();
       onPagoRegistrado();
@@ -238,12 +257,13 @@ function ModalDetalle({
   const handleSetRestante = () => {
     if (!detalle) return;
     if (necesitaTRM) {
-      if (trm <= 0) {
-        setErrorPago('Ingresa primero la tasa de cambio (TRM) para calcular el monto restante.');
+      if (tasaNatural <= 0) {
+        setErrorPago('Ingresa primero la tasa de cambio (1 factura = ? pago) para calcular el monto restante.');
         return;
       }
-      const montoCalc = saldoRestante / trm;
-      // Usamos toFixed(4) para máxima precisión
+      // El saldo está en la moneda de la venta; con tasa natural (1 V = X P)
+      // el monto a cobrar en la moneda del pago es saldo × tasa_natural.
+      const montoCalc = saldoRestante * tasaNatural;
       setMonto(montoCalc.toFixed(4));
     } else {
       setMonto(saldoRestante.toString());
@@ -262,7 +282,7 @@ function ModalDetalle({
         <div className="bg-yeikar-neutral p-5 text-yeikar-tertiary flex items-center justify-between">
           <div>
             <h3 className="font-headline font-bold text-lg text-yeikar-primary">
-              Factura / Estado de Cuenta #{detalle?.id ?? '...'}
+              Estado Financiero del pedido #{detalle?.id ?? '...'}
             </h3>
             {detalle && (
               <p className="text-xs text-yeikar-tertiary/60 font-mono mt-0.5">
@@ -274,7 +294,9 @@ function ModalDetalle({
             {detalle && (
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1 bg-yeikar-tertiary/20 px-2.5 py-1 rounded-xl text-xs border border-yeikar-tertiary/30">
-                  <span className="text-yeikar-tertiary/80 text-[10px] font-bold uppercase">Tasa Bs.:</span>
+                  <span className="text-yeikar-tertiary/80 text-[10px] font-bold uppercase">
+                    {detalle.moneda?.codigo === 'VES' ? 'Tasa Bs.:' : `Tasa (1 ${detalle.moneda?.codigo ?? 'USD'} → Bs.):`}
+                  </span>
                   <input
                     type="number"
                     step="any"
@@ -296,6 +318,18 @@ function ModalDetalle({
                 </button>
               </div>
             )}
+            {detalle?.pedido_id && (
+              <button
+                onClick={() => { window.location.href = `/historial?tipo=pedido&id=${detalle.pedido_id}`; }}
+                className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-primary hover:bg-yeikar-secondary-light rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
+                title="Ver expediente completo del pedido"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                Expediente
+              </button>
+            )}
             <button
               onClick={onClose}
               className="text-yeikar-tertiary/50 hover:text-yeikar-tertiary transition-colors"
@@ -316,22 +350,58 @@ function ModalDetalle({
               {/* Resumen financiero */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-yeikar-tertiary/20 rounded-xl p-3 text-center">
-                  <p className="text-xs text-yeikar-neutral/50 font-mono mb-1">Total Factura</p>
+                  <p className="text-xs text-yeikar-neutral/50 font-mono mb-1">
+                    Total Factura
+                    {detalle.moneda && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded bg-yeikar-secondary/20 text-yeikar-secondary font-bold text-[10px]">
+                        {detalle.moneda.codigo}
+                      </span>
+                    )}
+                  </p>
                   <p className="font-headline font-bold text-yeikar-secondary">
                     {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
                   </p>
+                  {detalle.moneda?.codigo !== 'COP' && (
+                    <p className="text-[10px] font-mono text-yeikar-neutral/40 mt-0.5">
+                      ≈ {formatCurrency(Number(detalle.total_en_moneda_base), 'COP')}
+                    </p>
+                  )}
                 </div>
                 <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
-                  <p className="text-xs text-green-600 font-mono mb-1">Pagado</p>
+                  <p className="text-xs text-green-600 font-mono mb-1">
+                    Pagado
+                    {detalle.moneda && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded bg-green-200/60 text-green-800 font-bold text-[10px]">
+                        {detalle.moneda.codigo}
+                      </span>
+                    )}
+                  </p>
                   <p className="font-headline font-bold text-green-700">
                     {detalle.moneda?.simbolo}{Number(detalle.total_pagado).toLocaleString('es-ES')}
                   </p>
+                  {detalle.moneda?.codigo !== 'COP' && (
+                    <p className="text-[10px] font-mono text-green-600/50 mt-0.5">
+                      ≈ {formatCurrency(Number(detalle.total_pagado) * Number(detalle.tasa_cambio), 'COP')}
+                    </p>
+                  )}
                 </div>
                 <div className="bg-amber-50 rounded-xl p-3 text-center border border-amber-100">
-                  <p className="text-xs text-amber-600 font-mono mb-1">Saldo</p>
+                  <p className="text-xs text-amber-600 font-mono mb-1">
+                    Saldo
+                    {detalle.moneda && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-200/60 text-amber-800 font-bold text-[10px]">
+                        {detalle.moneda.codigo}
+                      </span>
+                    )}
+                  </p>
                   <p className="font-headline font-bold text-amber-700">
                     {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
                   </p>
+                  {detalle.moneda?.codigo !== 'COP' && (
+                    <p className="text-[10px] font-mono text-amber-600/50 mt-0.5">
+                      ≈ {formatCurrency(Number(detalle.saldo_pendiente) * Number(detalle.tasa_cambio), 'COP')}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -365,6 +435,9 @@ function ModalDetalle({
                       </span>
                       <span className="font-mono text-yeikar-neutral/70">
                         {d.cantidad} × {detalle.moneda?.simbolo}{Number(d.precio).toLocaleString('es-ES')}
+                        <span className="ml-1 text-[10px] font-bold text-yeikar-neutral/40">
+                          {detalle.moneda?.codigo ?? ''}
+                        </span>
                       </span>
                     </div>
                   ))}
@@ -385,6 +458,8 @@ function ModalDetalle({
                     {detalle.pagos.map((p: Pago) => {
                       const metodoLabel = METODOS_PAGO.find((m) => m.value === p.metodo_pago)?.label ?? p.metodo_pago;
                       const esMultimoneda = p.tasa_cambio && p.tasa_cambio !== 1;
+                      const pagoCodigo = p.moneda?.codigo ?? '?';
+                      const ventaCodigo = detalle.moneda?.codigo ?? '?';
                       return (
                         <div
                           key={p.id}
@@ -399,15 +474,32 @@ function ModalDetalle({
                               <p className="text-green-600/60 font-mono mt-0.5">
                                 {new Date(p.fecha).toLocaleDateString('es-ES')}
                               </p>
+                              {/* Recibos del cobro (comprobantes digitales) */}
+                              {p.recibos && p.recibos.length > 0 && (
+                                <div className="flex gap-1.5 mt-1.5">
+                                  {p.recibos.map((r) => (
+                                    <AdjuntoImagen
+                                      key={r.id}
+                                      adjunto={r}
+                                      alt="recibo"
+                                      className="h-10 w-10 rounded border border-green-200 hover:border-green-400 transition-colors"
+                                      onClick={() => setReciboVer({ id: r.id, mime: r.mime })}
+                                    />
+                                  ))}
+                                </div>
+                              )}
                             </div>
                             <div className="text-right">
                               <span className="font-mono font-bold text-green-700">
                                 {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
+                                {p.moneda && <span className="ml-1 font-semibold">{p.moneda.codigo}</span>}
                               </span>
                               {esMultimoneda && (
                                 <p className="text-green-600/60 font-mono mt-0.5">
-                                  ≈ {detalle.moneda?.simbolo}{Number(p.monto_en_moneda_base).toLocaleString('es-ES')}
-                                  <span className="ml-1 opacity-60">(TRM: {Number(p.tasa_cambio).toLocaleString('es-ES')})</span>
+                                  ≈ {fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}
+                                  <span className="ml-1 opacity-60">
+                                    (1 {pagoCodigo} = {Number(p.tasa_cambio).toLocaleString('es-ES')} {nombreMoneda(ventaCodigo)})
+                                  </span>
                                 </p>
                               )}
                             </div>
@@ -457,17 +549,15 @@ function ModalDetalle({
                           <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
                             Moneda del pago
                           </label>
-                          <select
-                            value={monedaPagoId ?? ''}
-                            onChange={(e) => setMonedaPagoId(Number(e.target.value))}
-                            className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
-                          >
-                            {monedas.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.codigo} — {m.nombre}
-                              </option>
-                            ))}
-                          </select>
+                          <SearchSelect
+                            value={monedaPagoId}
+                            onChange={(v) => setMonedaPagoId(Number(v))}
+                            options={monedas.map((m) => ({
+                              value: m.id,
+                              label: `${m.codigo} — ${m.nombre}`,
+                            }))}
+                            placeholder="Seleccione moneda..."
+                          />
                         </div>
                       </div>
 
@@ -483,7 +573,7 @@ function ModalDetalle({
                               onClick={handleSetRestante}
                               className="text-[10px] font-bold text-yeikar-primary hover:underline hover:text-yeikar-primary-light flex items-center gap-0.5"
                             >
-                              ⚡ Pagar Restante
+                               Pagar Restante
                             </button>
                           </div>
                           <input
@@ -499,15 +589,15 @@ function ModalDetalle({
                         {necesitaTRM && (
                           <div>
                             <label className="text-xs font-bold text-amber-600 block mb-1">
-                              Tasa de cambio (TRM) ⚠️
+                              Tasa: 1 {monedaVenta?.codigo} = X {monedaPago?.codigo}
                             </label>
                             <input
                               type="number"
                               min="0"
                               step="0.01"
-                              value={trmInput}
-                              onChange={(e) => setTrmInput(e.target.value)}
-                              placeholder={`1 ${monedaPago?.codigo} = ? ${monedaVenta?.codigo}`}
+                              value={tasaNaturalInput}
+                              onChange={(e) => setTasaNaturalInput(e.target.value)}
+                              placeholder={`1 ${monedaVenta?.codigo} = ? ${monedaPago?.codigo}`}
                               className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-amber-50"
                             />
                           </div>
@@ -515,21 +605,22 @@ function ModalDetalle({
                       </div>
 
                       {/* Preview de conversión */}
-                      {necesitaTRM && montoNum > 0 && trm > 0 && (
+                      {necesitaTRM && montoNum > 0 && tasaNatural > 0 && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                          <p className="text-xs text-amber-700 font-mono">
-                            <span className="font-bold">{monedaPago?.simbolo}{montoNum.toLocaleString('es-ES')}</span>
-                            <span className="mx-2 opacity-60">×</span>
-                            <span className="font-bold">{trm.toLocaleString('es-ES')}</span>
-                            <span className="mx-2 opacity-60">=</span>
-                            <span className="font-bold text-amber-800">
-                              {monedaVenta?.simbolo}{montoEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })}
-                            </span>
-                            <span className="ml-2 opacity-60">en {monedaVenta?.codigo}</span>
+                          <p className="text-sm font-bold text-amber-800 font-mono">
+                            ≈ {montoEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {nombreMoneda(monedaVenta?.codigo)}
                           </p>
-                          {montoEquivalente > saldoRestante + 0.01 && (
+                          <p className="text-[10px] text-amber-600/70 font-mono mt-0.5">
+                            equivale a 1 {nombreMoneda(monedaPago?.codigo)} = {tasaAlmacenada.toLocaleString('es-ES', { maximumFractionDigits: 6 })} {nombreMoneda(monedaVenta?.codigo)}
+                          </p>
+                          {monedaVenta?.codigo === 'COP' && (
+                            <p className="text-[10px] text-emerald-700 font-mono mt-0.5 bg-emerald-50 rounded px-1.5 py-0.5">
+                              Se registrará en COP: {Math.round(montoEquivalente / 1000) * 1000} (redondeado al millar)
+                            </p>
+                          )}
+                          {montoEquivalente > saldoRestante + (monedaVenta?.codigo === 'COP' ? 1000 : 0.01) && (
                             <p className="text-xs text-red-600 font-bold mt-1">
-                              El equivalente excede el saldo pendiente ({monedaVenta?.simbolo}{saldoRestante.toLocaleString('es-ES')})
+                              El equivalente excede el saldo pendiente ({saldoRestante.toLocaleString('es-ES')} {nombreMoneda(monedaVenta?.codigo)})
                             </p>
                           )}
                         </div>
@@ -546,6 +637,53 @@ function ModalDetalle({
                           placeholder="N° de transacción, comprobante..."
                           className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
                         />
+                      </div>
+
+                      {/* Recibo digital (opcional) */}
+                      <div>
+                        <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                          Recibo / transferencia (opcional)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          {reciboPreview && (
+                            <img
+                              src={reciboPreview}
+                              alt="recibo"
+                              className="h-12 w-12 rounded-lg object-cover border border-yeikar-secondary-light/20"
+                            />
+                          )}
+                          <label className="flex items-center justify-center gap-1.5 h-12 px-3 rounded-lg border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-[11px] font-bold text-yeikar-neutral/50 transition-colors flex-1">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            {reciboArchivo ? reciboArchivo.name : 'Adjuntar imagen'}
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp,image/heic"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (!f) return;
+                                setReciboArchivo(f);
+                                if (reciboPreview) URL.revokeObjectURL(reciboPreview);
+                                setReciboPreview(URL.createObjectURL(f));
+                              }}
+                            />
+                          </label>
+                          {reciboArchivo && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setReciboArchivo(null);
+                                if (reciboPreview) URL.revokeObjectURL(reciboPreview);
+                                setReciboPreview(null);
+                              }}
+                              className="text-[11px] font-bold text-red-500 hover:underline"
+                            >
+                              Quitar
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <div>
@@ -568,7 +706,7 @@ function ModalDetalle({
 
                       <div className="flex gap-2">
                         <button
-                          onClick={() => { setShowForm(false); setErrorPago(''); setTrmInput(''); }}
+                          onClick={() => { setShowForm(false); setErrorPago(''); setTasaNaturalInput(''); }}
                           className="flex-1 py-2 text-sm font-bold text-yeikar-neutral/60 border border-yeikar-secondary-light/20 rounded-xl hover:bg-yeikar-tertiary/20 transition-all"
                         >
                           Cancelar
@@ -706,7 +844,7 @@ function ModalDetalle({
                           <p className="font-bold text-stone-800 uppercase tracking-wider">Esta factura va sin enmienda ni tachadura.</p>
                           <p className="italic">ORIGINAL · Comprobante fiscal de venta Comercializadora Yeikar (Ureña, Edo. Táchira).</p>
                           <p className="text-[7.5px] text-stone-500 font-mono">
-                            Tasa de Cambio Oficial: 1 {detalle.moneda?.codigo} = {tasaBs.toLocaleString('es-VE')} Bs.
+                            Tasa de Cambio Oficial: 1 {detalle.moneda?.codigo ?? 'USD'} = {tasaBs.toLocaleString('es-VE')} Bs.
                           </p>
                         </div>
 
@@ -758,6 +896,28 @@ function ModalDetalle({
           )}
         </div>
       </div>
+
+      {/* Visor de recibo (comprobante digital ampliado) */}
+      {reciboVer && (
+        <div
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-[60]"
+          onClick={() => setReciboVer(null)}
+        >
+          <div className="relative max-w-2xl w-full bg-white rounded-2xl overflow-hidden shadow-2xl">
+            <button
+              onClick={() => setReciboVer(null)}
+              className="absolute top-2 right-2 bg-black/60 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm hover:bg-black/80"
+            >
+              ×
+            </button>
+            <AdjuntoImagen
+              adjunto={{ id: reciboVer.id, mime: reciboVer.mime }}
+              alt="recibo"
+              className="w-full max-h-[85vh] object-contain"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -813,17 +973,15 @@ function ModalCrearFactura({
               Moneda sugerida de la cotización (puedes cambiarla).
             </p>
           )}
-          <select
+          <SearchSelect
             value={monedaId}
-            onChange={(e) => setMonedaId(Number(e.target.value))}
-            className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
-          >
-            {monedas.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.nombre} ({m.codigo} {m.simbolo})
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setMonedaId(Number(v))}
+            options={monedas.map((m) => ({
+              value: m.id,
+              label: `${m.nombre} (${m.codigo} ${m.simbolo})`,
+            }))}
+            placeholder="Seleccione moneda..."
+          />
         </div>
         {error && (
           <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
@@ -853,6 +1011,7 @@ function ModalCrearFactura({
 // ─── Página principal ─────────────────────────────────────────────────────────
 export default function Ventas() {
   const [activeTab, setActiveTab] = useState<'facturas' | 'pendientes'>('facturas');
+  const toast = useToast();
 
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [ventasLoading, setVentasLoading] = useState(false);
@@ -866,13 +1025,17 @@ export default function Ventas() {
   const [detalleVentaId, setDetalleVentaId] = useState<number | null>(null);
   const [pedidoParaFactura, setPedidoParaFactura] = useState<PedidoSinFactura | null>(null);
 
-  // Filtro de estado
-  const [filtroEstado, setFiltroEstado] = useState<string>('');
+  // Filtro de estado: por defecto solo cobros pendientes (PENDIENTE/ABONADA);
+  // las pagadas/canceladas quedan en su pill o en 'Todas'.
+  const [filtroEstado, setFiltroEstado] = useState<string>('COBROS');
 
-  const cargarVentas = useCallback(async () => {
+  // Búsqueda
+  const [busqueda, setBusqueda] = useState('');
+
+  const cargarVentas = useCallback(async (termino?: string) => {
     try {
       setVentasLoading(true);
-      const data = await ventaService.getAll();
+      const data = await ventaService.getAll(termino ? { buscar: termino } : undefined);
       setVentas(data);
     } finally {
       setVentasLoading(false);
@@ -907,20 +1070,122 @@ export default function Ventas() {
 
   useEffect(() => {
     cargarMonedas();
-    if (activeTab === 'facturas') {
-      cargarVentas();
-    } else {
+    if (activeTab === 'pendientes') {
       cargarPedidosSinFactura();
     }
-  }, [activeTab, cargarVentas, cargarPedidosSinFactura, cargarMonedas]);
+  }, [activeTab, cargarPedidosSinFactura, cargarMonedas]);
 
-  const ventasFiltradas = filtroEstado
-    ? ventas.filter((v) => v.estado === filtroEstado)
-    : ventas;
+  useEffect(() => {
+    if (activeTab !== 'facturas') return;
+    const t = setTimeout(() => cargarVentas(busqueda.trim() || undefined), 300);
+    return () => clearTimeout(t);
+  }, [busqueda, activeTab, cargarVentas]);
+
+  const ventasFiltradas = filtroEstado === 'COBROS'
+    ? ventas.filter((v) => v.estado === 'PENDIENTE' || v.estado === 'ABONADA')
+    : filtroEstado
+      ? ventas.filter((v) => v.estado === filtroEstado)
+      : ventas;
 
   const totalPendiente = ventas
     .filter((v) => v.estado !== 'PAGADA' && v.estado !== 'CANCELADA')
     .length;
+
+  const facturasColumns: DataColumn<Venta>[] = [
+    {
+      key: 'id',
+      header: '# Factura',
+      render: (v) => <span className="font-mono font-bold text-yeikar-secondary">#{v.id}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'cliente',
+      header: 'Cliente',
+      render: (v) => <span className="font-semibold text-yeikar-secondary">{v.cliente?.nombre ?? `Cliente #${v.cliente_id}`}</span>,
+      mobileSecondary: true,
+    },
+    {
+      key: 'pedido',
+      header: 'Pedido',
+      render: (v) => <span className="font-mono text-yeikar-neutral/60">Pedido #{v.pedido_id}</span>,
+      mobileLabel: 'Pedido',
+    },
+    {
+      key: 'fecha',
+      header: 'Fecha',
+      render: (v) => <span className="font-mono text-yeikar-neutral/70">{new Date(v.fecha).toLocaleDateString('es-ES')}</span>,
+      mobileLabel: 'Fecha',
+    },
+    {
+      key: 'total',
+      header: 'Total',
+      render: (v) => <span className="font-mono font-bold text-yeikar-secondary">{Number(v.total).toLocaleString('es-ES')}</span>,
+      mobileLabel: 'Total',
+    },
+    {
+      key: 'moneda',
+      header: 'Moneda',
+      render: (v) => (
+        <span className="font-mono text-xs font-bold bg-yeikar-tertiary/30 px-2 py-0.5 rounded-md">
+          {v.moneda?.codigo ?? '—'}
+        </span>
+      ),
+      mobileLabel: 'Moneda',
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      render: (v) => <Badge text={v.estado} className={ESTADO_VENTA_STYLE[v.estado] ?? ''} />,
+      mobileHidden: true,
+    },
+  ];
+
+  const renderAccionFactura = (v: Venta) => (
+    <button
+      id={`btn-ver-factura-${v.id}`}
+      onClick={() => setDetalleVentaId(v.id)}
+      className="px-3 py-2 bg-yeikar-secondary text-yeikar-tertiary hover:bg-yeikar-secondary-light rounded-lg text-xs font-bold font-headline transition-colors"
+    >
+      {v.estado !== 'PAGADA' && v.estado !== 'CANCELADA' ? 'Ver / Cobrar' : 'Ver Detalle'}
+    </button>
+  );
+
+  const pendientesColumns: DataColumn<PedidoSinFactura>[] = [
+    {
+      key: 'id',
+      header: '# Pedido',
+      render: (p) => <span className="font-mono font-bold text-yeikar-secondary">#{p.id}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'cliente',
+      header: 'Cliente',
+      render: (p) => <span className="font-semibold text-yeikar-secondary">{p.cliente?.nombre ?? '—'}</span>,
+      mobileSecondary: true,
+    },
+    {
+      key: 'fecha',
+      header: 'Fecha',
+      render: (p) => <span className="font-mono text-yeikar-neutral/70">{p.fecha}</span>,
+      mobileLabel: 'Fecha',
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      render: (p) => <Badge text={p.estado} className={`${ESTADO_PEDIDO_STYLE[p.estado] ?? ''} border border-transparent`} />,
+      mobileHidden: true,
+    },
+  ];
+
+  const renderCrearFactura = (p: PedidoSinFactura) => (
+    <button
+      id={`btn-crear-factura-${p.id}`}
+      onClick={() => setPedidoParaFactura(p)}
+      className="px-3 py-2 bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary/90 rounded-lg text-xs font-bold font-headline transition-colors"
+    >
+      Crear Factura
+    </button>
+  );
 
   return (
     <div className="space-y-6">
@@ -945,7 +1210,7 @@ export default function Ventas() {
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-yeikar-secondary-light/10">
+      <div className="flex border-b border-yeikar-secondary-light/10 overflow-x-auto scroll-touch whitespace-nowrap">
         <button
           id="tab-facturas"
           onClick={() => setActiveTab('facturas')}
@@ -978,22 +1243,30 @@ export default function Ventas() {
       {/* ── TAB: Facturas emitidas ── */}
       {activeTab === 'facturas' && (
         <div className="space-y-4">
-          {/* Filtro de estado */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-bold text-yeikar-neutral/50 font-mono">FILTRAR:</span>
-            {['', 'PENDIENTE', 'ABONADA', 'PAGADA', 'CANCELADA'].map((est) => (
-              <button
-                key={est}
-                onClick={() => setFiltroEstado(est)}
-                className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
-                  filtroEstado === est
-                    ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
-                    : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/20 hover:border-yeikar-primary/40'
-                }`}
-              >
-                {est === '' ? 'Todas' : est}
-              </button>
-            ))}
+          {/* Filtro de estado + búsqueda */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-bold text-yeikar-neutral/50 font-mono">FILTRAR:</span>
+              {['COBROS', 'PAGADA', 'CANCELADA', ''].map((est) => (
+                <button
+                  key={est}
+                  onClick={() => setFiltroEstado(est)}
+                  className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
+                    filtroEstado === est
+                      ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                      : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/20 hover:border-yeikar-primary/40'
+                  }`}
+                >
+                  {est === '' ? 'Todas' : est === 'COBROS' ? 'Pendientes de cobro' : est}
+                </button>
+              ))}
+            </div>
+            <SearchInput
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Buscar factura por cliente o estado..."
+              className="w-full sm:w-72"
+            />
           </div>
 
           <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 shadow-sm overflow-hidden">
@@ -1004,63 +1277,15 @@ export default function Ventas() {
                 No hay facturas para mostrar.
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="bg-yeikar-neutral text-yeikar-tertiary font-headline uppercase text-xs tracking-wider">
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20"># Factura</th>
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20">Cliente</th>
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20">Pedido</th>
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20">Fecha</th>
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20">Total</th>
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20">Moneda</th>
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20">Estado</th>
-                      <th className="px-5 py-4 border-b border-yeikar-secondary/20 text-right">Acción</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-yeikar-secondary-light/10">
-                    {ventasFiltradas.map((v) => (
-                      <tr key={v.id} className="hover:bg-yeikar-tertiary/10 transition-colors">
-                        <td className="px-5 py-4 font-mono font-bold text-yeikar-secondary">
-                          #{v.id}
-                        </td>
-                        <td className="px-5 py-4 font-semibold text-yeikar-secondary">
-                          {v.cliente?.nombre ?? `Cliente #${v.cliente_id}`}
-                        </td>
-                        <td className="px-5 py-4 font-mono text-yeikar-neutral/60">
-                          Pedido #{v.pedido_id}
-                        </td>
-                        <td className="px-5 py-4 font-mono text-yeikar-neutral/70">
-                          {new Date(v.fecha).toLocaleDateString('es-ES')}
-                        </td>
-                        <td className="px-5 py-4 font-mono font-bold text-yeikar-secondary">
-                          {Number(v.total).toLocaleString('es-ES')}
-                        </td>
-                        <td className="px-5 py-4">
-                          <span className="font-mono text-xs font-bold bg-yeikar-tertiary/30 px-2 py-0.5 rounded-md">
-                            {v.moneda?.codigo ?? '—'}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <Badge
-                            text={v.estado}
-                            className={ESTADO_VENTA_STYLE[v.estado] ?? ''}
-                          />
-                        </td>
-                        <td className="px-5 py-4 text-right">
-                          <button
-                            id={`btn-ver-factura-${v.id}`}
-                            onClick={() => setDetalleVentaId(v.id)}
-                            className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-tertiary hover:bg-yeikar-secondary-light rounded-lg text-xs font-bold font-headline transition-colors"
-                          >
-                            {v.estado !== 'PAGADA' && v.estado !== 'CANCELADA' ? 'Ver / Cobrar' : 'Ver Detalle'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ResponsiveDataTable
+                columns={facturasColumns}
+                rows={ventasFiltradas}
+                rowKey={(v) => v.id}
+                cardBadge={(v) => <Badge text={v.estado} className={ESTADO_VENTA_STYLE[v.estado] ?? ''} />}
+                tableActions={renderAccionFactura}
+                cardActions={renderAccionFactura}
+                darkHeader
+              />
             )}
           </div>
         </div>
@@ -1073,48 +1298,20 @@ export default function Ventas() {
             <Spinner />
           ) : pedidosSinFactura.length === 0 ? (
             <div className="p-10 text-center text-green-600 font-semibold italic text-sm">
-              ✓ Todos los pedidos activos ya tienen factura emitida.
+              Todos los pedidos activos ya tienen factura emitida.
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
-                <thead>
-                  <tr className="bg-yeikar-neutral text-yeikar-tertiary font-headline uppercase text-xs tracking-wider">
-                    <th className="px-5 py-4 border-b border-yeikar-secondary/20"># Pedido</th>
-                    <th className="px-5 py-4 border-b border-yeikar-secondary/20">Cliente</th>
-                    <th className="px-5 py-4 border-b border-yeikar-secondary/20">Fecha</th>
-                    <th className="px-5 py-4 border-b border-yeikar-secondary/20">Estado</th>
-                    <th className="px-5 py-4 border-b border-yeikar-secondary/20 text-right">Acción</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-yeikar-secondary-light/10">
-                  {pedidosSinFactura.map((p) => (
-                    <tr key={p.id} className="hover:bg-yeikar-tertiary/10 transition-colors">
-                      <td className="px-5 py-4 font-mono font-bold text-yeikar-secondary">#{p.id}</td>
-                      <td className="px-5 py-4 font-semibold text-yeikar-secondary">
-                        {p.cliente?.nombre ?? '—'}
-                      </td>
-                      <td className="px-5 py-4 font-mono text-yeikar-neutral/70">{p.fecha}</td>
-                      <td className="px-5 py-4">
-                        <Badge
-                          text={p.estado}
-                          className={`${ESTADO_PEDIDO_STYLE[p.estado] ?? ''} border border-transparent`}
-                        />
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <button
-                          id={`btn-crear-factura-${p.id}`}
-                          onClick={() => setPedidoParaFactura(p)}
-                          className="px-3 py-1.5 bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary/90 rounded-lg text-xs font-bold font-headline transition-colors"
-                        >
-                          Crear Factura
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ResponsiveDataTable
+              columns={pendientesColumns}
+              rows={pedidosSinFactura}
+              rowKey={(p) => p.id}
+              cardBadge={(p) => (
+                <Badge text={p.estado} className={`${ESTADO_PEDIDO_STYLE[p.estado] ?? ''} border border-transparent`} />
+              )}
+              tableActions={renderCrearFactura}
+              cardActions={renderCrearFactura}
+              darkHeader
+            />
           )}
         </div>
       )}

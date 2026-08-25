@@ -11,6 +11,7 @@ import {
 import { ventaService, Venta } from '../services/ventaService';
 import { getMonedas, Moneda } from '../services/gastoService';
 import { buildInformePrintHtml } from '../utils/informePrintHtml';
+import { SearchSelect } from './ui';
 
 const fmtCop = (n: number | null | undefined): string =>
   `$${Math.round(Number(n) || 0).toLocaleString('es-CO')}`;
@@ -78,6 +79,7 @@ export default function InformeMensual() {
   const [informe, setInforme] = useState<InformeMensualResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [guardando, setGuardando] = useState(false);
   const [notificacion, setNotificacion] = useState<string | null>(null);
 
@@ -103,6 +105,7 @@ export default function InformeMensual() {
   const cargarTodo = async () => {
     setLoading(true);
     setError(null);
+    setErrorStatus(null);
     try {
       const [inf, conc, val, met, mov, dev, mon] = await Promise.all([
         reportesService.getInformeMensual(mes),
@@ -134,7 +137,12 @@ export default function InformeMensual() {
       setDevForm((f) => (f.venta_id ? f : emptyDevolucionForm(mon.find((m) => m.codigo === 'COP')?.id)));
     } catch (e: any) {
       console.error(e);
-      setError(e?.response?.data?.detail ?? 'No se pudo cargar el informe mensual.');
+      setErrorStatus(e?.response?.status ?? null);
+      setError(
+        e?.response?.status === 403
+          ? 'Solo los dueños y administradores pueden ver los reportes financieros.'
+          : (e?.response?.data?.detail ?? 'No se pudo cargar el informe mensual.'),
+      );
     } finally {
       setLoading(false);
     }
@@ -339,7 +347,7 @@ export default function InformeMensual() {
       {/* Notificación */}
       {notificacion && (
         <div className="bg-green-50 border border-green-200 text-green-800 text-sm font-semibold px-4 py-3 rounded-xl print:hidden">
-          ✓ {notificacion}
+          {notificacion}
         </div>
       )}
       {error && (
@@ -401,8 +409,29 @@ export default function InformeMensual() {
           <div className="w-10 h-10 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
           <p className="text-xs font-mono text-yeikar-neutral/60">Generando informe...</p>
         </div>
-      ) : (
-        informe && (
+      ) : error && !informe ? (
+        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-red-200/70 bg-red-50/60 px-6 py-14 text-center print:hidden">
+          {errorStatus === 403 ? (
+            <svg className="w-10 h-10 text-yeikar-primary-dark" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          ) : (
+            <svg className="w-10 h-10 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+          )}
+          <p className="font-headline text-base font-bold text-yeikar-secondary">
+            {errorStatus === 403 ? 'Acceso restringido' : 'No se pudo cargar el informe'}
+          </p>
+          <p className="max-w-md text-sm text-yeikar-neutral/60">{error}</p>
+          <button
+            onClick={cargarTodo}
+            className="mt-2 rounded-xl bg-yeikar-primary px-5 py-2.5 font-headline text-sm font-bold text-yeikar-neutral shadow-gold transition-colors hover:bg-yeikar-primary-light"
+          >
+            Reintentar
+          </button>
+        </div>
+      ) : !informe ? null : (
           <>
             {/* ── Sección 1: Control Interno de Ingresos ── */}
             <div className="bg-white border border-yeikar-secondary-light/10 rounded-3xl shadow-sm overflow-hidden print:border-gray-400 print:rounded-none print:shadow-none">
@@ -444,11 +473,11 @@ export default function InformeMensual() {
                           <td className="p-3 text-center font-mono">{l.cantidad}</td>
                           <td className="p-3 text-yeikar-neutral/80">{l.producto}</td>
                           <td className={`p-3 text-right font-mono ${l.es_devolucion ? 'text-red-500 line-through' : 'text-yeikar-neutral/60'}`}>{fmtCop(l.precio_costo)}</td>
-                          <td className="p-3 text-center font-mono text-xs text-yeikar-neutral/50">{l.porcentaje_ganancia != null ? `${l.porcentaje_ganancia.toFixed(1)}%` : '—'}</td>
+                          <td className="p-3 text-center font-mono text-xs text-yeikar-neutral/50">{l.porcentaje_ganancia != null ? `${Number(l.porcentaje_ganancia).toFixed(1)}%` : '—'}</td>
                           <td className={`p-3 text-right font-mono font-semibold ${l.es_devolucion ? 'text-red-500' : 'text-green-600'}`}>{fmtCop(l.utilidad)}</td>
                           <td className="p-3 text-right font-mono font-bold text-yeikar-neutral">{fmtCop(l.precio_venta)}</td>
                           <td className="p-3 text-center font-mono text-xs text-yeikar-neutral/50">{l.moneda}</td>
-                          <td className="p-3 text-right font-mono text-xs text-yeikar-neutral/50">{l.tasa_cambio ? l.tasa_cambio.toLocaleString('es-CO') : '—'}</td>
+                          <td className="p-3 text-right font-mono text-xs text-yeikar-neutral/50">{l.tasa_cambio ? Number(l.tasa_cambio).toLocaleString('es-CO') : '—'}</td>
                           <td className={`p-3 text-right font-mono font-bold ${l.es_devolucion ? 'text-red-500' : 'text-yeikar-primary'}`}>{fmtCop(l.precio_venta_en_base)}</td>
                         </tr>
                       ))
@@ -548,6 +577,7 @@ export default function InformeMensual() {
                     <GastoGrupo titulo="Administrativos" lineas={informe.estado_resultados.gastos.administrativos} total={informe.estado_resultados.gastos.total_gastos_administrativos} />
                     <GastoGrupo titulo="Financieros" lineas={informe.estado_resultados.gastos.financieros} total={informe.estado_resultados.gastos.total_financieros} />
                     <GastoGrupo titulo="Impuestos" lineas={informe.estado_resultados.gastos.impuestos} total={informe.estado_resultados.gastos.total_impuestos} />
+                    <GastoGrupo titulo="Producción" lineas={informe.estado_resultados.gastos.produccion ?? []} total={informe.estado_resultados.gastos.total_gastos_produccion ?? 0} />
                     <Row label="Total Gastos" valor={informe.estado_resultados.gastos.total_gastos} strong negative />
                   </div>
 
@@ -599,7 +629,7 @@ export default function InformeMensual() {
                     {informe.pendientes_de_pago.lineas.length === 0 ? (
                       <tr>
                         <td colSpan={9} className="p-8 text-center text-green-600 font-semibold italic">
-                          ✓ No hay pendientes de pago al cierre de este mes.
+                          No hay pendientes de pago al cierre de este mes.
                         </td>
                       </tr>
                     ) : (
@@ -749,12 +779,15 @@ export default function InformeMensual() {
 
                     {/* Formulario */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <select value={cajaForm.metodo_caja_id} onChange={(e) => setCajaForm((f) => ({ ...f, metodo_caja_id: Number(e.target.value) }))} className={inputCls}>
-                        <option value={0}>Método...</option>
-                        {metodosCaja.map((m) => (
-                          <option key={m.id} value={m.id}>{m.nombre}</option>
-                        ))}
-                      </select>
+                      <SearchSelect
+                        value={cajaForm.metodo_caja_id}
+                        onChange={(v) => setCajaForm((f) => ({ ...f, metodo_caja_id: Number(v) }))}
+                        options={[
+                          { value: 0, label: 'Método...' },
+                          ...metodosCaja.map((m) => ({ value: m.id, label: m.nombre })),
+                        ]}
+                        placeholder="Método..."
+                      />
                       <input type="date" value={cajaForm.fecha} onChange={(e) => setCajaForm((f) => ({ ...f, fecha: e.target.value }))} className={inputCls} />
                       <select value={cajaForm.tipo} onChange={(e) => setCajaForm((f) => ({ ...f, tipo: e.target.value as any }))} className={inputCls}>
                         <option value="ENTRADA">Entrada</option>
@@ -763,11 +796,12 @@ export default function InformeMensual() {
                         <option value="AJUSTE">Ajuste</option>
                       </select>
                       <input type="number" min="0" step="0.01" value={cajaForm.monto} onChange={(e) => setCajaForm((f) => ({ ...f, monto: e.target.value }))} placeholder="Monto" className={inputCls} />
-                      <select value={cajaForm.moneda_id} onChange={(e) => setCajaForm((f) => ({ ...f, moneda_id: Number(e.target.value) }))} className={inputCls}>
-                        {monedas.map((m) => (
-                          <option key={m.id} value={m.id}>{m.codigo}</option>
-                        ))}
-                      </select>
+                      <SearchSelect
+                        value={cajaForm.moneda_id}
+                        onChange={(v) => setCajaForm((f) => ({ ...f, moneda_id: Number(v) }))}
+                        options={monedas.map((m) => ({ value: m.id, label: m.codigo }))}
+                        placeholder="Moneda..."
+                      />
                       <input type="number" min="0" step="0.01" value={cajaForm.tasa_cambio} onChange={(e) => setCajaForm((f) => ({ ...f, tasa_cambio: e.target.value }))} placeholder="Tasa (COP/1) si no es COP" className={inputCls} />
                       <input value={cajaForm.referencia} onChange={(e) => setCajaForm((f) => ({ ...f, referencia: e.target.value }))} placeholder="Referencia" className={inputCls} />
                       <button onClick={registrarMovimiento} disabled={guardando} className="bg-yeikar-primary text-yeikar-neutral font-bold text-sm rounded-lg hover:bg-yeikar-secondary transition-colors disabled:opacity-50 py-2">
@@ -804,7 +838,7 @@ export default function InformeMensual() {
                                 <td className="p-2 text-right font-mono">{m.moneda?.codigo ?? ''} {Math.round(m.monto).toLocaleString('es-CO')}</td>
                                 <td className="p-2 text-right font-mono font-semibold">{fmtCop(m.monto_en_moneda_base)}</td>
                                 <td className="p-2 text-right">
-                                  <button onClick={() => eliminarMovimiento(m.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">✕</button>
+                                  <button onClick={() => eliminarMovimiento(m.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">×</button>
                                 </td>
                               </tr>
                             ))
@@ -831,22 +865,27 @@ export default function InformeMensual() {
                 {panelAbierto === 'devoluciones' && (
                   <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl p-5 shadow-sm space-y-4">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                      <select value={devForm.venta_id} onChange={(e) => setDevForm((f) => ({ ...f, venta_id: Number(e.target.value) }))} className={inputCls}>
-                        <option value={0}>Venta...</option>
-                        {ventas.map((v) => (
-                          <option key={v.id} value={v.id}>
-                            #{v.id} — {v.cliente?.nombre ?? 'Sin cliente'} ({v.fecha.slice(0, 10)})
-                          </option>
-                        ))}
-                      </select>
+                      <SearchSelect
+                        value={devForm.venta_id}
+                        onChange={(v) => setDevForm((f) => ({ ...f, venta_id: Number(v) }))}
+                        options={[
+                          { value: 0, label: 'Venta...' },
+                          ...ventas.map((v) => ({
+                            value: v.id,
+                            label: `#${v.id} — ${v.cliente?.nombre ?? 'Sin cliente'} (${v.fecha.slice(0, 10)})`,
+                          })),
+                        ]}
+                        placeholder="Venta..."
+                      />
                       <input type="date" value={devForm.fecha} onChange={(e) => setDevForm((f) => ({ ...f, fecha: e.target.value }))} className={inputCls} />
                       <input type="number" min="1" step="1" value={devForm.cantidad} onChange={(e) => setDevForm((f) => ({ ...f, cantidad: e.target.value }))} placeholder="Cantidad" className={inputCls} />
                       <input type="number" min="0" step="0.01" value={devForm.monto_devuelto} onChange={(e) => setDevForm((f) => ({ ...f, monto_devuelto: e.target.value }))} placeholder="Monto devuelto" className={inputCls} />
-                      <select value={devForm.moneda_id} onChange={(e) => setDevForm((f) => ({ ...f, moneda_id: Number(e.target.value) }))} className={inputCls}>
-                        {monedas.map((m) => (
-                          <option key={m.id} value={m.id}>{m.codigo}</option>
-                        ))}
-                      </select>
+                      <SearchSelect
+                        value={devForm.moneda_id}
+                        onChange={(v) => setDevForm((f) => ({ ...f, moneda_id: Number(v) }))}
+                        options={monedas.map((m) => ({ value: m.id, label: m.codigo }))}
+                        placeholder="Moneda..."
+                      />
                       <input type="number" min="0" step="0.01" value={devForm.tasa_cambio} onChange={(e) => setDevForm((f) => ({ ...f, tasa_cambio: e.target.value }))} placeholder="Tasa (COP/1)" className={inputCls} />
                       <input value={devForm.motivo} onChange={(e) => setDevForm((f) => ({ ...f, motivo: e.target.value }))} placeholder="Motivo" className={`${inputCls} col-span-2`} />
                       <button onClick={registrarDevolucion} disabled={guardando} className="bg-red-500 text-white font-bold text-sm rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 py-2 col-span-2">
@@ -879,7 +918,7 @@ export default function InformeMensual() {
                                 <td className="p-2 text-right font-mono font-semibold text-red-500">−{fmtCop(d.monto_en_moneda_base ?? d.monto_devuelto)}</td>
                                 <td className="p-2 text-yeikar-neutral/60 italic">{d.motivo ?? ''}</td>
                                 <td className="p-2 text-right">
-                                  <button onClick={() => eliminarDevolucion(d.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">✕</button>
+                                  <button onClick={() => eliminarDevolucion(d.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">×</button>
                                 </td>
                               </tr>
                             ))
@@ -903,7 +942,7 @@ export default function InformeMensual() {
                             <p className={`text-sm font-semibold ${c.activo ? 'text-yeikar-neutral' : 'text-yeikar-neutral/40 line-through'}`}>{c.nombre}</p>
                             <p className="text-[10px] font-mono text-yeikar-neutral/40 uppercase">{c.seccion} · orden {c.orden}</p>
                           </div>
-                          <button onClick={() => eliminarConcepto(c.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">✕</button>
+                          <button onClick={() => eliminarConcepto(c.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">×</button>
                         </div>
                       ))}
                     </div>
@@ -913,7 +952,7 @@ export default function InformeMensual() {
             </div>
           </>
         )
-      )}
+      }
     </div>
   );
 }

@@ -8,6 +8,7 @@ export interface Client {
   email?: string;
   ciudad?: string;
   estado?: string;
+  cedula?: string;
   observaciones?: string;
   fecha_registro?: string;
   created_at?: string;
@@ -21,6 +22,7 @@ export interface ClientCreate {
   email?: string | null;
   ciudad?: string | null;
   estado?: string | null;
+  cedula?: string | null;
   observaciones?: string | null;
 }
 

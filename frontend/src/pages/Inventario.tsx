@@ -2,6 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse } from '../services/inventarioService';
 import { productosService } from '../services/productosService';
 import api from '../services/api';
+import { useToast } from '../context/ToastContext';
+import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
 
 interface Ubicacion {
   id: number;
@@ -33,6 +35,7 @@ type Tab = 'insumos' | 'productos';
 const TIPOS_MOVIMIENTO = ['ENTRADA', 'SALIDA', 'AJUSTE', 'DAÑO', 'DEVOLUCION'];
 
 export default function Inventario() {
+  const toast = useToast();
   interface UnidadMedida {
     id: number;
     nombre: string;
@@ -183,7 +186,7 @@ export default function Inventario() {
       setNewMaterial({ nombre: '', costo_base: '', unidad_medida_id: '', stock_minimo: '8' });
       fetchInsumos();
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al crear el insumo.');
+      toast.error(error.response?.data?.detail || 'Error al crear el insumo.');
     }
   };
 
@@ -223,7 +226,7 @@ export default function Inventario() {
       }
       fetchProductos();
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al crear el producto.');
+      toast.error(error.response?.data?.detail || 'Error al crear el producto.');
     } finally {
       setSavingProducto(false);
     }
@@ -262,7 +265,7 @@ export default function Inventario() {
       });
       fetchInsumos();
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al guardar el insumo.');
+      toast.error(error.response?.data?.detail || 'Error al guardar el insumo.');
     } finally {
       setSavingEdit(false);
     }
@@ -290,7 +293,7 @@ export default function Inventario() {
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al registrar el movimiento.');
+      toast.error(error.response?.data?.detail || 'Error al registrar el movimiento.');
     } finally {
       setSavingMov(false);
     }
@@ -333,7 +336,7 @@ export default function Inventario() {
       const p = productos.find(x => x.id === selectedProductoId);
       if (p) handleOpenProducto(p);
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al registrar el movimiento.');
+      toast.error(error.response?.data?.detail || 'Error al registrar el movimiento.');
     } finally {
       setSavingMovProd(false);
     }
@@ -366,6 +369,135 @@ export default function Inventario() {
   const inputCls = "w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono";
   const selectCls = "w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary";
 
+  const stockPill = (tieneStock: boolean, cantidad: number, isLowStock: boolean) => (
+    <span
+      className={`px-2.5 py-0.5 rounded-full text-xs font-bold whitespace-nowrap ${
+        !tieneStock || isLowStock
+          ? 'bg-red-50 text-red-700 border border-red-200'
+          : 'bg-green-50 text-green-700 border border-green-200'
+      }`}
+    >
+      {tieneStock ? cantidad.toLocaleString('es-ES') : '0'}
+    </span>
+  );
+
+  const insumoStock = (m: Material) => {
+    const s = stockMap.get(m.id);
+    const c = s ? parseFloat(s.cantidad.toString()) : 0;
+    return { s, c, low: c <= (m.stock_minimo ?? 8) };
+  };
+
+  const insumoColumns: DataColumn<Material>[] = [
+    {
+      key: 'nombre',
+      header: 'Material',
+      render: (m) => <span className="font-semibold text-yeikar-secondary">{m.nombre}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'ubicacion',
+      header: 'Ubicación',
+      render: (m) =>
+        insumoStock(m).s?.ubicacion_nombre || (
+          <span className="text-xs italic text-yeikar-neutral/30">Sin stock</span>
+        ),
+      mobileLabel: 'Ubicación',
+    },
+    {
+      key: 'stock',
+      header: 'Stock Actual',
+      render: (m) => {
+        const { s, c, low } = insumoStock(m);
+        return stockPill(!!s, c, low);
+      },
+      mobileHidden: true,
+    },
+    {
+      key: 'min',
+      header: 'Stock Mín.',
+      render: (m) => (
+        <span className="font-mono text-xs text-yeikar-neutral/60">{(m.stock_minimo ?? 8).toLocaleString('es-ES')}</span>
+      ),
+      mobileLabel: 'Mínimo',
+    },
+    {
+      key: 'unidad',
+      header: 'Unidad',
+      render: (m) => <span className="font-mono text-xs text-yeikar-neutral/60">{m.unidad_medida?.abreviatura || 'Unid'}</span>,
+      mobileLabel: 'Unidad',
+    },
+    {
+      key: 'precio',
+      header: 'Precio Unitario',
+      render: (m) => (
+        <span className="font-mono text-xs text-yeikar-neutral/60">
+          {m.costo_base > 0 ? m.costo_base.toLocaleString('es-ES') : <span className="italic text-yeikar-neutral/30">Sin precio</span>}
+        </span>
+      ),
+      mobileLabel: 'Precio',
+    },
+  ];
+
+  const productoStock = (p: Product) => {
+    const s = stockMapProducto.get(p.id);
+    const c = s ? parseFloat(s.cantidad.toString()) : 0;
+    return { s, c, low: c <= (p.stock_minimo ?? 8) };
+  };
+
+  const productoColumns: DataColumn<Product>[] = [
+    {
+      key: 'nombre',
+      header: 'Producto',
+      render: (p) => <span className="font-semibold text-yeikar-secondary">{p.nombre}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'codigo',
+      header: 'Código',
+      render: (p) => <span className="font-mono text-xs text-yeikar-neutral/60">{p.codigo || '—'}</span>,
+      mobileLabel: 'Código',
+    },
+    {
+      key: 'ubicacion',
+      header: 'Ubicación',
+      render: (p) =>
+        productoStock(p).s?.ubicacion_nombre || (
+          <span className="text-xs italic text-yeikar-neutral/30">Sin stock</span>
+        ),
+      mobileLabel: 'Ubicación',
+    },
+    {
+      key: 'stock',
+      header: 'Stock Actual',
+      render: (p) => {
+        const { s, c, low } = productoStock(p);
+        return stockPill(!!s, c, low);
+      },
+      mobileHidden: true,
+    },
+    {
+      key: 'min',
+      header: 'Stock Mín.',
+      render: (p) => (
+        <span className="font-mono text-xs text-yeikar-neutral/60">{(p.stock_minimo ?? 8).toLocaleString('es-ES')}</span>
+      ),
+      mobileLabel: 'Mínimo',
+    },
+    {
+      key: 'precio',
+      header: 'Último Precio',
+      render: (p) => {
+        const { s } = productoStock(p);
+        return s?.costo_promedio ? (
+          <span className="font-mono text-xs text-yeikar-neutral/60">${Number(s.costo_promedio).toLocaleString('es-ES')}</span>
+        ) : (
+          <span className="italic text-yeikar-neutral/30">—</span>
+        );
+      },
+      mobileLabel: 'Último precio',
+    },
+  ];
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -385,7 +517,7 @@ export default function Inventario() {
               onClick={() => setShowMaterialModal(true)}
               className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
             >
-              ➕ Nuevo Material
+               Nuevo Material
             </button>
           )}
           {tab === 'productos' && (
@@ -393,14 +525,14 @@ export default function Inventario() {
               onClick={() => setShowProductoModal(true)}
               className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
             >
-              ➕ Nuevo Producto de Reventa
+               Nuevo Producto de Reventa
             </button>
           )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-yeikar-secondary-light/10">
+      <div className="flex gap-2 border-b border-yeikar-secondary-light/10 overflow-x-auto scroll-touch whitespace-nowrap">
         <button
           onClick={() => setTab('insumos')}
           className={`px-5 py-2.5 rounded-t-xl font-headline font-bold text-sm transition-colors ${
@@ -461,7 +593,7 @@ export default function Inventario() {
 
         <div className="flex-1 bg-white border border-yeikar-secondary-light/10 rounded-3xl shadow-sm overflow-hidden">
           <div className="p-5 border-b border-yeikar-secondary-light/5 flex items-center justify-between">
-            <div className="relative w-72">
+            <div className="relative w-full sm:w-72">
               <input
                 type="text"
                 placeholder={tab === 'insumos' ? 'Buscar material...' : 'Buscar producto...'}
@@ -481,135 +613,37 @@ export default function Inventario() {
               <p className="text-xs font-mono text-yeikar-neutral/60">Cargando existencias...</p>
             </div>
           ) : tab === 'insumos' ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-yeikar-tertiary/20 text-yeikar-secondary font-headline font-bold text-xs uppercase tracking-wider">
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Material</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Ubicación</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Actual</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Mín.</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Unidad</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Precio Unitario</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-yeikar-secondary-light/5 text-sm">
-                  {filteredInv.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-yeikar-neutral/40 italic">
-                        {search ? `Sin resultados para "${search}"` : 'No hay materiales registrados. Haz clic en ➕ Nuevo Material para comenzar.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredInv.map((mat) => {
-                      const stockItem = stockMap.get(mat.id);
-                      const tieneStock = !!stockItem;
-                      const cantidad = tieneStock ? parseFloat(stockItem!.cantidad.toString()) : 0;
-                      const minimo = mat.stock_minimo ?? 8;
-                      const isLowStock = cantidad <= minimo;
-                      return (
-                        <tr
-                          key={mat.id}
-                          className={`hover:bg-yeikar-tertiary/25 transition-colors cursor-pointer ${
-                            selectedMaterialId === mat.id ? 'bg-yeikar-primary/5' : ''
-                          }`}
-                          onClick={() => handleOpenMaterial(mat)}
-                        >
-                          <td className="p-4 font-semibold text-yeikar-secondary">{mat.nombre}</td>
-                          <td className="p-4 text-yeikar-neutral/75">
-                            {stockItem?.ubicacion_nombre || <span className="text-yeikar-neutral/30 italic text-xs">Sin stock</span>}
-                          </td>
-                          <td className="p-4 font-mono font-bold">
-                            <span
-                              className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                !tieneStock || isLowStock
-                                  ? 'bg-red-50 text-red-700 border border-red-200'
-                                  : 'bg-green-50 text-green-700 border border-green-200'
-                              }`}
-                            >
-                              {tieneStock ? cantidad.toLocaleString('es-ES') : '0'}
-                            </span>
-                          </td>
-                          <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
-                            {minimo.toLocaleString('es-ES')}
-                          </td>
-                          <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
-                            {mat.unidad_medida?.abreviatura || 'Unid'}
-                          </td>
-                          <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
-                            {mat.costo_base > 0 ? mat.costo_base.toLocaleString('es-ES') : <span className="text-yeikar-neutral/30 italic">Sin precio</span>}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ResponsiveDataTable
+              columns={insumoColumns}
+              rows={filteredInv}
+              rowKey={(m) => m.id}
+              cardBadge={(m) => {
+                const { s, c, low } = insumoStock(m);
+                return stockPill(!!s, c, low);
+              }}
+              onRowClick={(m) => handleOpenMaterial(m)}
+              empty={
+                <div className="p-8 text-center text-sm italic text-yeikar-neutral/40">
+                  {search ? `Sin resultados para "${search}"` : 'No hay materiales registrados. Haz clic en "Nuevo Material" para comenzar.'}
+                </div>
+              }
+            />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-yeikar-tertiary/20 text-yeikar-secondary font-headline font-bold text-xs uppercase tracking-wider">
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Producto</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Código</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Ubicación</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Actual</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Stock Mín.</th>
-                    <th className="p-4 border-b border-yeikar-secondary-light/5">Último Precio</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-yeikar-secondary-light/5 text-sm">
-                  {filteredProductos.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="p-8 text-center text-yeikar-neutral/40 italic">
-                        {searchProducto ? `Sin resultados para "${searchProducto}"` : 'No hay productos de reventa (colchones, neveras, etc.). Marca un producto como "Reventa" en Productos.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredProductos.map((p) => {
-                      const stockItem = stockMapProducto.get(p.id);
-                      const tieneStock = !!stockItem;
-                      const cantidad = tieneStock ? parseFloat(stockItem!.cantidad.toString()) : 0;
-                      const minimo = p.stock_minimo ?? 8;
-                      const isLowStock = cantidad <= minimo;
-                      return (
-                        <tr
-                          key={p.id}
-                          className={`hover:bg-yeikar-tertiary/25 transition-colors cursor-pointer ${
-                            selectedProductoId === p.id ? 'bg-yeikar-primary/5' : ''
-                          }`}
-                          onClick={() => handleOpenProducto(p)}
-                        >
-                          <td className="p-4 font-semibold text-yeikar-secondary">{p.nombre}</td>
-                          <td className="p-4 font-mono text-xs text-yeikar-neutral/60">{p.codigo || '—'}</td>
-                          <td className="p-4 text-yeikar-neutral/75">
-                            {stockItem?.ubicacion_nombre || <span className="text-yeikar-neutral/30 italic text-xs">Sin stock</span>}
-                          </td>
-                          <td className="p-4 font-mono font-bold">
-                            <span
-                              className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                !tieneStock || isLowStock
-                                  ? 'bg-red-50 text-red-700 border border-red-200'
-                                  : 'bg-green-50 text-green-700 border border-green-200'
-                              }`}
-                            >
-                              {tieneStock ? cantidad.toLocaleString('es-ES') : '0'}
-                            </span>
-                          </td>
-                          <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
-                            {minimo.toLocaleString('es-ES')}
-                          </td>
-                          <td className="p-4 font-mono text-xs text-yeikar-neutral/60">
-                            {stockItem?.costo_promedio ? `$${Number(stockItem.costo_promedio).toLocaleString('es-ES')}` : <span className="text-yeikar-neutral/30 italic">—</span>}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ResponsiveDataTable
+              columns={productoColumns}
+              rows={filteredProductos}
+              rowKey={(p) => p.id}
+              cardBadge={(p) => {
+                const { s, c, low } = productoStock(p);
+                return stockPill(!!s, c, low);
+              }}
+              onRowClick={(p) => handleOpenProducto(p)}
+              empty={
+                <div className="p-8 text-center text-sm italic text-yeikar-neutral/40">
+                  {searchProducto ? `Sin resultados para "${searchProducto}"` : 'No hay productos de reventa (colchones, neveras, etc.). Marca un producto como "Reventa" en Productos.'}
+                </div>
+              }
+            />
           )}
         </div>
 
@@ -678,10 +712,12 @@ export default function Inventario() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
-                  <select required value={movMaterial.ubicacion_id} onChange={(e) => setMovMaterial(p => ({ ...p, ubicacion_id: e.target.value }))} className={selectCls}>
-                    <option value="">Seleccione una ubicación</option>
-                    {ubicaciones.map((u) => (<option key={u.id} value={u.id}>{u.nombre}</option>))}
-                  </select>
+                  <SearchSelect
+                    value={movMaterial.ubicacion_id}
+                    onChange={(v) => setMovMaterial(p => ({ ...p, ubicacion_id: String(v) }))}
+                    options={ubicaciones.map((u) => ({ value: u.id, label: u.nombre }))}
+                    placeholder="Seleccione una ubicación"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
@@ -796,10 +832,12 @@ export default function Inventario() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
-                  <select required value={movProducto.ubicacion_id} onChange={(e) => setMovProducto(p => ({ ...p, ubicacion_id: e.target.value }))} className={selectCls}>
-                    <option value="">Seleccione una ubicación</option>
-                    {ubicaciones.map((u) => (<option key={u.id} value={u.id}>{u.nombre}</option>))}
-                  </select>
+                  <SearchSelect
+                    value={movProducto.ubicacion_id}
+                    onChange={(v) => setMovProducto(p => ({ ...p, ubicacion_id: String(v) }))}
+                    options={ubicaciones.map((u) => ({ value: u.id, label: u.nombre }))}
+                    placeholder="Seleccione una ubicación"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
@@ -904,10 +942,12 @@ export default function Inventario() {
               </div>
               <div>
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Unidad de Medida *</label>
-                <select required value={newMaterial.unidad_medida_id} onChange={(e) => setNewMaterial(prev => ({ ...prev, unidad_medida_id: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-3 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary bg-white">
-                  <option value="">Seleccionar...</option>
-                  {unidades.map((u) => (<option key={u.id} value={u.id}>{u.nombre} ({u.abreviatura})</option>))}
-                </select>
+                <SearchSelect
+                  value={newMaterial.unidad_medida_id}
+                  onChange={(v) => setNewMaterial(prev => ({ ...prev, unidad_medida_id: String(v) }))}
+                  options={unidades.map((u) => ({ value: u.id, label: `${u.nombre} (${u.abreviatura})` }))}
+                  placeholder="Seleccionar..."
+                />
               </div>
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowMaterialModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>

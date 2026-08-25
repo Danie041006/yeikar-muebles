@@ -55,5 +55,5 @@ with open(f"{BASE}/producto_material.csv", newline='', encoding='utf-8-sig') as 
             count += 1
         else:
             print(f"Fila omitida: producto_id={pid} (existe? {pid in prod_nombre}), material_id={mid} (existe? {mid in mat_nombre})")
-    print(f"✅ Archivo generado: {output_path}")
+    print(f" Archivo generado: {output_path}")
     print(f"   Filas escritas: {count} de {reader.line_num - 1} totales")

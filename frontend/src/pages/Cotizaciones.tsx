@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, QuoteDetail, Moneda } from '../services/cotizacionService';
@@ -6,9 +7,15 @@ import { clienteService, Client } from '../services/clienteService';
 import { pedidoService } from '../services/pedidoService';
 import { ventaService, VentaDetalle, METODOS_PAGO } from '../services/ventaService';
 import { formatCurrency } from '../utils/format';
+import { normalizarEstructuraCostos } from '../utils/estructuraCostos';
+import EstructuraCostos from '../components/EstructuraCostos';
+import DocumentoCotizacion from '../components/Expediente/DocumentoCotizacion';
 
 import api from '../services/api';
 import { productosService } from '../services/productosService';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
+import { useToast } from '../context/ToastContext';
 
 interface CotizacionItemForm {
   producto_id: string;
@@ -16,6 +23,7 @@ interface CotizacionItemForm {
   ancho: string;
   largo: string;
   ganancia: string;
+  impuesto: string;
   observaciones: string;
   calcResult: CalculationResult | null;
   calcLoading: boolean;
@@ -23,6 +31,9 @@ interface CotizacionItemForm {
 }
 
 export default function Cotizaciones() {
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -30,6 +41,9 @@ export default function Cotizaciones() {
   
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
+  // Filtro de estado: por defecto solo cotizaciones activas (borrador/enviada/aprobada);
+  // las rechazadas/vencidas quedan ocultas salvo que se pida el histórico.
+  const [filtroEstadoCot, setFiltroEstadoCot] = useState<string>('ACTIVAS');
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(false);
@@ -57,7 +71,9 @@ export default function Cotizaciones() {
   const [convertError, setConvertError] = useState('');
 
   // Adelanto de la conversión (opcional)
+  const [adelantoModo, setAdelantoModo] = useState<'pct' | 'monto'>('pct');
   const [adelantoPct, setAdelantoPct] = useState('');
+  const [adelantoMonto, setAdelantoMonto] = useState('');
   const [adelantoMonedaId, setAdelantoMonedaId] = useState<number>(1);
   const [adelantoTrm, setAdelantoTrm] = useState('');
   const [adelantoMetodo, setAdelantoMetodo] = useState('');
@@ -67,11 +83,12 @@ export default function Cotizaciones() {
   const [selectedClientId, setSelectedClientId] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [items, setItems] = useState<CotizacionItemForm[]>([
-    { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
+    { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
   ]);
 
   // Modal de personalización de receta ad-hoc por renglón
   const [showPersonalizarModal, setShowPersonalizarModal] = useState(false);
+  const [verEstructuraModal, setVerEstructuraModal] = useState(false);
   const [personalizarIndex, setPersonalizarIndex] = useState<number | null>(null);
   const [personalizarSecciones, setPersonalizarSecciones] = useState<any[]>([]);
   const [modalPreviewCalc, setModalPreviewCalc] = useState<CalculationResult | null>(null);
@@ -104,25 +121,31 @@ export default function Cotizaciones() {
   const quoteMoneda = currencies.find((c) => c.id === quoteEnConversion?.moneda_id);
   const monedaAdelantoSel = currencies.find((c) => c.id === adelantoMonedaId);
 
-  // Tasa del abono ('1 {pago} = X {factura}') derivada de la TRM fijada en la cotización.
-  // null = el par no se puede deducir (p.ej. VES) → se pedirá TRM manual.
-  const tasaAbonoDerivada = () => {
-    if (!quoteEnConversion) return 1;
-    if (adelantoMonedaId === quoteEnConversion.moneda_id) return 1;
-    const qt = Number(quoteEnConversion.tasa_cambio) || 0;
-    if (!qt) return null;
-    const qCode = quoteMoneda?.codigo;
-    const pCode = monedaAdelantoSel?.codigo;
-    if (qCode === 'COP' && pCode === 'USD') return qt;
-    if (qCode === 'USD' && pCode === 'COP') return 1 / qt;
-    return null;
-  };
+  // La tasa del abono SIEMPRE la define el usuario cuando la moneda de pago
+  // difiere de la moneda de la cotización. Nunca se deduce de la tasa congelada
+  // de la cotización (puede pagarse días después con otra tasa).
+  const monedasIguales = adelantoMonedaId === quoteEnConversion?.moneda_id;
+  const tasaPagoPorQuote = monedasIguales ? 1 : Number(adelantoTrm) || 0;
+  const tasaAbonoValida = monedasIguales || tasaPagoPorQuote > 0;
 
   const pctAbono = Number(adelantoPct) || 0;
-  const abonoQuote = (quoteTotal * pctAbono) / 100;
-  const tasaAbono = tasaAbonoDerivada();
-  const necesitaTrmAbono = pctAbono > 0 && tasaAbono === null;
-  const abonoMontoPago = pctAbono > 0 && tasaAbono ? abonoQuote / tasaAbono : 0;
+  const montoFijoAbono = Number(adelantoMonto) || 0;
+  const abonoActivo =
+    (adelantoModo === 'pct' && pctAbono > 0) || (adelantoModo === 'monto' && montoFijoAbono > 0);
+
+  // Monto del abono expresado en la moneda de la cotización (para validar el tope).
+  const abonoEnMonedaCotizacion =
+    adelantoModo === 'pct'
+      ? (quoteTotal * pctAbono) / 100
+      : montoFijoAbono * tasaPagoPorQuote;
+
+  // Monto que realmente se registra como pago, en la moneda que elige el cliente.
+  const abonoMontoPago =
+    adelantoModo === 'pct'
+      ? ((quoteTotal * pctAbono) / 100) / (tasaPagoPorQuote || 1)
+      : montoFijoAbono;
+
+  const abonoExcedeTotal = abonoEnMonedaCotizacion > quoteTotal + 0.01;
 
   const fetchInitialData = async () => {
     try {
@@ -172,7 +195,7 @@ export default function Cotizaciones() {
   }, [search, soloMesActual, selectedMonth, selectedYear]);
 
   // Trigger calculation individually for each item
-  const calculateItemPrice = async (index: number, pId: string, w: string, l: string, g: string, overrideReceta?: any[] | null) => {
+  const calculateItemPrice = async (index: number, pId: string, w: string, l: string, g: string, overrideReceta?: any[] | null, imp?: string) => {
     if (!pId) {
       updateItemField(index, 'calcResult', null);
       return;
@@ -186,14 +209,16 @@ export default function Cotizaciones() {
     });
 
     try {
+      const impuestoItem = imp !== undefined ? (Number(imp) || 7) : (items[index]?.impuesto ? Number(items[index].impuesto) : 7);
       let res;
       if (customRecipe && customRecipe.length > 0) {
-        res = await cotizacionService.recalculateCustomRecipe(Number(g) || 40.0, customRecipe);
+        res = await cotizacionService.recalculateCustomRecipe(Number(g) || 40.0, customRecipe, impuestoItem);
       } else {
         res = await cotizacionService.calculatePrice(Number(pId), {
           ancho: Number(w) || 1.0,
           largo: Number(l) || 1.0,
           ganancia: Number(g) || 40.0,
+          impuesto: impuestoItem,
         });
       }
       
@@ -231,10 +256,10 @@ export default function Cotizaciones() {
     });
 
     // recalculate if relevant field changed
-    if (['producto_id', 'ancho', 'largo', 'ganancia'].includes(field)) {
+    if (['producto_id', 'ancho', 'largo', 'ganancia', 'impuesto'].includes(field)) {
       setItems((prevItems) => {
         const current = prevItems[index];
-        calculateItemPrice(index, current.producto_id, current.ancho, current.largo, current.ganancia, current.receta_personalizada);
+        calculateItemPrice(index, current.producto_id, current.ancho, current.largo, current.ganancia, current.receta_personalizada, current.impuesto);
         return prevItems;
       });
     }
@@ -243,7 +268,7 @@ export default function Cotizaciones() {
   const handleOpenPersonalizarReceta = async (index: number) => {
     const item = items[index];
     if (!item.producto_id) {
-      alert('Por favor selecciona un mueble primero.');
+      toast.info('Por favor selecciona un mueble primero.');
       return;
     }
     
@@ -265,7 +290,7 @@ export default function Cotizaciones() {
         setShowPersonalizarModal(true);
       } catch (err) {
         console.error('Error al cargar la receta estructurada:', err);
-        alert('Error al cargar la estructura del mueble.');
+        toast.error('Error al cargar la estructura del mueble.');
       } finally {
         setItems(prev => {
           const newItems = [...prev];
@@ -372,11 +397,12 @@ export default function Cotizaciones() {
     }
     const item = items[personalizarIndex];
     const ganancia = item ? (Number(item.ganancia) || 40.0) : 40.0;
+    const impuesto = item ? (Number(item.impuesto) || 7.0) : 7.0;
     
     setModalPreviewLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await cotizacionService.recalculateCustomRecipe(ganancia, personalizarSecciones);
+        const res = await cotizacionService.recalculateCustomRecipe(ganancia, personalizarSecciones, impuesto);
         setModalPreviewCalc(res);
       } catch (err) {
         console.error('Error recalculando preview en modal:', err);
@@ -414,7 +440,7 @@ export default function Cotizaciones() {
   const addItem = () => {
     setItems((prev) => [
       ...prev,
-      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
+      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
     ]);
   };
 
@@ -430,7 +456,7 @@ export default function Cotizaciones() {
     setSelectedMonedaId(1);
     setTasaCambio(1);
     setItems([
-      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
+      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
     ]);
     setIsFormOpen(true);
   };
@@ -453,11 +479,15 @@ export default function Cotizaciones() {
       const itemPrice = item.calcResult ? item.calcResult.precio_venta : 0.0;
       const subtotal = itemPrice * item.cantidad;
       globalTotal += subtotal;
+      const precioMoneda =
+        selectedMonedaId !== 1 && tasaCambio > 0
+          ? Math.round((itemPrice / tasaCambio) * 100) / 100
+          : itemPrice;
 
       return {
         producto_id: Number(item.producto_id),
         cantidad: item.cantidad,
-        precio: itemPrice,
+        precio: precioMoneda,
         ancho: Number(item.ancho) || 1.0,
         largo: Number(item.largo) || 1.0,
         observaciones: item.observaciones || null,
@@ -520,26 +550,32 @@ export default function Cotizaciones() {
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
-      alert('Error al actualizar el estado de la cotización.');
+      toast.error('Error al actualizar el estado de la cotización.');
     }
   };
 
-  const handleDelete = async (id: number) => {
-    if (window.confirm('¿Estás seguro de que deseas eliminar esta cotización?')) {
-      try {
-        await cotizacionService.delete(id);
-        fetchQuotes(search);
-      } catch (err) {
-        console.error(err);
-        alert('Error al eliminar.');
-      }
+  const handleDelete = (id: number) => {
+    setConfirmDeleteId(id);
+  };
+  const ejecutarDelete = async () => {
+    if (confirmDeleteId === null) return;
+    const id = confirmDeleteId;
+    setConfirmDeleteId(null);
+    try {
+      await cotizacionService.delete(id);
+      fetchQuotes(search);
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al eliminar.');
     }
   };
 
   const handleOpenConvert = (quote: Quote) => {
     setSelectedQuoteForConvert(quote);
     setDeliveryDate('');
+    setAdelantoModo('pct');
     setAdelantoPct('');
+    setAdelantoMonto('');
     setAdelantoMonedaId(quote.moneda_id ?? 1);
     setAdelantoTrm('');
     setAdelantoMetodo('');
@@ -615,7 +651,7 @@ export default function Cotizaciones() {
       pdf.save(`Cotizacion_${selectedQuoteForPrint.id}.pdf`);
     } catch (err) {
       console.error('Error generating PDF:', err);
-      alert('Hubo un error al generar el PDF.');
+      toast.error('Hubo un error al generar el PDF.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -624,7 +660,25 @@ export default function Cotizaciones() {
   const handleConvertQuote = async () => {
     if (!selectedQuoteForConvert || isConverting) return;
     setIsConverting(true);
+    setConvertError('');
     try {
+      if (abonoActivo) {
+        if (!adelantoMetodo) {
+          setConvertError('Selecciona el método de pago del abono inicial.');
+          return;
+        }
+        if (!monedasIguales && !tasaAbonoValida) {
+          setConvertError(
+            `Indica la tasa de cambio (TRM) del abono: 1 ${monedaAdelantoSel?.codigo ?? '?'} = X ${quoteMoneda?.codigo ?? '?'}.`
+          );
+          return;
+        }
+        if (abonoExcedeTotal) {
+          setConvertError('El abono inicial no puede exceder el total del pedido.');
+          return;
+        }
+      }
+
       let convertDetails;
       if (selectedQuoteForConvert.detalles && selectedQuoteForConvert.detalles.length > 0) {
         convertDetails = selectedQuoteForConvert.detalles.map((det) => ({
@@ -647,7 +701,7 @@ export default function Cotizaciones() {
           if (found) pId = found.id;
         }
         if (!pId) {
-          alert('No se pudo identificar el producto de esta cotización. Verifique que tenga detalles o que el producto exista en el catálogo.');
+          toast.error('No se pudo identificar el producto de esta cotización. Verifique que tenga detalles o que el producto exista en el catálogo.');
           return;
         }
         convertDetails = [
@@ -663,20 +717,24 @@ export default function Cotizaciones() {
       }
 
       const metodoLabel = METODOS_PAGO.find((m) => m.value === adelantoMetodo)?.label;
+      const monedaPagoDifiere = adelantoMonedaId !== selectedQuoteForConvert.moneda_id;
+      // TRM enviada al backend = '1 {pago} = X {cotización}' × tasa de la cotización (COP por cotización).
+      const tasaVenta = Number(selectedQuoteForConvert.tasa_cambio) || 1;
       await pedidoService.convertQuote(selectedQuoteForConvert.id, {
         detalles: convertDetails,
         fecha_entrega_estimada: deliveryDate || undefined,
-        adelanto: abonoMontoPago > 0 ? abonoMontoPago : undefined,
+        adelanto: abonoActivo ? abonoMontoPago : undefined,
         moneda_adelanto_id: adelantoMonedaId,
-        tasa_cambio_adelanto: necesitaTrmAbono ? Number(adelantoTrm) : undefined,
-        metodo_pago: abonoMontoPago > 0 ? adelantoMetodo : undefined,
+        tasa_cambio_adelanto:
+          abonoActivo && monedaPagoDifiere ? tasaPagoPorQuote * tasaVenta : undefined,
+        metodo_pago: abonoActivo ? adelantoMetodo : undefined,
       });
       setIsConvertOpen(false);
       const avisoAbono =
-        abonoMontoPago > 0 && monedaAdelantoSel
+        abonoActivo && monedaAdelantoSel
           ? ` Abono inicial registrado: ${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel.codigo)}${metodoLabel ? ` · ${metodoLabel}` : ''}.`
           : '';
-      alert(`¡Cotización convertida a pedido con éxito!${avisoAbono} Se creó la factura automáticamente.`);
+      toast.success(`¡Cotización convertida a pedido con éxito!${avisoAbono} Se creó la factura automáticamente.`);
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
@@ -713,6 +771,160 @@ export default function Cotizaciones() {
     const t = item.calcResult ? item.calcResult.costo_total : 0;
     return acc + (t * item.cantidad);
   }, 0);
+
+  const quoteEstadoBadge = (estado: string) => (
+    <span
+      className={`px-2.5 py-1 rounded-full text-xs font-bold font-headline inline-block whitespace-nowrap ${
+        estado === 'APROBADA'
+          ? 'bg-green-100 text-green-800'
+          : estado === 'ENVIADA'
+          ? 'bg-blue-100 text-blue-800'
+          : estado === 'RECHAZADA'
+          ? 'bg-red-100 text-red-800'
+          : estado === 'VENCIDA'
+          ? 'bg-orange-100 text-orange-800'
+          : 'bg-gray-100 text-gray-800'
+      }`}
+    >
+      {estado === 'BORRADOR' ? 'Borrador'
+        : estado === 'ENVIADA' ? 'Enviada'
+        : estado === 'APROBADA' ? 'Aprobada'
+        : estado === 'RECHAZADA' ? 'Rechazada'
+        : estado === 'VENCIDA' ? 'Vencida'
+        : estado}
+    </span>
+  );
+
+  const quoteColumns: DataColumn<Quote>[] = [
+    {
+      key: 'id',
+      header: 'Cotización ID',
+      render: (q) => <span className="font-mono font-bold text-yeikar-secondary">#{q.id}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'cliente',
+      header: 'Cliente',
+      render: (q) => (
+        <span className="font-bold text-yeikar-secondary font-headline">{q.cliente?.nombre || `Cliente ID: ${q.cliente_id}`}</span>
+      ),
+      mobileSecondary: true,
+    },
+    {
+      key: 'fecha',
+      header: 'Fecha',
+      render: (q) => <span className="font-mono text-yeikar-neutral/70">{q.fecha}</span>,
+      mobileLabel: 'Fecha',
+    },
+    {
+      key: 'creador',
+      header: 'Registrada por',
+      render: (q) => (
+        <div>
+          <div className="font-semibold text-yeikar-secondary">{q.creador_nombre || 'Registro histórico'}</div>
+          <div className="mt-0.5 text-[10px] font-mono text-yeikar-neutral/45">
+            {q.created_at ? new Date(q.created_at).toLocaleString('es-CO') : 'Hora no disponible'}
+          </div>
+        </div>
+      ),
+      mobileLabel: 'Registrada por',
+    },
+    {
+      key: 'detalles',
+      header: 'Detalles',
+      render: (q) => <span className="text-xs whitespace-pre-line text-yeikar-neutral/80">{q.observaciones}</span>,
+      mobileLabel: 'Detalles',
+    },
+    {
+      key: 'total',
+      header: 'Total Estimado',
+      render: (q) => (
+        <span className="font-mono font-bold text-yeikar-secondary">
+          {formatCurrency(Number(q.total_estimado), q.moneda?.codigo)}
+          {q.moneda && q.moneda_id !== 1 && (
+            <span className="block text-[10px] text-yeikar-neutral/40 font-normal">
+              ≈ {formatCurrency(Number(q.total_en_moneda_base || 0), 'COP')}
+            </span>
+          )}
+        </span>
+      ),
+      mobileLabel: 'Total',
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      render: (q) => quoteEstadoBadge(q.estado),
+      mobileHidden: true,
+    },
+  ];
+
+  const renderQuoteAcciones = (quote: Quote) => (
+    <>
+      {quote.estado === 'BORRADOR' && (
+        <button
+          onClick={() => handleUpdateStatus(quote, 'ENVIADA')}
+          className="text-xs bg-blue-550 text-blue-600 hover:underline font-bold py-1.5"
+          title="Enviar"
+        >
+          Enviar
+        </button>
+      )}
+      {quote.estado === 'ENVIADA' && (
+        <>
+          <button
+            onClick={() => handleUpdateStatus(quote, 'APROBADA')}
+            className="text-xs text-green-600 hover:underline font-bold py-1.5"
+            title="Aprobar"
+          >
+            Aprobar
+          </button>
+          <button
+            onClick={() => handleUpdateStatus(quote, 'RECHAZADA')}
+            className="text-xs text-red-600 hover:underline font-bold py-1.5"
+            title="Rechazar"
+          >
+            Rechazar
+          </button>
+        </>
+      )}
+      {quote.estado === 'APROBADA' && (
+        <button
+          onClick={() => handleOpenConvert(quote)}
+          className="bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral px-2.5 py-1.5 rounded text-xs font-bold font-headline shadow-sm"
+        >
+          Pedido
+        </button>
+      )}
+      <button
+        onClick={() => handleOpenPrintPreview(quote)}
+        className="bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-primary px-2.5 py-1.5 rounded text-xs font-bold font-headline shadow-sm flex items-center gap-1"
+        title="Imprimir Factura Inicial"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+        </svg>
+        Ver Cotización
+      </button>
+      <button
+        onClick={() => navigate(`/historial?tipo=cotizacion&id=${quote.id}`)}
+        className="p-2 text-yeikar-primary hover:text-yeikar-primary-dark transition-colors"
+        title="Ver expediente completo"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+        </svg>
+      </button>
+      <button
+        onClick={() => handleDelete(quote.id)}
+        className="p-1.5 text-red-600 hover:text-red-800 transition-colors"
+        title="Eliminar"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+        </svg>
+      </button>
+    </>
+  );
 
   return (
     <div className="space-y-6">
@@ -789,142 +1001,50 @@ export default function Cotizaciones() {
         </div>
       )}
 
+      {/* Filtro por estado: activas por defecto, histórico bajo demanda */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {[['ACTIVAS', 'Activas'], ['HISTORICAS', 'Rechazadas / Vencidas'], ['', 'Todas']].map(([valor, label]) => (
+          <button
+            key={valor}
+            onClick={() => setFiltroEstadoCot(valor)}
+            className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
+              filtroEstadoCot === valor
+                ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/20 hover:border-yeikar-primary/40'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Main Table */}
       <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-yeikar-neutral/60 font-mono">Cargando cotizaciones...</div>
         ) : quotes.length === 0 ? (
           <div className="p-8 text-center text-yeikar-neutral/60">No hay cotizaciones registradas.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-yeikar-neutral text-yeikar-tertiary font-headline uppercase text-xs tracking-wider">
-                  <th className="px-6 py-4 border-b border-yeikar-secondary/20">Cotización ID</th>
-                  <th className="px-6 py-4 border-b border-yeikar-secondary/20">Cliente</th>
-                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Fecha</th>
-                   <th className="px-6 py-4 border-b border-yeikar-secondary/20">Registrada por</th>
-                  <th className="px-6 py-4 border-b border-yeikar-secondary/20">Detalles</th>
-                  <th className="px-6 py-4 border-b border-yeikar-secondary/20">Total Estimado</th>
-                  <th className="px-6 py-4 border-b border-yeikar-secondary/20">Estado</th>
-                  <th className="px-6 py-4 border-b border-yeikar-secondary/20 text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-yeikar-secondary-light/10 text-sm font-body">
-                {quotes.map((quote) => (
-                  <tr key={quote.id} className="hover:bg-yeikar-tertiary/20 transition-colors">
-                    <td className="px-6 py-4 font-mono font-bold text-yeikar-secondary">
-                      #{quote.id}
-                    </td>
-                    <td className="px-6 py-4 font-bold text-yeikar-secondary font-headline">
-                      {quote.cliente?.nombre || `Cliente ID: ${quote.cliente_id}`}
-                    </td>
-                   <td className="px-6 py-4 font-mono text-yeikar-neutral/70">
-                     {quote.fecha}
-                   </td>
-                   <td className="px-6 py-4">
-                     <div className="font-semibold text-yeikar-secondary">
-                       {quote.creador_nombre || 'Registro histórico'}
-                     </div>
-                     <div className="mt-0.5 text-[10px] font-mono text-yeikar-neutral/45">
-                       {quote.created_at ? new Date(quote.created_at).toLocaleString('es-CO') : 'Hora no disponible'}
-                     </div>
-                   </td>
-                    <td className="px-6 py-4 text-xs whitespace-pre-line text-yeikar-neutral/80">
-                      {quote.observaciones}
-                    </td>
-                    <td className="px-6 py-4 font-mono font-bold text-yeikar-secondary">
-                      {formatCurrency(Number(quote.total_estimado), quote.moneda?.codigo)}
-                      {quote.moneda && quote.moneda_id !== 1 && (
-                        <span className="block text-[10px] text-yeikar-neutral/40 font-normal">
-                          ≈ {formatCurrency(Number(quote.total_en_moneda_base || 0), 'COP')}
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold font-headline inline-block ${
-                        quote.estado === 'APROBADA'
-                          ? 'bg-green-100 text-green-800'
-                          : quote.estado === 'ENVIADA'
-                          ? 'bg-blue-100 text-blue-800'
-                          : quote.estado === 'RECHAZADA'
-                          ? 'bg-red-100 text-red-800'
-                          : quote.estado === 'VENCIDA'
-                          ? 'bg-orange-100 text-orange-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {quote.estado === 'BORRADOR' ? 'Borrador'
-                          : quote.estado === 'ENVIADA' ? 'Enviada'
-                          : quote.estado === 'APROBADA' ? 'Aprobada'
-                          : quote.estado === 'RECHAZADA' ? 'Rechazada'
-                          : quote.estado === 'VENCIDA' ? 'Vencida'
-                          : quote.estado}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2.5">
-                        {quote.estado === 'BORRADOR' && (
-                          <button
-                            onClick={() => handleUpdateStatus(quote, 'ENVIADA')}
-                            className="text-xs bg-blue-550 text-blue-600 hover:underline font-bold"
-                            title="Enviar"
-                          >
-                            Enviar
-                          </button>
-                        )}
-                        {quote.estado === 'ENVIADA' && (
-                          <>
-                            <button
-                              onClick={() => handleUpdateStatus(quote, 'APROBADA')}
-                              className="text-xs text-green-600 hover:underline font-bold"
-                              title="Aprobar"
-                            >
-                              Aprobar
-                            </button>
-                            <button
-                              onClick={() => handleUpdateStatus(quote, 'RECHAZADA')}
-                              className="text-xs text-red-600 hover:underline font-bold"
-                              title="Rechazar"
-                            >
-                              Rechazar
-                            </button>
-                          </>
-                        )}
-                        {quote.estado === 'APROBADA' && (
-                          <button
-                            onClick={() => handleOpenConvert(quote)}
-                            className="bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral px-2.5 py-1 rounded text-xs font-bold font-headline shadow-sm"
-                          >
-                            Pedido
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleOpenPrintPreview(quote)}
-                          className="bg-yeikar-secondary hover:bg-yeikar-secondary-light text-yeikar-primary px-2.5 py-1 rounded text-xs font-bold font-headline shadow-sm flex items-center gap-1"
-                          title="Imprimir Factura Inicial"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                          </svg>
-                          Factura
-                        </button>
-                        <button
-                          onClick={() => handleDelete(quote.id)}
-                          className="p-1 text-red-600 hover:text-red-800 transition-colors"
-                          title="Eliminar"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        ) : (() => {
+          const quotesVisibles = filtroEstadoCot === 'ACTIVAS'
+            ? quotes.filter((q) => ['BORRADOR', 'ENVIADA', 'APROBADA'].includes(q.estado))
+            : filtroEstadoCot === 'HISTORICAS'
+              ? quotes.filter((q) => ['RECHAZADA', 'VENCIDA'].includes(q.estado))
+              : quotes;
+          if (quotesVisibles.length === 0) {
+            return <div className="p-8 text-center text-yeikar-neutral/60">No hay cotizaciones en este filtro.</div>;
+          }
+          return (
+            <ResponsiveDataTable
+              columns={quoteColumns}
+              rows={quotesVisibles}
+              rowKey={(q) => q.id}
+              cardBadge={(q) => quoteEstadoBadge(q.estado)}
+              tableActions={renderQuoteAcciones}
+              cardActions={renderQuoteAcciones}
+              darkHeader
+            />
+          );
+        })()}
       </div>
 
       {/* Quote Form Modal */}
@@ -943,19 +1063,15 @@ export default function Cotizaciones() {
                 <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
                   Cliente *
                 </label>
-                <select
+                <SearchSelect
                   value={selectedClientId}
-                  onChange={(e) => setSelectedClientId(e.target.value)}
-                  required
-                  className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm"
-                >
-                  <option value="">Selecciona un cliente...</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nombre} ({c.email || c.telefono})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => setSelectedClientId(String(v))}
+                  options={clients.map((c) => ({
+                    value: c.id,
+                    label: `${c.nombre} (${c.email || c.telefono})`,
+                  }))}
+                  placeholder="Selecciona un cliente..."
+                />
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -963,21 +1079,19 @@ export default function Cotizaciones() {
                   <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
                     Moneda de Cotización *
                   </label>
-                  <select
+                  <SearchSelect
                     value={selectedMonedaId}
-                    onChange={(e) => {
-                      const mId = Number(e.target.value);
+                    onChange={(v) => {
+                      const mId = Number(v);
                       setSelectedMonedaId(mId);
                       if (mId === 1) setTasaCambio(1);
                     }}
-                    className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm font-bold"
-                  >
-                    {currencies.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.codigo} — {m.nombre} ({m.simbolo})
-                      </option>
-                    ))}
-                  </select>
+                    options={currencies.map((m) => ({
+                      value: m.id,
+                      label: `${m.codigo} — ${m.nombre} (${m.simbolo})`,
+                    }))}
+                    placeholder="Seleccione moneda..."
+                  />
                 </div>
 
                 {selectedMonedaId !== 1 && (
@@ -1034,25 +1148,21 @@ export default function Cotizaciones() {
                           <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
                             Mueble Modelo *
                           </label>
-                          <select
+                          <SearchSelect
                             value={item.producto_id}
-                            onChange={(e) => updateItemField(index, 'producto_id', e.target.value)}
-                            required
-                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
-                          >
-                            <option value="">Seleccione mueble...</option>
-                            {products.map((p) => {
+                            onChange={(v) => updateItemField(index, 'producto_id', String(v))}
+                            options={products.map((p) => {
                               const basePrecio = Number(p.precio_venta_base ?? p.precio_costo_base ?? 0);
                               const baseMostrar = isFinite(basePrecio) && basePrecio > 0
                                 ? formatCurrency(basePrecio / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)
                                 : null;
-                              return (
-                                <option key={p.id} value={p.id}>
-                                  {p.nombre}{baseMostrar ? ` (${baseMostrar} base)` : ''}
-                                </option>
-                              );
+                              return {
+                                value: p.id,
+                                label: `${p.nombre}${baseMostrar ? ` (${baseMostrar} base)` : ''}`,
+                              };
                             })}
-                          </select>
+                            placeholder="Seleccione mueble..."
+                          />
                         </div>
                         <div>
                           <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
@@ -1105,6 +1215,18 @@ export default function Cotizaciones() {
                             className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
                           />
                         </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1" title="Impuestos adicionales sobre el costo de producción">
+                            % Impuestos
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.impuesto}
+                            onChange={(e) => updateItemField(index, 'impuesto', e.target.value)}
+                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
+                          />
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
@@ -1139,9 +1261,14 @@ export default function Cotizaciones() {
                           {item.calcLoading ? (
                             <span className="text-yeikar-neutral/40">Calculando...</span>
                           ) : item.calcResult ? (
-                            <span>Subt: {formatCurrency(item.calcResult.precio_venta * item.cantidad / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
+                            <span className="block">Subt: {formatCurrency(item.calcResult.precio_venta * item.cantidad / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
                           ) : (
                             <span>{formatCurrency(0, currencyCode)}</span>
+                          )}
+                          {item.calcResult && Number(item.calcResult.impuestos) > 0 && (
+                            <span className="block text-[9px] font-normal text-yeikar-neutral/45">
+                              incl. {formatCurrency(item.calcResult.impuestos * item.cantidad / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)} imp. ({Number(item.impuesto) || 7}%)
+                            </span>
                           )}
                         </div>
                       </div>
@@ -1330,39 +1457,81 @@ export default function Cotizaciones() {
 
               {/* Abono inicial (opcional) */}
               <div className="border-t border-yeikar-secondary-light/10 pt-4">
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center justify-between mb-2">
                   <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline">
                     Abono inicial <span className="normal-case font-normal text-yeikar-neutral/40">(opcional)</span>
                   </label>
                   <span className="text-xs font-mono font-bold text-yeikar-primary">
-                    {pctAbono > 0 ? `= ${formatCurrency(Math.round(abonoQuote), quoteMoneda?.codigo ?? 'COP')}` : 'Sin abono'}
+                    {abonoActivo && tasaAbonoValida
+                      ? `= ${formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteMoneda?.codigo ?? 'COP')}`
+                      : abonoActivo
+                      ? '— indica la tasa'
+                      : 'Sin abono'}
                   </span>
+                </div>
+
+                {/* Modo: porcentaje o monto fijo */}
+                <div className="mb-2 grid grid-cols-2 gap-1 rounded-lg border border-yeikar-secondary-light/10 bg-yeikar-tertiary/40 p-1">
+                  <button
+                    type="button"
+                    onClick={() => setAdelantoModo('pct')}
+                    className={`rounded-md py-1.5 text-xs font-bold transition-colors ${
+                      adelantoModo === 'pct'
+                        ? 'bg-yeikar-primary text-yeikar-neutral'
+                        : 'text-yeikar-neutral/55 hover:text-yeikar-secondary'
+                    }`}
+                  >
+                    Porcentaje
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAdelantoModo('monto')}
+                    className={`rounded-md py-1.5 text-xs font-bold transition-colors ${
+                      adelantoModo === 'monto'
+                        ? 'bg-yeikar-primary text-yeikar-neutral'
+                        : 'text-yeikar-neutral/55 hover:text-yeikar-secondary'
+                    }`}
+                  >
+                    Monto fijo
+                  </button>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
                   <div className="relative flex-1 min-w-32">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      placeholder="0"
-                      value={adelantoPct}
-                      onChange={(e) => setAdelantoPct(e.target.value)}
-                      className="w-full p-2 pr-8 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
-                    />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-yeikar-neutral/40 font-bold">%</span>
+                    {adelantoModo === 'pct' ? (
+                      <>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          placeholder="0"
+                          value={adelantoPct}
+                          onChange={(e) => setAdelantoPct(e.target.value)}
+                          className="w-full p-2 pr-8 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-yeikar-neutral/40 font-bold">%</span>
+                      </>
+                    ) : (
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder={`Monto en ${monedaAdelantoSel?.codigo ?? '...'}`}
+                        value={adelantoMonto}
+                        onChange={(e) => setAdelantoMonto(e.target.value)}
+                        className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
+                      />
+                    )}
                   </div>
-                  <select
+                  <SearchSelect
                     value={adelantoMonedaId}
-                    onChange={(e) => setAdelantoMonedaId(Number(e.target.value))}
-                    className="flex-1 min-w-32 p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
-                  >
-                    {currencies.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.nombre} ({m.codigo} {m.simbolo})
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => setAdelantoMonedaId(Number(v))}
+                    options={currencies.map((m) => ({
+                      value: m.id,
+                      label: `${m.nombre} (${m.codigo} ${m.simbolo})`,
+                    }))}
+                    placeholder="Seleccione moneda..."
+                    className="flex-1 min-w-32"
+                  />
                   <select
                     value={adelantoMetodo}
                     onChange={(e) => {
@@ -1385,14 +1554,9 @@ export default function Cotizaciones() {
                   </select>
                 </div>
 
-                {pctAbono > 0 && tasaAbono && adelantoMonedaId !== quoteEnConversion?.moneda_id && (
-                  <p className="text-xs text-yeikar-neutral/60 mt-2 font-mono">
-                    ≈ {formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? '')}
-                    {' '}· convertido con la tasa de la cotización
-                  </p>
-                )}
-
-                {necesitaTrmAbono && (
+                {/* Tasa SIEMPRE editable cuando la moneda de pago difiere de la cotización.
+                    Nunca se deduce de la tasa congelada de la cotización. */}
+                {!monedasIguales && (
                   <div className="mt-2">
                     <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
                       TRM: 1 {monedaAdelantoSel?.codigo ?? '?'} = X {quoteMoneda?.codigo ?? '?'}
@@ -1400,13 +1564,30 @@ export default function Cotizaciones() {
                     <input
                       type="number"
                       min="0"
-                      step="0.0001"
+                      step="any"
                       value={adelantoTrm}
                       onChange={(e) => setAdelantoTrm(e.target.value)}
-                      placeholder="Ej: 38,50"
+                      placeholder={`1 ${monedaAdelantoSel?.codigo ?? '?'} = ? ${quoteMoneda?.codigo ?? '?'}`}
                       className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
                     />
+                    {abonoActivo && !tasaAbonoValida && (
+                      <p className="mt-1 text-xs font-semibold text-red-600">
+                        Indica la tasa para poder registrar el abono.
+                      </p>
+                    )}
                   </div>
+                )}
+
+                {abonoActivo && monedasIguales && (
+                  <p className="mt-2 text-xs font-mono text-yeikar-neutral/50">
+                    Abono en la moneda de la factura: {formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? quoteMoneda?.codigo ?? '')}.
+                  </p>
+                )}
+
+                {abonoActivo && abonoExcedeTotal && (
+                  <p className="mt-2 text-xs font-semibold text-red-600">
+                    El abono ({formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteMoneda?.codigo ?? 'COP')}) excede el total del pedido ({formatCurrency(Math.round(quoteTotal), quoteMoneda?.codigo ?? 'COP')}).
+                  </p>
                 )}
               </div>
 
@@ -1418,9 +1599,21 @@ export default function Cotizaciones() {
 
               {/* Resumen antes de confirmar */}
               <div className="bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2 text-xs font-mono text-yeikar-secondary">
-                {pctAbono > 0
-                  ? `Abono inicial: ${pctAbono}% = ${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? quoteMoneda?.codigo ?? '')}${adelantoMonedaId !== quoteEnConversion?.moneda_id && tasaAbono ? ` (≈ ${formatCurrency(Math.round(abonoQuote), quoteMoneda?.codigo ?? '')})` : ''}${adelantoMetodo ? ` · ${METODOS_PAGO.find((m) => m.value === adelantoMetodo)?.label}` : ''} — se registra como primer pago.`
-                  : 'Sin abono inicial — la factura quedará PENDIENTE.'}
+                {abonoActivo ? (
+                  <>
+                    Abono inicial:{' '}
+                    {adelantoModo === 'pct'
+                      ? `${pctAbono}%`
+                      : `${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? '')} ${monedaAdelantoSel?.codigo ?? ''}`}{' '}
+                    = {formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteMoneda?.codigo ?? '')}
+                    {!monedasIguales && tasaAbonoValida
+                      ? ` · 1 ${monedaAdelantoSel?.codigo} = ${tasaPagoPorQuote.toLocaleString('es-ES')} ${quoteMoneda?.codigo}`
+                      : ''}
+                    {adelantoMetodo ? ` · ${METODOS_PAGO.find((m) => m.value === adelantoMetodo)?.label}` : ''} — se registra como primer pago.
+                  </>
+                ) : (
+                  'Sin abono inicial — la factura quedará PENDIENTE.'
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-yeikar-secondary-light/10">
@@ -1469,7 +1662,7 @@ export default function Cotizaciones() {
                   onClick={() => setIsPrintModalOpen(false)}
                   className="text-yeikar-tertiary/60 hover:text-yeikar-primary text-sm font-bold font-headline transition-colors"
                 >
-                  ✕ Cerrar
+                   × Cerrar
                 </button>
               </div>
 
@@ -1543,222 +1736,28 @@ export default function Cotizaciones() {
                     For PDFs larger than one page the canvas-slicing
                     function handles the split automatically.
                   */}
-                  <div
-                    id="pdf-preview-container"
-                    className="bg-white shadow-2xl relative text-stone-800 font-sans mx-auto"
-                    style={{
-                      width: '215.9mm',
-                      minHeight: '279.4mm',
-                      padding: '14mm 15mm',
-                      boxSizing: 'border-box',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      
+                                    <DocumentoCotizacion
+                    containerId="pdf-preview-container"
+                    cotizacion={{
+                      id: selectedQuoteForPrint.id,
+                      fecha: selectedQuoteForPrint.fecha,
+                      moneda_codigo: selectedQuoteForPrint.moneda?.codigo,
+                      tasa_cambio: selectedQuoteForPrint.tasa_cambio,
+                      total_estimado: selectedQuoteForPrint.total_estimado,
+                      cliente: selectedQuoteForPrint.cliente,
+                      detalles: selectedQuoteForPrint.detalles?.map((d) => ({
+                        ...d,
+                        producto_nombre: products.find((p) => p.id === d.producto_id)?.nombre ?? `Prod #${d.producto_id}`,
+                        foto: products.find((p) => p.id === d.producto_id)?.fotos?.[0]?.url ?? null,
+                      })) ?? [],
                     }}
-                  >
-                    {/* Watermark */}
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.035] z-0 select-none">
-                      <img src="/logo-marca-de-agua.PNG" alt="" className="w-[420px] h-auto" />
-                    </div>
-
-                    {/* ── All content above watermark ── */}
-                    <div className="relative z-10 flex flex-col gap-4 flex-1">
-                      <div className="flex flex-col gap-4">
-
-                      {/* ── Header ── */}
-                      <div className="flex justify-between items-start pb-3 border-b border-stone-300">
-                        <div className="space-y-1.5 max-w-[60%]">
-                          <img src="/Logo-yeikar.png" alt="Yeikar" className="h-12 object-contain" />
-                          <div className="font-serif font-bold text-stone-955 text-[11.5px] tracking-widest uppercase mt-1">
-                            Comercializadora Yeikar
-                          </div>
-                          <div className="text-[8px] text-stone-600 font-mono font-semibold">RIF: {printCompanyRif}</div>
-                          <div className="text-[8px] text-stone-650 font-medium leading-snug">DIRECCIÓN: {printCompanyAddress}</div>
-                          <div className="text-[8px] text-stone-600 font-mono font-semibold">TELÉFONO: {printCompanyPhone}</div>
-                        </div>
-
-                        <div className="text-right border border-stone-300 rounded-lg p-3 bg-stone-50 min-w-[170px] shadow-sm">
-                          <div className="text-[8.5px] font-bold text-stone-700 uppercase tracking-[0.15em]">Cotización / Factura Inicial</div>
-                          <div className="text-sm font-bold text-amber-800 font-mono tracking-widest mt-0.5">
-                            N°: 00 – {selectedQuoteForPrint.id.toString().padStart(5, '0')}
-                          </div>
-                          <div className="text-[8px] text-stone-600 font-mono font-bold mt-1 uppercase tracking-wider">
-                            Fecha: {selectedQuoteForPrint.fecha}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* ── Client Info ── */}
-                      <div className="grid grid-cols-3 gap-4 bg-stone-50/40 border border-stone-250 rounded-xl px-4 py-3 my-1 shadow-sm">
-                        {[
-                          { label: 'CLIENTE',    value: selectedQuoteForPrint.cliente?.nombre },
-                          { label: 'TELÉFONO',   value: selectedQuoteForPrint.cliente?.telefono || '—' },
-                          { label: 'DIRECCIÓN',  value: selectedQuoteForPrint.cliente?.direccion || '—' },
-                        ].map(({ label, value }) => (
-                          <div key={label} className="min-w-0">
-                            <div className="text-[7.5px] uppercase tracking-[0.14em] text-stone-550 font-bold mb-1">{label}</div>
-                            <div className="text-[10px] text-stone-950 font-extrabold leading-relaxed whitespace-pre-wrap break-words" title={value}>{value}</div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* ── Items Table ── */}
-                      <div className="border border-stone-300 rounded-lg overflow-hidden shadow-sm">
-                        <table className="w-full border-collapse text-[9.5px]">
-                          <thead>
-                            <tr className="bg-stone-900 text-stone-100">
-                              {['Modelo', 'Cant.', 'Descripción / Medidas', 'P. Unitario', `Total (${selectedQuoteForPrint.moneda?.codigo || 'COP'})`].map((h, i) => (
-                                <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[8px]
-                                  ${i === 0 ? 'text-left w-[20%]' : i === 1 ? 'text-center w-[8%]' : i === 2 ? 'text-left' : 'text-right w-[13%]'}`}>{h}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-stone-200">
-                            {selectedQuoteForPrint.detalles && selectedQuoteForPrint.detalles.length > 0 ? (
-                              selectedQuoteForPrint.detalles.map((det, idx) => {
-                                const prod       = products.find(p => p.id === det.producto_id);
-                                const modelName  = prod?.nombre ?? `Prod #${det.producto_id}`;
-                                const dims       = `${det.ancho ?? 1.0}×${det.largo ?? 1.0} m`;
-                                const desc       = det.observaciones ? `${dims} — ${det.observaciones}` : dims;
-                                const rowTotal   = Number(det.precio) * Number(det.cantidad);
-                                return (
-                                  <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
-                                    <td className="px-3 py-2 font-serif font-bold text-stone-950">{modelName}</td>
-                                    <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{Number(det.cantidad).toFixed(0)}</td>
-                                    <td className="px-3 py-2 text-stone-700 italic font-medium">{desc}</td>
-                                    <td className="px-3 py-2 text-right font-mono text-stone-850 font-medium">{formatCurrency(Number(det.precio), selectedQuoteForPrint.moneda?.codigo || 'COP')}</td>
-                                    <td className="px-3 py-2 text-right font-mono font-extrabold text-stone-950">{formatCurrency(rowTotal, selectedQuoteForPrint.moneda?.codigo || 'COP')}</td>
-                                  </tr>
-                                );
-                              })
-                            ) : (
-                              <tr><td colSpan={5} className="px-3 py-4 text-center text-stone-400 italic">Sin renglones.</td></tr>
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-
-                      {/* ── Dynamic Payments History (Seguimiento de Abonos) ── */}
-                      {associatedVenta && associatedVenta.pagos && associatedVenta.pagos.length > 0 && (
-                        <div className="my-1">
-                          <div className="text-[8.5px] font-serif font-bold uppercase tracking-wider text-stone-800 mb-1 flex items-center justify-between">
-                            <span>Historial de Abonos / Pagos Realizados</span>
-                            <span className="font-mono text-stone-600 font-normal">({associatedVenta.pagos.length} registros)</span>
-                          </div>
-                          <div className="border border-stone-300 rounded-lg overflow-hidden shadow-sm">
-                            <table className="w-full border-collapse text-[8.5px]">
-                              <thead>
-                                <tr className="bg-stone-100 text-stone-800 font-bold uppercase text-[7.5px] tracking-wider border-b border-stone-300">
-                                  <th className="px-2 py-1 text-left">Fecha</th>
-                                  <th className="px-2 py-1 text-left">Método</th>
-                                  <th className="px-2 py-1 text-left">Ref.</th>
-                                  <th className="px-2 py-1 text-right">Monto Recibido</th>
-                                  <th className="px-2 py-1 text-right">Equivalente en COP</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-stone-200 font-mono">
-                                {associatedVenta.pagos.map((p, idx) => {
-                                  const metodoLabel = METODOS_PAGO.find((m) => m.value === p.metodo_pago)?.label ?? p.metodo_pago;
-                                  return (
-                                    <tr key={p.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/50'}>
-                                      <td className="px-2 py-1 text-stone-700">{new Date(p.fecha).toLocaleDateString('es-ES')}</td>
-                                      <td className="px-2 py-1 font-bold text-stone-900">{metodoLabel}</td>
-                                      <td className="px-2 py-1 text-stone-600">{p.referencia || '—'}</td>
-                                      <td className="px-2 py-1 text-right font-bold text-stone-800">
-                                        {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
-                                      </td>
-                                      <td className="px-2 py-1 text-right font-bold text-emerald-800">
-                                        {formatCurrency(Number(p.monto_en_moneda_base || p.monto), 'COP')}
-                                        {p.tasa_cambio && p.tasa_cambio !== 1 && (
-                                          <span className="block text-[7px] text-stone-500 font-normal">Tasa: {p.tasa_cambio}</span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* ── Totals: Left=breakdown, Right=grand total card ── */}
-                      <div className="grid grid-cols-2 gap-4 pt-1">
-
-                        {/* Left — subtotal breakdown */}
-                        <div className="space-y-1 text-[9.5px] text-stone-700 pr-2">
-                          {[
-                            { label: 'Sub-Total',    value: subTotal,    color: 'text-stone-900 font-bold' },
-                            ...(Number(printDiscount) > 0 ? [{ label: `Descuento (${printDiscount}%)`, value: -discountVal, color: 'text-emerald-800 font-bold' }] : []),
-                            { label: 'Neto Sub-Total', value: netSubTotal, color: 'text-stone-900 font-bold' },
-                            ...(Number(printIva) > 0 ? [{ label: `IVA (${printIva}%)`, value: ivaVal, color: 'text-stone-900 font-bold' }] : []),
-                          ].map(({ label, value, color }, i, arr) => (
-                            <div key={label} className={`flex justify-between items-center ${i === arr.length - 1 ? 'border-t border-stone-300 pt-1' : ''}`}>
-                              <span className="text-[7.5px] uppercase tracking-wider font-bold text-stone-500">{label}</span>
-                              <span className={`font-mono font-extrabold ${color}`}>
-                                {value < 0 ? '-' : ''}{formatCurrency(Math.abs(value), selectedQuoteForPrint.moneda?.codigo || 'COP')}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Right — grand total card */}
-                        <div className="bg-amber-50/60 rounded-xl p-3 flex flex-col gap-1.5 border border-amber-300/80 shadow-sm">
-                          <div className="flex justify-between items-baseline">
-                            <span className="text-[8px] tracking-[0.15em] font-bold text-stone-700 uppercase">Total Cotización</span>
-                            <span className="text-base font-black text-amber-900 font-mono">
-                              {formatCurrency(grandTotal, selectedQuoteForPrint.moneda?.codigo || 'COP')}
-                            </span>
-                          </div>
-
-                          {selectedQuoteForPrint.tasa_cambio && selectedQuoteForPrint.moneda_id !== 1 && (
-                            <div className="flex justify-between items-baseline text-[8.5px] text-stone-600 font-mono font-medium border-t border-amber-200/60 pt-1">
-                              <span>EQUIVALENTE EN COP:</span>
-                              <span>{formatCurrency(grandTotal * Number(selectedQuoteForPrint.tasa_cambio), 'COP')}</span>
-                            </div>
-                          )}
-
-                          {associatedVenta && Number(associatedVenta.total_pagado) > 0 && (
-                            <div className="flex justify-between items-baseline text-[8.5px] text-emerald-800 font-mono font-extrabold border-t border-amber-200/60 pt-1">
-                              <span>TOTAL ABONADO:</span>
-                              <span>-{formatCurrency(Number(associatedVenta.total_pagado), 'COP')}</span>
-                            </div>
-                          )}
-
-                          <div className="border-t border-amber-200/80 pt-1.5 space-y-0.5 text-[8.5px]">
-                            {associatedVenta && (
-                              <div className="flex justify-between text-amber-900 font-mono font-black text-[9.5px]">
-                                <span>SALDO PENDIENTE:</span>
-                                <span>{formatCurrency(Number(associatedVenta.saldo_pendiente), 'COP')}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* ── Terms ── */}
-                      <div className="border border-stone-300 rounded-lg px-3 py-2 bg-stone-55/40 text-[10.5px] text-stone-750 leading-relaxed font-medium">
-                        <span className="font-bold text-stone-900 text-[10px] uppercase tracking-wider mr-1">Términos y Condiciones:</span>
-                        Una vez aceptado el pedido y firmado este comprobante se procederá con la fabricación personalizada. Debido a que el producto entra en proceso de corte e insumos a la medida,{' '}
-                        <strong className="text-stone-950 font-bold">no se aceptan cambios a último minuto</strong>.
-                      </div>
-                      </div>
-
-                      {/* ── Signatures ── */}
-                      <div className="grid grid-cols-2 gap-10 pt-8 mt-auto">
-                        {['FIRMA DEL CLIENTE', 'FIRMA DEL EMISOR'].map(label => (
-                          <div key={label} className="text-center">
-                            <div className="w-36 border-t border-stone-400 mx-auto mb-1" />
-                            <div className="text-[8px] font-serif font-bold uppercase tracking-wider text-stone-800">{label}</div>
-                            <div className="text-[7px] text-stone-500 font-medium mt-0.5">
-                              {label.includes('CLIENTE') ? 'Acepto Conforme' : 'Autorizado'}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                    </div>{/* end z-10 */}
-                  </div>{/* end pdf-preview-container */}
+                    rif={printCompanyRif}
+                    direccion={printCompanyAddress}
+                    telefono={printCompanyPhone}
+                    descuentoPct={Number(printDiscount || 0)}
+                    ivaPct={Number(printIva || 0)}
+                    venta={associatedVenta as any}
+                  />
                 </div>{/* end right panel */}
               </div>{/* end body */}
             </div>
@@ -1810,15 +1809,26 @@ export default function Cotizaciones() {
               </div>
 
               <button
-                onClick={() => { setShowPersonalizarModal(false); setPersonalizarIndex(null); setModalPreviewCalc(null); }}
+                onClick={() => { setShowPersonalizarModal(false); setPersonalizarIndex(null); setModalPreviewCalc(null); setVerEstructuraModal(false); }}
                 className="text-yeikar-tertiary/60 hover:text-yeikar-primary text-sm font-bold font-headline self-start md:self-auto"
               >
-                ✕ Cerrar
+                 × Cerrar
               </button>
             </div>
 
             {/* Cuerpo del Modal */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="flex justify-end">
+                <button
+                  onClick={() => setVerEstructuraModal((v) => !v)}
+                  className="text-xs font-bold text-yeikar-primary hover:text-yeikar-secondary uppercase tracking-wider"
+                >
+                  {verEstructuraModal ? '▲ Ocultar estructura' : '▼ Ver estructura de costos (Excel)'}
+                </button>
+              </div>
+              {verEstructuraModal && modalPreviewCalc && (
+                <EstructuraCostos data={normalizarEstructuraCostos(modalPreviewCalc)} />
+              )}
               {personalizarSecciones && personalizarSecciones.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {personalizarSecciones.map((sec, secIdx) => {
@@ -1900,7 +1910,7 @@ export default function Cotizaciones() {
                                       onClick={() => handleRemoveCost(secIdx, cpIdx)}
                                       className="text-red-500 hover:text-red-700"
                                     >
-                                      ✕
+                                      ×
                                     </button>
                                   </div>
                                 </div>
@@ -1934,7 +1944,7 @@ export default function Cotizaciones() {
                                     className="absolute top-1 right-2 text-stone-400 hover:text-red-650 text-xs"
                                     title="Quitar"
                                   >
-                                    ✕
+                                    ×
                                   </button>
                                   <div className="font-bold text-xs text-yeikar-secondary truncate pr-4">
                                     {el.nombre_insumo_original}
@@ -2039,7 +2049,7 @@ export default function Cotizaciones() {
                 onClick={() => { setShowAddMaterialDropdown(false); setAddMaterialSeccionIndex(null); }}
                 className="text-stone-400 hover:text-stone-600 font-bold"
               >
-                ✕
+                ×
               </button>
             </div>
             <input
@@ -2138,6 +2148,15 @@ export default function Cotizaciones() {
         </div>
       )}
 
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        title="Eliminar cotización"
+        message="¿Estás seguro de que deseas eliminar esta cotización?"
+        confirmLabel="Sí, eliminar"
+        danger
+        onConfirm={ejecutarDelete}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
     </div>
   );
 }

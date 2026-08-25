@@ -43,6 +43,29 @@ def client():
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _reset_rate_limit(db):
+    """Limpia el rate limit por IP y el lockout de login ANTES de cada test:
+    la suite comparte la IP de TestClient y los intentos fallidos de login se
+    acumulan en la tabla login_intento (en BD) bloqueando la IP entre tests."""
+    from app.core.rate_limit import RateLimitMiddleware
+
+    stack = app.middleware_stack
+    visto = set()
+    while stack is not None and id(stack) not in visto:
+        visto.add(id(stack))
+        if isinstance(stack, RateLimitMiddleware):
+            stack.reset()
+            break
+        stack = getattr(stack, "app", None)
+    # Lockout de login en BD: solo los registros de la IP de prueba.
+    db.execute(
+        __import__("sqlalchemy").text("DELETE FROM login_intento WHERE ip = 'testclient'")
+    )
+    db.commit()
+    yield
+
+
 @pytest.fixture
 def db():
     db = session_local()
@@ -56,9 +79,12 @@ def db():
 # Cleaner: registro + borrado estricto en orden inverso de FKs
 # ---------------------------------------------------------------------------
 ORDEN_LIMPIEZA = [
+    "devolucion_venta",
     "pago",
     "detalle_venta",
     "venta",
+    "detalle_factura",
+    "factura",
     "mano_obra",
     "consumo_material",
     "etapa_asignado_adicional",
@@ -73,9 +99,14 @@ ORDEN_LIMPIEZA = [
     "cotizacion",
     "detalle_compra",
     "compra",
+    "nomina_linea",
+    "nomina_detalle",
+    "nomina_concepto_vario",
+    "nomina",
     "producto_material",
     "movimiento_inventario",
     "inventario",
+    "precio_produccion",
     "producto",
     "material",
     "gasto",
@@ -114,11 +145,28 @@ class Cleaner:
         for (gid,) in rows:
             self._ids["gasto"].add(int(gid))
 
+    def registrar_caja_ref(self, referencia: str):
+        """Registra un movimiento de caja por su referencia exacta para
+        eliminarlo en teardown (no tienen id registrable y no deben quedar
+        egresos/ingresos huérfanos en la caja real)."""
+        if "movimiento_caja" not in self._ids:
+            self._ids["movimiento_caja"] = set()
+        self._ids["movimiento_caja"].add(f"REF::{referencia}")
+
     def cleanup(self, db):
         from sqlalchemy import text
         errores = []
+        refs = [r[5:] for r in (self._ids.get("movimiento_caja") or set()) if r.startswith("REF::")]
+        if refs:
+            try:
+                for ref in refs:
+                    db.execute(text("DELETE FROM movimiento_caja WHERE referencia = :r"), {"r": ref})
+                db.commit()
+            except Exception as e:  # noqa: BLE001
+                db.rollback()
+                errores.append(f"movimiento_caja(por referencia): {e}")
         for tabla in ORDEN_LIMPIEZA:
-            ids = self._ids.get(tabla) or set()
+            ids = {i for i in (self._ids.get(tabla) or set()) if not str(i).startswith("REF::")}
             if not ids:
                 continue
             ids_str = ",".join(str(i) for i in ids)
@@ -142,7 +190,7 @@ def cleaner(db):
         try:
             c.cleanup(db)
         except AssertionError as e:
-            print(f"\n⚠️  CLEANUP: {e}")
+            print(f"\n  CLEANUP: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +261,8 @@ def crear_proveedor(client, cleaner, nombre=None) -> dict:
 
 
 def crear_cotizacion(client, cleaner, cliente_id, producto_id, precio, cantidad=1,
-                     moneda_id=1, tasa_cambio=1.0, estado="BORRADOR", observaciones=None) -> dict:
+                     moneda_id=1, tasa_cambio=1.0, estado="BORRADOR", observaciones=None,
+                     headers=ADMIN_HEADERS) -> dict:
     payload = {
         "cliente_id": cliente_id,
         "fecha": str(datetime.today().date()),
@@ -232,7 +281,7 @@ def crear_cotizacion(client, cleaner, cliente_id, producto_id, precio, cantidad=
             }
         ],
     }
-    r = client.post("/api/v1/cotizacion/", json=payload, headers=ADMIN_HEADERS)
+    r = client.post("/api/v1/cotizacion/", json=payload, headers=headers)
     assert r.status_code == 201, f"crear_cotizacion → {r.status_code}: {r.text}"
     body = r.json()
     cleaner.registrar("cotizacion", body["id"])

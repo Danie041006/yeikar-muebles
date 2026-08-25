@@ -10,6 +10,7 @@ from app.modules.sales.schemas import VentaCreate, PagoCreate
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
 from app.modules.users.model import Usuario
+from app.core.state_machine import TRANSICIONES_PEDIDO, validar_transicion
 
 def _snapshot(pedido: model.Pedido) -> dict:
     return {
@@ -63,6 +64,8 @@ def obtener_pedidos(
             extract('year', model.Pedido.fecha) == today.year
         )
 
+    query = query.order_by(model.Pedido.fecha.desc(), model.Pedido.id.desc())
+
     return query.offset(salto).limit(limite).all()
 
 def crear_pedido(db: Session, esquema: schemas.PedidoCreate, usuario: Usuario | None = None):
@@ -114,6 +117,29 @@ def actualizar_pedido(
     
     estado_anterior = db_pedido.estado
     nuevo_estado = datos.get("estado")
+
+    # Máquina de estados: no se pueden saltar etapas del proceso ni revivir
+    # pedidos cancelados/entregados.
+    if nuevo_estado and nuevo_estado != estado_anterior:
+        validar_transicion(TRANSICIONES_PEDIDO, estado_anterior, nuevo_estado, "pedido")
+        # PRODUCCION → TERMINADO manual: exigir que TODAS las órdenes de
+        # producción del pedido estén FINALIZADA (no se "come" la producción).
+        if estado_anterior == "PRODUCCION" and nuevo_estado == "TERMINADO":
+            from app.modules.production.model import OrdenProduccion
+            n_detalles = db.query(model.DetallePedido).filter(
+                model.DetallePedido.pedido_id == db_pedido.id
+            ).count()
+            n_ordenes_finalizadas = db.query(OrdenProduccion).join(
+                model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id
+            ).filter(
+                model.DetallePedido.pedido_id == db_pedido.id,
+                OrdenProduccion.estado == "FINALIZADA",
+            ).count()
+            if n_detalles == 0 or n_ordenes_finalizadas != n_detalles:
+                raise ValueError(
+                    "No se puede marcar el pedido como TERMINADO: todas las líneas del pedido "
+                    "deben tener su orden de producción FINALIZADA."
+                )
     
     for campo, valor in datos.items():
         setattr(db_pedido, campo, valor)
@@ -218,9 +244,39 @@ def convertir_cotizacion_a_pedido(
     if pedido_existente:
         raise ValueError("Esta cotización ya fue convertida a pedido")
 
+    # Una cotización rechazada o vencida no puede convertirse en pedido.
+    if db_cotizacion.estado in ("RECHAZADA", "VENCIDA"):
+        raise ValueError(
+            f"No se puede convertir una cotización en estado '{db_cotizacion.estado}' a pedido. "
+            "Solo se convierten cotizaciones en estado BORRADOR, ENVIADA o APROBADA."
+        )
+
     # Validar detalles
     if not detalles:
         raise ValueError("El pedido requiere al menos un detalle de producto")
+
+    # Validar que los precios/cantidades coincidan con los de la cotización:
+    # una cotización de 2.6M no puede convertirse en una factura de 1 peso.
+    detalles_cotizacion = {dc.producto_id: dc for dc in (db_cotizacion.detalles or [])}
+    for detalle in detalles:
+        detalle_dict = detalle if isinstance(detalle, dict) else detalle.model_dump()
+        dc = detalles_cotizacion.get(detalle_dict.get("producto_id"))
+        if dc is None:
+            raise ValueError(
+                f"El producto {detalle_dict.get('producto_id')} no forma parte de la cotización. "
+                "El pedido debe copiar exactamente los renglones cotizados."
+            )
+        precio_enviado = float(detalle_dict.get("precio", 0) or 0)
+        precio_cotizado = float(dc.precio)
+        cantidad_enviada = float(detalle_dict.get("cantidad", 0) or 0)
+        cantidad_cotizada = float(dc.cantidad)
+        if abs(precio_enviado - precio_cotizado) > 0.01 or abs(cantidad_enviada - cantidad_cotizada) > 0.001:
+            raise ValueError(
+                f"El detalle del producto {dc.producto_id} no coincide con la cotización: "
+                f"se cotizó {cantidad_cotizada:g} × {precio_cotizado:,.2f} y se envía "
+                f"{cantidad_enviada:g} × {precio_enviado:,.2f}. "
+                "El pedido debe copiar exactamente los precios y cantidades cotizados."
+            )
 
     # ── Abono inicial (opcional) ──────────────────────────────────────────
     adelanto_monto = float(adelanto or 0.0)
@@ -234,22 +290,32 @@ def convertir_cotizacion_a_pedido(
     moneda_pago = moneda_adelanto_id or db_cotizacion.moneda_id
     tasa_pago = None
     if adelanto_monto > 0:
-        tasa_pago, derivada = _derivar_tasa_pago(db, db_cotizacion.moneda_id, moneda_pago, db_cotizacion.tasa_cambio)
-        if not derivada:
-            if not tasa_cambio_adelanto or float(tasa_cambio_adelanto) <= 0:
-                raise ValueError(
-                    "La moneda del abono no se puede convertir con la tasa de la cotización. "
-                    "Indica la tasa de cambio (TRM) del abono."
-                )
-            # La TRM indicada es COP por unidad de moneda del abono (p.ej. 1 VES = 10 COP).
-            # Convertirla a "unidades de la moneda de la venta" usando la tasa congelada de la
-            # cotización (COP por unidad de la moneda de la venta): tasa_pago = TRM / tasa_venta.
-            tasa_venta = float(db_cotizacion.tasa_cambio or 1.0)
-            if tasa_venta <= 0:
-                raise ValueError(
-                    "La cotización no tiene una tasa de cambio válida para convertir la TRM del abono."
-                )
-            tasa_pago = float(tasa_cambio_adelanto) / tasa_venta
+        misma_moneda = moneda_pago == db_cotizacion.moneda_id
+        if misma_moneda:
+            # Misma moneda que la factura: tasa 1:1, no requiere TRM.
+            tasa_pago = 1.0
+        else:
+            tasa_explicita = float(tasa_cambio_adelanto) if tasa_cambio_adelanto else 0.0
+            if tasa_explicita > 0:
+                # La TRM indicada es COP por unidad de moneda del abono (p.ej. 1 USD = 4000 COP).
+                # Convertirla a "unidades de la moneda de la venta" usando la tasa congelada de la
+                # cotización (COP por unidad de la moneda de la venta): tasa_pago = TRM / tasa_venta.
+                # La TRM explícita SIEMPRE tiene prioridad: el cliente paga días después y la
+                # tasa congelada en la cotización puede ya no corresponder.
+                tasa_venta = float(db_cotizacion.tasa_cambio or 1.0)
+                if tasa_venta <= 0:
+                    raise ValueError(
+                        "La cotización no tiene una tasa de cambio válida para convertir la TRM del abono."
+                    )
+                tasa_pago = tasa_explicita / tasa_venta
+            else:
+                # Fallback: solo pares deducibles de la tasa de la cotización (venta USD ← pago COP).
+                tasa_pago, derivada = _derivar_tasa_pago(db, db_cotizacion.moneda_id, moneda_pago, db_cotizacion.tasa_cambio)
+                if not derivada or tasa_pago is None:
+                    raise ValueError(
+                        "La moneda del abono difiere de la moneda de la cotización. "
+                        "Indica la tasa de cambio (TRM) del abono."
+                    )
 
     # Cambiar estado de la cotización a APROBADA
     estado_cotizacion_anterior = db_cotizacion.estado
@@ -281,16 +347,35 @@ def convertir_cotizacion_a_pedido(
                 f"El producto con id {detalle_dict.get('producto_id')} no existe. "
                 "No se puede convertir la cotización con un producto inexistente."
             )
-        # Si el detalle no trae costo, intentar completarlo desde la cotización
-        if not detalle_dict.get("costo_unitario"):
+        # Si el detalle no trae costo, intentar completarlo desde la cotización.
+        # Nunca escribir 0.0: el fallback al precio_costo_base del producto en la
+        # venta exige NULL (0.0 es un costo falso que rompe el margen).
+        if detalle_dict.get("costo_unitario") is None:
             for dc in (db_cotizacion.detalles or []):
                 if dc.producto_id == detalle_dict.get("producto_id"):
-                    detalle_dict["costo_unitario"] = float(dc.costo_total or 0.0)
+                    detalle_dict["costo_unitario"] = float(dc.costo_total) if dc.costo_total else None
+                    break
+        # Las dimensiones (ancho/largo) cotizadas deben pasar al pedido: son las
+        # que usa producción para escalar la receta y mostrar el tamaño en el
+        # kanban. Antes se perdían en la conversión y el tablero las mostraba vacías.
+        if detalle_dict.get("ancho") is None or detalle_dict.get("largo") is None:
+            for dc in (db_cotizacion.detalles or []):
+                if dc.producto_id == detalle_dict.get("producto_id"):
+                    if detalle_dict.get("ancho") is None:
+                        detalle_dict["ancho"] = float(dc.ancho) if dc.ancho else None
+                    if detalle_dict.get("largo") is None:
+                        detalle_dict["largo"] = float(dc.largo) if dc.largo else None
                     break
         if not detalle_dict.get("porcentaje_ganancia"):
             costo = detalle_dict.get("costo_unitario")
             precio = detalle_dict.get("precio", 0.0)
             if costo:
+                # El costo está en COP; si la cotización es en otra moneda, el
+                # precio debe convertirse a COP con la TRM congelada antes de
+                # calcular el margen (mezclar USD con COP daba márgenes absurdos
+                # como -99.96%).
+                if db_cotizacion.moneda_id != 1:
+                    precio = float(precio) * float(db_cotizacion.tasa_cambio or 1.0)
                 margen = ((float(precio) - float(costo)) / float(costo)) * 100
                 # Clamp: la columna es numeric(5,2) → máx 999.99. Un margen mayor
                 # es dato inválido, pero no debe romper la conversión con un 500.

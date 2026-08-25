@@ -134,6 +134,8 @@ def actualizar_envio(
         envio = service.actualizar_envio(db, id, esquema, usuario_actual)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not envio:
         raise HTTPException(status_code=404, detail="Envío no encontrado")
     return _serialize_envio(envio, usuario_actual)
@@ -153,6 +155,8 @@ def cambiar_estado_envio(
         envio = service.actualizar_envio(db, id, schemas.EnvioUpdate(estado=estado), usuario_actual)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not envio:
         raise HTTPException(status_code=404, detail="Envío no encontrado")
     return _serialize_envio(envio, usuario_actual)
@@ -168,6 +172,8 @@ def eliminar_envio(
         exito = service.eliminar_envio(db, id, usuario_actual)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     if not exito:
         raise HTTPException(status_code=404, detail="Envío no encontrado")
     return None

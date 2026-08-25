@@ -123,13 +123,13 @@ def main() -> int:
 
         db.commit()
         print(
-            f"✅ Clasificación completada: {count} registros en "
+            f" Clasificación completada: {count} registros en "
             f"cama_historica_atributos y mueble_atributos (vectores 8D)."
         )
         return 0
     except Exception as e:
         db.rollback()
-        print(f"❌ Error durante la importación: {e}")
+        print(f" Error durante la importación: {e}")
         return 1
     finally:
         db.close()

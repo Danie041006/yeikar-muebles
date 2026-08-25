@@ -6,6 +6,7 @@ from typing import List
 from datetime import timedelta
 
 from app.core.config import settings
+from app.core.client_ip import obtener_ip_cliente
 from app.db.session import get_db
 from app.modules.users import schemas, service, model
 from app.modules.users.deps import (
@@ -46,7 +47,7 @@ def login(
     Autentica al usuario con nombre_usuario y password.
     Retorna un token JWT y un refresh token.
     """
-    ip = request.client.host if request and request.client else "unknown"
+    ip = obtener_ip_cliente(request) if request else "unknown"
     if service.usuario_bloqueado(db, form_data.username, ip):
         raise HTTPException(
             status_code=429,

@@ -14,6 +14,8 @@ class Compra(Base):
     fecha = Column(Date, nullable=False)
     estado = Column(String(50), default="BORRADOR", nullable=False)
     tipo_pago = Column(String(50), default="CREDITO", nullable=False)  # CONTADO | CREDITO
+    # Cuenta de caja de la que sale el dinero al recibir una compra CONTADO.
+    metodo_caja_id = Column(BigInteger, ForeignKey("metodo_caja.id", ondelete="RESTRICT"), nullable=True)
     # Tasa de cambio al momento de la compra (COP por 1 unidad de moneda de la compra).
     tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
     # Total convertido a moneda base (COP) con la tasa del día de la compra.
@@ -29,6 +31,16 @@ class Compra(Base):
     @property
     def total(self):
         return sum(d.cantidad * d.costo_unitario for d in self.detalles) if self.detalles else 0.0
+
+    @property
+    def comprobantes(self):
+        """Comprobantes digitales de la compra (adjuntos tipo COMPRA)."""
+        from sqlalchemy.orm import object_session
+        from app.modules.adjuntos.service import adjuntos_info
+        s = object_session(self)
+        if s is None:
+            return []
+        return adjuntos_info(s, "COMPRA", self.id)
 
 class DetalleCompra(Base):
     __tablename__ = "detalle_compra"

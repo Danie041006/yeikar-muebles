@@ -38,6 +38,7 @@ MODULOS_CATALOGO: List[Dict[str, str]] = [
     {"clave": "cotizaciones_ia", "nombre": "Cotizaciones con IA", "descripcion": "Motor de cotización inteligente (IQE)."},
     {"clave": "pedidos", "nombre": "Pedidos", "descripcion": "Pedidos de clientes."},
     {"clave": "ventas", "nombre": "Ventas, pagos y abonos", "descripcion": "Facturas, cobros, abonos y cuentas por cobrar."},
+    {"clave": "facturacion", "nombre": "Facturación", "descripcion": "Emisión de facturas fiscales de pedidos pagados al 100%."},
     {"clave": "produccion", "nombre": "Producción", "descripcion": "Órdenes de producción y kanban por áreas."},
     {"clave": "inventario", "nombre": "Inventario", "descripcion": "Stock, movimientos y alertas."},
     {"clave": "envios", "nombre": "Envíos y despachos", "descripcion": "Despacho y entrega de pedidos."},
@@ -48,6 +49,8 @@ MODULOS_CATALOGO: List[Dict[str, str]] = [
     {"clave": "gastos", "nombre": "Gastos", "descripcion": "Registro y control de gastos."},
     {"clave": "cuentas", "nombre": "Cuentas y movimientos", "descripcion": "Medios de pago (efectivo, Zelle, bancos), saldos y movimientos de cada cuenta."},
     {"clave": "compras", "nombre": "Compras", "descripcion": "Compras de materiales e insumos."},
+    {"clave": "costos_produccion", "nombre": "Costos de Producción", "descripcion": "Catálogo de precios de producción por área."},
+    {"clave": "nomina", "nombre": "Nómina", "descripcion": "Nómina semanal, pagos por empleado y aguinaldo."},
     {"clave": "reportes", "nombre": "Reportes financieros", "descripcion": "Pérdidas y ganancias, indicadores."},
     {"clave": "tasas", "nombre": "Tasas de cambio", "descripcion": "Tasas de cambio diarias."},
     {"clave": "catalogos", "nombre": "Configuración de catálogos", "descripcion": "Monedas, unidades, áreas, cargos y demás catálogos."},
@@ -82,7 +85,15 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM],
+            # require_exp + verify_exp: un token SIN fecha de expiración (o ya
+            # vencido) se rechaza. python-jose NO exige exp por defecto: sin
+            # esto, un token robado sin exp serviría para siempre.
+            options={"verify_exp": True, "require_exp": True},
+        )
         username: str = payload.get("sub")
         token_type: str = payload.get("type", "access")
         if username is None or token_type != "access":

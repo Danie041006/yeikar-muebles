@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Optional
 from sqlalchemy.orm import Session, joinedload
 
-from app.modules.quotes.vision_provider import FurnitureAttributes
+from app.modules.quotes.atributos import FurnitureAttributes
 from app.modules.productos.model import Producto, ProductoMaterial, CamaHistoricaAtributos, MuebleAtributos
 
 

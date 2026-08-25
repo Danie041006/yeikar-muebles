@@ -24,7 +24,13 @@ Si la condición no se cumple, la cantidad del material es 0.
 import unicodedata
 from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session, joinedload
+from app.core.redondeo import redondear_precio_cop
 from app.modules.productos.model import Producto, ProductoMaterial, Material, ReglaGastoSeccion, SeccionProducto, ElementoSeccion, PoliticaSeccion, CostoProduccionSeccion
+
+
+# Porcentaje de impuestos adicional sobre el costo de producción (configurable).
+# Fórmula:  a = costo_produccion * (1 + impuesto%)   →   b = a * (1 + ganancia%)
+IMPUESTOS_PCT_DEFAULT = Decimal("7")
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +142,34 @@ def _redondear(valor: Decimal, decimales: int = 4) -> Decimal:
     return valor.quantize(cuantificador, rounding=ROUND_HALF_UP)
 
 
+def _aplicar_impuestos_y_ganancia(
+    costo: Decimal,
+    ganancia_porcentaje: Decimal,
+    iva_porcentaje: Decimal,
+    impuesto_porcentaje: Decimal,
+):
+    """
+    Regla de precios YEIKAR:
+      a = costo_produccion * (1 + impuesto%)   → impuestos sobre el costo total
+      b = a * (1 + ganancia%)                  → precio final del producto
+      precio_con_iva = b * (1 + iva%)          → IVA opcional después
+    Devuelve (monto_impuestos, base_con_impuestos, precio_sin_iva, precio_con_iva).
+    """
+    monto_impuestos = _redondear(costo * impuesto_porcentaje / Decimal("100"), 2)
+    base_con_impuestos = _redondear(costo + monto_impuestos, 2)
+    # Los precios de venta se redondean al millar COP hacia arriba: nunca se
+    # vende por debajo del precio calculado y ningún descuento % deja decimales.
+    precio_sin_iva = redondear_precio_cop(
+        _redondear(base_con_impuestos * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2),
+        "ceil",
+    )
+    precio_con_iva = redondear_precio_cop(
+        _redondear(precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")), 2),
+        "ceil",
+    )
+    return monto_impuestos, base_con_impuestos, precio_sin_iva, precio_con_iva
+
+
 def _calcular_cantidad_material(
     pm: ProductoMaterial,
     nuevo_ancho: Decimal,
@@ -226,6 +260,7 @@ def calcular_costo_producto(
     iva_porcentaje: Decimal = Decimal("0"),        # En Colombia el IVA de muebles es 0% por defecto
     pct_mano_obra: Decimal = Decimal("15"),
     pct_gastos: Decimal = Decimal("10"),
+    impuesto_porcentaje: Decimal = IMPUESTOS_PCT_DEFAULT,
     atributos: dict = None,
 ) -> dict:
     """
@@ -353,9 +388,10 @@ def calcular_costo_producto(
 
         costo_nochero = costo_por_seccion.get("NOCHEROS", Decimal("0"))
 
-        # Precio de venta con margen de ganancia e IVA sobre el costo de producción real
-        precio_sin_iva = _redondear(costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2)
-        precio_con_iva = _redondear(precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")), 2)
+        # Precio de venta: costo + impuestos% → resultado + ganancia% → (opcional IVA)
+        monto_impuestos, base_con_impuestos, precio_sin_iva, precio_con_iva = _aplicar_impuestos_y_ganancia(
+            costo_produccion, ganancia_porcentaje, iva_porcentaje, impuesto_porcentaje
+        )
 
         resultado = {
             "producto_id": producto.id,
@@ -373,6 +409,9 @@ def calcular_costo_producto(
                 "pct_gastos": "por sección (ver desglose_por_seccion)",
                 "costo_produccion": float(costo_produccion),
                 "costo_total": float(costo_produccion),
+                "impuesto_porcentaje": float(impuesto_porcentaje),
+                "impuestos": float(monto_impuestos),
+                "base_con_impuestos": float(base_con_impuestos),
                 "ganancia_porcentaje": float(ganancia_porcentaje),
                 "precio_sin_iva": float(precio_sin_iva),
                 "iva_porcentaje": float(iva_porcentaje),
@@ -387,6 +426,9 @@ def calcular_costo_producto(
             "costo_gastos_indirectos": float(costo_gastos_total),
             "costo_produccion": float(costo_produccion),
             "costo_total": float(costo_produccion),
+            "impuesto_porcentaje": float(impuesto_porcentaje),
+            "impuestos": float(monto_impuestos),
+            "base_con_impuestos": float(base_con_impuestos),
             "ganancia_porcentaje": float(ganancia_porcentaje),
             "precio_sin_iva": float(precio_sin_iva),
             "iva_porcentaje": float(iva_porcentaje),
@@ -416,11 +458,12 @@ def calcular_costo_producto(
             costo_total_elementos = Decimal("0")
             detalle_elementos = []
             desglose_por_seccion = {}
-            # Pre-cargar materiales normalizados para usar el costo VIGENTE del insumo.
-            # Regla: si el elemento está mapeado a un material (material_id_normalizado),
-            # el costo se toma de material.costo_base en vivo (así subir el precio del
-            # insumo actualiza el mueble). Si no hay material mapeado, se usa el
-            # precio_unitario guardado en el elemento.
+            # Pre-cargar materiales normalizados para usarlos como FALLBACK de precio.
+            # Regla: se usa el precio_unitario guardado en el elemento (el precio que
+            # YEIKAR fijó en la receta/Excel). Solo si el elemento NO tiene precio se
+            # cae al costo VIGENTE del material (material.costo_base). Esto evita que
+            # precios del catálogo con unidades distintas (p.ej. LAM MDF por lámina vs
+            # por pieza) inflen el costo de producción.
             ids_materiales = {el.material_id_normalizado for sec in secciones for el in sec.elementos if el.material_id_normalizado}
             materiales_map = {
                 m.id: m for m in db.query(Material).filter(Material.id.in_(ids_materiales)).all()
@@ -430,10 +473,10 @@ def calcular_costo_producto(
                 costo_insumos = Decimal("0")
                 for el in sec.elementos:
                     mat_vivo = materiales_map.get(el.material_id_normalizado) if el.material_id_normalizado else None
-                    if mat_vivo is not None and mat_vivo.costo_base is not None:
-                        costo_unitario_efectivo = Decimal(str(mat_vivo.costo_base))
-                    elif el.precio_unitario:
+                    if el.precio_unitario:
                         costo_unitario_efectivo = Decimal(str(el.precio_unitario))
+                    elif mat_vivo is not None and mat_vivo.costo_base is not None:
+                        costo_unitario_efectivo = Decimal(str(mat_vivo.costo_base))
                     else:
                         costo_unitario_efectivo = Decimal("0")
                     subtotal = Decimal(str(el.cantidad)) * costo_unitario_efectivo
@@ -508,8 +551,9 @@ def calcular_costo_producto(
             # NO se suman mano de obra ni gastos indirectos adicionales.
             costo_produccion_el = costo_total_elementos
 
-            precio_sin_iva_el = _redondear(costo_produccion_el * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2)
-            precio_con_iva_el = _redondear(precio_sin_iva_el   * (Decimal("1") + iva_porcentaje      / Decimal("100")), 2)
+            monto_imp_el, base_imp_el, precio_sin_iva_el, precio_con_iva_el = _aplicar_impuestos_y_ganancia(
+                costo_produccion_el, ganancia_porcentaje, iva_porcentaje, impuesto_porcentaje
+            )
 
             return {
                 "producto_id": producto.id,
@@ -526,6 +570,9 @@ def calcular_costo_producto(
                     "costo_gastos_indirectos": 0.0,
                     "costo_produccion": float(costo_produccion_el),
                     "costo_total": float(costo_produccion_el),
+                    "impuesto_porcentaje": float(impuesto_porcentaje),
+                    "impuestos": float(monto_imp_el),
+                    "base_con_impuestos": float(base_imp_el),
                     "ganancia_porcentaje": float(ganancia_porcentaje),
                     "precio_sin_iva": float(precio_sin_iva_el),
                     "iva_porcentaje": float(iva_porcentaje),
@@ -539,6 +586,9 @@ def calcular_costo_producto(
                 "costo_gastos_indirectos": 0.0,
                 "costo_produccion": float(costo_produccion_el),
                 "costo_total": float(costo_produccion_el),
+                "impuesto_porcentaje": float(impuesto_porcentaje),
+                "impuestos": float(monto_imp_el),
+                "base_con_impuestos": float(base_imp_el),
                 "ganancia_porcentaje": float(ganancia_porcentaje),
                 "precio_sin_iva": float(precio_sin_iva_el),
                 "iva_porcentaje": float(iva_porcentaje),
@@ -551,7 +601,10 @@ def calcular_costo_producto(
         # Excel, se usan como último recurso (NO antes de las secciones).
         if producto.precio_venta_base is not None:
             precio_sin_iva = Decimal(str(producto.precio_venta_base))
-            precio_con_iva = Decimal(str(producto.precio_venta_con_iva)) if producto.precio_venta_con_iva else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")))
+            precio_con_iva = redondear_precio_cop(
+                Decimal(str(producto.precio_venta_con_iva)) if producto.precio_venta_con_iva else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100"))),
+                "ceil",
+            )
             costo_produccion = Decimal(str(producto.precio_costo_base)) if producto.precio_costo_base else (precio_sin_iva / (Decimal("1") + ganancia_porcentaje / Decimal("100")))
             costo_total_materiales = costo_produccion / (Decimal("1") + (pct_mano_obra + pct_gastos) / Decimal("100"))
             costo_mano_obra = costo_total_materiales * pct_mano_obra / Decimal("100")
@@ -573,6 +626,9 @@ def calcular_costo_producto(
                     "pct_gastos": float(pct_gastos),
                     "costo_produccion": float(costo_produccion),
                     "costo_total": float(costo_produccion),
+                    "impuesto_porcentaje": float(impuesto_porcentaje),
+                    "impuestos": 0.0,
+                    "base_con_impuestos": float(costo_produccion),
                     "ganancia_porcentaje": float(ganancia_porcentaje),
                     "precio_sin_iva": float(precio_sin_iva),
                     "iva_porcentaje": float(iva_porcentaje),
@@ -586,6 +642,9 @@ def calcular_costo_producto(
                 "costo_gastos_indirectos": float(costo_gastos),
                 "costo_produccion": float(costo_produccion),
                 "costo_total": float(costo_produccion),
+                "impuesto_porcentaje": float(impuesto_porcentaje),
+                "impuestos": 0.0,
+                "base_con_impuestos": float(costo_produccion),
                 "ganancia_porcentaje": float(ganancia_porcentaje),
                 "precio_sin_iva": float(precio_sin_iva),
                 "iva_porcentaje": float(iva_porcentaje),
@@ -725,8 +784,9 @@ def calcular_costo_producto(
     costo_gastos    = _redondear(costo_total_materiales * pct_gastos    / Decimal("100"), 2)
     costo_produccion = costo_total_materiales + costo_mano_obra + costo_gastos
 
-    precio_sin_iva = _redondear(costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2)
-    precio_con_iva = _redondear(precio_sin_iva   * (Decimal("1") + iva_porcentaje      / Decimal("100")), 2)
+    monto_impuestos, base_con_impuestos, precio_sin_iva, precio_con_iva = _aplicar_impuestos_y_ganancia(
+        costo_produccion, ganancia_porcentaje, iva_porcentaje, impuesto_porcentaje
+    )
 
     # --- 5. Resultado -------------------------------------------------------
     return {
@@ -751,6 +811,9 @@ def calcular_costo_producto(
             "pct_gastos": float(pct_gastos),
             "costo_produccion": float(costo_produccion),
             "costo_total": float(costo_produccion),  # Alias
+            "impuesto_porcentaje": float(impuesto_porcentaje),
+            "impuestos": float(monto_impuestos),
+            "base_con_impuestos": float(base_con_impuestos),
             "ganancia_porcentaje": float(ganancia_porcentaje),
             "precio_sin_iva": float(precio_sin_iva),
             "iva_porcentaje": float(iva_porcentaje),
@@ -765,6 +828,9 @@ def calcular_costo_producto(
         "costo_gastos_indirectos": float(costo_gastos),  # Alias
         "costo_produccion": float(costo_produccion),
         "costo_total": float(costo_produccion),  # Alias
+        "impuesto_porcentaje": float(impuesto_porcentaje),
+        "impuestos": float(monto_impuestos),
+        "base_con_impuestos": float(base_con_impuestos),
         "ganancia_porcentaje": float(ganancia_porcentaje),
         "precio_sin_iva": float(precio_sin_iva),
         "iva_porcentaje": float(iva_porcentaje),
@@ -772,3 +838,263 @@ def calcular_costo_producto(
         "precio_sugerido": float(precio_con_iva),  # Alias
         "precio_venta": float(precio_con_iva),  # Alias
     }
+
+
+# ---------------------------------------------------------------------------
+# Recálculo automático de precios de productos (anti-inflación)
+# ---------------------------------------------------------------------------
+# Cuando el costo de un insumo cambia, actualizamos `precio_costo_base` y
+# `precio_venta_base` de los productos que lo usan SIN inflar precios:
+#
+#   - Productos con SECCIONES: se recalcula el costo completo con los precios
+#     vivos de los insumos (la estructura ya incluye mano de obra, %gastos y
+#     %negocio por sección). Es exacto.
+#
+#   - Productos con RECETA PLANA: se ESCALA el costo del Excel proporcionalmente
+#     al cambio de los materiales (S1 = S0 × M1/M0), conservando la proporción
+#     de mano de obra/gastos que ya tenía el Excel. NUNCA se apilan porcentajes.
+#
+#   - GUARDA anti-inflación: si el costo nuevo difiere más de 30% del actual,
+#     el producto NO se aplica y queda marcado `requiere_revision` para que el
+#     dueño lo revise en la vista previa.
+UMBRAL_CAMBIO_PORCENTAJE = Decimal("30")
+
+def _costo_materiales_actuales(db: Session, producto: Producto) -> Decimal:
+    """Suma el costo de los materiales de la receta plana a medidas base con
+    los precios VIGENTES de cada insumo."""
+    total = Decimal("0")
+    ancho_base = Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")
+    largo_base = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
+    area_base = ancho_base * largo_base
+    for pm in db.query(ProductoMaterial).filter(ProductoMaterial.producto_id == producto.id).all():
+        material = pm.material
+        if material is None or not material.costo_base:
+            continue
+        cantidad = _calcular_cantidad_material(
+            pm, ancho_base, largo_base, ancho_base, largo_base,
+            area_base, area_base, None,
+        )
+        total += cantidad * Decimal(str(material.costo_base))
+    return total
+
+
+def _costo_plana_fallback(db: Session, producto: Producto) -> Decimal:
+    """Costo de receta plana con la fórmula del Excel: Σ materiales × (1 + %gastos
+    por sección). No apila mano de obra ni gastos indirectos adicionales."""
+    ancho_base = Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")
+    largo_base = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
+    area_base = ancho_base * largo_base
+    reglas = {r.seccion: Decimal(str(r.porcentaje_gasto)) for r in db.query(ReglaGastoSeccion).all()}
+    costo_por_seccion: dict[str, Decimal] = {}
+    for pm in db.query(ProductoMaterial).filter(ProductoMaterial.producto_id == producto.id).all():
+        material = pm.material
+        if material is None or not material.costo_base:
+            continue
+        cantidad = _calcular_cantidad_material(
+            pm, ancho_base, largo_base, ancho_base, largo_base,
+            area_base, area_base, None,
+        )
+        sec = _normalizar_seccion(pm.seccion)
+        costo_por_seccion[sec] = costo_por_seccion.get(sec, Decimal("0")) + cantidad * Decimal(str(material.costo_base))
+    total = Decimal("0")
+    for sec, base in costo_por_seccion.items():
+        pct = reglas.get(sec, Decimal("0"))
+        total += base + _redondear(base * pct / Decimal("100"), 2)
+    return total
+
+
+def _producto_usa_secciones(db: Session, producto_id: int) -> bool:
+    return db.query(SeccionProducto.id).filter(SeccionProducto.producto_id == producto_id).first() is not None
+
+
+def productos_que_usan_material(db: Session, id_material: int) -> list[int]:
+    """Ids de productos (receta plana o secciones) que referencian un material."""
+    ids = set()
+    for (pid,) in db.query(ProductoMaterial.producto_id).filter(ProductoMaterial.material_id == id_material).all():
+        ids.add(pid)
+    for (pid,) in (
+        db.query(SeccionProducto.producto_id)
+        .join(ElementoSeccion, ElementoSeccion.seccion_id == SeccionProducto.id)
+        .filter(ElementoSeccion.material_id_normalizado == id_material)
+        .all()
+    ):
+        ids.add(pid)
+    return sorted(ids)
+
+
+def _guardar_snapshot(db: Session, producto: Producto, costo_nuevo: Decimal, precio_nuevo: Decimal) -> None:
+    producto.precio_costo_base = _redondear(costo_nuevo, 2)
+    # Precios de venta siempre al millar COP (hacia arriba para no erosionar margen).
+    producto.precio_venta_base = redondear_precio_cop(precio_nuevo, "ceil")
+    producto.precio_venta_con_iva = redondear_precio_cop(precio_nuevo, "ceil")  # IVA de muebles 0% por defecto
+
+
+def recalcular_precios_productos(
+    db: Session,
+    producto_ids: list[int] | None = None,
+    aplicar: bool = False,
+    ganancia_porcentaje: Decimal = Decimal("40"),
+    iva_porcentaje: Decimal = Decimal("0"),
+    impuesto_porcentaje: Decimal = IMPUESTOS_PCT_DEFAULT,
+) -> list[dict]:
+    """Vista previa (aplicar=False) o recálculo real (aplicar=True) de los precios
+    base de productos con receta. Devuelve por producto el antes → después y si se
+    aplicó o quedó en revisión."""
+    resultados = []
+    if producto_ids is None:
+        planos = [pid for (pid,) in db.query(ProductoMaterial.producto_id).distinct().all()]
+        jerarquicos = [pid for (pid,) in db.query(SeccionProducto.producto_id).distinct().all()]
+        producto_ids = sorted(set(planos) | set(jerarquicos))
+
+    for pid in producto_ids:
+        producto = db.query(Producto).filter(Producto.id == pid).first()
+        if not producto:
+            continue
+        costo_anterior = Decimal(str(producto.precio_costo_base)) if producto.precio_costo_base is not None else None
+        precio_anterior = Decimal(str(producto.precio_venta_base)) if producto.precio_venta_base is not None else None
+
+        if _producto_usa_secciones(db, pid):
+            tipo = "secciones"
+            ancho = Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")
+            largo = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
+            calc = calcular_costo_producto(
+                db, pid, ancho, largo,
+                ganancia_porcentaje=ganancia_porcentaje,
+                iva_porcentaje=iva_porcentaje,
+                impuesto_porcentaje=impuesto_porcentaje,
+            )
+            costo_nuevo = Decimal(str(calc["costo_produccion"]))
+            precio_nuevo = Decimal(str(calc["precio_venta"]))
+            # Guarda anti-inflación también aquí: si el snapshot estaba muy
+            # desactualizado (>30%), no se aplica solo; se revisa en la vista previa.
+            requiere_revision = (
+                costo_anterior is not None and costo_anterior > 0
+                and abs(costo_nuevo / costo_anterior - Decimal("1")) * Decimal("100") > UMBRAL_CAMBIO_PORCENTAJE
+            )
+        else:
+            tipo = "plana"
+            costo_nuevo = _costo_plana_fallback(db, producto)
+            monto_imp, base_imp, precio_sin_iva, precio_con_iva = _aplicar_impuestos_y_ganancia(
+                costo_nuevo, ganancia_porcentaje, iva_porcentaje, impuesto_porcentaje
+            )
+            precio_nuevo = precio_con_iva
+            # Guarda anti-inflación sobre el costo actual (si existe)
+            requiere_revision = (
+                costo_anterior is not None and costo_anterior > 0
+                and abs(costo_nuevo / costo_anterior - Decimal("1")) * Decimal("100") > UMBRAL_CAMBIO_PORCENTAJE
+            )
+
+        pct_cambio = None
+        if costo_anterior and costo_anterior > 0:
+            pct_cambio = float((costo_nuevo / costo_anterior - Decimal("1")) * Decimal("100"))
+
+        aplicado = False
+        if aplicar and not requiere_revision:
+            _guardar_snapshot(db, producto, costo_nuevo, precio_nuevo)
+            aplicado = True
+
+        resultados.append({
+            "producto_id": producto.id,
+            "producto_nombre": producto.nombre,
+            "tipo": tipo,
+            "costo_anterior": float(costo_anterior) if costo_anterior is not None else None,
+            "costo_nuevo": float(costo_nuevo),
+            "precio_anterior": float(precio_anterior) if precio_anterior is not None else None,
+            "precio_nuevo": float(precio_nuevo),
+            "pct_cambio": pct_cambio,
+            "requiere_revision": bool(requiere_revision),
+            "aplicado": aplicado,
+        })
+
+    if aplicar:
+        db.commit()
+    return resultados
+
+
+def recalcular_tras_cambio_material(
+    db: Session,
+    id_material: int,
+    costo_viejo: Decimal | None,
+    costo_nuevo: Decimal | None,
+) -> list[dict]:
+    """Hook llamado al actualizar un material: recalcula (con cuidado) los
+    productos que lo usan. Para recetas planas ESCALA el costo del Excel por el
+    cambio de materiales; para secciones recalcula el costo completo."""
+    if costo_viejo is None or costo_nuevo is None or costo_viejo == costo_nuevo:
+        return []
+    resultados = []
+    for pid in productos_que_usan_material(db, id_material):
+        producto = db.query(Producto).filter(Producto.id == pid).first()
+        if not producto:
+            continue
+        costo_anterior = Decimal(str(producto.precio_costo_base)) if producto.precio_costo_base is not None else None
+        precio_anterior = Decimal(str(producto.precio_venta_base)) if producto.precio_venta_base is not None else None
+
+        if _producto_usa_secciones(db, pid):
+            # Recalcular completo (exacto): ya refleja el precio vivo del insumo.
+            ancho = Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")
+            largo = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
+            calc = calcular_costo_producto(db, pid, ancho, largo)
+            costo_nuevo_p = Decimal(str(calc["costo_produccion"]))
+            precio_nuevo_p = Decimal(str(calc["precio_venta"]))
+            requiere_revision = (
+                costo_anterior is not None and costo_anterior > 0
+                and abs(costo_nuevo_p / costo_anterior - Decimal("1")) * Decimal("100") > UMBRAL_CAMBIO_PORCENTAJE
+            )
+        else:
+            # Escalar el costo del Excel proporcionalmente al cambio de materiales.
+            m1 = _costo_materiales_actuales(db, producto)
+            m0 = m1
+            for pm in db.query(ProductoMaterial).filter(ProductoMaterial.producto_id == pid, ProductoMaterial.material_id == id_material).all():
+                material = pm.material
+                if material is None or not material.costo_base:
+                    continue
+                cantidad = _calcular_cantidad_material(
+                    pm,
+                    Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60"),
+                    Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90"),
+                    Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60"),
+                    Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90"),
+                    (Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")) * (Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")),
+                    (Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")) * (Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")),
+                    None,
+                )
+                m0 = m0 - cantidad * (costo_nuevo - costo_viejo)
+
+            if costo_anterior is not None and m0 > 0:
+                costo_nuevo_p = _redondear(costo_anterior * m1 / m0, 2)
+            else:
+                costo_nuevo_p = _costo_plana_fallback(db, producto)
+            _, _, precio_sin_iva, precio_con_iva = _aplicar_impuestos_y_ganancia(
+                costo_nuevo_p, Decimal("40"), Decimal("0"), IMPUESTOS_PCT_DEFAULT
+            )
+            precio_nuevo_p = precio_con_iva
+            requiere_revision = (
+                costo_anterior is not None and costo_anterior > 0
+                and abs(costo_nuevo_p / costo_anterior - Decimal("1")) * Decimal("100") > UMBRAL_CAMBIO_PORCENTAJE
+            )
+
+        pct_cambio = None
+        if costo_anterior and costo_anterior > 0:
+            pct_cambio = float((costo_nuevo_p / costo_anterior - Decimal("1")) * Decimal("100"))
+
+        aplicado = False
+        if not requiere_revision:
+            _guardar_snapshot(db, producto, costo_nuevo_p, precio_nuevo_p)
+            aplicado = True
+
+        resultados.append({
+            "producto_id": producto.id,
+            "producto_nombre": producto.nombre,
+            "tipo": "secciones" if _producto_usa_secciones(db, pid) else "plana",
+            "costo_anterior": float(costo_anterior) if costo_anterior is not None else None,
+            "costo_nuevo": float(costo_nuevo_p),
+            "precio_anterior": float(precio_anterior) if precio_anterior is not None else None,
+            "precio_nuevo": float(precio_nuevo_p),
+            "pct_cambio": pct_cambio,
+            "requiere_revision": bool(requiere_revision),
+            "aplicado": aplicado,
+        })
+
+    db.commit()
+    return resultados

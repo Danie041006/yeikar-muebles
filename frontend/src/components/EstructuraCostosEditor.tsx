@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { LineaCostoOut, SeccionCostoOut, UnidadMedida } from '../services/iqeService';
 import { productosService, Material } from '../services/productosService';
+import { useToast } from '../context/ToastContext';
+import { SearchSelect } from './ui';
 
 interface EstructuraCostosEditorProps {
   secciones: SeccionCostoOut[];
@@ -17,6 +19,7 @@ export default function EstructuraCostosEditor({
   unidades,
   isLoading,
 }: EstructuraCostosEditorProps) {
+  const toast = useToast();
   // Estados para agregar material
   const [activeSearchSection, setActiveSearchSection] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -25,6 +28,9 @@ export default function EstructuraCostosEditor({
 
   // Estado para modal de creación de material
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // Estado para modal de nueva sección
+  const [isNewSectionOpen, setIsNewSectionOpen] = useState(false);
+  const [newSectionName, setNewSectionName] = useState('');
   const [newMatName, setNewMatName] = useState('');
   const [newMatCost, setNewMatCost] = useState('0');
   const [newMatUnit, setNewMatUnit] = useState('');
@@ -86,9 +92,45 @@ export default function EstructuraCostosEditor({
     onChange(finalUpdated);
   };
 
-  // Eliminar línea
-  const handleDeleteItem = (seccionNombre: string, tempId: string) => {
+  // Mapear un material sugerido (un clic) para una línea sin precio
+  const handleMapSugerencia = (seccionNombre: string, tempId: string, mat: { id: number; nombre: string; costo_base: number; abreviatura?: string | null }) => {
     const updated = secciones.map((sec) => {
+      if (sec.seccion === seccionNombre) {
+        return {
+          ...sec,
+          items: sec.items.map((item) => {
+            if (item.temp_id === tempId) {
+              const costo_unitario = Number(mat.costo_base) || 0;
+              const updatedItem: LineaCostoOut = {
+                ...item,
+                material_id: mat.id,
+                costo_unitario,
+                costo_total: parseFloat((item.cantidad * costo_unitario).toFixed(2)),
+                precio_pendiente: false,
+                unidad: mat.abreviatura || item.unidad,
+                fuente: 'manual',
+                razon: item.razon || `Mapeado a ${mat.nombre}`,
+                sugerencias: [],
+              };
+              return updatedItem;
+            }
+            return item;
+          }),
+        };
+      }
+      return sec;
+    });
+    const finalUpdated = updated.map((sec) => {
+      const subtotal = sec.items
+        .filter((i) => i.activo)
+        .reduce((sum, item) => sum + (item.costo_total || 0), 0);
+      return { ...sec, subtotal: parseFloat(subtotal.toFixed(2)) };
+    });
+    onChange(finalUpdated);
+  };
+
+  // Eliminar línea
+  const handleDeleteItem = (seccionNombre: string, tempId: string) => {    const updated = secciones.map((sec) => {
       if (sec.seccion === seccionNombre) {
         const filtered = sec.items.filter((item) => item.temp_id !== tempId);
         const subtotal = filtered
@@ -197,7 +239,7 @@ export default function EstructuraCostosEditor({
       setIsModalOpen(false);
       setActiveSearchSection(null);
     } catch (err) {
-      alert('Error al crear el material en el inventario. Asegúrese de que el nombre sea único.');
+      toast.error('Error al crear el material en el inventario. Asegúrese de que el nombre sea único.');
     }
   };
 
@@ -218,12 +260,20 @@ export default function EstructuraCostosEditor({
 
   // Agregar una nueva sección vacía
   const handleAddSection = () => {
-    const nombre = prompt('Ingrese el nombre de la nueva sección (ej. HERRAJES, TAPICERÍA):');
-    if (!nombre || !nombre.trim()) return;
+    setNewSectionName('');
+    setIsNewSectionOpen(true);
+  };
+
+  const handleConfirmAddSection = () => {
+    const nombre = newSectionName;
+    if (!nombre || !nombre.trim()) {
+      toast.warning('Ingrese el nombre de la sección.');
+      return;
+    }
 
     const nombreUpper = nombre.toUpperCase().trim();
     if (secciones.some((s) => s.seccion === nombreUpper)) {
-      alert('La sección ya existe.');
+      toast.warning('La sección ya existe.');
       return;
     }
 
@@ -234,34 +284,22 @@ export default function EstructuraCostosEditor({
     };
 
     onChange([...secciones, nuevaSeccion]);
-  };
-
-  // Colores para las fuentes
-  const getFuenteBadge = (fuente: string) => {
-    switch (fuente) {
-      case 'ia':
-        return <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase">IA</span>;
-      case 'historico':
-        return <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase">Historial</span>;
-      case 'ia+historico':
-        return <span className="bg-purple-50 text-purple-700 border border-purple-200 text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase">Fusionado</span>;
-      default:
-        return <span className="bg-gray-100 text-gray-700 border border-gray-200 text-[10px] px-1.5 py-0.5 rounded font-semibold uppercase">Manual</span>;
-    }
+    setIsNewSectionOpen(false);
+    setNewSectionName('');
   };
 
   // Icono por sección de producción
   const getSeccionIcon = (nombre: string) => {
     const n = nombre.toUpperCase();
-    if (n.includes('EBAN')) return '🪵';
-    if (n.includes('MANO DE OBRA') || n.includes('M.O')) return '👷';
-    if (n.includes('PINTURA')) return '🎨';
-    if (n.includes('TAPIC')) return '🧵';
-    if (n.includes('HERRAJ')) return '🔩';
-    if (n.includes('TERMINACI')) return '✨';
-    if (n.includes('NOCHER')) return '🛏️';
-    if (n.includes('ILUMINA') || n.includes('LED')) return '💡';
-    return '📦';
+    if (n.includes('EBAN')) return '';
+    if (n.includes('MANO DE OBRA') || n.includes('M.O')) return '';
+    if (n.includes('PINTURA')) return '';
+    if (n.includes('TAPIC')) return '';
+    if (n.includes('HERRAJ')) return '';
+    if (n.includes('TERMINACI')) return '';
+    if (n.includes('NOCHER')) return '';
+    if (n.includes('ILUMINA') || n.includes('LED')) return '';
+    return '';
   };
 
   // Color del header por sección
@@ -303,7 +341,6 @@ export default function EstructuraCostosEditor({
                 <tr className="bg-gray-100/50 text-[10px] text-gray-500 uppercase tracking-wider border-b border-gray-100">
                   <th className="w-10 px-4 py-2.5 text-center">Activo</th>
                   <th className="text-left px-4 py-2.5">Material / Insumo</th>
-                  <th className="text-center px-2 py-2.5">Origen</th>
                   <th className="text-right px-4 py-2.5">Cant.</th>
                   <th className="text-left px-2 py-2.5">Unidad</th>
                   <th className="text-right px-4 py-2.5">Costo Unit.</th>
@@ -314,7 +351,7 @@ export default function EstructuraCostosEditor({
               <tbody className="divide-y divide-gray-100 font-body">
                 {sec.items.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-6 text-gray-400 text-xs italic">
+                    <td colSpan={7} className="text-center py-6 text-gray-400 text-xs italic">
                       No hay materiales en esta sección. Haz clic en "+ Agregar línea" para añadir uno.
                     </td>
                   </tr>
@@ -343,21 +380,57 @@ export default function EstructuraCostosEditor({
                             <span className="font-semibold text-gray-800 text-xs sm:text-sm">{item.nombre}</span>
                             {item.precio_pendiente && item.activo && (
                               <span className="bg-red-50 text-red-600 border border-red-200 text-[9px] px-1 rounded font-bold animate-pulse">
-                                ⚠️ PRECIO PENDIENTE
+                                 PRECIO PENDIENTE
+                              </span>
+                            )}
+                            {item.fuente === 'politica' && (
+                              <span className="bg-blue-50 text-blue-600 border border-blue-200 text-[9px] px-1 rounded font-bold">
+                                 MANO DE OBRA
+                              </span>
+                            )}
+                            {item.confianza_cantidad === 'alta' && (
+                              <span className="bg-green-50 text-green-600 border border-green-200 text-[9px] px-1 rounded font-bold" title="Cantidad tomada de una receta real o respaldada por varias recetas similares">
+                                 confianza alta
+                              </span>
+                            )}
+                            {item.confianza_cantidad === 'media' && (
+                              <span className="bg-amber-50 text-amber-600 border border-amber-200 text-[9px] px-1 rounded font-bold" title="Cantidad estimada por mediana de recetas similares (3-4 recetas)">
+                                 confianza media
+                              </span>
+                            )}
+                            {item.confianza_cantidad === 'baja' && (
+                              <span className="bg-gray-50 text-gray-500 border border-gray-200 text-[9px] px-1 rounded font-bold" title="Cantidad propuesta por la IA sin respaldo histórico">
+                                 estimación IA
                               </span>
                             )}
                           </div>
                           {item.razon && (
                             <span className="text-[10px] text-gray-400 italic mt-0.5 line-clamp-1 hover:line-clamp-none" title={item.razon}>
-                              💡 {item.razon}
+                               {item.razon}
                             </span>
                           )}
+                          {item.cantidad_ia_sugerida != null && item.cantidad_referencia != null && Math.abs(item.cantidad_ia_sugerida - item.cantidad_referencia) > 0.001 && (
+                            <span className="text-[10px] text-gray-500 mt-0.5 font-mono" title="Cantidad propuesta por la IA vs cantidad real de la receta histórica">
+                               IA: {item.cantidad_ia_sugerida} · receta: {item.cantidad_referencia}
+                            </span>
+                          )}
+                          {/* Sugerencias de material del inventario (1 clic para mapear) */}
+                          {item.precio_pendiente && item.sugerencias && item.sugerencias.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {item.sugerencias.map((sug) => (
+                                <button
+                                  key={sug.id}
+                                  type="button"
+                                  title={`Mapear a "${sug.nombre}" (${sug.costo_base} por ${sug.abreviatura || ''})`}
+                                  onClick={() => handleMapSugerencia(sec.seccion, item.temp_id, sug)}
+                                  className="text-[10px] font-semibold bg-yeikar-primary/10 text-yeikar-secondary border border-yeikar-primary/30 rounded-full px-2 py-0.5 hover:bg-yeikar-primary/20 hover:border-yeikar-primary transition-all"
+                                >
+                                  + {sug.nombre}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      </td>
-
-                      {/* Origen */}
-                      <td className="px-2 py-3 text-center">
-                        {getFuenteBadge(item.fuente)}
                       </td>
 
                       {/* Cantidad */}
@@ -427,7 +500,7 @@ export default function EstructuraCostosEditor({
                               title="Crear material formalmente en inventario"
                               className="p-1.5 text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 hover:text-emerald-700 transition-all"
                             >
-                              📥
+                              +
                             </button>
                           )}
                           <button
@@ -435,7 +508,7 @@ export default function EstructuraCostosEditor({
                             onClick={() => handleDeleteItem(sec.seccion, item.temp_id)}
                             className="p-1.5 text-red-500 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 hover:text-red-700 transition-all"
                           >
-                            🗑️
+                            ×
                           </button>
                         </div>
                       </td>
@@ -506,7 +579,7 @@ export default function EstructuraCostosEditor({
                     onClick={() => openCreateMaterialModal(sec.seccion, customMaterialName)}
                     className="bg-emerald-600 text-white px-2 py-1 rounded-lg text-[10px] font-bold hover:bg-emerald-700 transition-all"
                   >
-                    Crear en Inventario 📥
+                    Crear en Inventario
                   </button>
                 </div>
               </div>
@@ -516,7 +589,7 @@ export default function EstructuraCostosEditor({
                 onClick={() => startAddLine(sec.seccion)}
                 className="text-xs font-semibold text-yeikar-primary hover:text-yeikar-primary-dark flex items-center gap-1 py-1"
               >
-                ➕ Agregar línea de costo
+                 Agregar línea de costo
               </button>
             )}
           </div>
@@ -530,7 +603,7 @@ export default function EstructuraCostosEditor({
           onClick={handleAddSection}
           className="flex-1 py-3 border-2 border-dashed border-gray-300 text-gray-500 rounded-2xl hover:bg-gray-50 hover:border-gray-400 font-semibold text-sm transition-all flex items-center justify-center gap-2"
         >
-          📂 Agregar nueva sección de producción
+           Agregar nueva sección de producción
         </button>
         <button
           type="button"
@@ -540,7 +613,7 @@ export default function EstructuraCostosEditor({
         >
           {isLoading ? (
             <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-          ) : '🔄'} Recalcular estructura
+          ) : ''} Recalcular estructura
         </button>
       </div>
 
@@ -579,19 +652,12 @@ export default function EstructuraCostosEditor({
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Unidad de Medida *</label>
-                  <select
-                    required
+                  <SearchSelect
                     value={newMatUnit}
-                    onChange={(e) => setNewMatUnit(e.target.value)}
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    <option value="">Seleccionar...</option>
-                    {unidades.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.nombre} ({u.abreviatura})
-                      </option>
-                    ))}
-                  </select>
+                    onChange={(v) => setNewMatUnit(String(v))}
+                    options={unidades.map((u) => ({ value: u.id, label: `${u.nombre} (${u.abreviatura})` }))}
+                    placeholder="Seleccionar..."
+                  />
                 </div>
               </div>
 
@@ -608,6 +674,53 @@ export default function EstructuraCostosEditor({
                   className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 transition-all shadow-sm"
                 >
                   Confirmar y Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: nueva sección */}
+      {isNewSectionOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-gray-200">
+            <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-dark text-white px-6 py-4">
+              <h3 className="font-headline font-bold text-lg">Nueva Sección</h3>
+              <p className="text-xs text-white/70">Agrupa insumos y costos bajo una misma etapa de producción</p>
+            </div>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleConfirmAddSection();
+              }}
+              className="p-6 space-y-4 font-body"
+            >
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Nombre de la sección *</label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newSectionName}
+                  onChange={(e) => setNewSectionName(e.target.value)}
+                  placeholder="ej. HERRAJES, TAPICERÍA"
+                  className="w-full border border-gray-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 uppercase"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsNewSectionOpen(false)}
+                  className="flex-1 py-2.5 border border-gray-300 text-gray-600 rounded-xl font-medium text-sm hover:bg-gray-50 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-yeikar-primary text-yeikar-neutral rounded-xl font-bold text-sm hover:bg-yeikar-primary/90 transition-all shadow-sm"
+                >
+                  Crear sección
                 </button>
               </div>
             </form>

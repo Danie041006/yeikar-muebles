@@ -6,16 +6,16 @@ from app.modules.catalogos.schemas import MonedaResponse
 
 class DetalleCotizacionBase(BaseModel):
     producto_id: int
-    cantidad: float
-    precio: float
-    alto: Optional[float] = None
-    ancho: Optional[float] = None
-    largo: Optional[float] = None
+    cantidad: float = Field(gt=0)
+    precio: float = Field(ge=0)
+    alto: Optional[float] = Field(None, ge=0)
+    ancho: Optional[float] = Field(None, ge=0)
+    largo: Optional[float] = Field(None, ge=0)
     observaciones: Optional[str] = None
-    costo_materiales: Optional[float] = None
-    costo_mano_obra: Optional[float] = None
-    costo_gastos: Optional[float] = None
-    costo_total: Optional[float] = None
+    costo_materiales: Optional[float] = Field(None, ge=0)
+    costo_mano_obra: Optional[float] = Field(None, ge=0)
+    costo_gastos: Optional[float] = Field(None, ge=0)
+    costo_total: Optional[float] = Field(None, ge=0)
     receta_personalizada: Optional[Any] = None
 
 class DetalleCotizacionCreate(DetalleCotizacionBase):
@@ -31,10 +31,10 @@ class DetalleCotizacionResponse(DetalleCotizacionBase):
 class CotizacionBase(BaseModel):
     fecha: date
     estado: str
-    total_estimado: float
+    total_estimado: float = Field(ge=0)
     moneda_id: int = 1
     tasa_cambio: float = Field(1.0, gt=0)
-    total_en_moneda_base: Optional[float] = None
+    total_en_moneda_base: Optional[float] = Field(None, ge=0)
     observaciones: Optional[str] = None
 
 class CotizacionCreate(CotizacionBase):
@@ -45,10 +45,10 @@ class CotizacionUpdate(BaseModel):
     cliente_id: Optional[int] = None
     fecha: Optional[date] = None
     estado: Optional[str] = None
-    total_estimado: Optional[float] = None
+    total_estimado: Optional[float] = Field(None, ge=0)
     moneda_id: Optional[int] = None
     tasa_cambio: Optional[float] = Field(None, gt=0)
-    total_en_moneda_base: Optional[float] = None
+    total_en_moneda_base: Optional[float] = Field(None, ge=0)
     observaciones: Optional[str] = None
 
 class CotizacionResponse(CotizacionBase):

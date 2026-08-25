@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { cotizacionService, Product, CalculationResult } from '../services/cotizacionService';
+import { SearchSelect, Modal } from '../components/ui';
+import EstructuraCostos from '../components/EstructuraCostos';
+import { normalizarEstructuraCostos } from '../utils/estructuraCostos';
 
 // ─── Badge de tipo de escala ────────────────────────────────────────────────
 function EscalaBadge({ tipo }: { tipo: string }) {
@@ -86,8 +89,10 @@ export default function Calculadora() {
   const [ancho, setAncho]     = useState(1.6);
   const [largo, setLargo]     = useState(1.9);
   const [ganancia, setGanancia] = useState(40);
+  const [impuesto, setImpuesto] = useState(7);
 
   const [resultado, setResultado] = useState<CalculationResult | null>(null);
+  const [showEstructura, setShowEstructura] = useState(false);
   const [cargando, setCargando]   = useState(false);
   const [error, setError]         = useState('');
 
@@ -113,7 +118,7 @@ export default function Calculadora() {
     setCargando(true);
     setError('');
     try {
-      const res = await cotizacionService.calculatePrice(productoId, { ancho, largo, ganancia });
+      const res = await cotizacionService.calculatePrice(productoId, { ancho, largo, ganancia, impuesto });
       setResultado(res);
     } catch (e) {
       setError('Error al calcular. Verifica que el backend esté activo.');
@@ -121,13 +126,13 @@ export default function Calculadora() {
     } finally {
       setCargando(false);
     }
-  }, [productoId, ancho, largo, ganancia]);
+  }, [productoId, ancho, largo, ganancia, impuesto]);
 
   useEffect(() => {
     if (!productoId) return;
     const timer = setTimeout(calcular, 450);
     return () => clearTimeout(timer);
-  }, [calcular, productoId, ancho, largo, ganancia]);
+  }, [calcular, productoId, ancho, largo, ganancia, impuesto]);
 
   const baseDim = productoActual
     ? `${Number(productoActual.ancho_base).toFixed(2)}m × ${Number(productoActual.largo_base).toFixed(2)}m`
@@ -153,18 +158,12 @@ export default function Calculadora() {
         <label className="block text-xs text-yeikar-tertiary/70 uppercase tracking-widest mb-2">
           Producto Modelo
         </label>
-        <select
-          className="w-full bg-yeikar-neutral border border-yeikar-primary/20 rounded-xl px-4 py-2.5 text-yeikar-tertiary text-sm focus:outline-none focus:border-yeikar-primary focus:ring-2 focus:ring-yeikar-primary/30 transition"
-          value={productoId ?? ''}
-          onChange={e => setProductoId(e.target.value ? Number(e.target.value) : null)}
-        >
-          <option value="">Selecciona un producto modelo...</option>
-          {productos.map(p => (
-            <option key={p.id} value={p.id}>
-              {p.nombre}
-            </option>
-          ))}
-        </select>
+        <SearchSelect
+          value={productoId}
+          onChange={(v) => setProductoId(Number(v))}
+          options={productos.map(p => ({ value: p.id, label: p.nombre }))}
+          placeholder="Selecciona un producto modelo..."
+        />
       </div>
 
       {/* Panel principal */}
@@ -224,6 +223,23 @@ export default function Calculadora() {
               />
             </div>
 
+            {/* Impuestos */}
+            <div className="mb-2">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-xs text-yeikar-tertiary/70 uppercase tracking-wider">Impuestos</span>
+                <span className="text-base font-bold text-yeikar-primary font-mono">{impuesto}%</span>
+              </div>
+              <input
+                type="range" min={0} max={30} step={0.5}
+                value={impuesto}
+                onChange={e => setImpuesto(parseFloat(e.target.value))}
+                className="w-full h-1.5 appearance-none rounded-full outline-none cursor-pointer"
+                style={{
+                  background: `linear-gradient(to right, #D4AF37 ${impuesto * 3.33}%, #422C1F ${impuesto * 3.33}%)`,
+                }}
+              />
+            </div>
+
             {/* Indicador dimensiones */}
             {baseDim && (
               <div className="text-center mt-3">
@@ -263,7 +279,8 @@ export default function Calculadora() {
           )}
 
           {resultado && (
-            <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 overflow-hidden mb-5 shadow-card">
+            <>
+              <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 overflow-hidden mb-5 shadow-card">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-yeikar-primary/15 text-yeikar-tertiary/60 text-xs uppercase tracking-wider">
@@ -328,18 +345,33 @@ export default function Calculadora() {
                   <span className="text-yeikar-tertiary/90">Costo de producción total</span>
                   <span className="font-mono text-yeikar-tertiary">{cop(resultado.costo_total)}</span>
                 </div>
+                {Number(resultado.impuestos) > 0 && (
+                  <div className="flex justify-between text-sm text-yeikar-tertiary/60">
+                    <span>Impuestos ({Number(resultado.impuesto_porcentaje) || impuesto}%)</span>
+                    <span className="font-mono text-yeikar-tertiary/80">{cop(resultado.impuestos)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between text-lg font-black pt-2 border-t border-yeikar-primary/30">
                   <span className="text-yeikar-primary">Precio sugerido de venta ({ganancia}% ganancia)</span>
                   <span className="font-mono text-yeikar-primary">{cop(resultado.precio_venta)}</span>
                 </div>
               </div>
             </div>
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => setShowEstructura(true)}
+                className="text-xs font-bold text-yeikar-primary hover:text-yeikar-secondary uppercase tracking-wider"
+              >
+                Ver estructura de costos (Excel)
+              </button>
+            </div>
+            </>
           )}
 
           {/* Estado vacío */}
           {!resultado && !cargando && !error && (
             <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 p-12 text-center shadow-card">
-              <div className="text-4xl mb-3">📐</div>
+              <div className="text-4xl mb-3"></div>
               <p className="text-yeikar-tertiary/70">Ajusta las dimensiones para ver el cálculo de materiales</p>
             </div>
           )}
@@ -349,13 +381,27 @@ export default function Calculadora() {
       {/* Estado inicial sin producto */}
       {!productoId && (
         <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 p-16 text-center shadow-card">
-          <div className="text-5xl mb-4">🛏️</div>
+          <div className="text-5xl mb-4"></div>
           <h3 className="text-xl font-bold text-yeikar-tertiary mb-2">Selecciona un producto modelo</h3>
           <p className="text-yeikar-tertiary/70 text-sm max-w-sm mx-auto">
             Elige la cama o mueble base y ajusta las dimensiones para ver en vivo cuántos materiales se necesitan y cuánto cuesta producirlo.
           </p>
         </div>
       )}
+
+      {/* Modal: estructura de costos estilo Excel */}
+      <Modal
+        open={showEstructura}
+        onClose={() => setShowEstructura(false)}
+        title="Estructura de Costos"
+        subtitle={resultado?.producto_nombre || 'Producto'}
+        size="4xl"
+        footer={<button onClick={() => setShowEstructura(false)} className="btn btn-outline">Cerrar</button>}
+      >
+        {resultado && (
+          <EstructuraCostos data={normalizarEstructuraCostos(resultado)} />
+        )}
+      </Modal>
     </div>
   );
 }

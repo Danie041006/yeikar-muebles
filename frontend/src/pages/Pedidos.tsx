@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Trash2 } from 'lucide-react';
 import {
   Button,
   Card,
@@ -10,11 +11,15 @@ import {
   SearchInput,
   Spinner,
   ConfirmDialog,
+  ResponsiveDataTable,
+  type DataColumn,
 } from '../components/ui';
+import { useToast } from '../context/ToastContext';
 import { pedidoService, Order } from '../services/pedidoService';
 
 export default function Pedidos() {
   const navigate = useNavigate();
+  const toast = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
@@ -74,7 +79,7 @@ export default function Pedidos() {
       }
     } catch (err) {
       console.error(err);
-      alert('Error al actualizar el estado del pedido.');
+      toast.error('Error al actualizar el estado del pedido.');
     } finally {
       setStatusUpdatingId(null);
     }
@@ -92,17 +97,39 @@ export default function Pedidos() {
       fetchOrders(search);
     } catch (err) {
       console.error(err);
-      alert('Error al eliminar el pedido.');
+      toast.error('Error al eliminar el pedido.');
     }
   };
 
-  const estadosPedido = [
-    { value: 'APROBADO', label: 'Aprobado' },
-    { value: 'PRODUCCION', label: 'En producción' },
-    { value: 'TERMINADO', label: 'Terminado' },
-    { value: 'ENTREGADO', label: 'Entregado' },
-    { value: 'CANCELADO', label: 'Cancelado' }
-  ];
+  // Misma matriz de transiciones que el backend (app/core/state_machine.py):
+  // el select solo ofrece los saltos válidos del flujo de negocio.
+  const TRANSICIONES_PEDIDO: Record<string, string[]> = {
+    COTIZADO: ['APROBADO', 'CANCELADO'],
+    APROBADO: ['PRODUCCION', 'CANCELADO'],
+    PRODUCCION: ['PAUSADO', 'TERMINADO', 'CANCELADO'],
+    PAUSADO: ['PRODUCCION', 'CANCELADO'],
+    TERMINADO: ['ENTREGADO'],
+    ENTREGADO: [],
+    CANCELADO: [],
+  };
+  const ESTADO_LABEL: Record<string, string> = {
+    COTIZADO: 'Cotizado',
+    APROBADO: 'Aprobado',
+    PRODUCCION: 'En producción',
+    PAUSADO: 'Pausado',
+    TERMINADO: 'Terminado',
+    ENTREGADO: 'Entregado',
+    CANCELADO: 'Cancelado',
+  };
+
+  const opcionesEstado = (estado: string) => {
+    const actual = { value: estado, label: ESTADO_LABEL[estado] ?? estado };
+    const siguientes = (TRANSICIONES_PEDIDO[estado] ?? []).map((v) => ({
+      value: v,
+      label: ESTADO_LABEL[v] ?? v,
+    }));
+    return [actual, ...siguientes];
+  };
 
   const estadoSelectClass = (estado: string) => {
     if (estado === 'APROBADO' || estado === 'COTIZADO') {
@@ -145,6 +172,83 @@ export default function Pedidos() {
         return estado;
     }
   };
+
+  const EstadoSelect = ({ order }: { order: Order }) => (
+    <select
+      value={order.estado}
+      disabled={statusUpdatingId !== null || (TRANSICIONES_PEDIDO[order.estado] ?? []).length === 0}
+      onChange={(e) => handleUpdateStatus(order.id, order.observaciones, e.target.value)}
+      className={`px-2.5 py-1.5 rounded-full font-bold text-xs font-headline border focus:outline-none focus:ring-2 focus:ring-yeikar-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${estadoSelectClass(order.estado)}`}
+      aria-label={`Cambiar estado del pedido #${order.id}`}
+    >
+      {opcionesEstado(order.estado).map((est) => (
+        <option key={est.value} value={est.value}>{est.label}</option>
+      ))}
+    </select>
+  );
+
+  const renderActions = (order: Order) => (
+    <>
+      <button
+        onClick={() => setSelectedOrder(order)}
+        className="btn px-3 py-2 rounded-lg text-xs bg-yeikar-secondary text-yeikar-tertiary hover:bg-yeikar-secondary-light"
+      >
+        Ver detalles
+      </button>
+      {['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(order.estado) && (
+        <button
+          onClick={() => navigate('/ventas')}
+          className="btn px-3 py-2 rounded-lg text-xs bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary-light flex items-center gap-1"
+          title="Ir a Facturas y Cobros"
+        >
+          <span>Factura / Cobros</span>
+        </button>
+      )}
+      <button
+        onClick={() => handleOpenDeleteConfirm(order.id)}
+        className="p-2 text-red-600 hover:text-red-800 transition-colors"
+        title="Eliminar"
+        aria-label="Eliminar pedido"
+      >
+        <Trash2 className="h-5 w-5" />
+      </button>
+    </>
+  );
+
+  const columns: DataColumn<Order>[] = [
+    {
+      key: 'id',
+      header: 'Pedido ID',
+      render: (o) => <span className="font-mono font-bold text-yeikar-secondary">#{o.id}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'cliente',
+      header: 'Cliente',
+      render: (o) => (
+        <span className="font-bold text-yeikar-secondary font-headline">{o.cliente?.nombre || `Cliente ID: ${o.cliente_id}`}</span>
+      ),
+      mobileSecondary: true,
+    },
+    {
+      key: 'fecha',
+      header: 'Fecha Creación',
+      render: (o) => <span className="font-mono text-xs text-yeikar-neutral/50">{o.fecha}</span>,
+      mobileLabel: 'Creado',
+    },
+    {
+      key: 'entrega',
+      header: 'Entrega Estimada',
+      render: (o) => <span className="font-mono text-xs text-yeikar-neutral/50">{o.fecha_entrega_estimada || 'Sin definir'}</span>,
+      mobileLabel: 'Entrega',
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      render: (o) => <EstadoSelect order={o} />,
+      mobileHidden: true,
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -239,82 +343,14 @@ export default function Pedidos() {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-yeikar-tertiary/20 text-yeikar-secondary font-headline font-bold text-xs uppercase tracking-wider">
-                <tr>
-                  <th className="table-th">Pedido ID</th>
-                  <th className="table-th">Cliente</th>
-                  <th className="table-th">Fecha Creación</th>
-                  <th className="table-th">Entrega Estimada</th>
-                  <th className="table-th">Estado</th>
-                  <th className="table-th text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-yeikar-secondary-light/5 text-sm">
-                {orders.map((order) => (
-                  <tr key={order.id} className="hover:bg-yeikar-tertiary/10 transition-colors">
-                    <td className="px-6 py-4 font-mono font-bold text-yeikar-secondary">
-                      #{order.id}
-                    </td>
-                    <td className="px-6 py-4 font-bold text-yeikar-secondary font-headline">
-                      {order.cliente?.nombre || `Cliente ID: ${order.cliente_id}`}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-xs text-yeikar-neutral/50">
-                      {order.fecha}
-                    </td>
-                    <td className="px-6 py-4 font-mono text-xs text-yeikar-neutral/50">
-                      {order.fecha_entrega_estimada || 'Sin definir'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <select
-                        value={order.estado === 'COTIZADO' ? 'APROBADO' : order.estado}
-                        disabled={statusUpdatingId !== null}
-                        onChange={(e) => handleUpdateStatus(order.id, order.observaciones, e.target.value)}
-                        className={`px-2.5 py-1 rounded-full font-bold text-xs font-headline border focus:outline-none focus:ring-2 focus:ring-yeikar-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${estadoSelectClass(order.estado)}`}
-                        aria-label={`Cambiar estado del pedido #${order.id}`}
-                      >
-                        {estadosPedido.map((est) => (
-                          <option key={est.value} value={est.value}>
-                            {est.label}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => setSelectedOrder(order)}
-                          className="btn px-3 py-1.5 rounded-lg text-xs bg-yeikar-secondary text-yeikar-tertiary hover:bg-yeikar-secondary-light"
-                        >
-                          Ver detalles
-                        </button>
-                        {['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(order.estado) && (
-                          <button
-                            onClick={() => navigate('/ventas')}
-                            className="btn px-3 py-1.5 rounded-lg text-xs bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary-light flex items-center gap-1"
-                            title="Ir a Facturas y Cobros"
-                          >
-                            <span>Factura / Cobros</span>
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleOpenDeleteConfirm(order.id)}
-                          className="p-1.5 text-red-600 hover:text-red-800 transition-colors"
-                          title="Eliminar"
-                          aria-label="Eliminar pedido"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveDataTable
+            columns={columns}
+            rows={orders}
+            rowKey={(o) => o.id}
+            cardBadge={(o) => <EstadoSelect order={o} />}
+            tableActions={renderActions}
+            cardActions={renderActions}
+          />
         )}
       </Card>
 
@@ -326,6 +362,11 @@ export default function Pedidos() {
         size="2xl"
         footer={
           <>
+            {selectedOrder && (
+              <Button variant="outline" onClick={() => navigate(`/historial?tipo=pedido&id=${selectedOrder.id}`)}>
+                📂 Ver expediente completo
+              </Button>
+            )}
             {selectedOrder && ['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(selectedOrder.estado) && (
               <Button
                 onClick={() => { setSelectedOrder(null); navigate('/ventas'); }}

@@ -8,6 +8,7 @@ class Client(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     nombre = Column(String(150), nullable=False)
+    cedula = Column(String(30), nullable=True)
     telefono = Column(String(50), nullable=False)
     direccion = Column(Text)
     email = Column(String(120))

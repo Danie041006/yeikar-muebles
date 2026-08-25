@@ -46,6 +46,56 @@ export interface EnvioUpdate {
   guia_despacho?: string | null;
   observaciones?: string | null;
 }
+
+export interface ClienteReparto {
+  id: number;
+  nombre: string;
+  telefono?: string | null;
+  direccion?: string | null;
+  ciudad?: string | null;
+}
+
+export interface ProductoReparto {
+  id: number;
+  nombre?: string | null;
+}
+
+export interface DetallePedidoReparto {
+  id: number;
+  pedido_id: number;
+  producto_id: number;
+  cantidad: number;
+  alto?: number | null;
+  ancho?: number | null;
+  largo?: number | null;
+  color?: string | null;
+  acabado?: string | null;
+  observaciones?: string | null;
+  producto?: ProductoReparto | null;
+}
+
+export interface PedidoReparto {
+  id: number;
+  cliente_id: number;
+  fecha?: string | null;
+  estado: string;
+  fecha_entrega_estimada?: string | null;
+  cliente?: ClienteReparto | null;
+  detalles: DetallePedidoReparto[];
+}
+
+export interface EnvioReparto {
+  id: number;
+  pedido_id: number;
+  empleado_id?: number | null;
+  fecha_salida?: string | null;
+  fecha_entrega?: string | null;
+  estado: 'PREPARADO' | 'EN_TRANSITO' | 'ENTREGADO' | 'FALLIDO';
+  direccion_entrega?: string | null;
+  guia_despacho?: string | null;
+  observaciones?: string | null;
+  pedido?: PedidoReparto | null;
+}
 export const envioService = {
   getAll: async (buscar?: string, estado?: string): Promise<Envio[]> => {
     const response = await api.get<Envio[]>('/envio/', {
@@ -58,6 +108,12 @@ export const envioService = {
   },
   getById: async (id: number): Promise<Envio> => {
     const response = await api.get<Envio>(`/envio/${id}`);
+    return response.data;
+  },
+  getMisAsignaciones: async (estado?: string): Promise<EnvioReparto[]> => {
+    const response = await api.get<EnvioReparto[]>('/envio/mis-asignaciones', {
+      params: estado ? { estado } : undefined,
+    });
     return response.data;
   },
   update: async (id: number, data: EnvioUpdate): Promise<Envio> => {

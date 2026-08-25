@@ -261,16 +261,16 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Solo analiza y muestra estadísticas sin guardar en la BD")
     args = parser.parse_args()
 
-    print(f"📂 Leyendo Excel: {EXCEL_PATH}")
+    print(f" Leyendo Excel: {EXCEL_PATH}")
     if not EXCEL_PATH.exists():
-        print(f"❌ No se encontró el archivo: {EXCEL_PATH}")
+        print(f" No se encontró el archivo: {EXCEL_PATH}")
         sys.exit(1)
 
     wb = openpyxl.load_workbook(str(EXCEL_PATH), data_only=True)
     print(f"Total hojas a procesar: {len(wb.sheetnames)}")
 
     if args.dry_run:
-        print("🔍 MODO DRY-RUN ACTIVADO (No se modificará la base de datos)\n")
+        print(" MODO DRY-RUN ACTIVADO (No se modificará la base de datos)\n")
         total_filas = 0
         conteo_secciones = {}
         hojas_procesadas = 0
@@ -293,7 +293,7 @@ def main():
                 for f in filas[:4]:
                     print(f"      [{f['seccion']:<12}] {f['nombre_material']:<40} Qty: {f['cantidad_base']} ${f['v_unit']}")
 
-        print(f"\n📊 RESUMEN DRY-RUN:")
+        print(f"\n RESUMEN DRY-RUN:")
         print(f"  Hojas procesadas: {hojas_procesadas} / {len(wb.sheetnames)}")
         print(f"  Total ítems de receta: {total_filas}")
         print("  Distribución por sección:")
@@ -316,7 +316,7 @@ def main():
         if excel_prod_ids:
             db.query(ProductoMaterial).filter(ProductoMaterial.producto_id.in_(excel_prod_ids)).delete(synchronize_session=False)
             db.flush()
-        print(f"🧹 Recetas anteriores limpiadas para {len(excel_prods)} productos del Excel\n")
+        print(f" Recetas anteriores limpiadas para {len(excel_prods)} productos del Excel\n")
 
         creados = 0
         total_recetas_creadas = 0
@@ -394,16 +394,16 @@ def main():
 
             total_recetas_creadas += insumos_insertados
             creados += 1
-            print(f"  ✅ [{sheet_name.strip()[:30]:<30}] -> Prod #{producto.id} | {insumos_insertados} recetas | Costo: {costo}")
+            print(f"   [{sheet_name.strip()[:30]:<30}] -> Prod #{producto.id} | {insumos_insertados} recetas | Costo: {costo}")
 
         db.commit()
-        print(f"\n🎉 ¡Importación completada exitosamente!")
+        print(f"\n ¡Importación completada exitosamente!")
         print(f"   - Productos creados: {creados}")
         print(f"   - Recetas (ProductoMaterial) insertadas: {total_recetas_creadas}")
 
     except Exception as e:
         db.rollback()
-        print(f"\n❌ Error en la importación: {e}")
+        print(f"\n Error en la importación: {e}")
         traceback.print_exc()
         sys.exit(1)
     finally:

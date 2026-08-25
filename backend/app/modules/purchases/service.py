@@ -77,9 +77,49 @@ def obtener_compras(
     return query.order_by(model.Compra.fecha.desc()).offset(skip).limit(limit).all()
 
 
+def _validar_pago_contado(db: Session, compra, estado: str) -> None:
+    """Una compra CONTADO debe indicar de qué cuenta sale el dinero."""
+    if compra.tipo_pago == "CONTADO" and estado == "RECIBIDA" and not getattr(compra, "metodo_caja_id", None):
+        raise ValueError(
+            "La compra es CONTADO: debes indicar el método de caja (metodo_caja_id) "
+            "del que sale el dinero al recibirla."
+        )
+
+
+def _movimiento_caja_compra(db: Session, compra: model.Compra, registrar: bool) -> None:
+    """Registra (o revierte) la salida de caja de una compra RECIBIDA.
+
+    Cada peso que sale del negocio debe quedar en su cuenta: al recibir una
+    compra CONTADO se genera la SALIDA; si la compra deja de estar RECIBIDA
+    (cancela/reversa), el movimiento se elimina para no dejar egresos fantasma.
+    """
+    if compra.tipo_pago != "CONTADO" or not compra.metodo_caja_id:
+        return
+    from app.modules.reports.model import MovimientoCaja
+    referencia = f"Compra #{compra.id}"
+    mov = db.query(MovimientoCaja).filter(MovimientoCaja.referencia == referencia).first()
+    if registrar and mov is None:
+        from app.core.caja import registrar_movimiento_caja
+        registrar_movimiento_caja(
+            db,
+            metodo_caja_id=compra.metodo_caja_id,
+            tipo="SALIDA",
+            monto=float(compra.total_en_moneda_base or 0),
+            moneda_id=1,
+            tasa_cambio=1.0,
+            fecha=compra.fecha,
+            referencia=referencia,
+            observaciones=f"Compra #{compra.id} a {compra.proveedor.nombre if compra.proveedor else 'proveedor'}",
+        )
+    elif not registrar and mov is not None:
+        db.delete(mov)
+        db.flush()
+
+
 def crear_compra(db: Session, compra: schemas.CompraCreate) -> model.Compra:
     # Crear registro de compra y sus detalles
     from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+    _validar_pago_contado(db, compra, compra.estado or "BORRADOR")
     tasa_cambio = obtener_tasa_moneda_a_cop(db, compra.moneda_id, compra.fecha)
     total_en_base = sum(
         float(d.cantidad) * float(d.costo_unitario) for d in compra.detalle
@@ -91,6 +131,7 @@ def crear_compra(db: Session, compra: schemas.CompraCreate) -> model.Compra:
         fecha=compra.fecha,
         estado=compra.estado or "BORRADOR",
         tipo_pago=compra.tipo_pago or "CREDITO",
+        metodo_caja_id=compra.metodo_caja_id,
         tasa_cambio=tasa_cambio,
         total_en_moneda_base=round(total_en_base, 2),
         observaciones=compra.observaciones,
@@ -126,6 +167,7 @@ def crear_compra(db: Session, compra: schemas.CompraCreate) -> model.Compra:
             _actualizar_costo_material(
                 db, detalle.material_id, detalle.cantidad, detalle.costo_unitario, ubicacion_id
             )
+        _movimiento_caja_compra(db, db_compra, registrar=True)
 
     db.commit()
     db.refresh(db_compra)
@@ -140,44 +182,77 @@ def actualizar_compra(db: Session, compra_id: int, compra_update: schemas.Compra
     viejo_estado = db_compra.estado
     for attr, value in compra_update.model_dump(exclude_unset=True).items():
         setattr(db_compra, attr, value)
-        
-    # Registrar movimiento de inventario (entrada) si transiciona a RECIBIDA y no existía previo
+    _validar_pago_contado(db, db_compra, db_compra.estado)
+
+    # Registrar movimiento de inventario (entrada) si transiciona a RECIBIDA.
+    # Stock NETO: si hay una reversa previa (SALIDA) por CANCELADA→RECIBIDA,
+    # la entrada debe re-registrarse; si el stock ya está, se omite.
+    from app.modules.inventory.model import MovimientoInventario
     if viejo_estado != "RECIBIDA" and db_compra.estado == "RECIBIDA":
-        from app.modules.inventory.model import MovimientoInventario
-        existe_mov = db.query(MovimientoInventario).filter(
-            MovimientoInventario.referencia_tipo == "COMPRA",
-            MovimientoInventario.referencia_id == db_compra.id
-        ).first()
-        
-        if not existe_mov:
-            ubicacion_id = _ubicacion_entrada(db)
-            for detalle in db_compra.detalles:
-                movimiento = inventory_schemas.MovimientoCreate(
-                    material_id=detalle.material_id,
-                    ubicacion_id=ubicacion_id,
-                    tipo="ENTRADA",
-                    cantidad=detalle.cantidad,
-                    referencia_tipo="COMPRA",
-                    referencia_id=db_compra.id,
-                    observaciones="Entrada por compra (actualizada a recibida)",
-                )
-                inventory_service.registrar_movimiento(db, movimiento)
-                _actualizar_costo_material(
-                    db, detalle.material_id, detalle.cantidad, detalle.costo_unitario, ubicacion_id
-                )
+        try:
+            _reentrada_stock_compra(db, db_compra)
+        except ValueError as e:
+            raise ValueError(f"Error al recibir la compra: {e}")
+        _movimiento_caja_compra(db, db_compra, registrar=True)
 
     # Revertir stock si la compra SALIÓ de RECIBIDA (CANCELADA, BORRADOR, EMITIDA).
     # La entrada de inventario solo tiene validez mientras la compra siga RECIBIDA.
     if viejo_estado == "RECIBIDA" and db_compra.estado != "RECIBIDA":
-        from app.modules.inventory.model import MovimientoInventario
-        movimientos = db.query(MovimientoInventario).filter(
-            MovimientoInventario.referencia_tipo == "COMPRA",
-            MovimientoInventario.referencia_id == db_compra.id
-        ).all()
-        for mov in movimientos:
-            if mov.tipo == "ENTRADA":
-                for detalle in db_compra.detalles:
-                    if detalle.material_id == mov.material_id:
+        _reversa_stock_compra(db, db_compra)
+        _movimiento_caja_compra(db, db_compra, registrar=False)
+
+    db.commit()
+    db.refresh(db_compra)
+    return db_compra
+
+
+def _stock_neto_compra(db: Session, compra_id: int, material_id: int) -> float:
+    """Entradas de inventario de la compra menos sus reversas (SALIDA)."""
+    from app.modules.inventory.model import MovimientoInventario
+    movs = db.query(MovimientoInventario).filter(
+        MovimientoInventario.referencia_tipo == "COMPRA",
+        MovimientoInventario.referencia_id == compra_id,
+        MovimientoInventario.material_id == material_id,
+    ).all()
+    neto = 0.0
+    for m in movs:
+        neto += float(m.cantidad) if m.tipo == "ENTRADA" else -float(m.cantidad)
+    return neto
+
+
+def _reentrada_stock_compra(db: Session, db_compra: model.Compra) -> None:
+    """Registra la entrada de stock al pasar a RECIBIDA (idempotente)."""
+    for detalle in db_compra.detalles:
+        if _stock_neto_compra(db, db_compra.id, detalle.material_id) > 0:
+            continue  # el stock ya está contado
+        ubicacion_id = _ubicacion_entrada(db)
+        movimiento = inventory_schemas.MovimientoCreate(
+            material_id=detalle.material_id,
+            ubicacion_id=ubicacion_id,
+            tipo="ENTRADA",
+            cantidad=detalle.cantidad,
+            referencia_tipo="COMPRA",
+            referencia_id=db_compra.id,
+            observaciones="Entrada por compra (actualizada a recibida)",
+        )
+        inventory_service.registrar_movimiento(db, movimiento)
+        _actualizar_costo_material(
+            db, detalle.material_id, detalle.cantidad, detalle.costo_unitario, ubicacion_id
+        )
+
+
+def _reversa_stock_compra(db: Session, db_compra: model.Compra) -> None:
+    """Revierte el stock al salir de RECIBIDA, con mensaje claro si no alcanza."""
+    from app.modules.inventory.model import MovimientoInventario
+    movimientos = db.query(MovimientoInventario).filter(
+        MovimientoInventario.referencia_tipo == "COMPRA",
+        MovimientoInventario.referencia_id == db_compra.id,
+    ).all()
+    for mov in movimientos:
+        if mov.tipo == "ENTRADA":
+            for detalle in db_compra.detalles:
+                if detalle.material_id == mov.material_id:
+                    try:
                         salida = inventory_schemas.MovimientoCreate(
                             material_id=mov.material_id,
                             ubicacion_id=mov.ubicacion_id,
@@ -188,10 +263,11 @@ def actualizar_compra(db: Session, compra_id: int, compra_update: schemas.Compra
                             observaciones=f"Reversa de entrada por compra ({db_compra.estado})",
                         )
                         inventory_service.registrar_movimiento(db, salida)
-
-    db.commit()
-    db.refresh(db_compra)
-    return db_compra
+                    except ValueError as e:
+                        raise ValueError(
+                            f"No se puede cancelar la compra #{db_compra.id}: "
+                            f"el material {detalle.material_id} ya no tiene stock suficiente para revertir. {e}"
+                        )
 
 
 def eliminar_compra(db: Session, compra_id: int) -> bool:

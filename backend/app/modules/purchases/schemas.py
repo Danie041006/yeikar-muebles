@@ -3,12 +3,17 @@ from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional, List
 
+from app.modules.adjuntos.schemas import AdjuntoInfo
+
 class CompraBase(BaseModel):
     proveedor_id: int
     moneda_id: int
     fecha: date
     estado: str = "BORRADOR"
     tipo_pago: str = "CREDITO"  # CONTADO | CREDITO
+    # Método de caja del desembolso (id de MetodoCaja). Obligatorio cuando
+    # tipo_pago = CONTADO: al recibir la compra, el efectivo SALE de esa cuenta.
+    metodo_caja_id: Optional[int] = None
     observaciones: Optional[str] = None
 
 class CompraCreate(BaseModel):
@@ -17,6 +22,7 @@ class CompraCreate(BaseModel):
     fecha: date
     estado: Optional[str] = "BORRADOR"
     tipo_pago: Optional[str] = "CREDITO"
+    metodo_caja_id: Optional[int] = None
     observaciones: Optional[str] = None
     detalle: List["DetalleCompraCreate"]
 
@@ -28,6 +34,8 @@ class CompraResponse(CompraBase):
     created_at: datetime
     updated_at: datetime
     detalle: List["DetalleCompraResponse"] = Field(validation_alias="detalles")
+    # Comprobantes digitales de la compra (adjuntos tipo COMPRA)
+    comprobantes: List[AdjuntoInfo] = []
 
     class Config:
         from_attributes = True

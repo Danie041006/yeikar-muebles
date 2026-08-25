@@ -5,6 +5,9 @@ export interface PnLDetail {
   ingresos: number;
   gastos: number;
   balance: number;
+  ingresos_cop?: number;
+  gastos_cop?: number;
+  balance_cop?: number;
 }
 
 export interface PnLResponse {
@@ -31,6 +34,47 @@ export interface ReportAlertaStockResponse {
   ubicacion_nombre: string;
 }
 
+// ---------------- Estado del día (reporte diario) ----------------
+export interface MovimientoDiario {
+  id: number;
+  tipo: string; // APERTURA | ENTRADA | SALIDA | AJUSTE
+  moneda_codigo: string;
+  moneda_simbolo: string;
+  monto: number;
+  monto_cop: number;
+  cuenta_nombre?: string | null;
+  referencia?: string | null;
+  concepto: string;
+  quien?: string | null;
+}
+
+export interface LineaMonedaDiaria {
+  moneda_id: number;
+  codigo: string;
+  simbolo: string;
+  monto_ingresos: number;
+  monto_egresos: number;
+  monto_cop: number;
+}
+
+export interface SaldoCuentaDiaria {
+  metodo_caja_id: number;
+  cuenta_nombre: string;
+  saldo_inicial_cop: number;
+  saldo_final_cop: number;
+}
+
+export interface ResumenDiario {
+  fecha: string;
+  saldo_inicial_cop: number;
+  total_ingresos_cop: number;
+  total_egresos_cop: number;
+  saldo_final_cop: number;
+  movimientos: MovimientoDiario[];
+  por_moneda: LineaMonedaDiaria[];
+  saldos_por_cuenta: SaldoCuentaDiaria[];
+}
+
 export const reportesService = {
   getPnL: async (mes: string): Promise<PnLResponse> => {
     const response = await api.get<PnLResponse>('/reports/pnl', {
@@ -54,6 +98,12 @@ export const reportesService = {
   // ---------------- Informe Mensual ----------------
   getInformeMensual: async (mes: string): Promise<InformeMensualResponse> => {
     const response = await api.get<InformeMensualResponse>('/reports/informe-mensual', { params: { mes } });
+    return response.data;
+  },
+
+  // ---------------- Estado del día ----------------
+  getResumenDiario: async (fecha?: string): Promise<ResumenDiario> => {
+    const response = await api.get<ResumenDiario>('/reports/diario', { params: fecha ? { fecha } : {} });
     return response.data;
   },
 
@@ -209,10 +259,12 @@ export interface GastosEstadoResultados {
   administrativos: LineaGastoInforme[];
   financieros: LineaGastoInforme[];
   impuestos: LineaGastoInforme[];
+  produccion?: LineaGastoInforme[];
   total_gastos_operativos: number;
   total_gastos_administrativos: number;
   total_financieros: number;
   total_impuestos: number;
+  total_gastos_produccion?: number;
   total_gastos: number;
 }
 
@@ -235,6 +287,7 @@ export interface InformeMensualResponse {
   resumen: ResumenMes;
   estado_resultados: EstadoResultados;
   pendientes_de_pago: PendientesDePagoInforme;
+  saldos_caja?: LineaValorConcepto[];
 }
 
 export interface PendientePagoLinea {

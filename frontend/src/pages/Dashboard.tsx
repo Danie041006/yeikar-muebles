@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { reportesService, ResumenDiario } from '../services/reportesService';
 import {
   ShoppingBag,
   Hammer,
@@ -17,7 +18,7 @@ import {
   BarChart3,
   Users,
 } from 'lucide-react';
-import { Card, StatCard, Badge, Button } from '../components/ui';
+import { Card, StatCard, Badge, Button, ResponsiveDataTable, type DataColumn } from '../components/ui';
 
 interface IngresoMesDetail {
   moneda: string;
@@ -63,6 +64,9 @@ export default function Dashboard() {
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
   const [stockAlerts, setStockAlerts] = useState<StockAlerta[]>([]);
   const [delayedOrdersCount, setDelayedOrdersCount] = useState(0);
+  const [resumenHoy, setResumenHoy] = useState<ResumenDiario | null>(null);
+
+  const fmtCOP = (n: number) => `$ ${(Number(n) || 0).toLocaleString('es-CO')}`;
 
   const today = new Date().toLocaleDateString('es-ES', {
     weekday: 'long',
@@ -102,7 +106,11 @@ export default function Dashboard() {
         .then((r) => setStockAlerts(r.data))
         .catch(() => {});
     }
-  }, [puedePedidos, puedeInventario]);
+
+    if (esAdmin) {
+      reportesService.getResumenDiario().then(setResumenHoy).catch(() => {});
+    }
+  }, [puedePedidos, puedeInventario, esAdmin]);
 
   const cards = [
     {
@@ -164,6 +172,46 @@ export default function Dashboard() {
     { label: 'Reportes Financieros', href: '/reportes', icon: BarChart3, primary: false, module: 'reportes' },
   ].filter((item) => hasModulo(item.module));
 
+  const recentOrdersColumns: DataColumn<RecentOrder>[] = [
+    {
+      key: 'id',
+      header: 'Código',
+      render: (o) => <span className="font-mono font-bold text-yeikar-secondary">#{o.id}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'cliente',
+      header: 'Cliente',
+      render: (o) => <span className="font-semibold text-yeikar-neutral">{o.cliente?.nombre || '—'}</span>,
+      mobileSecondary: true,
+    },
+    {
+      key: 'fecha',
+      header: 'Fecha',
+      render: (o) => <span className="font-mono text-xs text-yeikar-neutral/50">{new Date(o.fecha).toLocaleDateString('es-ES')}</span>,
+      mobileLabel: 'Fecha',
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      render: (o) => (
+        <Badge
+          tone={
+            (['ENTREGADO', 'TERMINADO'] as string[]).includes(o.estado)
+              ? 'green'
+              : (['PRODUCCION', 'EN_PRODUCCION'] as string[]).includes(o.estado)
+              ? 'blue'
+              : 'gold'
+          }
+          dot
+        >
+          {orderStatusLabels[o.estado] || o.estado}
+        </Badge>
+      ),
+      mobileHidden: true,
+    },
+  ];
+
   return (
     <div className="space-y-8">
       {/* Header Banner */}
@@ -208,6 +256,27 @@ export default function Dashboard() {
         ))}
       </div>
 
+      {/* Resumen del día (solo admins) */}
+      {esAdmin && resumenHoy && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-yeikar-primary/20 bg-white/60 p-5 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-yeikar-primary/10 text-yeikar-primary-dark">
+              <DollarSign className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-yeikar-neutral/40">Hoy</p>
+              <p className="font-headline font-black text-yeikar-secondary">Ingresos {fmtCOP(resumenHoy.total_ingresos_cop)} · Egresos {fmtCOP(resumenHoy.total_egresos_cop)}</p>
+              <p className="text-xs text-yeikar-neutral/50">
+                Saldo de caja {fmtCOP(resumenHoy.saldo_final_cop)} · {resumenHoy.movimientos.length} movimientos
+              </p>
+            </div>
+          </div>
+          <Link to="/reporte-diario" className="flex items-center gap-1 text-xs font-bold text-yeikar-primary-dark hover:text-yeikar-secondary">
+            Ver estado del día <ArrowUpRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
+      )}
+
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Orders Table (2/3 width) */}
@@ -232,55 +301,31 @@ export default function Dashboard() {
               </div>
             }
           >
-            <div className="overflow-x-auto -mx-6 -mb-6">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr>
-                    <th className="table-th">Código</th>
-                    <th className="table-th">Cliente</th>
-                    <th className="table-th">Fecha</th>
-                    <th className="table-th">Estado</th>
-                  </tr>
-                </thead>
-               <tbody className="divide-y divide-yeikar-secondary-light/10">
-                  {recentOrders.length === 0 ? (
-                    <tr>
-                       <td colSpan={4} className="p-8 text-center text-sm italic text-yeikar-neutral/45">
-                        No hay pedidos recientes en el sistema.
-                      </td>
-                    </tr>
-                  ) : (
-                    recentOrders.map((order) => (
-                       <tr key={order.id} className="transition-colors hover:bg-yeikar-tertiary/55">
-                        <td className="table-td font-mono font-bold text-yeikar-secondary">
-                          #{order.id}
-                        </td>
-                        <td className="table-td font-semibold text-yeikar-neutral">
-                          {order.cliente?.nombre || '—'}
-                        </td>
-                         <td className="table-td font-mono text-xs text-yeikar-neutral/50">
-                          {new Date(order.fecha).toLocaleDateString('es-ES')}
-                        </td>
-                        <td className="table-td">
-                          <Badge
-                            tone={
-                              (['ENTREGADO', 'TERMINADO'] as string[]).includes(order.estado)
-                                ? 'green'
-                                : (['PRODUCCION', 'EN_PRODUCCION'] as string[]).includes(order.estado)
-                                ? 'blue'
-                                : 'gold'
-                            }
-                            dot
-                          >
-                             {orderStatusLabels[order.estado] || order.estado}
-                          </Badge>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ResponsiveDataTable
+              columns={recentOrdersColumns}
+              rows={recentOrders}
+              rowKey={(o) => o.id}
+              cardBadge={(o) => (
+                <Badge
+                  tone={
+                    (['ENTREGADO', 'TERMINADO'] as string[]).includes(o.estado)
+                      ? 'green'
+                      : (['PRODUCCION', 'EN_PRODUCCION'] as string[]).includes(o.estado)
+                      ? 'blue'
+                      : 'gold'
+                  }
+                  dot
+                >
+                  {orderStatusLabels[o.estado] || o.estado}
+                </Badge>
+              )}
+              tableClassName="-mx-6 -mb-6"
+              empty={
+                <div className="p-8 text-center text-sm italic text-yeikar-neutral/45">
+                  No hay pedidos recientes en el sistema.
+                </div>
+              }
+            />
           </Card>
         </div>
 

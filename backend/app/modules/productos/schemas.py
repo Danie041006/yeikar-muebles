@@ -1,7 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from app.modules.catalogos.schemas import TipoProductoResponse, UnidadMedidaResponse
+from app.modules.adjuntos.schemas import AdjuntoInfo
 
 # ------------------------------------------------------------
 # Producto
@@ -38,6 +39,11 @@ class ProductoResponse(ProductoBase):
     precio_costo_base: Optional[float] = None
     precio_venta_base: Optional[float] = None
     created_at: Optional[datetime] = None
+    # Fotos de referencia del mueble (adjuntos tipo PRODUCTO)
+    fotos: List["AdjuntoInfo"] = []
+
+    class Config:
+        from_attributes = True
     updated_at: Optional[datetime] = None
     tipo_producto: Optional[TipoProductoResponse] = None
 
@@ -50,9 +56,9 @@ class ProductoResponse(ProductoBase):
 class MaterialBase(BaseModel):
     nombre: str
     unidad_medida_id: int
-    costo_base: Optional[float] = 0.0
+    costo_base: Optional[float] = Field(0.0, ge=0)
     activo: Optional[bool] = True
-    stock_minimo: Optional[float] = 8.0
+    stock_minimo: Optional[float] = Field(8.0, ge=0)
 
 class MaterialCreate(MaterialBase):
     pass
@@ -60,9 +66,9 @@ class MaterialCreate(MaterialBase):
 class MaterialUpdate(BaseModel):
     nombre: Optional[str] = None
     unidad_medida_id: Optional[int] = None
-    costo_base: Optional[float] = None
+    costo_base: Optional[float] = Field(None, ge=0)
     activo: Optional[bool] = None
-    stock_minimo: Optional[float] = None
+    stock_minimo: Optional[float] = Field(None, ge=0)
 
 class MaterialResponse(MaterialBase):
     id: int
@@ -78,11 +84,11 @@ class MaterialResponse(MaterialBase):
 # ------------------------------------------------------------
 class ProductoMaterialBase(BaseModel):
     material_id: int
-    cantidad_base: float
+    cantidad_base: float = Field(gt=0)
     tipo_escala: str  # FIJO | LINEAL | AREA | ESPACIADO | POR_RANGO | FORMULA
     seccion: str = "EBANISTERIA"
-    distancia_pauta_cm: Optional[float] = None
-    tornillos_por_pieza: Optional[int] = None
+    distancia_pauta_cm: Optional[float] = Field(None, ge=0)
+    tornillos_por_pieza: Optional[int] = Field(None, ge=0)
     condicion_activacion: Optional[Dict[str, Any]] = None
     rangos: Optional[List[Dict[str, Any]]] = None
     formula_personalizada: Optional[str] = None
@@ -94,11 +100,11 @@ class ProductoMaterialCreate(ProductoMaterialBase):
 
 class ProductoMaterialUpdate(BaseModel):
     material_id: Optional[int] = None
-    cantidad_base: Optional[float] = None
+    cantidad_base: Optional[float] = Field(None, gt=0)
     tipo_escala: Optional[str] = None
     seccion: Optional[str] = None
-    distancia_pauta_cm: Optional[float] = None
-    tornillos_por_pieza: Optional[int] = None
+    distancia_pauta_cm: Optional[float] = Field(None, ge=0)
+    tornillos_por_pieza: Optional[int] = Field(None, ge=0)
     condicion_activacion: Optional[Dict[str, Any]] = None
     rangos: Optional[List[Dict[str, Any]]] = None
     formula_personalizada: Optional[str] = None
@@ -223,4 +229,5 @@ class SeccionProductoResponse(BaseModel):
 
 class RecalculateCustomRecipeRequest(BaseModel):
     ganancia: float = 40.0
+    impuesto: float = 7.0
     secciones: List[SeccionProductoResponse]

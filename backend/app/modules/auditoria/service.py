@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.auditoria.model import AuditEvent
 from app.modules.users.model import Usuario
+from app.core.client_ip import obtener_ip_cliente
 
 
 def _json_safe(value: Any) -> Any:
@@ -46,7 +47,7 @@ def record_event(
         before_data=_json_safe(before),
         after_data=_json_safe(after),
         changed_fields=changed_fields(before, after) if before is not None or after is not None else None,
-        ip_address=request.client.host if request and request.client else None,
+        ip_address=obtener_ip_cliente(request) if request else None,
         user_agent=request.headers.get("user-agent") if request else None,
     )
     db.add(event)

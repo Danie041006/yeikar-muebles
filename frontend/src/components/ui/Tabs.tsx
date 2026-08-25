@@ -24,7 +24,10 @@ export default function Tabs({
 }: TabsProps) {
   if (variant === 'pills') {
     return (
-      <div role="tablist" className={`inline-flex items-center gap-1 p-1.5 bg-white/70 backdrop-blur border border-yeikar-secondary-light/10 rounded-2xl ${className}`}>
+      <div
+        role="tablist"
+        className={`flex w-full max-w-full items-center gap-1 overflow-x-auto p-1.5 scroll-touch bg-white/70 backdrop-blur border border-yeikar-secondary-light/10 rounded-2xl [scroll-snap-type:x_proximity] ${className}`}
+      >
         {tabs.map((tab) => {
           const isActive = tab.key === active;
           return (
@@ -34,7 +37,7 @@ export default function Tabs({
               role="tab"
               aria-selected={isActive}
               onClick={() => onChange(tab.key)}
-              className={`relative px-4 py-2 text-xs font-bold font-headline rounded-xl transition-colors select-none flex items-center gap-2 ${
+              className={`relative snap-start px-4 py-2 text-xs font-bold font-headline rounded-xl transition-colors select-none flex items-center gap-2 whitespace-nowrap ${
                 isActive ? 'text-yeikar-neutral' : 'text-slate-500 hover:text-slate-800'
               }`}
             >

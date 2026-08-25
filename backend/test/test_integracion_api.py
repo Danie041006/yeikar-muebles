@@ -18,12 +18,12 @@ RESULTS = []
 def ok(name):
     global PASS_COUNT
     PASS_COUNT += 1
-    RESULTS.append(f"  ✅  {name}")
+    RESULTS.append(f"    {name}")
 
 def fail(name, detail=""):
     global FAIL_COUNT
     FAIL_COUNT += 1
-    RESULTS.append(f"  ❌  {name}" + (f"\n      → {detail}" if detail else ""))
+    RESULTS.append(f"    {name}" + (f"\n      → {detail}" if detail else ""))
 
 def section(title):
     RESULTS.append(f"\n{'─'*55}")
@@ -278,8 +278,8 @@ if HADMIN:
 # ─── Summary ──────────────────────────────────────────────────────────────────
 RESULTS.append(f"\n{'═'*55}")
 RESULTS.append(f"  RESULTADO FINAL: {PASS_COUNT + FAIL_COUNT} pruebas ejecutadas")
-RESULTS.append(f"  ✅  Aprobadas : {PASS_COUNT}")
-RESULTS.append(f"  ❌  Fallidas  : {FAIL_COUNT}")
+RESULTS.append(f"    Aprobadas : {PASS_COUNT}")
+RESULTS.append(f"    Fallidas  : {FAIL_COUNT}")
 RESULTS.append(f"{'═'*55}\n")
 
 print("\n".join(RESULTS))

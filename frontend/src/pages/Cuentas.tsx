@@ -5,8 +5,10 @@ import {
 } from '../services/cuentasService';
 import {
   Button, Card, Badge, Spinner, EmptyState, StatCard, Modal, PageHeader,
-  Field, Input, Select, Textarea, ConfirmDialog,
+  Field, Input, Select, Textarea, ConfirmDialog, SearchSelect,
+  ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
+import { nombreMoneda, fmtMoneda } from '../utils/format';
 
 const TIPOS = [
   { key: '', label: 'Todos' },
@@ -196,6 +198,73 @@ export default function Cuentas() {
     }
   };
 
+  const renderAccionesMov = (m: MovimientoCaja) => (
+    <>
+      <Button variant="ghost" size="sm" className="text-yeikar-primary-dark" onClick={() => abrirMovimiento(m.metodo_caja_id, m)}>
+        Editar
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+        onClick={() => setConfirmAccion({ tipo: 'movimiento', id: m.id })}
+      >
+        Eliminar
+      </Button>
+    </>
+  );
+
+  const movColumns: DataColumn<MovimientoCaja>[] = [
+    {
+      key: 'fecha',
+      header: 'Fecha',
+      render: (m) => <span className="font-mono text-xs text-yeikar-neutral/50">{m.fecha.slice(0, 10)}</span>,
+      mobilePrimary: true,
+    },
+    {
+      key: 'cuenta',
+      header: 'Cuenta',
+      render: (m) => <span className="font-bold text-yeikar-secondary">{m.metodo_caja?.nombre ?? '-'}</span>,
+      mobileSecondary: true,
+    },
+    {
+      key: 'tipo',
+      header: 'Tipo',
+      render: (m) => <Badge tone={TIPO_TONE[m.tipo] ?? 'neutral'}>{m.tipo}</Badge>,
+      mobileHidden: true,
+    },
+    {
+      key: 'monto',
+      header: 'Monto',
+      align: 'right',
+      render: (m) => <span className="font-mono font-semibold">{monedaDe(m.moneda_id)?.simbolo ?? ''}{fmt(Number(m.monto))}</span>,
+      mobileLabel: 'Monto',
+    },
+    {
+      key: 'cop',
+      header: 'COP',
+      align: 'right',
+      render: (m) => <span className="font-mono">${fmt(Number(m.monto_en_moneda_base))}</span>,
+      mobileLabel: 'COP',
+    },
+    {
+      key: 'referencia',
+      header: 'Referencia / Razón',
+      render: (m) => (
+        <span className="text-yeikar-neutral/60 max-w-xs truncate" title={m.referencia ?? m.observaciones ?? ''}>
+          {m.referencia || m.observaciones || '-'}
+        </span>
+      ),
+      mobileLabel: 'Referencia',
+    },
+    {
+      key: 'responsable',
+      header: 'Responsable',
+      render: (m) => <span>{m.usuario?.nombre_usuario ?? '-'}</span>,
+      mobileLabel: 'Responsable',
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -261,10 +330,10 @@ export default function Cuentas() {
                 <p className="text-sm text-yeikar-neutral/40 italic">Sin movimientos</p>
               ) : r.saldo_por_moneda.map((l) => (
                 <div key={l.moneda_id} className="flex justify-between text-sm">
-                  <span className="text-yeikar-neutral/50">{l.simbolo} en {l.codigo}</span>
+                  <span className="text-yeikar-neutral/50">{nombreMoneda(l.codigo)}</span>
                   <span className="font-mono font-semibold">
                     {l.simbolo} {fmt(Number(l.monto))}
-                    {l.codigo !== 'COP' && <span className="text-yeikar-neutral/40 text-xs"> · ≈ ${fmt(Number(l.monto_cop))}</span>}
+                    {l.codigo !== 'COP' && <span className="text-yeikar-neutral/40 text-xs"> · ≈ {fmtMoneda(Number(l.monto_cop), 'COP')}</span>}
                   </span>
                 </div>
               ))}
@@ -300,16 +369,16 @@ export default function Cuentas() {
         bodyClassName="p-0"
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <Select
+            <SearchSelect
               value={filtroCuenta}
-              onChange={(e) => setFiltroCuenta(e.target.value ? Number(e.target.value) : '')}
-              className="w-auto py-1.5 text-xs"
-            >
-              <option value="">Todas las cuentas</option>
-              {resumen.map((r) => (
-                <option key={r.metodo_caja.id} value={r.metodo_caja.id}>{r.metodo_caja.nombre}</option>
-              ))}
-            </Select>
+              onChange={(v) => setFiltroCuenta(v === '' ? '' : Number(v))}
+              className="w-52"
+              options={[
+                { value: '', label: 'Todas las cuentas' },
+                ...resumen.map((r) => ({ value: r.metodo_caja.id, label: r.metodo_caja.nombre })),
+              ]}
+              placeholder="Todas las cuentas"
+            />
             <Select
               value={filtroTipo}
               onChange={(e) => setFiltroTipo(e.target.value)}
@@ -322,74 +391,34 @@ export default function Cuentas() {
           </div>
         }
       >
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-yeikar-tertiary/20 text-yeikar-secondary">
-              <tr className="font-headline font-bold text-xs uppercase tracking-wider">
-                <th className="table-th">Fecha</th>
-                <th className="table-th">Cuenta</th>
-                <th className="table-th">Tipo</th>
-                <th className="table-th text-right">Monto</th>
-                <th className="table-th text-right">COP</th>
-                <th className="table-th">Referencia / Razón</th>
-                <th className="table-th">Responsable</th>
-                <th className="table-th text-right">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-yeikar-secondary-light/5 text-sm">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="p-8">
-                    <Spinner size="sm" />
-                  </td>
-                </tr>
-              ) : movimientos.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="p-8">
-                    <EmptyState
-                      compact
-                      icon={
-                        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0 0a2 2 0 11-4 0m4 0a2 2 0 10-4 0" />
-                        </svg>
-                      }
-                      title="Sin movimientos"
-                      description="No hay movimientos con los filtros actuales."
-                    />
-                  </td>
-                </tr>
-              ) : movimientos.map((m) => {
-                const mon = monedaDe(m.moneda_id);
-                return (
-                  <tr key={m.id} className="hover:bg-yeikar-tertiary/10 transition-colors">
-                    <td className="table-td font-mono text-xs text-yeikar-neutral/50">{m.fecha.slice(0, 10)}</td>
-                    <td className="table-td font-bold text-yeikar-secondary">{m.metodo_caja?.nombre ?? '-'}</td>
-                    <td className="table-td"><Badge tone={TIPO_TONE[m.tipo] ?? 'neutral'}>{m.tipo}</Badge></td>
-                    <td className="table-td text-right font-mono font-semibold">{mon?.simbolo ?? ''}{fmt(Number(m.monto))}</td>
-                    <td className="table-td text-right font-mono">${fmt(Number(m.monto_en_moneda_base))}</td>
-                    <td className="table-td text-yeikar-neutral/60 max-w-xs truncate" title={m.referencia ?? m.observaciones ?? ''}>
-                      {m.referencia || m.observaciones || '-'}
-                    </td>
-                    <td className="table-td">{m.usuario?.nombre_usuario ?? '-'}</td>
-                    <td className="table-td text-right whitespace-nowrap">
-                      <Button variant="ghost" size="sm" className="text-yeikar-primary-dark" onClick={() => abrirMovimiento(m.metodo_caja_id, m)}>
-                        Editar
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => setConfirmAccion({ tipo: 'movimiento', id: m.id })}
-                      >
-                        Eliminar
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        {loading ? (
+          <div className="p-8 flex justify-center">
+            <Spinner size="sm" />
+          </div>
+        ) : (
+          <ResponsiveDataTable
+            columns={movColumns}
+            rows={movimientos}
+            rowKey={(m) => m.id}
+            cardBadge={(m) => <Badge tone={TIPO_TONE[m.tipo] ?? 'neutral'}>{m.tipo}</Badge>}
+            tableActions={renderAccionesMov}
+            cardActions={renderAccionesMov}
+            empty={
+              <div className="p-8">
+                <EmptyState
+                  compact
+                  icon={
+                    <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0 0a2 2 0 11-4 0m4 0a2 2 0 10-4 0" />
+                    </svg>
+                  }
+                  title="Sin movimientos"
+                  description="No hay movimientos con los filtros actuales."
+                />
+              </div>
+            }
+          />
+        )}
       </Card>
 
       {/* Modal cuenta */}
@@ -447,15 +476,15 @@ export default function Cuentas() {
       >
         <div className="space-y-4">
           <Field label="Cuenta" required>
-            <Select
+            <SearchSelect
               value={movForm.metodo_caja_id}
-              onChange={(e) => setMovForm({ ...movForm, metodo_caja_id: Number(e.target.value) })}
-            >
-              <option value={0}>Seleccione...</option>
-              {resumen.map((r) => (
-                <option key={r.metodo_caja.id} value={r.metodo_caja.id}>{r.metodo_caja.nombre}</option>
-              ))}
-            </Select>
+              onChange={(v) => setMovForm({ ...movForm, metodo_caja_id: Number(v) })}
+              options={[
+                { value: 0, label: 'Seleccione...' },
+                ...resumen.map((r) => ({ value: r.metodo_caja.id, label: r.metodo_caja.nombre })),
+              ]}
+              placeholder="Seleccione..."
+            />
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Tipo" required>
@@ -488,12 +517,12 @@ export default function Cuentas() {
               />
             </Field>
             <Field label="Moneda">
-              <Select
+              <SearchSelect
                 value={movForm.moneda_id}
-                onChange={(e) => setMovForm({ ...movForm, moneda_id: Number(e.target.value) })}
-              >
-                {monedas.map((m) => <option key={m.id} value={m.id}>{m.codigo} ({m.simbolo})</option>)}
-              </Select>
+                onChange={(v) => setMovForm({ ...movForm, moneda_id: Number(v) })}
+                options={monedas.map((m) => ({ value: m.id, label: `${m.codigo} (${m.simbolo})` }))}
+                placeholder="Seleccione moneda..."
+              />
             </Field>
             <Field label="Tasa → COP">
               <Input

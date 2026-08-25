@@ -19,6 +19,7 @@ import app.modules.users.model      # noqa: F401
 from app.modules.users.model import LoginIntento, RefreshToken  # noqa: F401
 import app.modules.purchases.model  # noqa: F401
 import app.modules.sales.model      # noqa: F401
+import app.modules.facturacion.model # noqa: F401
 import app.modules.gastos.model     # noqa: F401
 import app.modules.proveedores.model # noqa: F401
 import app.modules.empleados.model   # noqa: F401
@@ -26,6 +27,9 @@ import app.modules.envios.model      # noqa: F401
 import app.modules.tasas_cambio.model # noqa: F401
 import app.modules.reports.model     # noqa: F401
 import app.modules.auditoria.model   # noqa: F401
+import app.modules.costos_produccion.model  # noqa: F401
+import app.modules.nomina.model  # noqa: F401
+import app.modules.adjuntos.model  # noqa: F401
 
 from alembic import context
 

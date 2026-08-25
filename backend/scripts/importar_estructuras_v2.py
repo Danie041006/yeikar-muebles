@@ -1083,7 +1083,7 @@ def auditoria_catalog(args):
     hoja_prices, por_nombre, uso = _grupos_catalog(args)
     mats_total = sum(len(g) for g in por_nombre.values())
 
-    print(f"\n🔎 AUDITORÍA DE CATÁLOGO — {mats_total} materiales, {len(por_nombre)} nombres normalizados")
+    print(f"\n AUDITORÍA DE CATÁLOGO — {mats_total} materiales, {len(por_nombre)} nombres normalizados")
     reporte = {"materiales": mats_total, "nombres": len(por_nombre), "grupos": []}
     grupos_fallos = 0
     for k, grupo in sorted(por_nombre.items()):
@@ -1122,7 +1122,7 @@ def auditoria_catalog(args):
     p = _ruta(args.audit_catalog)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(_json.dumps(reporte, ensure_ascii=False, indent=1))
-    print(f"📦 Auditoría catálogo → {p}")
+    print(f" Auditoría catálogo → {p}")
 
 
 def aplicar_limpieza_catalog(args):
@@ -1196,7 +1196,7 @@ def aplicar_limpieza_catalog(args):
                             desactivar.append(m.id)
         plan.append(plan_k)
 
-    print(f"\n🧹 PLAN DE LIMPIEZA — {len(plan)} grupos, {cambios_precio} precios a corregir, {len(desactivar)} duplicados a desactivar")
+    print(f"\n PLAN DE LIMPIEZA — {len(plan)} grupos, {cambios_precio} precios a corregir, {len(desactivar)} duplicados a desactivar")
     import json as _json
     p = _ruta(args.audit_catalog.replace("auditoria_catalog.json", "plan_limpieza_catalog.json"))
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -1220,8 +1220,8 @@ def aplicar_limpieza_catalog(args):
                 if det["desactivar"]:
                     m.activo = False
         db.commit()
-        print(f"✅ Aplicado: {cambios_precio} precios corregidos, {len(desactivar)} materiales desactivados")
-        print(f"📦 Plan → {p}")
+        print(f" Aplicado: {cambios_precio} precios corregidos, {len(desactivar)} materiales desactivados")
+        print(f" Plan → {p}")
     else:
         print("   (modo plan — verifica y repite con --commit para escribir en la BD)")
 
@@ -1272,7 +1272,7 @@ def main():
             aprobadas_set |= {l.strip() for l in p.read_text().splitlines() if l.strip()}
 
     wb = openpyxl.load_workbook(args.excel, data_only=True)
-    print(f"📂 Excel: {args.excel}")
+    print(f" Excel: {args.excel}")
     print(f"   Hojas: {len(wb.sheetnames)} | {'MODO ESCRITURA' if args.write else 'MODO AUDITORÍA (no toca la BD)'}")
 
     db = None
@@ -1306,13 +1306,13 @@ def main():
                                 "estado": "SIN_DATOS", "secciones": 0, "total_insumos": 0,
                                 "costos_prod": 0, "total_calc": 0.0, "total_hoja": None,
                                 "delta": None, "producto": None})
-                resultados_print = f"📄 {sname.strip()[:60]}  → SIN_DATOS (hoja índice)"
+                resultados_print = f" {sname.strip()[:60]}  → SIN_DATOS (hoja índice)"
                 print(f"\n{resultados_print}")
                 continue
 
             gate = evaluar_hoja(rd, args.threshold)
 
-            print(f"\n📄 {sname.strip()[:60]}")
+            print(f"\n {sname.strip()[:60]}")
             print(f"   Producto: {rd['nombre_producto'] or '—'}")
             for clave in rd["orden"]:
                 s = rd["secciones"][clave]
@@ -1339,9 +1339,9 @@ def main():
                 if estado == "BLOQUEADA":
                     diag = diagnostico_gate(rd, Decimal(str(gate["total_calculado_erp"])),
                                             declarado_gate, args.threshold)
-                    print(f"   🔎 diagnóstico: {diag if diag != 'desglose_incompleto' else 'desglose incompleto en la hoja (dinero declarado sin ítems)'}")
+                    print(f"    diagnóstico: {diag if diag != 'desglose_incompleto' else 'desglose incompleto en la hoja (dinero declarado sin ítems)'}")
                 if diag == "total_declarado_obsoleto":
-                    print(f"   ✔ sus secciones cuadran entre sí; el TOTAL del producto olvida una sección. Importable por secciones.")
+                    print(f"    sus secciones cuadran entre sí; el TOTAL del producto olvida una sección. Importable por secciones.")
 
             dd = f"{gate['delta_pct']:+.1f}%" if gate["delta_pct"] is not None else "??"
             print(f"   → ERP calcula: {fmon(gate['total_calculado_erp'])} | "
@@ -1351,13 +1351,13 @@ def main():
                       f"(insumos cubiertos {cobertura:.0f}%)")
 
             for adv in gate["advertencias"]:
-                print(f"     ⚠ {adv}")
+                print(f"      {adv}")
             if diffs_cat:
-                print(f"     🔻 precios hoja vs catálogo (más de ±50%):")
+                print(f"      precios hoja vs catálogo (más de ±50%):")
                 for n, a, b in diffs_cat:
                     print(f"       · {n:<34} hoja {a:>12,.0f} vs catálogo {b:>12,.0f}")
             if dudosos_cat:
-                print(f"     ⚠ catálogo dudoso (precio unitario en catálogo >4× o <¼ el de la hoja; se conserva hoja):")
+                print(f"      catálogo dudoso (precio unitario en catálogo >4× o <¼ el de la hoja; se conserva hoja):")
                 for n, a, b in dudosos_cat:
                     print(f"       · {n:<34} hoja {a:>12,.0f} vs catálogo {b:>12,.0f} /unidad")
 
@@ -1376,7 +1376,7 @@ def main():
 
             if args.write:
                 if estado == "BLOQUEADA" and not args.force:
-                    print("   ⛔ BLOQUEADA por umbral — no se escribe (usa --force para forzar)")
+                    print("    BLOQUEADA por umbral — no se escribe (usa --force para forzar)")
                     continue
                 if args.fijar_costo_computado and gate["total_calculado_erp"] is not None and gate["total_calculado_erp"] > 0:
                     costo_computado = Decimal(str(gate["total_calculado_erp"]))
@@ -1389,10 +1389,10 @@ def main():
                     pid = persistir_hoja(db, rd, gate, args)
                     db.commit()
                     total_escribir += 1
-                    print(f"   ✅ ESCRITO -> Producto #{pid}")
+                    print(f"    ESCRITO -> Producto #{pid}")
                 except Exception as e:
                     db.rollback()
-                    print(f"   ❌ Error: {e}")
+                    print(f"    Error: {e}")
 
         print("\n" + "=" * 100)
         print("RESUMEN DE AUDITORÍA")
@@ -1407,7 +1407,7 @@ def main():
         if args.json:
             Path(args.json).parent.mkdir(parents=True, exist_ok=True)
             Path(args.json).write_text(json.dumps({"resumen": resumen}, ensure_ascii=False, indent=2, default=str))
-            print(f"📦 Reporte JSON → {args.json}")
+            print(f" Reporte JSON → {args.json}")
 
     finally:
         if db:

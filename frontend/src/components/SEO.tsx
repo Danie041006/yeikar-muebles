@@ -31,7 +31,7 @@ const organizationSchema = {
   '@context': 'https://schema.org',
   '@type': 'Organization',
   name: 'YEIKAR',
-  description: 'Sistema ERP para la gestión integral de fabricación de muebles en Colombia',
+  description: 'Sistema ERP para la gestión integral de fabricación de muebles en Venezuela',
   url: 'https://yeikar.com/',
   logo: 'https://yeikar.com/Logo-yeikar.png',
   contactPoint: {
@@ -41,7 +41,7 @@ const organizationSchema = {
   },
   address: {
     '@type': 'PostalAddress',
-    addressCountry: 'CO',
+    addressCountry: 'VE',
   },
 };
 

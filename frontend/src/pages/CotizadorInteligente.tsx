@@ -1,21 +1,24 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   iqeService,
-  type FurnitureAttributesOut,
-  type PreguntaFaltanteOut,
   type SeccionCostoOut,
   type ResumenCostosOut,
   type UnidadMedida,
   type TipoProducto,
+  type ContextoExportarOut,
+  type GenerateStructureOut,
 } from '../services/iqeService';
 import { clienteService, type Client } from '../services/clienteService';
+import { productosService } from '../services/productosService';
 import EstructuraCostosEditor from '../components/EstructuraCostosEditor';
+import EstructuraCostos from '../components/EstructuraCostos';
+import { normalizarEstructuraIQE } from '../utils/estructuraCostos';
+import { Modal } from '../components/ui';
+import { SearchSelect } from '../components/ui';
 
 // ─── Tipos de estado local ────────────────────────────────────────────────────
 
-type Paso = 'upload' | 'validar' | 'borrador' | 'finalizar';
-
-interface AtributosEditables extends FurnitureAttributesOut {}
+type Paso = 'manual' | 'borrador' | 'finalizar';
 
 interface ParametrosForm {
   ancho: string;
@@ -24,142 +27,62 @@ interface ParametrosForm {
   fondo: string;
   ganancia: string;
   iva: string;
+  impuesto: string;
   pct_mano_obra: string;
   pct_gastos: string;
 }
 
-const MATERIALES_PRINCIPALES = ['melamina', 'madera solida', 'mdf', 'aglomerado', 'triplex'];
-const ESPESORES = ['15', '18', '25', '32'];
-const ACABADOS = ['pintura', 'laca', 'barniz', 'tinte', 'natural'];
+const PASOS = [
+  { id: 'manual', num: 1, label: 'Contexto + IA' },
+  { id: 'borrador', num: 2, label: 'Estructura de Costos' },
+  { id: 'finalizar', num: 3, label: 'Guardar' },
+] as const;
+
+const TIPOS_MUEBLE = [
+  { value: 'otro', label: 'Otro / genérico' },
+  { value: 'cama', label: 'Cama' },
+  { value: 'nochero', label: 'Nochero / mesa de noche' },
+  { value: 'closet', label: 'Closet' },
+  { value: 'armario', label: 'Armario' },
+  { value: 'tocador', label: 'Tocador' },
+  { value: 'sala', label: 'Sala' },
+  { value: 'comedor', label: 'Comedor' },
+  { value: 'escritorio', label: 'Escritorio' },
+  { value: 'rack_tv', label: 'Rack / TV' },
+  { value: 'libreria', label: 'Librería' },
+  { value: 'mueble_bano', label: 'Mueble de baño' },
+];
 
 // ─── Constantes de la UI ──────────────────────────────────────────────────────
 
-const TIPOS_MUEBLE = [
-  'cama', 'nochero', 'closet', 'tocador', 'armario',
-  'sala', 'comedor', 'escritorio', 'rack_tv', 'libreria', 'mueble_bano', 'otro',
+// Ejemplo de lo que devuelve la IA en FORMATO EXCEL (para "Probar con un ejemplo")
+const EJEMPLO_EXCEL = `SECCION EBANISTERIA
+MATERIAL | CANTIDAD | UNIDAD | V/UNIT | PRECIO TOTAL
+LAMINA DE 9 | 1 | LAMINA | 140000 | 140000
+COLBON | 0.7 | LITRO | 14000 | 9800
+TORNILLOS DE 2" | 100 | UN | 100 | 10000
+HECHURA | 1 | PAR |  | 
+SECCION PINTURA
+PREPARADO | 1 | PISTOLADA |  | 
+PINTURA ALEX | 1 | CON EL 5% |  | 
+SECCION TAPICERIA
+TELA PRANNA NEGRA | 6 | M | 34899 | 209394
+ESPUMA 2 ROSADA | 2 | LAMINA | 48000 | 96000`;
+
+const CONSEJOS_IA = [
+  { nombre: 'Las 3 IAs', texto: 'Todas deben hacerte las preguntas del costeador ANTES de cotizar (lo exige el prompt [1]). Si alguna salta directo a la tabla, respóndele: "Hazme TODAS las preguntas que necesites antes de cotizar, una por una".' },
+  { nombre: 'Claude', texto: 'Activa "extended thinking" para mejores cantidades.' },
+  { nombre: 'ChatGPT', texto: 'Usa un modelo con razonamiento y adjunta la foto en el primer mensaje.' },
+  { nombre: 'Gemini', texto: 'Activa "Deep Think" (modelo 2.5 Pro) para analizar la foto.' },
 ];
 
-const FAMILIAS = ['tapizada', 'melamina', 'madera_solida', 'mdf_laqueado', 'metalica', 'mixta'];
-const ESTILOS = ['moderno', 'clasico', 'rustico', 'minimalista', 'industrial'];
-const PATAS = ['metal', 'madera', 'sin_patas', 'ruedas'];
-
-const PASOS: { id: Paso; label: string; num: number }[] = [
-  { id: 'upload', label: 'Foto', num: 1 },
-  { id: 'validar', label: 'Validar IA', num: 2 },
-  { id: 'borrador', label: 'Estructura', num: 3 },
-  { id: 'finalizar', label: 'Finalizar', num: 4 },
+const PASOS_GUIA = [
+  { n: '1', t: 'Entender el mueble', d: 'Copia el prompt [1], adjunta la FOTO (o pega el mensaje de WhatsApp) y responde las preguntas que te haga la IA.' },
+  { n: '2', t: 'Estructura de costos', d: 'En la MISMA conversación, copia el prompt [2]. La IA te devuelve la tabla estilo Excel.' },
+  { n: '3', t: 'Pega la respuesta', d: 'Copia la tabla que devolvió la IA, pégala abajo e importa la estructura.' },
 ];
-
-const CONFIANZA_COLOR = (c: number) => {
-  if (c >= 0.85) return 'bg-yeikar-primary/15 text-yeikar-primary-dark';
-  if (c >= 0.70) return 'bg-yeikar-secondary-light/10 text-yeikar-secondary';
-  return 'bg-red-50 text-red-700';
-};
-
-const INPUT_CLS =
-  'w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white';
-
-/** Renderiza el control de entrada según el tipo de pregunta de la IA */
-function renderPreguntaInput(
-  p: PreguntaFaltanteOut,
-  valor: any,
-  onChange: (v: any) => void
-) {
-  switch (p.tipo) {
-    case 'select':
-      return (
-        <select value={valor ?? ''} onChange={(e) => onChange(e.target.value || undefined)} className={INPUT_CLS}>
-          <option value="">Seleccione...</option>
-          {(p.opciones || []).map((o) => <option key={o} value={o}>{o}</option>)}
-        </select>
-      );
-    case 'multi':
-      return (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {(p.opciones || []).map((o) => {
-            const activo = Array.isArray(valor) && valor.includes(o);
-            return (
-              <button
-                key={o}
-                type="button"
-                onClick={() => {
-                  const arr = Array.isArray(valor) ? [...valor] : [];
-                  const idx = arr.indexOf(o);
-                  if (idx >= 0) arr.splice(idx, 1);
-                  else arr.push(o);
-                  onChange(arr.length > 0 ? arr : undefined);
-                }}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all
-                  ${activo ? 'bg-yeikar-primary/20 border-yeikar-primary text-yeikar-primary-dark' : 'bg-white border-yeikar-secondary-light/20 text-yeikar-neutral/60 hover:border-yeikar-primary/40'}`}
-              >
-                {o}
-              </button>
-            );
-          })}
-        </div>
-      );
-    case 'si_no':
-      return (
-        <div className="flex gap-2 pt-1">
-          {['Si', 'No'].map((op) => {
-            const activo = valor === op.toLowerCase();
-            return (
-              <button
-                key={op}
-                type="button"
-                onClick={() => onChange(activo ? undefined : op.toLowerCase())}
-                className={`px-4 py-1.5 rounded-lg text-sm font-semibold border transition-all
-                  ${activo ? 'bg-yeikar-primary/20 border-yeikar-primary text-yeikar-primary-dark' : 'bg-white border-yeikar-secondary-light/20 text-yeikar-neutral/60 hover:border-yeikar-primary/40'}`}
-              >
-                {op}
-              </button>
-            );
-          })}
-        </div>
-      );
-    case 'numero':
-      return (
-        <input
-          type="number"
-          min="0"
-          step="any"
-          value={valor ?? ''}
-          onChange={(e) => onChange(e.target.value === '' ? undefined : parseFloat(e.target.value))}
-          className={INPUT_CLS}
-        />
-      );
-    default:
-      return (
-        <input
-          type="text"
-          value={valor ?? ''}
-          onChange={(e) => onChange(e.target.value || undefined)}
-          className={INPUT_CLS}
-        />
-      );
-  }
-}
 
 export default function CotizadorInteligente() {
-  // ── Estado de navegación ──
-  const [paso, setPaso] = useState<Paso>('upload');
-
-  // ── Paso 1: Subida de imagen ──
-  const [imagenFile, setImagenFile] = useState<File | null>(null);
-  const [imagenPreview, setImagenPreview] = useState<string | null>(null);
-  const [contextoAdicional, setContextoAdicional] = useState('');
-  const [analizando, setAnalizando] = useState(false);
-  const [errorAnalisis, setErrorAnalisis] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // ── Paso 2: Atributos de la IA (editables) ──
-  const [atributos, setAtributos] = useState<AtributosEditables | null>(null);
-
-  // ── Preguntas dinámicas de la IA (Fase 5) ──
-  const [preguntas, setPreguntas] = useState<PreguntaFaltanteOut[]>([]);
-  const [respuestas, setRespuestas] = useState<Record<string, any>>({});
-  const [generandoPreguntas, setGenerandoPreguntas] = useState(false);
-
   // ── Parámetros de dimensiones y costos ──
   const [parametros, setParametros] = useState<ParametrosForm>({
     ancho: '1.60',
@@ -168,13 +91,15 @@ export default function CotizadorInteligente() {
     fondo: '',
     ganancia: '40',
     iva: '0',
+    impuesto: '7',
     pct_mano_obra: '15',
     pct_gastos: '10',
   });
 
-  // ── Paso 3: Estructura de Costos ──
+  // ── Paso 2: Estructura de Costos ──
   const [secciones, setSecciones] = useState<SeccionCostoOut[]>([]);
   const [resumen, setResumen] = useState<ResumenCostosOut | null>(null);
+  const [showEstructura, setShowEstructura] = useState(false);
   const [materialesSinPrecio, setMaterialesSinPrecio] = useState(0);
   const [productoBaseId, setProductoBaseId] = useState<number | null>(null);
   const [productoBaseNombre, setProductoBaseNombre] = useState<string | null>(null);
@@ -185,14 +110,43 @@ export default function CotizadorInteligente() {
   const [unidades, setUnidades] = useState<UnidadMedida[]>([]);
   const [tiposProducto, setTiposProducto] = useState<TipoProducto[]>([]);
 
-  // ── Paso 4: Finalizar y guardar ──
+  // ── Paso 1 (Manual): contexto + JSON de la IA de navegador ──
+  const [productos, setProductos] = useState<{ id: number; nombre: string }[]>([]);
+  const [productoBaseSel, setProductoBaseSel] = useState('');
+  const [tipoMueble, setTipoMueble] = useState('otro');
+  const [conFoto, setConFoto] = useState(true);
+  const [descripcionMueble, setDescripcionMueble] = useState('');
+  const [contexto, setContexto] = useState<ContextoExportarOut | null>(null);
+  const [promptActivoId, setPromptActivoId] = useState('entender_mueble');
+  const [generandoContexto, setGenerandoContexto] = useState(false);
+  const [jsonIA, setJsonIA] = useState('');
+  const [importandoEstructura, setImportandoEstructura] = useState(false);
+  const [copiado, setCopiado] = useState(false);
+  const [advertenciaImport, setAdvertenciaImport] = useState<string | null>(null);
+  const [seccionesFaltantes, setSeccionesFaltantes] = useState<string[]>([]);
+  const jsonFileRef = useRef<HTMLInputElement>(null);
+
+  const promptActivo =
+    contexto?.prompts.find((p) => p.id === promptActivoId) ?? contexto?.prompts[0] ?? null;
+
+  const handleCargarArchivoJson = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setJsonIA(String(e.target?.result || ''));
+      setErrorAnalisis('');
+    };
+    reader.readAsText(file);
+  };
+
+  // ── Paso 3: Finalizar y guardar ──
+  const [paso, setPaso] = useState<Paso>('manual');
   const [guardarComo, setGuardarComo] = useState<'cotizacion' | 'producto'>('cotizacion');
   const [clientes, setClientes] = useState<Client[]>([]);
   const [clienteId, setClienteId] = useState('');
   const [observacionesFinal, setObservacionesFinal] = useState('');
   const [nombreProducto, setNombreProducto] = useState('');
   const [tipoProductoId, setTipoProductoId] = useState('');
-  
+
   const [guardando, setGuardando] = useState(false);
   const [cotizacionCreada, setCotizacionCreada] = useState<{
     id: number;
@@ -201,6 +155,7 @@ export default function CotizadorInteligente() {
     pdfUrl: string;
     isProduct: boolean;
   } | null>(null);
+  const [errorAnalisis, setErrorAnalisis] = useState('');
   const [errorFinal, setErrorFinal] = useState('');
 
   // Cargar catálogos iniciales
@@ -220,140 +175,169 @@ export default function CotizadorInteligente() {
     loadCatalogs();
   }, []);
 
-  const handleImagenSelect = useCallback((file: File) => {
-    if (!['image/jpeg', 'image/jpg', 'image/png', 'image/webp'].includes(file.type)) {
-      setErrorAnalisis('Solo se aceptan imágenes JPEG, PNG o WEBP.');
-      return;
+  /** Cargar productos para la receta de referencia */
+  const cargarProductos = useCallback(async () => {
+    try {
+      const list = await productosService.getProductos();
+      setProductos(list.map((p) => ({ id: p.id, nombre: p.nombre })));
+    } catch (err) {
+      console.error('Error al cargar productos:', err);
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorAnalisis('La imagen no puede superar 10 MB.');
-      return;
-    }
-    setImagenFile(file);
-    setErrorAnalisis('');
-    const reader = new FileReader();
-    reader.onload = (e) => setImagenPreview(e.target?.result as string);
-    reader.readAsDataURL(file);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) handleImagenSelect(file);
-  }, [handleImagenSelect]);
+  useEffect(() => {
+    cargarProductos();
+  }, [cargarProductos]);
 
-  /** Paso 1 → Paso 2: Analizar imagen con IA */
-  const handleAnalizar = async () => {
-    if (!imagenFile) return;
-    setAnalizando(true);
+  // ── Paso 1: generar el paquete de contexto para la IA de navegador ──
+  const handleGenerarContexto = async () => {
+    setGenerandoContexto(true);
     setErrorAnalisis('');
     try {
-      const datosProyecto = buildDatosProyecto();
-      const resultado = await iqeService.analyzeImage(imagenFile, contextoAdicional, datosProyecto);
-      setAtributos(resultado);
-      // Prellenado de nombre si se crea producto después
-      setNombreProducto(`NUEVO MUEBLE ${resultado.tipo_mueble.toUpperCase()}`);
-      setPreguntas(resultado.preguntas_faltantes ?? []);
-      setRespuestas({});
-      setPaso('validar');
+      const res = await iqeService.exportarContexto({
+        producto_base_id: productoBaseSel ? Number(productoBaseSel) : null,
+        ancho: parseFloat(parametros.ancho) || 1.6,
+        largo: parseFloat(parametros.largo) || 1.9,
+        alto: parseFloat(parametros.alto) || null,
+        con_foto: conFoto,
+        descripcion: conFoto ? undefined : descripcionMueble,
+        tipo_mueble: tipoMueble,
+      });
+      setContexto(res);
+      setPromptActivoId(res.prompts?.[0]?.id ?? 'desde_cero');
+      setCopiado(false);
+    } catch (err: any) {
+      setErrorAnalisis(err?.response?.data?.detail || 'Error al generar el contexto.');
+    } finally {
+      setGenerandoContexto(false);
+    }
+  };
+
+  const handleCopiarContexto = async () => {
+    const texto = promptActivo?.instrucciones ?? contexto?.instrucciones;
+    if (!texto) return;
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2500);
+    } catch {
+      setErrorAnalisis('No se pudo copiar: copia el texto manualmente.');
+    }
+  };
+
+  const handleDescargarContexto = () => {
+    if (!contexto) return;
+    const blob = new Blob([contexto.texto], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'contexto-yeikar.md';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDescargarInventarioJson = () => {
+    if (!contexto) return;
+    const blob = new Blob(
+      [JSON.stringify({ inventario: contexto.inventario, receta_similar: contexto.receta_similar }, null, 2)],
+      { type: 'application/json;charset=utf-8' },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'inventario-yeikar.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** ¿La respuesta pegada parece JSON (objeto/array) o texto estilo Excel? */
+  const esRespuestaJson = (texto: string): boolean => {
+    const t = texto.trim();
+    return t.startsWith('{') || t.startsWith('[');
+  };
+
+  /** Aplicar la estructura importada → saltar al editor */
+  const aplicarRespuestaImportada = (resp: GenerateStructureOut) => {
+    setSecciones(resp.secciones);
+    setResumen(resp.resumen);
+    setMaterialesSinPrecio(resp.materiales_sin_precio);
+    setProductoBaseId(resp.producto_base_id);
+    setProductoBaseNombre(resp.producto_base_nombre);
+    setScoreSimilitud(Math.round(resp.score_similitud * 100));
+    setAdvertenciaImport(resp.advertencia ?? null);
+    setSeccionesFaltantes(resp.secciones_faltantes ?? []);
+    setPaso('borrador');
+  };
+
+  /** Normalizar el JSON pegado (objeto con estructura_propuesta o array directo) */
+  const parsearJsonIA = (): { estructura: any[]; tipo: string; dims: Record<string, any> } | null => {
+    try {
+      const parsed = JSON.parse(jsonIA);
+      if (Array.isArray(parsed)) {
+        return { estructura: parsed, tipo: 'otro', dims: {} };
+      }
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.estructura_propuesta)) {
+        return {
+          estructura: parsed.estructura_propuesta,
+          tipo: parsed.tipo_mueble || 'otro',
+          dims: parsed.dimensiones_referencia || {},
+        };
+      }
+      setErrorAnalisis('El JSON no contiene una estructura válida (falta "estructura_propuesta").');
+      return null;
+    } catch {
+      setErrorAnalisis('JSON inválido. Revisa que la IA devolvió un JSON válido y pégalo completo.');
+      return null;
+    }
+  };
+
+  /** Importar la respuesta de la IA (formato Excel o JSON) → salta al editor */
+  const handleImportarEstructura = async () => {
+    if (!jsonIA.trim()) return;
+    setImportandoEstructura(true);
+    setErrorAnalisis('');
+    try {
+      const base = {
+        producto_base_id: productoBaseSel ? Number(productoBaseSel) : null,
+        tipo_mueble: tipoMueble,
+        nuevo_ancho: parseFloat(parametros.ancho) || 1.6,
+        nuevo_largo: parseFloat(parametros.largo) || 1.9,
+        nuevo_alto: parseFloat(parametros.alto) || null,
+        nuevo_fondo: parseFloat(parametros.fondo) || null,
+        ganancia_porcentaje: parseFloat(parametros.ganancia) || 40,
+        iva_porcentaje: parseFloat(parametros.iva) || 0,
+        impuesto_porcentaje: parseFloat(parametros.impuesto) || 7,
+        pct_mano_obra: parseFloat(parametros.pct_mano_obra) || 15,
+        pct_gastos: parseFloat(parametros.pct_gastos) || 10,
+      };
+      if (esRespuestaJson(jsonIA)) {
+        const parsed = parsearJsonIA();
+        if (!parsed) return;
+        const resp = await iqeService.importarEstructura({
+          ...base,
+          estructura_propuesta: parsed.estructura,
+          tipo_mueble: parsed.tipo,
+          dimensiones_referencia: parsed.dims,
+        });
+        aplicarRespuestaImportada(resp);
+      } else {
+        const resp = await iqeService.importarTexto({
+          ...base,
+          texto: jsonIA,
+        });
+        aplicarRespuestaImportada(resp);
+      }
     } catch (err: any) {
       setErrorAnalisis(
         err?.response?.data?.detail ||
-          'Error al analizar la imagen. Verifica la API de OpenAI y las credenciales.'
+          'No se pudo importar la respuesta. Si la IA no la devolvió en formato Excel, usa el prompt "Reparar respuesta".',
       );
     } finally {
-      setAnalizando(false);
+      setImportandoEstructura(false);
     }
   };
 
-  /** Construye el JSON datos_proyecto que se envía ANTES del análisis */
-  const buildDatosProyecto = () => {
-    const datos: Record<string, any> = {};
-    const ancho = parseFloat(parametros.ancho);
-    const largo = parseFloat(parametros.largo);
-    const alto = parseFloat(parametros.alto);
-    const fondo = parseFloat(parametros.fondo);
-    if (ancho > 0) datos.ancho = ancho;
-    if (largo > 0) datos.largo = largo;
-    if (alto > 0) datos.alto = alto;
-    if (fondo > 0) datos.fondo = fondo;
-    const mat = respuestas.material_principal;
-    if (mat) datos.material_principal = mat;
-    const esp = respuestas.espesor_tablero;
-    if (esp) datos.espesor_tablero = esp;
-    const acabado = respuestas.acabado;
-    if (acabado) datos.acabado = acabado;
-    return Object.keys(datos).length > 0 ? datos : undefined;
-  };
-
-  /** Regenera las preguntas de la IA de forma explícita (Paso 2) */
-  const handleGenerarPreguntas = async () => {
-    if (!imagenFile) return;
-    setGenerandoPreguntas(true);
-    setErrorAnalisis('');
-    try {
-      const nuevas = await iqeService.generateQuestions(imagenFile, contextoAdicional, buildDatosProyecto());
-      setPreguntas(nuevas);
-    } catch (err: any) {
-      setErrorAnalisis(
-        err?.response?.data?.detail || 'Error al generar preguntas de la IA.'
-      );
-    } finally {
-      setGenerandoPreguntas(false);
-    }
-  };
-
-  /** Actualiza la respuesta a una pregunta dinámica */
-  const setRespuesta = (clave: string, valor: any) => {
-    setRespuestas((prev) => ({ ...prev, [clave]: valor }));
-  };
-
-  /** Paso 2 → Paso 3: Generar la estructura de costos inteligente */
-  const handleGenerarEstructura = async () => {
-    if (!atributos) return;
-    setGenerandoEstructura(true);
-    setErrorAnalisis('');
-    try {
-      const resp = await iqeService.generateStructure({
-        tipo_mueble: atributos.tipo_mueble,
-        atributos: {
-          familia_probable: atributos.familia_probable,
-          estilo_general: atributos.estilo_general,
-          tipo_patas: atributos.tipo_patas,
-          tiene_tapiceria: atributos.tiene_tapiceria,
-          tiene_luces: atributos.tiene_luces,
-          observaciones: atributos.observaciones,
-          atributos_extra: atributos.atributos_extra,
-        },
-        estructura_propuesta: atributos.estructura_propuesta,
-        nuevo_ancho: parseFloat(parametros.ancho) || 1.60,
-        nuevo_largo: parseFloat(parametros.largo) || 1.90,
-        nuevo_alto: parseFloat(parametros.alto) || null,
-        nuevo_fondo: parseFloat(parametros.fondo) || null,
-        respuestas,
-        dimensiones_referencia: atributos.dimensiones_referencia ?? undefined,
-        ganancia_porcentaje: parseFloat(parametros.ganancia) || 40,
-        iva_porcentaje: parseFloat(parametros.iva) || 0,
-        pct_mano_obra: parseFloat(parametros.pct_mano_obra) || 15,
-        pct_gastos: parseFloat(parametros.pct_gastos) || 10,
-      });
-
-      setSecciones(resp.secciones);
-      setResumen(resp.resumen);
-      setMaterialesSinPrecio(resp.materiales_sin_precio);
-      setProductoBaseId(resp.producto_base_id);
-      setProductoBaseNombre(resp.producto_base_nombre);
-      setScoreSimilitud(Math.round(resp.score_similitud * 100));
-
-      setPaso('borrador');
-    } catch (err: any) {
-      setErrorAnalisis(err?.response?.data?.detail || 'Error al generar la estructura de costos.');
-    } finally {
-      setGenerandoEstructura(false);
-    }
-  };
-
-  /** Paso 3: Recalcular la estructura de costos */
+  /** Paso 2: Recalcular la estructura de costos */
   const handleRecalcular = async () => {
     setGenerandoEstructura(true);
     try {
@@ -361,6 +345,7 @@ export default function CotizadorInteligente() {
         secciones,
         ganancia_porcentaje: parseFloat(parametros.ganancia) || 40,
         iva_porcentaje: parseFloat(parametros.iva) || 0,
+        impuesto_porcentaje: parseFloat(parametros.impuesto) || 7,
         pct_mano_obra: parseFloat(parametros.pct_mano_obra) || 15,
         pct_gastos: parseFloat(parametros.pct_gastos) || 10,
       });
@@ -386,44 +371,28 @@ export default function CotizadorInteligente() {
     setPaso('finalizar');
   };
 
-  /** Paso 4: Guardar cotización o nuevo producto */
+  /** Paso 3: Guardar cotización o nuevo producto */
   const handleGuardarFinal = async () => {
-    setErrorFinal('');
-    if (guardarComo === 'cotizacion' && !clienteId) {
-      setErrorFinal('Debe seleccionar un cliente.');
-      return;
-    }
-    if (guardarComo === 'producto') {
-      if (!nombreProducto.trim()) {
-        setErrorFinal('Debe ingresar el nombre del producto.');
-        return;
-      }
-      if (!tipoProductoId) {
-        setErrorFinal('Debe seleccionar la categoría de producto.');
-        return;
-      }
-    }
-
     setGuardando(true);
+    setErrorFinal('');
     try {
       const resp = await iqeService.finalizeStructure({
         guardar_como: guardarComo,
-        cliente_id: guardarComo === 'cotizacion' ? parseInt(clienteId) : null,
-        nombre_producto: guardarComo === 'producto' ? nombreProducto.trim() : null,
-        tipo_producto_id: guardarComo === 'producto' ? parseInt(tipoProductoId) : null,
+        cliente_id: guardarComo === 'cotizacion' ? Number(clienteId) : undefined,
+        nombre_producto: guardarComo === 'producto' ? nombreProducto : undefined,
+        tipo_producto_id: guardarComo === 'producto' ? Number(tipoProductoId) : undefined,
         producto_base_id: productoBaseId,
         secciones,
-        nuevo_ancho: parseFloat(parametros.ancho) || 1.60,
-        nuevo_largo: parseFloat(parametros.largo) || 1.90,
+        nuevo_ancho: parseFloat(parametros.ancho) || 1.6,
+        nuevo_largo: parseFloat(parametros.largo) || 1.9,
         nuevo_alto: parseFloat(parametros.alto) || null,
         ganancia_porcentaje: parseFloat(parametros.ganancia) || 40,
         iva_porcentaje: parseFloat(parametros.iva) || 0,
+        impuesto_porcentaje: parseFloat(parametros.impuesto) || 7,
         pct_mano_obra: parseFloat(parametros.pct_mano_obra) || 15,
         pct_gastos: parseFloat(parametros.pct_gastos) || 10,
-        observaciones: observacionesFinal,
-        analisis_id: atributos?.analisis_id,
+        observaciones: observacionesFinal || null,
       });
-
       setCotizacionCreada({
         id: resp.cotizacion_id,
         total: resp.total_estimado,
@@ -436,6 +405,26 @@ export default function CotizadorInteligente() {
     } finally {
       setGuardando(false);
     }
+  };
+
+    /** Reiniciar el flujo completo */
+  const handleNuevaCotizacion = () => {    setPaso('manual');
+    setProductoBaseSel('');
+    setContexto(null);
+    setJsonIA('');
+    setDescripcionMueble('');
+    setSecciones([]);
+    setResumen(null);
+    setCotizacionCreada(null);
+    setClienteId('');
+    setObservacionesFinal('');
+    setNombreProducto('');
+    setTipoProductoId('');
+    setErrorAnalisis('');
+    setErrorFinal('');
+    setProductoBaseId(null);
+    setProductoBaseNombre(null);
+    setScoreSimilitud(0);
   };
 
   const pasoActualNum = PASOS.find((p) => p.id === paso)?.num ?? 1;
@@ -451,8 +440,8 @@ export default function CotizadorInteligente() {
             </svg>
           </div>
           <div>
-            <h1 className="text-xl sm:text-2xl font-headline font-bold tracking-tight">Cotizador Inteligente v2</h1>
-            <p className="text-xs text-white/70">Estructura de costos editable guiada por IA y datos reales</p>
+            <h1 className="text-xl sm:text-2xl font-headline font-bold tracking-tight">Cotizador Inteligente</h1>
+            <p className="text-xs text-white/70">100% manual · sin APIs de pago · guiado por IA de navegador y datos reales</p>
           </div>
         </div>
       </div>
@@ -476,7 +465,7 @@ export default function CotizadorInteligente() {
                         completado ? 'bg-yeikar-primary/25 text-yeikar-primary-dark shadow' :
                         'bg-yeikar-secondary-light/10 text-yeikar-neutral/40'}`}
                     >
-                      {completado ? '✓' : p.num}
+                      {completado ? '' : p.num}
                     </div>
                     <span
                       className={`text-xs font-bold hidden sm:block
@@ -497,405 +486,305 @@ export default function CotizadorInteligente() {
       </div>
 
       <div className="max-w-5xl mx-auto px-4 py-8">
-        {/* ── PASO 1: Carga de Imagen ── */}
-        {paso === 'upload' && (
+        {/* ── PASO 1: Modo Manual (contexto + IA de navegador) ── */}
+        {paso === 'manual' && (
           <div className="space-y-6">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-headline font-bold text-yeikar-secondary">Analizar Mueble</h2>
-              <p className="text-sm text-yeikar-neutral/60 mt-1">Sube la foto del mueble para que la IA proponga los materiales y fases de producción.</p>
+            {/* Guía paso a paso */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {PASOS_GUIA.map((s) => (
+                <div key={s.n} className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-4 shadow-card">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="w-6 h-6 rounded-full bg-yeikar-primary text-yeikar-neutral font-black font-headline text-sm flex items-center justify-center">{s.n}</span>
+                    <h3 className="font-headline font-bold text-sm text-yeikar-secondary">{s.t}</h3>
+                  </div>
+                  <p className="text-xs text-yeikar-neutral/60 leading-relaxed">{s.d}</p>
+                </div>
+              ))}
             </div>
 
-            <div
-              onDrop={handleDrop}
-              onDragOver={(e) => e.preventDefault()}
-              onClick={() => fileInputRef.current?.click()}
-              className={`relative border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200
-                ${imagenPreview ? 'border-yeikar-primary bg-yeikar-primary/5 shadow-inner' : 'border-yeikar-secondary-light/15 bg-white hover:border-yeikar-primary hover:bg-yeikar-primary/5'}`}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/jpeg,image/jpg,image/png,image/webp"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleImagenSelect(e.target.files[0])}
-              />
-              {imagenPreview ? (
-                <div className="flex flex-col items-center gap-4">
-                  <img src={imagenPreview} alt="Preview del mueble" className="max-h-72 max-w-full rounded-xl shadow-md object-contain border border-yeikar-secondary-light/10" />
-                  <p className="text-xs text-yeikar-neutral/50 font-mono">{imagenFile?.name} · {((imagenFile?.size || 0) / 1024).toFixed(0)} KB</p>
+            {/* Consejos según la IA */}
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-4 shadow-card">
+              <h3 className="text-xs font-bold text-yeikar-neutral/70 uppercase tracking-wider mb-2"> Consejos según tu IA (para mejores resultados)</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {CONSEJOS_IA.map((c) => (
+                  <div key={c.nombre} className="rounded-xl bg-yeikar-tertiary/50 border border-yeikar-secondary-light/10 px-3 py-2">
+                    <span className="text-xs font-black text-yeikar-secondary">{c.nombre}</span>
+                    <p className="text-[11px] text-yeikar-neutral/60 mt-0.5">{c.texto}</p>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[11px] text-yeikar-neutral/50 mt-2">
+                No cambies de chat entre el paso 1 y el 2: la IA necesita recordar lo que entendió del mueble.
+              </p>
+            </div>
+
+            {/* Entrada: foto o descripción */}
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">¿Cómo analizará la IA el mueble?</h3>
+                <div className="flex gap-1.5 bg-yeikar-tertiary/60 rounded-xl p-1">
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setImagenFile(null);
-                      setImagenPreview(null);
-                    }}
-                    className="text-xs text-red-500 hover:text-red-700 underline font-semibold"
+                    onClick={() => setConFoto(true)}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold font-headline transition-all ${
+                      conFoto ? 'bg-yeikar-primary text-yeikar-neutral shadow-sm' : 'text-yeikar-neutral/60 hover:bg-white'
+                    }`}
                   >
-                    Cambiar Imagen
+                     Con foto
+                  </button>
+                  <button
+                    onClick={() => setConFoto(false)}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold font-headline transition-all ${
+                      !conFoto ? 'bg-yeikar-primary text-yeikar-neutral shadow-sm' : 'text-yeikar-neutral/60 hover:bg-white'
+                    }`}
+                  >
+                     Sin foto (descripción)
                   </button>
                 </div>
-              ) : (
-                <div className="flex flex-col items-center gap-3 text-yeikar-neutral/40">
-                  <svg className="w-16 h-16 text-yeikar-secondary-light/25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                  </svg>
-                  <div>
-                    <p className="font-semibold text-yeikar-neutral/70 text-sm">Arrastra la imagen aquí</p>
-                    <p className="text-xs mt-1">o haz clic para explorar · JPEG, PNG, WEBP · Max 10 MB</p>
-                  </div>
+              </div>
+
+              {!conFoto && (
+                <div>
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">
+                    Describe el mueble (o pega el mensaje del cliente) *
+                  </label>
+                  <textarea
+                    value={descripcionMueble}
+                    onChange={(e) => setDescripcionMueble(e.target.value)}
+                    rows={3}
+                    placeholder='Ej: "Cama matrimonial 1.60x1.90 en madera sólida, espaldar tapizado en tela lino beige, dos noches con 1 cajón cada uno, acabado laqueado mate"'
+                    className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 resize-none"
+                  />
+                  <p className="text-[11px] text-yeikar-neutral/50 mt-1">
+                     Si tienes el mensaje de WhatsApp del cliente, pégalo tal cual — la IA entiende lenguaje cotidiano.
+                  </p>
                 </div>
               )}
             </div>
 
-            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card">
-              <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Contexto o mensaje adicional</label>
-              <textarea
-                value={contextoAdicional}
-                onChange={(e) => setContextoAdicional(e.target.value)}
-                placeholder='Ej: "Cama King Size tapizada en lino con patas ocultas" o "Closet modular de melamina Rovere"'
-                rows={3}
-                className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 resize-none font-body"
-              />
-              <p className="text-xs text-yeikar-neutral/50 mt-2">💡 Indique dimensiones solicitadas o materiales preferidos para guiar mejor a la IA.</p>
-            </div>
-
-            {/* Datos del proyecto — la IA calcula cantidades para ESTAS medidas */}
+            {/* Producto de referencia + medidas */}
             <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card space-y-4">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">Datos del proyecto</h3>
+                <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">Referencia y medidas</h3>
                 <span className="text-[10px] bg-yeikar-primary/15 text-yeikar-primary-dark font-bold px-2 py-0.5 rounded-full">OPCIONAL</span>
               </div>
-              <p className="text-xs text-yeikar-neutral/50 -mt-2">Las cantidades se calcularán para estas medidas exactas, no para un estándar.</p>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">
+                  Tipo de mueble
+                </label>
+                <select
+                  value={tipoMueble}
+                  onChange={(e) => setTipoMueble(e.target.value)}
+                  className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                >
+                  {TIPOS_MUEBLE.map((t) => (
+                    <option key={t.value} value={t.value}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-yeikar-neutral/50 mt-1">
+                  Afina la anatomía (secciones típicas) y el catálogo que recibe la IA. Con "Otro" usa el catálogo completo.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Ancho (m) *</label>
-                  <input
-                    type="number" step="0.01" min="0"
-                    value={parametros.ancho}
-                    onChange={(e) => setParametros({ ...parametros, ancho: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">
+                    Producto similar (receta de referencia)
+                  </label>
+                  <SearchSelect
+                    value={productoBaseSel}
+                    onChange={(v) => setProductoBaseSel(String(v))}
+                    options={[
+                      { value: '', label: 'Ninguno — estructura desde cero' },
+                      ...productos.map((p) => ({ value: p.id, label: p.nombre })),
+                    ]}
+                    placeholder="Ninguno — estructura desde cero"
                   />
+                  <p className="text-[11px] text-yeikar-neutral/50 mt-1">
+                    Si eliges uno, la IA recibirá su receta como guía de materiales y proporciones.
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Largo (m) *</label>
-                  <input
-                    type="number" step="0.01" min="0"
-                    value={parametros.largo}
-                    onChange={(e) => setParametros({ ...parametros, largo: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
-                  />
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Ancho (m)</label>
+                    <input type="number" step="0.01" min="0" value={parametros.ancho}
+                      onChange={(e) => setParametros({ ...parametros, ancho: e.target.value })}
+                      className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Largo (m)</label>
+                    <input type="number" step="0.01" min="0" value={parametros.largo}
+                      onChange={(e) => setParametros({ ...parametros, largo: e.target.value })}
+                      className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Alto (m)</label>
+                    <input type="number" step="0.01" min="0" value={parametros.alto}
+                      onChange={(e) => setParametros({ ...parametros, alto: e.target.value })}
+                      className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40" />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Alto (m)</label>
-                  <input
-                    type="number" step="0.01" min="0"
-                    value={parametros.alto}
-                    onChange={(e) => setParametros({ ...parametros, alto: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
-                  />
+              </div>
+              <button
+                onClick={handleGenerarContexto}
+                disabled={generandoContexto || (!conFoto && !descripcionMueble.trim())}
+                className="w-full py-3 bg-yeikar-primary text-yeikar-neutral rounded-xl font-bold font-headline hover:bg-yeikar-primary/90 transition-all disabled:opacity-40 text-sm flex items-center justify-center gap-2"
+              >
+                {generandoContexto ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Generando contexto del negocio...
+                  </>
+                ) : (
+                  ' Generar contexto para la IA'
+                )}
+              </button>
+            </div>
+
+            {/* Paquete de contexto generado */}
+            {contexto && (
+              <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">
+                    Instrucciones para la IA
+                    {contexto.producto_base_id && (
+                      <span className="ml-2 text-[11px] font-mono text-yeikar-neutral/50 normal-case">
+                        · Ref: {contexto.producto_base_nombre}
+                      </span>
+                    )}
+                  </h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCopiarContexto}
+                      className="px-3 py-1.5 bg-yeikar-secondary text-white rounded-lg text-xs font-bold hover:bg-yeikar-secondary-light transition-all"
+                    >
+                      {copiado ? '¡Copiado!' : 'Copiar prompt'}
+                    </button>
+                    <button
+                      onClick={handleDescargarContexto}
+                      className="px-3 py-1.5 border border-yeikar-secondary-light/25 text-yeikar-secondary rounded-lg text-xs font-bold hover:bg-yeikar-tertiary transition-all"
+                    >
+                       Descargar .md
+                    </button>
+                    <button
+                      onClick={handleDescargarInventarioJson}
+                      title="Inventario estructurado (JSON) para IA que aceptan archivos"
+                      className="px-3 py-1.5 border border-yeikar-secondary-light/25 text-yeikar-secondary rounded-lg text-xs font-bold hover:bg-yeikar-tertiary transition-all"
+                    >
+                       inventario.json
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Fondo (m)</label>
+
+                {/* Librería de prompts */}
+                {contexto.prompts.length > 0 && (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {contexto.prompts.map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => setPromptActivoId(p.id)}
+                          title={p.descripcion}
+                          className={`text-left px-3 py-2 rounded-xl border text-xs font-bold transition-all ${
+                            promptActivo?.id === p.id
+                              ? 'bg-yeikar-primary/15 border-yeikar-primary/50 text-yeikar-secondary'
+                              : 'border-yeikar-secondary-light/15 text-yeikar-neutral/60 hover:bg-yeikar-tertiary'
+                          }`}
+                        >
+                          {p.titulo}
+                        </button>
+                      ))}
+                    </div>
+                    {promptActivo && (
+                      <p className="text-[11px] text-yeikar-neutral/50">
+                         {promptActivo.descripcion}
+                      </p>
+                    )}
+                  </>
+                )}
+
+                <textarea
+                  readOnly
+                  value={promptActivo?.instrucciones ?? contexto.instrucciones}
+                  rows={16}
+                  className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-xs font-mono bg-yeikar-tertiary/40 focus:outline-none resize-y"
+                />
+                <p className="text-[11px] text-yeikar-neutral/50">
+                  Inventario con <strong>{contexto.inventario.length}</strong> materiales · Copia el prompt seleccionado,{' '}
+                  {conFoto ? 'adjunta la foto del mueble' : 'incluye la descripción'} en tu IA y pégalo.
+                </p>
+              </div>
+            )}
+
+            {/* Pegar la respuesta de la IA */}
+            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-5 shadow-card space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">Respuesta de la IA</h3>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setJsonIA(EJEMPLO_EXCEL); setErrorAnalisis(''); }}
+                    className="px-3 py-1.5 border border-yeikar-primary/40 text-yeikar-secondary rounded-lg text-xs font-bold hover:bg-yeikar-primary/10 transition-all"
+                  >
+                     Probar con un ejemplo
+                  </button>
+                  <button
+                    onClick={() => jsonFileRef.current?.click()}
+                    className="px-3 py-1.5 border border-yeikar-secondary-light/25 text-yeikar-secondary rounded-lg text-xs font-bold hover:bg-yeikar-tertiary transition-all"
+                  >
+                     Cargar .txt / .json
+                  </button>
                   <input
-                    type="number" step="0.01" min="0"
-                    value={parametros.fondo}
-                    onChange={(e) => setParametros({ ...parametros, fondo: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
+                    ref={jsonFileRef}
+                    type="file"
+                    accept=".txt,.md,.json,text/plain,application/json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleCargarArchivoJson(f);
+                      e.target.value = '';
+                    }}
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Material principal</label>
-                  <select
-                    value={respuestas.material_principal ?? ''}
-                    onChange={(e) => setRespuesta('material_principal', e.target.value || undefined)}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    <option value="">No sé / Lo decide la IA</option>
-                    {MATERIALES_PRINCIPALES.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Espesor tablero (mm)</label>
-                  <select
-                    value={respuestas.espesor_tablero ?? ''}
-                    onChange={(e) => setRespuesta('espesor_tablero', e.target.value || undefined)}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    <option value="">No sé</option>
-                    {ESPESORES.map(ep => <option key={ep} value={ep}>{ep} mm</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Acabado</label>
-                  <select
-                    value={respuestas.acabado ?? ''}
-                    onChange={(e) => setRespuesta('acabado', e.target.value || undefined)}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    <option value="">No sé</option>
-                    {ACABADOS.map(a => <option key={a} value={a}>{a}</option>)}
-                  </select>
-                </div>
-              </div>
+              <textarea
+                value={jsonIA}
+                onChange={(e) => setJsonIA(e.target.value)}
+                rows={10}
+                placeholder='Pega aquí la tabla que devolvió la IA (secciones + MATERIAL | CANTIDAD | UNIDAD | V/UNIT | PRECIO TOTAL)...'
+                className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 resize-y"
+              />
+              <button
+                onClick={handleImportarEstructura}
+                disabled={!jsonIA.trim() || importandoEstructura}
+                className="w-full py-3 bg-yeikar-secondary text-white rounded-xl font-bold hover:bg-yeikar-secondary-light transition-all disabled:opacity-40 text-sm flex items-center justify-center gap-2"
+              >
+                {importandoEstructura ? (
+                  <>
+                    <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Importando y matcheando con el inventario...
+                  </>
+                ) : (
+                  ' Importar estructura y continuar →'
+                )}
+              </button>
+              <p className="text-[11px] text-yeikar-neutral/50">
+                 Si la IA no devolvió la tabla bien formada, pídele con el prompt "Reparar respuesta" y pega el resultado aquí.
+              </p>
             </div>
 
             {errorAnalisis && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 font-semibold">
-                ⚠️ {errorAnalisis}
+                 {errorAnalisis}
               </div>
             )}
-
-            <button
-              onClick={handleAnalizar}
-              disabled={!imagenFile || analizando}
-              className="w-full py-4 bg-yeikar-secondary text-white rounded-xl font-bold hover:bg-yeikar-secondary-light transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-3 shadow-md text-base"
-            >
-              {analizando ? (
-                <>
-                  <svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Analizando y sugiriendo estructura de costos...
-                </>
-              ) : (
-                'Analizar con IA →'
-              )}
-            </button>
           </div>
         )}
 
-        {/* ── PASO 2: Validar Atributos y Configurar Medidas ── */}
-        {paso === 'validar' && atributos && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl sm:text-2xl font-headline font-bold text-yeikar-secondary">Configuración del Producto</h2>
-                <p className="text-sm text-yeikar-neutral/60 mt-1">Revisa los atributos detectados por la IA y define las medidas finales de costeo.</p>
-              </div>
-              {imagenPreview && (
-                <img src={imagenPreview} alt="Miniatura" className="w-16 h-16 rounded-xl object-cover border border-yeikar-secondary-light/10 shadow" />
-              )}
-            </div>
-
-            <div className={`rounded-xl px-4 py-3 flex items-center gap-2 text-xs sm:text-sm font-semibold ${CONFIANZA_COLOR(atributos.nivel_confianza)}`}>
-              <span>Confianza de la IA: <strong>{Math.round(atributos.nivel_confianza * 100)}%</strong></span>
-              {atributos.requiere_revision_humana && <span className="bg-red-200 text-red-800 text-[10px] px-1.5 py-0.5 rounded font-bold">REVISIÓN RECOMENDADA</span>}
-            </div>
-
-            {/* Qué vio la IA y qué medidas asumió */}
-            {atributos.percepcion && (
-              <div className="bg-yeikar-secondary-light/5 border border-yeikar-secondary-light/15 rounded-2xl p-5 shadow-card space-y-2">
-                <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">Percepción de la IA</h3>
-                <p className="text-sm text-yeikar-neutral/80">{atributos.percepcion}</p>
-                {atributos.dimensiones_referencia && Object.keys(atributos.dimensiones_referencia).length > 0 && (
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {Object.entries(atributos.dimensiones_referencia).map(([k, v]) => (
-                      <span key={k} className="bg-white border border-yeikar-secondary-light/15 text-xs font-mono font-semibold text-yeikar-secondary px-2.5 py-1 rounded-lg">
-                        {k}: {v}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Atributos generales */}
-            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-6 shadow-card space-y-4">
-              <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider mb-2">Atributos generales</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Tipo de Mueble</label>
-                  <select
-                    value={atributos.tipo_mueble}
-                    onChange={(e) => setAtributos({ ...atributos, tipo_mueble: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    {TIPOS_MUEBLE.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Familia de Material</label>
-                  <select
-                    value={atributos.familia_probable || ''}
-                    onChange={(e) => setAtributos({ ...atributos, familia_probable: e.target.value || null })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    <option value="">Sin definir</option>
-                    {FAMILIAS.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Estilo General</label>
-                  <select
-                    value={atributos.estilo_general || ''}
-                    onChange={(e) => setAtributos({ ...atributos, estilo_general: e.target.value || null })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    <option value="">Sin definir</option>
-                    {ESTILOS.map(e => <option key={e} value={e}>{e}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Tipo de Patas</label>
-                  <select
-                    value={atributos.tipo_patas || ''}
-                    onChange={(e) => setAtributos({ ...atributos, tipo_patas: e.target.value || null })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                  >
-                    <option value="">Sin definir</option>
-                    {PATAS.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex gap-6 pt-2">
-                <label className="flex items-center gap-2 cursor-pointer font-semibold text-sm text-yeikar-neutral">
-                  <input
-                    type="checkbox"
-                    checked={atributos.tiene_tapiceria}
-                    onChange={(e) => setAtributos({ ...atributos, tiene_tapiceria: e.target.checked })}
-                    className="w-4 h-4 rounded border-yeikar-secondary-light/25 text-yeikar-primary focus:ring-yeikar-primary/40 accent-yeikar-primary"
-                  />
-                  Tiene Tapicería
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer font-semibold text-sm text-yeikar-neutral">
-                  <input
-                    type="checkbox"
-                    checked={atributos.tiene_luces}
-                    onChange={(e) => setAtributos({ ...atributos, tiene_luces: e.target.checked })}
-                    className="w-4 h-4 rounded border-yeikar-secondary-light/25 text-yeikar-primary focus:ring-yeikar-primary/40 accent-yeikar-primary"
-                  />
-                  Tiene Iluminación LED
-                </label>
-              </div>
-            </div>
-
-            {/* Medidas y Parámetros Iniciales */}
-            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-6 shadow-card space-y-4">
-              <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider mb-2">Medidas y Parámetros del Proyecto</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Ancho (metros) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={parametros.ancho}
-                    onChange={(e) => setParametros({ ...parametros, ancho: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Largo (metros) *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={parametros.largo}
-                    onChange={(e) => setParametros({ ...parametros, largo: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Alto (metros)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={parametros.alto}
-                    onChange={(e) => setParametros({ ...parametros, alto: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Fondo (metros)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={parametros.fondo}
-                    onChange={(e) => setParametros({ ...parametros, fondo: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
-                  />
-                </div>
-                <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-xs font-semibold text-yeikar-neutral/60 mb-1">Ganancia / Margen (%)</label>
-                  <input
-                    type="number"
-                    value={parametros.ganancia}
-                    onChange={(e) => setParametros({ ...parametros, ganancia: e.target.value })}
-                    className="w-full border border-yeikar-secondary-light/15 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Preguntas dinámicas de la IA (ingeniero de producción) */}
-            <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 p-6 shadow-card space-y-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-bold text-yeikar-neutral uppercase tracking-wider">
-                    Preguntas de la IA <span className="text-yeikar-primary-dark">(ingeniero de producción)</span>
-                  </h3>
-                  <p className="text-xs text-yeikar-neutral/50 mt-1">
-                    {preguntas.length > 0
-                      ? 'Solo preguntas que la imagen no respondió y que afectan el costo. Respóndelas para afinar la estructura.'
-                      : 'La IA no encontró preguntas críticas. Las cantidades se estimarán con lo visible en la imagen.'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleGenerarPreguntas}
-                  disabled={generandoPreguntas || !imagenFile}
-                  className="shrink-0 text-xs font-bold text-yeikar-primary-dark border border-yeikar-primary/40 hover:bg-yeikar-primary/10 rounded-lg px-3 py-2 transition-all disabled:opacity-40"
-                >
-                  {generandoPreguntas ? 'Generando...' : '🔄 Regenerar preguntas'}
-                </button>
-              </div>
-
-              {preguntas.length > 0 && (
-                <div className="space-y-4 pt-2">
-                  {preguntas.map((p) => (
-                    <div key={p.clave} className="border border-yeikar-secondary-light/15 rounded-xl p-4 bg-yeikar-tertiary/40">
-                      <label className="block text-sm font-semibold text-yeikar-neutral">
-                        {p.pregunta}
-                        {p.requerida && <span className="text-red-500 ml-1">*</span>}
-                      </label>
-                      {p.por_que && <p className="text-xs text-yeikar-neutral/50 mt-0.5 mb-2">{p.por_que}</p>}
-                      {renderPreguntaInput(p, respuestas[p.clave], (v) => setRespuesta(p.clave, v))}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setPaso('upload')}
-                className="flex-1 py-3 border border-yeikar-secondary-light/15 text-yeikar-neutral/70 rounded-xl font-semibold hover:bg-yeikar-tertiary transition-all"
-              >
-                ← Volver a Foto
-              </button>
-              <button
-                type="button"
-                onClick={handleGenerarEstructura}
-                disabled={generandoEstructura}
-                className="flex-2 flex-grow-[2] py-3 bg-yeikar-secondary text-white rounded-xl font-bold hover:bg-yeikar-secondary-light transition-all shadow-md flex items-center justify-center gap-2"
-              >
-                {generandoEstructura ? (
-                  <><svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Generando Estructura...</>
-                ) : (
-                  'Generar estructura de costos →'
-                )}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* ── PASO 3: Estructura de Costos Editable (Borrador) ── */}
+        {/* ── PASO 2: Estructura de Costos del Borrador ── */}
         {paso === 'borrador' && (
           <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -905,7 +794,7 @@ export default function CotizadorInteligente() {
                 </h2>
                 {productoBaseNombre && (
                   <p className="text-xs text-yeikar-neutral/50 mt-1">
-                    Fusión inteligente guiada por plantilla: <strong>{productoBaseNombre}</strong> ({scoreSimilitud}% similitud)
+                    Fusión guiada por plantilla: <strong>{productoBaseNombre}</strong> ({scoreSimilitud}% similitud)
                   </p>
                 )}
               </div>
@@ -919,11 +808,44 @@ export default function CotizadorInteligente() {
 
             {/* Panel de dimensiones y desgloses de costos */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-              {/* Editor de la Tabla */}
               <div className="lg:col-span-2 space-y-6">
+                {/* Advertencias de validación post-import */}
+                {advertenciaImport && (
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-sm text-amber-800">
+                     {advertenciaImport}
+                    {seccionesFaltantes.length > 0 && (
+                      <span className="block mt-1 text-xs">
+                        Secciones pendientes: {seccionesFaltantes.join(', ')}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* Resumen del import */}
+                {(() => {
+                  const totalItems = secciones.reduce((n, s) => n + s.items.length, 0);
+                  const mapeados = secciones.reduce((n, s) => n + s.items.filter((i) => i.material_id).length, 0);
+                  if (totalItems === 0) return null;
+                  return (
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-center">
+                        <p className="text-xs font-mono text-green-600 mb-0.5"> Matcheados con inventario</p>
+                        <p className="font-headline font-bold text-green-700 text-xl">{mapeados}</p>
+                      </div>
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                        <p className="text-xs font-mono text-amber-600 mb-0.5"> Pendientes</p>
+                        <p className="font-headline font-bold text-amber-700 text-xl">{materialesSinPrecio}</p>
+                      </div>
+                      <div className="bg-yeikar-tertiary/60 border border-yeikar-secondary-light/10 rounded-xl p-3 text-center">
+                        <p className="text-xs font-mono text-yeikar-neutral/50 mb-0.5">Líneas totales</p>
+                        <p className="font-headline font-bold text-yeikar-neutral text-xl">{totalItems}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {materialesSinPrecio > 0 && (
                   <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl px-5 py-3 text-xs sm:text-sm font-semibold flex items-center gap-2">
-                    <span>⚠️ Tienes {materialesSinPrecio} material(es) sin precio asignado. Ingrese un costo unitario temporal o registre el material formalmente.</span>
+                    <span> Tienes {materialesSinPrecio} material(es) sin precio asignado. Ingrese un costo unitario temporal o registre el material formalmente.</span>
                   </div>
                 )}
 
@@ -978,6 +900,15 @@ export default function CotizadorInteligente() {
                         className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
                       />
                     </div>
+                    <div>
+                      <label className="block text-yeikar-neutral/50 font-medium mb-1" title="Impuestos adicionales sobre el costo de producción">Impuestos %</label>
+                      <input
+                        type="number"
+                        value={parametros.impuesto}
+                        onChange={(e) => setParametros({ ...parametros, impuesto: e.target.value })}
+                        className="w-full border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-1.5 font-mono focus:outline-none focus:ring-1 focus:ring-yeikar-primary"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -987,6 +918,12 @@ export default function CotizadorInteligente() {
                     <h3 className="font-headline font-bold text-base border-b border-white/10 pb-2">
                       Resumen del ERP
                     </h3>
+                    <button
+                      onClick={() => setShowEstructura(true)}
+                      className="w-full text-xs font-bold text-yeikar-primary-light hover:text-white uppercase tracking-wider underline underline-offset-4"
+                    >
+                      Ver estructura de costos (Excel)
+                    </button>
                     <div className="space-y-2 text-xs sm:text-sm">
                       <div className="flex justify-between">
                         <span className="text-white/60">Costo Materiales</span>
@@ -1004,9 +941,15 @@ export default function CotizadorInteligente() {
                         <span>Costo de Producción</span>
                         <span className="font-mono">${resumen.costo_produccion.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
                       </div>
+                      {Number(resumen.impuestos) > 0 && (
+                        <div className="flex justify-between text-white/80">
+                          <span>Impuestos ({Number(resumen.impuesto_porcentaje) || parametros.impuesto}%)</span>
+                          <span className="font-mono">${Number(resumen.impuestos).toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
+                        </div>
+                      )}
                       <div className="flex justify-between text-white/80">
                         <span>Ganancia ({parametros.ganancia}%)</span>
-                        <span className="font-mono">${(resumen.precio_sin_iva - resumen.costo_produccion).toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
+                        <span className="font-mono">${(resumen.precio_sin_iva - (resumen.base_con_impuestos || resumen.costo_produccion)).toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
                       </div>
                     </div>
 
@@ -1026,17 +969,17 @@ export default function CotizadorInteligente() {
 
             {errorAnalisis && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 font-semibold">
-                ⚠️ {errorAnalisis}
+                 {errorAnalisis}
               </div>
             )}
 
             <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => setPaso('validar')}
+                onClick={() => setPaso('manual')}
                 className="flex-1 py-3 border border-yeikar-secondary-light/15 text-yeikar-neutral/70 rounded-xl font-semibold hover:bg-yeikar-tertiary transition-all"
               >
-                ← Configurar Atributos
+                ← Volver al Paso 1
               </button>
               <button
                 type="button"
@@ -1050,7 +993,7 @@ export default function CotizadorInteligente() {
           </div>
         )}
 
-        {/* ── PASO 4: Guardar y Persistir ── */}
+        {/* ── PASO 3: Guardar y Persistir ── */}
         {paso === 'finalizar' && !cotizacionCreada && resumen && (
           <div className="space-y-6">
             <div>
@@ -1085,7 +1028,7 @@ export default function CotizadorInteligente() {
                   className={`py-4 text-center font-semibold text-sm transition-all flex items-center justify-center gap-2
                     ${guardarComo === 'cotizacion' ? 'bg-yeikar-primary/10 text-yeikar-secondary font-bold' : 'text-yeikar-neutral/50 hover:bg-yeikar-tertiary'}`}
                 >
-                  📄 Guardar como Cotización
+                   Guardar como Cotización
                 </button>
                 <button
                   type="button"
@@ -1093,7 +1036,7 @@ export default function CotizadorInteligente() {
                   className={`py-4 text-center font-semibold text-sm transition-all flex items-center justify-center gap-2
                     ${guardarComo === 'producto' ? 'bg-yeikar-primary/10 text-yeikar-secondary font-bold' : 'text-yeikar-neutral/50 hover:bg-yeikar-tertiary'}`}
                 >
-                  📦 Guardar como Nuevo Producto
+                   Guardar como Nuevo Producto
                 </button>
               </div>
 
@@ -1102,15 +1045,12 @@ export default function CotizadorInteligente() {
                   <div className="space-y-4">
                     <div>
                       <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Cliente *</label>
-                      <select
-                        required
+                      <SearchSelect
                         value={clienteId}
-                        onChange={(e) => setClienteId(e.target.value)}
-                        className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                      >
-                        <option value="">Seleccione un cliente...</option>
-                        {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                      </select>
+                        onChange={(v) => setClienteId(String(v))}
+                        options={clientes.map((c) => ({ value: c.id, label: c.nombre }))}
+                        placeholder="Seleccione un cliente..."
+                      />
                     </div>
                     <div>
                       <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Observaciones</label>
@@ -1139,15 +1079,12 @@ export default function CotizadorInteligente() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Categoría de Producto *</label>
-                        <select
-                          required
+                        <SearchSelect
                           value={tipoProductoId}
-                          onChange={(e) => setTipoProductoId(e.target.value)}
-                          className="w-full border border-yeikar-secondary-light/15 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-yeikar-primary/40 bg-white"
-                        >
-                          <option value="">Seleccione categoría...</option>
-                          {tiposProducto.map(tp => <option key={tp.id} value={tp.id}>{tp.nombre}</option>)}
-                        </select>
+                          onChange={(v) => setTipoProductoId(String(v))}
+                          options={tiposProducto.map((tp) => ({ value: tp.id, label: tp.nombre }))}
+                          placeholder="Seleccione categoría..."
+                        />
                       </div>
                       <div>
                         <label className="block text-sm font-semibold text-yeikar-neutral mb-2">Descripción del Producto</label>
@@ -1161,7 +1098,7 @@ export default function CotizadorInteligente() {
                       </div>
                     </div>
                     <p className="text-xs text-yeikar-primary-dark bg-yeikar-primary/10 border border-yeikar-primary/30 rounded-lg p-3 font-semibold">
-                      💡 Al guardar como Producto, la receta detallada se almacenará como receta paramétrica base. Esto te permitirá usar este producto como plantilla idéntica para cotizaciones futuras.
+                       Al guardar como Producto, la receta detallada se almacenará como receta paramétrica base. Esto te permitirá usar este producto como plantilla idéntica para cotizaciones futuras.
                     </p>
                   </div>
                 )}
@@ -1170,7 +1107,7 @@ export default function CotizadorInteligente() {
 
             {errorFinal && (
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700 font-semibold">
-                ⚠️ {errorFinal}
+                 {errorFinal}
               </div>
             )}
 
@@ -1191,7 +1128,7 @@ export default function CotizadorInteligente() {
                 {guardando ? (
                   <><svg className="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg> Guardando...</>
                 ) : (
-                  '✓ Confirmar y Registrar'
+                  'Confirmar y Registrar'
                 )}
               </button>
             </div>
@@ -1239,27 +1176,7 @@ export default function CotizadorInteligente() {
               )}
               <button
                 type="button"
-                onClick={() => {
-                  setPaso('upload');
-                  setImagenFile(null);
-                  setImagenPreview(null);
-                  setContextoAdicional('');
-                  setAtributos(null);
-                  setPreguntas([]);
-                  setRespuestas({});
-                  setSecciones([]);
-                  setResumen(null);
-                  setCotizacionCreada(null);
-                  setClienteId('');
-                  setObservacionesFinal('');
-                  setNombreProducto('');
-                  setTipoProductoId('');
-                  setErrorAnalisis('');
-                  setErrorFinal('');
-                  setProductoBaseId(null);
-                  setProductoBaseNombre(null);
-                  setScoreSimilitud(0);
-                }}
+                onClick={handleNuevaCotizacion}
                 className="px-6 py-3 border border-yeikar-secondary-light/15 text-yeikar-neutral/70 rounded-xl font-semibold hover:bg-yeikar-tertiary transition-all"
               >
                 Nueva Cotización
@@ -1268,6 +1185,18 @@ export default function CotizadorInteligente() {
           </div>
         )}
       </div>
+
+      {/* Modal: estructura de costos estilo Excel */}
+      <Modal
+        open={showEstructura}
+        onClose={() => setShowEstructura(false)}
+        title="Estructura de Costos"
+        subtitle="Cotizador IA"
+        size="4xl"
+        footer={<button onClick={() => setShowEstructura(false)} className="btn btn-outline">Cerrar</button>}
+      >
+        <EstructuraCostos data={normalizarEstructuraIQE({ secciones, resumen })} />
+      </Modal>
     </div>
   );
 }

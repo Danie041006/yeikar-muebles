@@ -107,102 +107,117 @@ export default function Login() {
           </div>
         </section>
 
-        <section className="relative flex min-h-screen items-center justify-center px-5 py-8 sm:px-10 lg:px-14 xl:px-24">
+        <section className="relative flex min-h-screen flex-col px-5 py-8 sm:px-10 lg:items-center lg:justify-center lg:px-14 xl:px-24">
+          {/* Banda de marca móvil */}
+          <div className="relative -mx-5 -mt-8 mb-7 overflow-hidden bg-gradient-to-b from-yeikar-neutral via-yeikar-secondary to-yeikar-secondary-dark px-5 pb-9 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:-mx-10 sm:px-10 lg:hidden">
+            <div className="pointer-events-none absolute -right-16 -top-10 h-60 w-60 rounded-full border border-yeikar-primary/25" />
+            <div className="pointer-events-none absolute -right-4 top-0 h-44 w-44 rounded-full border border-yeikar-primary/20" />
+            <div className="pointer-events-none absolute right-20 top-12 h-20 w-20 rounded-full border border-yeikar-primary/25" />
+            <div className="pointer-events-none absolute bottom-0 right-1/3 h-px w-1/2 bg-gradient-to-r from-transparent via-yeikar-primary/30 to-transparent" />
+
+            <div className="relative z-10 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-2xl font-black text-yeikar-neutral shadow-gold">Y</div>
+                <div>
+                  <p className="font-headline text-lg font-black tracking-[0.22em] text-white">YEIKAR</p>
+                  <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.18em] text-yeikar-primary/70">Atelier ERP</p>
+                </div>
+              </div>
+              <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-[10px] font-bold text-emerald-300">Seguro</span>
+            </div>
+
+            <p className="relative z-10 mt-9 max-w-[260px] font-headline text-[26px] font-semibold leading-[1.05] tracking-[-0.03em] text-white">
+              Cada detalle cuenta.<br />
+              <span className="text-yeikar-primary">Cada entrega también.</span>
+            </p>
+          </div>
+
           <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
             className="w-full max-w-[430px]"
           >
-            <div className="mb-10 flex items-center justify-between lg:hidden">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-xl font-black text-yeikar-neutral shadow-gold">Y</div>
+            <div className="rounded-3xl border border-yeikar-secondary-light/10 bg-white p-6 shadow-modal sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
+              <div className="mb-7">
+                <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl border border-yeikar-primary/20 bg-yeikar-primary/10 text-yeikar-primary-dark">
+                  <LockKeyhole className="h-5 w-5" strokeWidth={1.8} />
+                </div>
+                <p className="eyebrow mb-2">Acceso privado</p>
+                <h2 className="font-headline text-[28px] font-semibold leading-tight tracking-[-0.045em] text-yeikar-neutral sm:text-4xl">Bienvenido de vuelta.</h2>
+                <p className="mt-3 max-w-sm text-sm leading-relaxed text-yeikar-neutral/55">Ingresa a tu espacio de trabajo y mantén cada área de tu operación en movimiento.</p>
+              </div>
+
+              {error && (
+                <div className="mb-6 flex items-start gap-3 rounded-2xl border border-rose-200/80 bg-rose-50/80 px-4 py-3.5 text-sm text-rose-800" role="alert" aria-live="polite">
+                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmit} className="space-y-5" noValidate>
                 <div>
-                  <p className="font-headline text-base font-black tracking-[0.22em] text-yeikar-secondary">YEIKAR</p>
-                  <p className="mt-0.5 font-mono text-[8px] uppercase tracking-[0.18em] text-yeikar-primary-dark">Atelier ERP</p>
-                </div>
-              </div>
-              <span className="rounded-full border border-emerald-700/10 bg-emerald-50 px-3 py-1.5 text-[10px] font-bold text-emerald-800">Seguro</span>
-            </div>
-
-            <div className="mb-9">
-              <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl border border-yeikar-primary/20 bg-yeikar-primary/10 text-yeikar-primary-dark">
-                <LockKeyhole className="h-5 w-5" strokeWidth={1.8} />
-              </div>
-              <p className="eyebrow mb-2">Acceso privado</p>
-              <h2 className="font-headline text-4xl font-semibold leading-tight tracking-[-0.045em] text-yeikar-neutral sm:text-[44px]">Bienvenido de vuelta.</h2>
-              <p className="mt-3 max-w-sm text-sm leading-relaxed text-yeikar-neutral/55">Ingresa a tu espacio de trabajo y mantén cada área de tu operación en movimiento.</p>
-            </div>
-
-            {error && (
-              <div className="mb-6 flex items-start gap-3 rounded-2xl border border-rose-200/80 bg-rose-50/80 px-4 py-3.5 text-sm text-rose-800" role="alert" aria-live="polite">
-                <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-              <div>
-                <label htmlFor="username" className="label">Usuario</label>
-                <input
-                  id="username"
-                  type="text"
-                  value={username}
-                  onChange={(event) => setUsername(event.target.value)}
-                  disabled={loading}
-                  className="input h-12 bg-white/80"
-                  placeholder="Tu usuario"
-                  autoComplete="username"
-                  autoFocus
-                />
-              </div>
-
-              <div>
-                <div className="mb-1.5 flex items-center justify-between">
-                  <label htmlFor="password" className="label mb-0">Contraseña</label>
-                  <span className="text-[11px] text-yeikar-neutral/40">Acceso seguro</span>
-                </div>
-                <div className="relative">
+                  <label htmlFor="username" className="label">Usuario</label>
                   <input
-                    id="password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    id="username"
+                    type="text"
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
                     disabled={loading}
-                    className="input h-12 bg-white/80 pr-12"
-                    placeholder="Tu contraseña"
-                    autoComplete="current-password"
+                    className="input h-12 bg-white/80 lg:bg-white"
+                    placeholder="Tu usuario"
+                    autoComplete="username"
+                    autoFocus
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-yeikar-neutral/40 transition-colors hover:bg-yeikar-tertiary hover:text-yeikar-secondary"
-                    aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
-                  >
-                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
                 </div>
+
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label htmlFor="password" className="label mb-0">Contraseña</label>
+                    <span className="text-[11px] text-yeikar-neutral/40">Acceso seguro</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      disabled={loading}
+                      className="input h-12 bg-white/80 pr-12 lg:bg-white"
+                      placeholder="Tu contraseña"
+                      autoComplete="current-password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2.5 text-yeikar-neutral/40 transition-colors hover:bg-yeikar-tertiary hover:text-yeikar-secondary"
+                      aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="group flex h-[52px] w-full items-center justify-center gap-3 rounded-xl bg-yeikar-primary px-5 font-headline text-sm font-bold text-yeikar-neutral shadow-gold transition-all duration-200 hover:bg-yeikar-primary-light hover:shadow-lift disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? (
+                    <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-yeikar-neutral/25 border-t-yeikar-neutral" /> Validando acceso...</span>
+                  ) : (
+                    <>Entrar al espacio de trabajo <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>
+                  )}
+                </button>
+              </form>
+
+              <div className="mt-8 flex items-center gap-3 border-t border-yeikar-secondary-light/10 pt-5 text-[11px] text-yeikar-neutral/45">
+                <ShieldCheck className="h-4 w-4 text-yeikar-primary-dark" />
+                <span>Tu sesión está protegida y tus datos permanecen privados.</span>
               </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="group flex h-12 w-full items-center justify-center gap-3 rounded-xl bg-yeikar-primary px-5 font-headline text-sm font-bold text-yeikar-neutral shadow-gold transition-all duration-200 hover:bg-yeikar-primary-light hover:shadow-lift disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {loading ? (
-                  <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-yeikar-neutral/25 border-t-yeikar-neutral" /> Validando acceso...</span>
-                ) : (
-                  <>Entrar al espacio de trabajo <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>
-                )}
-              </button>
-            </form>
-
-            <div className="mt-9 flex items-center gap-3 border-t border-yeikar-secondary-light/10 pt-5 text-[11px] text-yeikar-neutral/45">
-              <ShieldCheck className="h-4 w-4 text-yeikar-primary-dark" />
-              <span>Tu sesión está protegida y tus datos permanecen privados.</span>
             </div>
 
-            <div className="mt-8 flex items-center justify-between text-[10px] text-yeikar-neutral/35">
+            <div className="mt-7 flex items-center justify-between text-[10px] text-yeikar-neutral/35 pb-safe lg:mt-8">
               <span className="flex items-center gap-1.5"><Check className="h-3.5 w-3.5 text-yeikar-primary-dark" /> Operación conectada</span>
               <span className="flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-yeikar-primary-dark" /> YEIKAR {new Date().getFullYear()}</span>
             </div>

@@ -16,3 +16,5 @@ except Exception as e:
     print(f"Error: {e}")
 finally:
     db.close()
+
+    

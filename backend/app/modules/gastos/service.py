@@ -3,7 +3,7 @@ from typing import List, Optional
 from datetime import date
 from decimal import Decimal
 from app.modules.gastos import model, schemas
-from app.modules.catalogos.model import TipoGasto, Moneda
+from app.modules.catalogos.model import TipoGasto, Moneda, Area
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios
 from app.modules.users.model import Usuario
@@ -19,6 +19,14 @@ def _validar_fks(db: Session, tipo_gasto_id: int, moneda_id: int) -> Moneda:
     return moneda
 
 
+def _validar_area(db: Session, area_id: Optional[int]) -> None:
+    """Valida que el área exista si se indica (None = sin área, válido); lanza ValueError si no."""
+    if area_id is None:
+        return
+    if not db.query(Area).filter(Area.id == area_id).first():
+        raise ValueError(f"El área con id {area_id} no existe.")
+
+
 def _resolver_tasa(db: Session, moneda: Moneda, fecha: date, tasa_cambio) -> Decimal:
     """Devuelve la tasa a COP: 1.0 si es COP, la indicada, o la vigente si no se indicó."""
     if moneda.codigo == "COP":
@@ -29,6 +37,23 @@ def _resolver_tasa(db: Session, moneda: Moneda, fecha: date, tasa_cambio) -> Dec
     if Decimal(str(tasa_cambio)) <= 0:
         raise ValueError("La tasa de cambio debe ser mayor que cero.")
     return Decimal(str(tasa_cambio))
+
+def _adjuntar_metodo_caja(db: Session, gastos):
+    """Adjunta la cuenta de caja de cada gasto (id + nombre) desde su movimiento."""
+    from app.modules.reports.model import MovimientoCaja, MetodoCaja
+    solo = not isinstance(gastos, list)
+    lista = [gastos] if solo else gastos
+    if not lista:
+        return gastos
+    refs = {f"Gasto #{g.id}": g for g in lista}
+    cuentas = {c.id: c.nombre for c in db.query(MetodoCaja).all()}
+    for mv in db.query(MovimientoCaja).filter(MovimientoCaja.referencia.in_(refs.keys())).all():
+        g = refs.get(mv.referencia)
+        if g is not None:
+            g.metodo_caja_id = mv.metodo_caja_id
+            g.metodo_caja_nombre = cuentas.get(mv.metodo_caja_id)
+    return gastos
+
 
 def _snapshot(gasto: model.Gasto) -> dict:
     return {
@@ -44,11 +69,15 @@ def _snapshot(gasto: model.Gasto) -> dict:
 def obtener_gasto(db: Session, gasto_id: int, usuario: Usuario | None = None):
     query = db.query(model.Gasto).options(
         joinedload(model.Gasto.tipo_gasto),
-        joinedload(model.Gasto.moneda)
+        joinedload(model.Gasto.moneda),
+        joinedload(model.Gasto.area)
     ).filter(model.Gasto.id == gasto_id)
     if usuario is not None:
         query = filtrar_registros_propios(query, model.Gasto.creado_por_id, usuario)
-    return query.first()
+    gasto = query.first()
+    if gasto:
+        _adjuntar_metodo_caja(db, gasto)
+    return gasto
 
 def obtener_gastos(
     db: Session,
@@ -56,13 +85,15 @@ def obtener_gastos(
     limit: int = 100,
     tipo_gasto_id: Optional[int] = None,
     categoria: Optional[str] = None,
+    area_id: Optional[int] = None,
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     usuario: Usuario | None = None,
 ) -> List[model.Gasto]:
     query = db.query(model.Gasto).options(
         joinedload(model.Gasto.tipo_gasto),
-        joinedload(model.Gasto.moneda)
+        joinedload(model.Gasto.moneda),
+        joinedload(model.Gasto.area)
     )
     if usuario is not None:
         query = filtrar_registros_propios(query, model.Gasto.creado_por_id, usuario)
@@ -70,13 +101,17 @@ def obtener_gastos(
         query = query.filter(model.Gasto.tipo_gasto_id == tipo_gasto_id)
     if categoria:
         query = query.join(model.Gasto.tipo_gasto).filter(TipoGasto.categoria == categoria.upper())
+    if area_id:
+        query = query.filter(model.Gasto.area_id == area_id)
     if fecha_desde:
         query = query.filter(model.Gasto.fecha >= fecha_desde)
     if fecha_hasta:
         query = query.filter(model.Gasto.fecha <= fecha_hasta)
-    return query.order_by(model.Gasto.fecha.desc()).offset(skip).limit(limit).all()
+    gastos = query.order_by(model.Gasto.fecha.desc()).offset(skip).limit(limit).all()
+    return _adjuntar_metodo_caja(db, gastos)
 
-def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None = None):
+def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None = None, commit: bool = True):
+    _validar_area(db, gasto.area_id)
     moneda = _validar_fks(db, gasto.tipo_gasto_id, gasto.moneda_id)
     tasa = _resolver_tasa(db, moneda, gasto.fecha, gasto.tasa_cambio)
     es_cop = moneda.codigo == "COP"
@@ -85,6 +120,7 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None
     db_gasto = model.Gasto(
         tipo_gasto_id=gasto.tipo_gasto_id,
         moneda_id=gasto.moneda_id,
+        area_id=gasto.area_id,
         fecha=gasto.fecha,
         descripcion=gasto.descripcion,
         monto=gasto.monto,
@@ -96,6 +132,25 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None
     )
     db.add(db_gasto)
     db.flush()
+
+    # Si el gasto indica método de caja, el efectivo SALE de esa cuenta.
+    # Sin esto, los gastos existían solo como número en el P&L y el saldo de
+    # caja nunca bajaba (egreso fantasma).
+    if gasto.metodo_caja_id:
+        from app.core.caja import registrar_movimiento_caja
+        registrar_movimiento_caja(
+            db,
+            metodo_caja_id=gasto.metodo_caja_id,
+            tipo="SALIDA",
+            monto=float(gasto.monto),
+            moneda_id=gasto.moneda_id,
+            tasa_cambio=float(tasa),
+            fecha=gasto.fecha,
+            referencia=f"Gasto #{db_gasto.id}",
+            observaciones=gasto.descripcion or f"Gasto #{db_gasto.id}",
+            usuario_id=usuario.id if usuario is not None else None,
+        )
+
     record_event(
         db,
         actor=usuario,
@@ -104,9 +159,10 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None
         entity_id=db_gasto.id,
         after=_snapshot(db_gasto),
     )
-    db.commit()
-    db.refresh(db_gasto)
-    return db_gasto
+    if commit:
+        db.commit()
+        db.refresh(db_gasto)
+    return _adjuntar_metodo_caja(db, db_gasto)
 
 def actualizar_gasto(
     db: Session,
@@ -132,6 +188,10 @@ def actualizar_gasto(
             raise ValueError(f"El tipo de gasto con id {data['tipo_gasto_id']} no existe.")
     if "moneda_id" in data:
         moneda = _validar_fks(db, db_gasto.tipo_gasto_id, data["moneda_id"])
+
+    # Validar el área si viene en el update (None es válido: limpia el área).
+    if "area_id" in data:
+        _validar_area(db, data["area_id"])
 
     # Recalcular monto_en_moneda_base si cambió moneda, monto o tasa
     if "monto" in data or "tasa_cambio" in data or "moneda_id" in data:
@@ -172,6 +232,12 @@ def eliminar_gasto(db: Session, gasto_id: int, usuario: Usuario | None = None) -
     db_gasto = obtener_gasto(db, gasto_id, usuario)
     if not db_gasto:
         return False
+    # Al eliminar un gasto con salida de caja, se revierte su movimiento para
+    # que el saldo de la cuenta no quede con un egreso que ya no existe.
+    from app.modules.reports.model import MovimientoCaja
+    db.query(MovimientoCaja).filter(
+        MovimientoCaja.referencia == f"Gasto #{db_gasto.id}"
+    ).delete(synchronize_session=False)
     record_event(
         db,
         actor=usuario,

@@ -12,7 +12,7 @@ Uso:
 El script crea materiales de ejemplo si no existen, asigna las dimensiones base
 al producto y luego carga las filas de producto_material con sus tipos de escala.
 
-⚠️  Ajusta los IDs y datos según el Excel real de Carolina antes de correr en producción.
+  Ajusta los IDs y datos según el Excel real de Carolina antes de correr en producción.
 """
 
 import sys
@@ -40,10 +40,10 @@ try:
         producto = db.query(Producto).filter(Producto.activo == True).first()
 
     if not producto:
-        print("❌ No se encontró ningún producto activo. Crea uno primero en la API.")
+        print(" No se encontró ningún producto activo. Crea uno primero en la API.")
         sys.exit(1)
 
-    print(f"✅ Producto encontrado: [{producto.id}] {producto.nombre}")
+    print(f" Producto encontrado: [{producto.id}] {producto.nombre}")
 
     # Actualizar dimensiones base
     producto.ancho_base = Decimal("1.60")
@@ -100,9 +100,9 @@ try:
             m = Material(nombre=nombre, costo_base=costo, unidad_medida_id=um.id, activo=True)
             db.add(m)
             db.flush()
-            print(f"   ➕ Material creado: {nombre}")
+            print(f"    Material creado: {nombre}")
         else:
-            print(f"   ✔  Material existente: {nombre} (id={m.id})")
+            print(f"     Material existente: {nombre} (id={m.id})")
         mat_db[nombre] = m
 
     # ------------------------------------------------------------------
@@ -193,14 +193,14 @@ try:
         db.add(r)
 
     db.commit()
-    print(f"\n✅ Receta de {len(receta)} materiales cargada para [{producto.id}] {producto.nombre}")
+    print(f"\n Receta de {len(receta)} materiales cargada para [{producto.id}] {producto.nombre}")
     print(f"   Dimensiones base: {producto.ancho_base} m (ancho) × {producto.largo_base} m (largo)")
     print("\nPrueba el cálculo con:")
     print(f"  GET /api/v1/producto/{producto.id}/calcular-precio?ancho=2.00&largo=1.95&ganancia=40")
 
 except Exception as e:
     db.rollback()
-    print(f"❌ Error: {e}")
+    print(f" Error: {e}")
     import traceback
     traceback.print_exc()
 finally:

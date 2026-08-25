@@ -28,29 +28,44 @@ def obtener_pnl(db: Session, mes: str) -> schemas.PnLResponse:
     start_date = date(year, month, 1)
     end_date = date(year, month, last_day)
 
-    # 1. Obtener ingresos por moneda (pagos recibidos)
+    # 1. Obtener ingresos por moneda (pagos recibidos), en bruto y en COP.
+    #    La conversión usa la tasa congelada de cada pago (monto_en_moneda_base).
     ingresos_query = (
-        db.query(Moneda.codigo, func.sum(Pago.monto).label("total"))
+        db.query(
+            Moneda.codigo,
+            func.sum(Pago.monto).label("total"),
+            func.sum(Pago.monto_en_moneda_base).label("total_cop"),
+        )
         .join(Pago, Pago.moneda_id == Moneda.id)
         .filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt)
         .group_by(Moneda.codigo)
         .all()
     )
     ingresos_dict = {row.codigo: Decimal(str(row.total or 0.0)) for row in ingresos_query}
+    ingresos_cop_dict = {row.codigo: Decimal(str(row.total_cop or 0.0)) for row in ingresos_query}
 
-    # 2a. Obtener gastos generales por moneda
+    # 2a. Obtener gastos generales por moneda (bruto y COP con su tasa del día)
     gastos_query = (
-        db.query(Moneda.codigo, func.sum(Gasto.monto).label("total"))
+        db.query(
+            Moneda.codigo,
+            func.sum(Gasto.monto).label("total"),
+            func.sum(Gasto.monto_en_moneda_base).label("total_cop"),
+        )
         .join(Gasto, Gasto.moneda_id == Moneda.id)
         .filter(Gasto.fecha >= start_date, Gasto.fecha <= end_date)
         .group_by(Moneda.codigo)
         .all()
     )
     gastos_dict = {row.codigo: Decimal(str(row.total or 0.0)) for row in gastos_query}
+    gastos_cop_dict = {row.codigo: Decimal(str(row.total_cop or 0.0)) for row in gastos_query}
 
-    # 2b. Obtener compras de materiales en estado RECIBIDA por moneda
+    # 2b. Obtener compras de materiales en estado RECIBIDA por moneda (bruto y COP)
     compras_query = (
-        db.query(Moneda.codigo, func.sum(DetalleCompra.cantidad * DetalleCompra.costo_unitario).label("total"))
+        db.query(
+            Moneda.codigo,
+            func.sum(DetalleCompra.cantidad * DetalleCompra.costo_unitario).label("total"),
+            func.sum(DetalleCompra.cantidad * DetalleCompra.costo_unitario * Compra.tasa_cambio).label("total_cop"),
+        )
         .select_from(DetalleCompra)
         .join(Compra, DetalleCompra.compra_id == Compra.id)
         .join(Moneda, Compra.moneda_id == Moneda.id)
@@ -59,29 +74,27 @@ def obtener_pnl(db: Session, mes: str) -> schemas.PnLResponse:
         .all()
     )
     compras_dict = {row.codigo: Decimal(str(row.total or 0.0)) for row in compras_query}
+    compras_cop_dict = {row.codigo: Decimal(str(row.total_cop or 0.0)) for row in compras_query}
 
-    # 2c. Obtener mano de obra pagada por moneda (vía pedido -> venta -> moneda)
+    # 2c. Mano de obra pagada. Se paga en COP SIEMPRE (a los trabajadores se les
+    #     paga en pesos, sin importar la moneda en que el cliente pagó la venta),
+    #     así que va al grupo COP tanto en bruto como en equivalente.
     mano_obra_list = (
-        db.query(ManoObra, Moneda.codigo.label("moneda_cod"))
+        db.query(ManoObra)
         .select_from(ManoObra)
-        .join(EtapaProduccion, ManoObra.etapa_produccion_id == EtapaProduccion.id)
-        .join(OrdenProduccion, EtapaProduccion.orden_produccion_id == OrdenProduccion.id)
-        .join(DetallePedido, OrdenProduccion.detalle_pedido_id == DetallePedido.id)
-        .join(Pedido, DetallePedido.pedido_id == Pedido.id)
-        .outerjoin(Venta, Venta.pedido_id == Pedido.id)
-        .outerjoin(Moneda, Venta.moneda_id == Moneda.id)
         .filter(ManoObra.updated_at >= start_dt, ManoObra.updated_at <= end_dt, ManoObra.pagado == True)
         .all()
     )
 
-    mano_obra_dict = {}
-    for mo, moneda_cod in mano_obra_list:
-        cod = moneda_cod or "COP"  # fallback a COP si no hay venta/moneda asociada
+    mano_obra_dict = {"COP": Decimal("0.0")}
+    mano_obra_cop_dict = {"COP": Decimal("0.0")}
+    for mo in mano_obra_list:
         recargo = Decimal(str(mo.porcentaje_recargo or 0.0)) / Decimal("100.0")
         monto_total = Decimal(str(mo.monto)) * (Decimal("1.0") + recargo)
-        mano_obra_dict[cod] = mano_obra_dict.get(cod, Decimal("0.0")) + monto_total
+        mano_obra_dict["COP"] += monto_total
+        mano_obra_cop_dict["COP"] += monto_total
 
-    # 3. Combinar todas las monedas
+    # 3. Combinar todas las monedas (bruto + equivalente COP)
     todas_monedas = set(ingresos_dict.keys()).union(gastos_dict.keys(), compras_dict.keys(), mano_obra_dict.keys())
     detalles = []
     for cod in todas_monedas:
@@ -89,16 +102,24 @@ def obtener_pnl(db: Session, mes: str) -> schemas.PnLResponse:
         gas = gastos_dict.get(cod, Decimal("0.0"))
         com = compras_dict.get(cod, Decimal("0.0"))
         mo_val = mano_obra_dict.get(cod, Decimal("0.0"))
+        ing_cop = ingresos_cop_dict.get(cod, Decimal("0.0"))
+        gas_cop = gastos_cop_dict.get(cod, Decimal("0.0"))
+        com_cop = compras_cop_dict.get(cod, Decimal("0.0"))
+        mo_cop = mano_obra_cop_dict.get(cod, Decimal("0.0"))
 
         # Egresos totales = Gastos generales + Compras recibidas + Mano de obra pagada
         egresos_totales = gas + com + mo_val
+        egresos_cop = gas_cop + com_cop + mo_cop
 
         detalles.append(
             schemas.PnLDetail(
                 moneda=cod,
                 ingresos=ing,
                 gastos=egresos_totales,
-                balance=ing - egresos_totales
+                balance=ing - egresos_totales,
+                ingresos_cop=ing_cop,
+                gastos_cop=egresos_cop,
+                balance_cop=ing_cop - egresos_cop,
             )
         )
 
@@ -472,12 +493,15 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
         total_inicial += v_inicial
         total_final += v_final
 
-    # Saldos de caja a fin de mes (en COP)
+    # Saldos de caja a fin de mes (en COP). NO forman parte del inventario:
+    # sumarlos a inventarios_finales fabricaba una utilidad ficticia (el costo
+    # de ventas salía negativo por decenas de millones). Se exponen aparte en
+    # el informe (campo saldos_caja al final de la respuesta).
     metodos_caja = db.query(model.MetodoCaja).filter(model.MetodoCaja.activo == True).order_by(model.MetodoCaja.orden).all()
+    saldos_caja = []
     for mc in metodos_caja:
         saldo = _saldo_caja_en_cop(db, mc.id, end_date)
-        inventarios_finales.append(schemas.LineaValorConcepto(concepto_id=-mc.id, nombre=f"Caja: {mc.nombre}", valor=saldo))
-        total_final += saldo
+        saldos_caja.append(schemas.LineaValorConcepto(concepto_id=-mc.id, nombre=mc.nombre, valor=saldo))
 
     # Compras del mes (recibidas)
     compras_mes = (
@@ -531,17 +555,22 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     administrativos = _lineas_categoria("ADMINISTRATIVO")
     financieros = _lineas_categoria("FINANCIERO")
     impuestos = _lineas_categoria("IMPUESTO")
+    # El consumo de materia prima en producción (PRODUCCION) es un costo real:
+    # antes quedaba fuera del estado de resultados y solo aparecía en el resumen.
+    produccion = _lineas_categoria("PRODUCCION")
 
     gastos_estado = schemas.GastosEstadoResultados(
         operativos=operativos,
         administrativos=administrativos,
         financieros=financieros,
         impuestos=impuestos,
+        produccion=produccion,
         total_gastos_operativos=sum(l.monto for l in operativos),
         total_gastos_administrativos=sum(l.monto for l in administrativos),
         total_financieros=sum(l.monto for l in financieros),
         total_impuestos=sum(l.monto for l in impuestos),
-        total_gastos=sum(l.monto for l in operativos + administrativos + financieros + impuestos),
+        total_gastos_produccion=sum(l.monto for l in produccion),
+        total_gastos=sum(l.monto for l in operativos + administrativos + financieros + impuestos + produccion),
     )
 
     estado = schemas.EstadoResultados(
@@ -674,6 +703,7 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
             lineas=pedidos_pendientes,
             total_pendiente=total_pendiente,
         ),
+        saldos_caja=saldos_caja,
     )
 
 
@@ -752,6 +782,20 @@ def listar_metodos_caja(db: Session) -> List[model.MetodoCaja]:
 def crear_metodo_caja(db: Session, esquema: schemas.MetodoCajaCreate) -> model.MetodoCaja:
     obj = model.MetodoCaja(**esquema.model_dump())
     db.add(obj)
+    db.flush()
+    # Por defecto, toda cuenta nueva abre con un millón (COP) de saldo inicial.
+    from app.core.caja import registrar_movimiento_caja
+    registrar_movimiento_caja(
+        db,
+        metodo_caja_id=obj.id,
+        tipo="APERTURA",
+        monto=1_000_000.0,
+        moneda_id=1,
+        tasa_cambio=1.0,
+        fecha=date.today(),
+        referencia="Saldo inicial por defecto",
+        observaciones="Apertura por defecto: 1.000.000 COP",
+    )
     db.commit()
     db.refresh(obj)
     return obj
@@ -830,6 +874,153 @@ def eliminar_movimiento_caja(db: Session, movimiento_id: int) -> bool:
     return True
 
 
+def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
+    """Devuelve (concepto legible, responsable) de un movimiento de caja.
+
+    Interpreta la `referencia` estándar ("Gasto #N", "Pago #N", "Nómina #N",
+    "Compra #N") para enriquecerlo con el nombre real; queda NULL quien no
+    aplica o si el registro original ya no existe.
+    """
+    quien = m.usuario.nombre_usuario if m.usuario else None
+    ref = (m.referencia or "").strip()
+    if ref.startswith("Gasto #"):
+        try:
+            g = db.query(Gasto).filter(Gasto.id == int(ref.split("#")[1].split(" ")[0])).first()
+        except ValueError:
+            g = None
+        if g:
+            nombre_tipo = g.tipo_gasto.nombre if g.tipo_gasto else "Gasto"
+            desc = g.descripcion or ""
+            concepto = f"Gasto: {nombre_tipo}" + (f" — {desc}" if desc else "")
+            return concepto, (g.creador.nombre_usuario if g.creador else quien)
+        return "Gasto", quien
+    if ref.startswith("Pago #"):
+        try:
+            pago_id = int(ref.split("#")[1].split(" ")[0])
+            f = db.query(Pago).filter(Pago.id == pago_id).first()
+        except ValueError:
+            f = None
+        if f and f.venta:
+            cliente = f.venta.cliente.nombre if f.venta.cliente else "?"
+            concepto = f"Pago venta #{f.venta_id} — {cliente}"
+        else:
+            concepto = "Pago"
+        return concepto, quien
+    if ref.startswith("Nómina #"):
+        return "Nómina semanal", quien
+    if ref.startswith("Compra #"):
+        return "Compra", quien
+    return ref or "Movimiento", quien
+
+
+def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
+    """Estado del día: saldo inicial, ingresos, egresos y quién los hizo.
+
+    Se construye desde `movimiento_caja` (la bitácora única de caja). La
+    convención es la misma que _saldo_caja_en_cop: SALIDA resta; el resto
+    suma (AJUSTE lleva su signo en el monto). Todo se expresa en COP.
+    """
+    movs = (
+        db.query(model.MovimientoCaja)
+        .options(
+            sa_orm.joinedload(model.MovimientoCaja.metodo_caja),
+            sa_orm.joinedload(model.MovimientoCaja.moneda),
+            sa_orm.joinedload(model.MovimientoCaja.usuario),
+        )
+        .filter(model.MovimientoCaja.fecha <= dia)
+        .order_by(model.MovimientoCaja.fecha, model.MovimientoCaja.id)
+        .all()
+    )
+
+    def cop(m) -> Decimal:
+        if m.monto_en_moneda_base is not None:
+            return Decimal(str(m.monto_en_moneda_base))
+        return Decimal(str(m.monto)) * Decimal(str(m.tasa_cambio or 1.0))
+
+    def signo(m) -> Decimal:
+        return Decimal("-1") if m.tipo == "SALIDA" else Decimal("1")
+
+    # Saldo inicial (antes del día) por cuenta
+    inicial_por_cuenta: Dict[int, Decimal] = {}
+    for m in movs:
+        if m.fecha < dia:
+            inicial_por_cuenta[m.metodo_caja_id] = (
+                inicial_por_cuenta.get(m.metodo_caja_id, Decimal("0")) + signo(m) * cop(m)
+            )
+
+    # Movimientos del día + totales COP + desglose por moneda
+    movimientos: List[schemas.MovimientoDiarioResponse] = []
+    total_ingresos_cop = Decimal("0.0")
+    total_egresos_cop = Decimal("0.0")
+    por_moneda: Dict[int, dict] = {}
+    final_por_cuenta: Dict[int, Decimal] = dict(inicial_por_cuenta)
+
+    for m in movs:
+        if m.fecha != dia:
+            continue
+        montocop = cop(m)
+        val_cuenta = final_por_cuenta.get(m.metodo_caja_id, Decimal("0"))
+        final_por_cuenta[m.metodo_caja_id] = val_cuenta + signo(m) * montocop
+        if m.tipo == "SALIDA":
+            total_egresos_cop += montocop
+        else:
+            total_ingresos_cop += montocop
+
+        meta = por_moneda.setdefault(
+            m.moneda_id,
+            {"moneda_id": m.moneda_id,
+             "codigo": m.moneda.codigo if m.moneda else "?",
+             "simbolo": m.moneda.simbolo if m.moneda else "?",
+             "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
+             "monto_cop": Decimal("0.0")},
+        )
+        if m.tipo == "SALIDA":
+            meta["monto_egresos"] += Decimal(str(m.monto))
+        else:
+            meta["monto_ingresos"] += Decimal(str(m.monto))
+        meta["monto_cop"] += montocop
+
+        concepto, quien = _concepto_movimiento(db, m)
+        movimientos.append(
+            schemas.MovimientoDiarioResponse(
+                id=m.id,
+                tipo=m.tipo,
+                moneda_codigo=m.moneda.codigo if m.moneda else "?",
+                moneda_simbolo=m.moneda.simbolo if m.moneda else "?",
+                monto=m.monto,
+                monto_cop=montocop,
+                cuenta_nombre=m.metodo_caja.nombre if m.metodo_caja else None,
+                referencia=m.referencia,
+                concepto=concepto,
+                quien=quien,
+            )
+        )
+
+    saldo_inicial_cop = sum(inicial_por_cuenta.values(), Decimal("0"))
+    saldo_final_cop = sum(final_por_cuenta.values(), Decimal("0"))
+
+    saldos_por_cuenta = [
+        schemas.SaldoCuentaDiaria(
+            metodo_caja_id=mid,
+            cuenta_nombre=mc.nombre,
+            saldo_inicial_cop=inicial_por_cuenta.get(mid, Decimal("0")),
+            saldo_final_cop=final_por_cuenta.get(mid, Decimal("0")),
+        )
+        for mid, mc in {mm.metodo_caja_id: mm.metodo_caja for mm in movs if mm.metodo_caja}.items()
+    ]
+
+    return schemas.ResumenDiarioResponse(
+        fecha=dia,
+        saldo_inicial_cop=saldo_inicial_cop,
+        total_ingresos_cop=total_ingresos_cop,
+        total_egresos_cop=total_egresos_cop,
+        saldo_final_cop=saldo_final_cop,
+        movimientos=movimientos,
+        por_moneda=[schemas.LineaMonedaDiaria(**data) for data in por_moneda.values()],
+        saldos_por_cuenta=saldos_por_cuenta,
+    )
+
+
 def resumen_cuentas(db: Session) -> List[dict]:
     """
     Saldo por cada cuenta activa: desglosado por moneda (en su propia moneda
@@ -886,10 +1077,54 @@ def listar_devoluciones(db: Session, fecha_desde: Optional[date] = None, fecha_h
     return query.order_by(model.DevolucionVenta.fecha.desc()).all()
 
 def crear_devolucion(db: Session, esquema: schemas.DevolucionVentaCreate) -> model.DevolucionVenta:
+    # 1. La devolución debe corresponder a una venta existente y no superar lo cobrado.
+    from app.modules.sales.model import Venta, Pago
+    venta = db.query(Venta).filter(Venta.id == esquema.venta_id).first()
+    if not venta:
+        raise ValueError("La venta especificada no existe.")
+    total_pagado = sum(
+        float(p.monto_en_moneda_base) for p in db.query(Pago).filter(Pago.venta_id == venta.id).all()
+    )
+    # Resta lo YA devuelto en devoluciones previas: sin esto se podía reembolsar
+    # N veces la misma venta (cada devolución generaba una SALIDA de caja).
+    total_ya_devuelto = sum(
+        float(d.monto_en_moneda_base or 0)
+        for d in db.query(model.DevolucionVenta).filter(model.DevolucionVenta.venta_id == venta.id).all()
+    )
+    monto_devuelto_base = round(
+        Decimal(str(esquema.monto_devuelto)) * Decimal(str(esquema.tasa_cambio or 1.0)), 2
+    )
+    if monto_devuelto_base + Decimal(str(round(total_ya_devuelto, 2))) > Decimal(str(total_pagado)) + Decimal("0.01"):
+        raise ValueError(
+            f"El monto devuelto ({monto_devuelto_base:,.2f} COP, ya se han devuelto "
+            f"{total_ya_devuelto:,.2f}) excede lo cobrado en la venta "
+            f"({total_pagado:,.2f} COP). No se puede devolver más de lo pagado."
+        )
+
     datos = esquema.model_dump()
-    datos["monto_en_moneda_base"] = round(Decimal(str(datos["monto_devuelto"])) * Decimal(str(datos.get("tasa_cambio") or 1.0)), 2)
+    datos["monto_en_moneda_base"] = monto_devuelto_base
     obj = model.DevolucionVenta(**datos)
     db.add(obj)
+    db.flush()
+
+    # 2. El reembolso SALE de la misma cuenta por la que se cobró (último pago).
+    #    Sin esto, la devolución era solo un número en el ER: el dinero cobrado
+    #    permanecía en caja y se contaba dos veces.
+    ultimo_pago = db.query(Pago).filter(Pago.venta_id == venta.id).order_by(Pago.id.desc()).first()
+    if ultimo_pago and ultimo_pago.metodo_pago:
+        from app.core.caja import registrar_movimiento_caja
+        registrar_movimiento_caja(
+            db,
+            codigo=ultimo_pago.metodo_pago,
+            tipo="SALIDA",
+            monto=float(esquema.monto_devuelto),
+            moneda_id=esquema.moneda_id,
+            tasa_cambio=float(esquema.tasa_cambio or 1.0),
+            fecha=esquema.fecha,
+            referencia=f"Devolución venta #{venta.id}",
+            observaciones=esquema.motivo or f"Devolución de la venta #{venta.id}",
+        )
+
     db.commit()
     db.refresh(obj)
     return obj
@@ -898,6 +1133,11 @@ def eliminar_devolucion(db: Session, devolucion_id: int) -> bool:
     obj = db.query(model.DevolucionVenta).filter(model.DevolucionVenta.id == devolucion_id).first()
     if not obj:
         return False
+    # Revertir el reembolso de caja (ENTRADA de vuelta) para no dejar egresos fantasma.
+    from app.modules.reports.model import MovimientoCaja
+    db.query(MovimientoCaja).filter(
+        MovimientoCaja.referencia == f"Devolución venta #{obj.venta_id}"
+    ).delete(synchronize_session=False)
     db.delete(obj)
     db.commit()
     return True

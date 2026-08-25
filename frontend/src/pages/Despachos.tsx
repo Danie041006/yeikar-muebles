@@ -6,12 +6,15 @@ import { OrderDetail } from '../services/pedidoService';
 import { Empleado } from '../services/produccionService';
 import api from '../services/api';
 import LocationTracker from '../components/LocationTracker';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { SearchSelect } from '../components/ui';
+import { useToast } from '../context/ToastContext';
 export default function Despachos() {
-  const [envios, setEnvios] = useState<Envio[]>([]);
+  const toast = useToast();  const [envios, setEnvios] = useState<Envio[]>([]);
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [activeTab, setActiveTab] = useState<'PREPARADO' | 'EN_TRANSITO' | 'ENTREGADO' | 'FALLIDO'>('PREPARADO');
+  const [activeTab, setActiveTab] = useState<'activos' | 'historicos'>('activos');
   // Modal / Assign Form state
   const [assigningEnvio, setAssigningEnvio] = useState<Envio | null>(null);
   const [selectedEmpleadoId, setSelectedEmpleadoId] = useState('');
@@ -33,6 +36,8 @@ export default function Despachos() {
   const [placasGuia, setPlacasGuia] = useState('');
   const [loadingVenta, setLoadingVenta] = useState(false);
   const [entregandoId, setEntregandoId] = useState<number | null>(null);
+  const [confirmEntregaId, setConfirmEntregaId] = useState<number | null>(null);
+  const [confirmReprogramarId, setConfirmReprogramarId] = useState<number | null>(null);
 
   const handleOpenGuiaModal = async (envio: Envio) => {
     setShowGuiaModal(envio);
@@ -100,7 +105,7 @@ export default function Despachos() {
         pdf.save(`Guia_Despacho_Yeikar_${showGuiaModal.guia_despacho || showGuiaModal.id}.pdf`);
       } catch (err) {
         console.error('Error al generar la Guía de Despacho:', err);
-        alert('Hubo un error al generar la Guía de Despacho en PDF.');
+        toast.error('Hubo un error al generar la Guía de Despacho en PDF.');
       } finally {
         setIsGeneratingGuia(false);
       }
@@ -113,7 +118,10 @@ export default function Despachos() {
   const fetchEnvios = async () => {
     try {
       setLoading(true);
-      const data = await envioService.getAll(search || undefined, activeTab);
+      // Activos = pendientes + en ruta; Históricos = entregados + fallidos.
+      const estados = activeTab === 'activos' ? ['PREPARADO', 'EN_TRANSITO'] : ['ENTREGADO', 'FALLIDO'];
+      const [a, b] = await Promise.all(estados.map((e) => envioService.getAll(search || undefined, e)));
+      const data = [...a, ...b];
       setEnvios(data);
     } catch (error) {
       console.error('Error fetching delivery shipments:', error);
@@ -155,25 +163,29 @@ export default function Despachos() {
     };
     try {
       await envioService.update(assigningEnvio.id, data);
-      alert('¡Envío asignado y puesto en tránsito con éxito!');
+      toast.success('¡Envío asignado y puesto en tránsito con éxito!');
       setAssigningEnvio(null);
       fetchEnvios();
     } catch (error) {
       console.error('Error dispatching shipment:', error);
-      alert('Ocurrió un error al registrar el despacho.');
+      toast.error('Ocurrió un error al registrar el despacho.');
     }
   };
-  const handleConfirmEntrega = async (envioId: number) => {
-    if (entregandoId !== null) return;
-    if (!window.confirm('¿Confirmar que el pedido ha sido entregado exitosamente al cliente?')) return;
+  const handleConfirmEntrega = (envioId: number) => {
+    setConfirmEntregaId(envioId);
+  };
+  const ejecutarConfirmarEntrega = async () => {
+    const envioId = confirmEntregaId;
+    if (envioId === null || entregandoId !== null) return;
+    setConfirmEntregaId(null);
     setEntregandoId(envioId);
     try {
       await envioService.updateEstado(envioId, 'ENTREGADO');
-      alert('¡Envío marcado como ENTREGADO y Pedido actualizado!');
+      toast.success('¡Envío marcado como ENTREGADO y Pedido actualizado!');
       fetchEnvios();
     } catch (error) {
       console.error('Error delivering shipment:', error);
-      alert('Error al confirmar la entrega.');
+      toast.error('Error al confirmar la entrega.');
     } finally {
       setEntregandoId(null);
     }
@@ -191,27 +203,32 @@ export default function Despachos() {
     };
     try {
       await envioService.update(failingEnvio.id, data);
-      alert('Envío reportado como fallido.');
+      toast.success('Envío reportado como fallido.');
       setFailingEnvio(null);
       fetchEnvios();
     } catch (error) {
       console.error('Error failing shipment:', error);
-      alert('Error al reportar la falla.');
+      toast.error('Error al reportar la falla.');
     }
   };
-  const handleReProgramar = async (envioId: number) => {
-    if (!window.confirm('¿Desea re-programar este despacho? Volverá al estado PENDIENTE de asignación.')) return;
+  const handleReProgramar = (envioId: number) => {
+    setConfirmReprogramarId(envioId);
+  };
+  const ejecutarReProgramar = async () => {
+    const envioId = confirmReprogramarId;
+    if (envioId === null) return;
+    setConfirmReprogramarId(null);
     try {
       await envioService.update(envioId, {
         estado: 'PREPARADO',
         fecha_salida: null,
         fecha_entrega: null
       });
-      alert('Envío re-programado con éxito.');
+      toast.success('Envío re-programado con éxito.');
       fetchEnvios();
     } catch (error) {
       console.error('Error reprogramming shipment:', error);
-      alert('Error al re-programar.');
+      toast.error('Error al re-programar.');
     }
   };
   const getStatusBadgeClass = (status: string) => {
@@ -248,7 +265,7 @@ export default function Despachos() {
       </div>
       {/* Tabs bar */}
       <div className="flex gap-2 border-b border-yeikar-secondary-light/10 pb-px flex-wrap">
-        {(['PREPARADO', 'EN_TRANSITO', 'ENTREGADO', 'FALLIDO'] as const).map((tab) => (
+        {(['activos', 'historicos'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -258,10 +275,7 @@ export default function Despachos() {
                 : 'border-transparent text-yeikar-neutral/65 hover:text-yeikar-primary'
             }`}
           >
-            {tab === 'PREPARADO' && 'Pendientes'}
-            {tab === 'EN_TRANSITO' && 'En Ruta'}
-            {tab === 'ENTREGADO' && 'Entregados'}
-            {tab === 'FALLIDO' && 'Novedades/Fallas'}
+            {tab === 'activos' ? 'Activos (Pendientes + En ruta)' : 'Históricos (Entregados + Fallidos)'}
           </button>
         ))}
       </div>
@@ -369,6 +383,12 @@ export default function Despachos() {
               </div>
               {/* Action Buttons */}
               <div className="mt-5 pt-3 border-t border-yeikar-secondary-light/5 flex flex-col gap-2">
+                <button
+                  onClick={() => { window.location.href = `/historial?tipo=envio&id=${envio.id}`; }}
+                  className="w-full bg-yeikar-tertiary/60 hover:bg-yeikar-tertiary text-yeikar-secondary text-xs font-headline font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5"
+                >
+                  📂 Expediente completo
+                </button>
                 <div className="flex gap-2">
                   {envio.estado === 'PREPARADO' && (
                     <button
@@ -432,19 +452,15 @@ export default function Despachos() {
             <form onSubmit={handleAssignSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Chofer/Conductor *</label>
-                <select
+                <SearchSelect
                   value={selectedEmpleadoId}
-                  onChange={(e) => setSelectedEmpleadoId(e.target.value)}
-                  required
-                  className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
-                >
-                  <option value="">Selecciona Conductor...</option>
-                  {empleados.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.nombre} {emp.apellido} ({emp.cargo?.nombre || 'Empleado'})
-                    </option>
-                  ))}
-                </select>
+                  onChange={(v) => setSelectedEmpleadoId(String(v))}
+                  options={empleados.map((emp) => ({
+                    value: emp.id,
+                    label: `${emp.nombre} ${emp.apellido} (${emp.cargo?.nombre || 'Empleado'})`,
+                  }))}
+                  placeholder="Selecciona Conductor..."
+                />
               </div>
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Guía de Despacho (Opcional)</label>
@@ -487,7 +503,7 @@ export default function Despachos() {
                   type="submit"
                   className="bg-yeikar-primary text-yeikar-neutral px-4 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow transition-all"
                 >
-                  Despachar y Salir 🚛
+                  Despachar y Salir 
                 </button>
               </div>
             </form>
@@ -553,12 +569,12 @@ export default function Despachos() {
               </div>
             ) : ventaLinkedGuia ? (
               <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-xs space-y-1">
-                <p className="font-bold text-green-800">✓ Factura vinculada encontrada</p>
+                <p className="font-bold text-green-800">Factura vinculada encontrada</p>
                 <p className="text-green-700 font-mono">Factura #{ventaLinkedGuia.id} · {ventaLinkedGuia.moneda?.codigo} {Number(ventaLinkedGuia.total).toLocaleString('es-VE', { minimumFractionDigits: 2 })}</p>
               </div>
             ) : (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs">
-                <p className="text-amber-800">⚠ No se encontró factura vinculada para este pedido. Los montos en el PDF estarán vacíos.</p>
+                <p className="text-amber-800"> No se encontró factura vinculada para este pedido. Los montos en el PDF estarán vacíos.</p>
               </div>
             )}
 
@@ -883,6 +899,24 @@ export default function Despachos() {
           </div>
         );
       })()}
+      <ConfirmDialog
+        open={confirmEntregaId !== null}
+        title="Confirmar entrega"
+        message="¿Confirmar que el pedido ha sido entregado exitosamente al cliente? El envío pasará a ENTREGADO y el pedido se actualizará."
+        confirmLabel="Sí, entregado"
+        danger={false}
+        onConfirm={ejecutarConfirmarEntrega}
+        onCancel={() => setConfirmEntregaId(null)}
+      />
+      <ConfirmDialog
+        open={confirmReprogramarId !== null}
+        title="Re-programar despacho"
+        message="¿Desea re-programar este despacho? Volverá al estado PENDIENTE de asignación."
+        confirmLabel="Sí, re-programar"
+        danger={false}
+        onConfirm={ejecutarReProgramar}
+        onCancel={() => setConfirmReprogramarId(null)}
+      />
     </div>
   );
 }

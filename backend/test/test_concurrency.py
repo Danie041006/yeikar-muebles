@@ -356,6 +356,12 @@ def test_consumos_simultaneos_no_exceden_stock(client, db, cleaner):
     })
     assert st == 201, f"crear etapa → {st}: {etapa}"
     cleaner.registrar("etapa_produccion", etapa["id"])
+    # Máquina de estados: los consumos exigen la etapa EN_PROCESO
+    r_ep = client.put(
+        f"/api/v1/produccion/etapa/{etapa['id']}/estado",
+        params={"estado": "EN_PROCESO"}, headers=ADMIN_HEADERS,
+    )
+    assert r_ep.status_code == 200, f"etapa EN_PROCESO → {r_ep.status_code}: {r_ep.text}"
 
     # Stock de 10 para el material
     st, body = crear_movimiento(client, cleaner, material["id"], "ENTRADA", 10)

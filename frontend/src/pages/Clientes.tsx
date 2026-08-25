@@ -11,12 +11,16 @@ import {
   Field,
   Input,
   Textarea,
+  ResponsiveDataTable,
+  type DataColumn,
 } from '../components/ui';
 import { clienteService, Client, ClientCreate } from '../services/clienteService';
 import { Plus, Users, Mail, Phone, Pencil, Trash2, MapPin } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 
 export default function Clientes() {
   const [clients, setClients] = useState<Client[]>([]);
+  const toast = useToast();
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -32,6 +36,7 @@ export default function Clientes() {
   // Form State
   const [formData, setFormData] = useState<ClientCreate>({
     nombre: '',
+    cedula: '',
     telefono: '',
     email: '',
     direccion: '',
@@ -71,6 +76,7 @@ export default function Clientes() {
     setEditingClient(null);
     setFormData({
       nombre: '',
+      cedula: '',
       telefono: '',
       email: '',
       direccion: '',
@@ -85,6 +91,7 @@ export default function Clientes() {
     setEditingClient(client);
     setFormData({
       nombre: client.nombre,
+      cedula: client.cedula || '',
       telefono: client.telefono || '',
       email: client.email || '',
       direccion: client.direccion || '',
@@ -110,6 +117,7 @@ export default function Clientes() {
     // Limpiar campos opcionales vacíos para no enviar strings vacíos al backend
     const payload: any = {
       nombre: formData.nombre.trim(),
+      cedula: formData.cedula?.trim() || null,
       telefono: formData.telefono.trim(),
       email: formData.email?.trim() || null,
       direccion: formData.direccion?.trim() || null,
@@ -145,9 +153,91 @@ export default function Clientes() {
       fetchClients(search);
     } catch (err: any) {
       console.error(err);
-      alert('No se pudo eliminar el cliente.');
+      toast.error('No se pudo eliminar el cliente.');
     }
   };
+
+  const renderActions = (client: Client) => (
+    <>
+      <button
+        onClick={() => handleOpenEditModal(client)}
+        className="p-2 text-slate-400 hover:text-amber-800 hover:bg-amber-500/10 transition-all rounded-xl"
+        title="Editar"
+        aria-label="Editar cliente"
+      >
+        <Pencil className="w-4 h-4" />
+      </button>
+      <button
+        onClick={() => handleOpenDeleteConfirm(client.id)}
+        className="p-2 text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-all rounded-xl"
+        title="Eliminar"
+        aria-label="Eliminar cliente"
+      >
+        <Trash2 className="w-4 h-4" />
+      </button>
+    </>
+  );
+
+  const columns: DataColumn<Client>[] = [
+    {
+      key: 'nombre',
+      header: 'Nombre',
+      render: (c) => (
+        <span className="font-bold text-yeikar-neutral font-headline">{c.nombre}</span>
+      ),
+      mobilePrimary: true,
+    },
+    {
+      key: 'contacto',
+      header: 'Contacto',
+      render: (c) => (
+        <div className="space-y-1.5">
+          {c.email && (
+            <div className="flex items-center gap-2 text-slate-600">
+              <Mail className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+              <span className="text-xs">{c.email}</span>
+            </div>
+          )}
+          {c.telefono && (
+            <div className="flex items-center gap-2 text-slate-600">
+              <Phone className="w-3.5 h-3.5 text-amber-800 shrink-0" />
+              <span className="font-mono text-xs">{c.telefono}</span>
+            </div>
+          )}
+        </div>
+      ),
+      mobileLabel: 'Contacto',
+      mobileSecondary: true,
+    },
+    {
+      key: 'ubicacion',
+      header: 'Ubicación',
+      render: (c) => (
+        <div>
+          {c.direccion && (
+            <div className="flex items-center gap-2 text-slate-600 text-xs">
+              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span>{c.direccion}</span>
+            </div>
+          )}
+          {(c.ciudad || c.estado) && (
+            <div className="text-xs text-slate-400 font-mono ml-5.5 mt-0.5">
+              {c.ciudad}
+              {c.ciudad && c.estado && ', '}
+              {c.estado}
+            </div>
+          )}
+        </div>
+      ),
+      mobileLabel: 'Ubicación',
+    },
+    {
+      key: 'observaciones',
+      header: 'Observaciones',
+      render: (c) => <span className="text-slate-400 italic max-w-xs truncate text-xs">{c.observaciones || '—'}</span>,
+      mobileLabel: 'Notas',
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -204,80 +294,20 @@ export default function Clientes() {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr>
-                  <th className="table-th">Nombre</th>
-                  <th className="table-th">Contacto</th>
-                  <th className="table-th">Ubicación</th>
-                  <th className="table-th">Observaciones</th>
-                  <th className="table-th text-right">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {clients.map((client) => (
-                  <tr key={client.id} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="table-td font-bold text-yeikar-neutral font-headline">
-                      {client.nombre}
-                    </td>
-                    <td className="table-td space-y-1.5">
-                      {client.email && (
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <Mail className="w-3.5 h-3.5 text-amber-800" />
-                          <span className="text-xs">{client.email}</span>
-                        </div>
-                      )}
-                      {client.telefono && (
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <Phone className="w-3.5 h-3.5 text-amber-800" />
-                          <span className="font-mono text-xs">{client.telefono}</span>
-                        </div>
-                      )}
-                    </td>
-                    <td className="table-td">
-                      {client.direccion && (
-                        <div className="flex items-center gap-2 text-slate-600 text-xs">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{client.direccion}</span>
-                        </div>
-                      )}
-                      {(client.ciudad || client.estado) && (
-                        <div className="text-xs text-slate-400 font-mono ml-5.5">
-                          {client.ciudad}
-                          {client.ciudad && client.estado && ', '}
-                          {client.estado}
-                        </div>
-                      )}
-                    </td>
-                    <td className="table-td text-slate-400 italic max-w-xs truncate text-xs">
-                      {client.observaciones || '—'}
-                    </td>
-                    <td className="table-td text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleOpenEditModal(client)}
-                          className="p-2 text-slate-400 hover:text-amber-800 hover:bg-amber-500/10 transition-all rounded-xl"
-                          title="Editar"
-                          aria-label="Editar cliente"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleOpenDeleteConfirm(client.id)}
-                          className="p-2 text-slate-400 hover:text-rose-700 hover:bg-rose-50 transition-all rounded-xl"
-                          title="Eliminar"
-                          aria-label="Eliminar cliente"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveDataTable
+            columns={columns}
+            rows={clients}
+            rowKey={(c) => c.id}
+            cardBadge={(c) =>
+              c.cedula ? (
+                <span className="rounded-full border border-amber-500/20 bg-amber-50 px-2.5 py-1 font-mono text-[10px] font-bold text-amber-800">
+                  {c.cedula}
+                </span>
+              ) : undefined
+            }
+            tableActions={renderActions}
+            cardActions={renderActions}
+          />
         )}
       </Card>
 
@@ -328,15 +358,26 @@ export default function Clientes() {
                 className="font-mono"
               />
             </Field>
-            <Field label="Correo Electrónico">
+            <Field label="Cédula / RIF">
               <Input
-                type="email"
-                name="email"
-                value={formData.email ?? ''}
+                type="text"
+                name="cedula"
+                value={formData.cedula ?? ''}
                 onChange={handleInputChange}
+                placeholder="Ej: V-12.345.678"
+                className="font-mono"
               />
             </Field>
           </div>
+
+          <Field label="Correo Electrónico">
+            <Input
+              type="email"
+              name="email"
+              value={formData.email ?? ''}
+              onChange={handleInputChange}
+            />
+          </Field>
 
           <Field label="Dirección">
             <Input

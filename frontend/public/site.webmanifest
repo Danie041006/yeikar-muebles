@@ -1,0 +1,26 @@
+{
+  "name": "Mueblería YEIKAR - ERP de Gestión",
+  "short_name": "YEIKAR",
+  "description": "Sistema ERP para la gestión integral de fabricación de muebles: cotizaciones, pedidos, producción, inventario y ventas.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F9F7F2",
+  "theme_color": "#2D1B10",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "16x16 32x32 48x48",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "/Logo-yeikar.png",
+      "sizes": "271x272",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

@@ -12,14 +12,23 @@ import Reportes from './pages/Reportes';
 import Productos from './pages/Productos';
 import Calculadora from './pages/Calculadora';
 import Ventas from './pages/Ventas';
+import Facturacion from './pages/Facturacion';
 import Despachos from './pages/Despachos';
+import MisDespachos from './pages/MisDespachos';
 import Usuarios from './pages/Usuarios';
 import Gastos from './pages/Gastos';
 import Cuentas from './pages/Cuentas';
+import CostosProduccion from './pages/CostosProduccion';
+import Nomina from './pages/Nomina';
+import Empleados from './pages/Empleados';
 import CotizadorInteligente from './pages/CotizadorInteligente';
 import Auditoria from './pages/Auditoria';
+import EstadoDia from './pages/EstadoDia';
+import Expediente from './pages/Expediente';
+import NotFound from './pages/NotFound';
 import DashboardLayout from './components/Layout/DashboardLayout';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 
 // Qué módulo protege cada ruta (claves del catálogo del backend)
 const ROUTE_MODULES: Record<string, string> = {
@@ -28,22 +37,29 @@ const ROUTE_MODULES: Record<string, string> = {
   '/cotizaciones': 'cotizaciones',
   '/cotizaciones-ia': 'cotizaciones_ia',
   '/pedidos': 'pedidos',
+  '/historial': 'pedidos',
   '/produccion': 'produccion',
   '/inventario': 'inventario',
   '/reportes': 'reportes',
+  '/reporte-diario': 'reportes',
   '/productos': 'productos',
   '/costos': 'productos',
   '/ventas': 'ventas',
+  '/facturacion': 'facturacion',
   '/envios': 'envios',
+  '/mis-despachos': 'envios',
   '/gastos': 'gastos',
   '/cuentas': 'cuentas',
+  '/costos-produccion': 'costos_produccion',
+  '/nomina': 'nomina',
+  '/empleados': 'empleados',
   '/usuarios': 'usuarios',
   '/auditoria': 'usuarios',
 };
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user, loading, hasModulo } = useAuth();
+  const { user, loading, hasModulo, esAdmin } = useAuth();
 
   const token = localStorage.getItem('token');
   if (!token) return <Navigate to="/login" state={{ from: location }} />;
@@ -68,6 +84,20 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   const modulo = ROUTE_MODULES[location.pathname];
   if (modulo && modulo !== 'dashboard' && !hasModulo(modulo)) {
     return <Navigate to="/dashboard" />;
+  }
+
+  // Vista bifurcada por rol: la administradora ve el panel completo de
+  // Despachos (/envios); el chofer ve solo sus repartos (/mis-despachos).
+  if (location.pathname === '/envios' && !esAdmin) {
+    return <Navigate to="/mis-despachos" replace />;
+  }
+  if (location.pathname === '/mis-despachos' && esAdmin) {
+    return <Navigate to="/envios" replace />;
+  }
+
+  // Reportes financieros y datos globales: solo dueños/administradores.
+  if ((location.pathname === '/reportes' || location.pathname === '/reporte-diario') && !esAdmin) {
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;
@@ -98,6 +128,10 @@ const pageMeta: Record<string, { title: string; description: string }> = {
     title: 'Pedidos',
     description: 'Administración de pedidos y órdenes de compra.',
   },
+  '/historial': {
+    title: 'Expediente',
+    description: 'Historial completo de cada negocio: cotización, pedido, producción, cobros, factura y despacho.',
+  },
   '/produccion': {
     title: 'Producción',
     description: 'Gestión de producción con tablero Kanban para seguimiento de etapas.',
@@ -109,6 +143,10 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   '/reportes': {
     title: 'Reportes',
     description: 'Reportes financieros y de rentabilidad para tu negocio de muebles.',
+  },
+  '/reporte-diario': {
+    title: 'Estado del día',
+    description: 'Ingresos y egresos del día, quién los hizo y saldo de caja.',
   },
   '/productos': {
     title: 'Productos',
@@ -122,9 +160,17 @@ const pageMeta: Record<string, { title: string; description: string }> = {
     title: 'Ventas',
     description: 'Registro y seguimiento de ventas con generación de facturas.',
   },
+  '/facturacion': {
+    title: 'Facturación',
+    description: 'Emisión de facturas fiscales de pedidos pagados al 100% con montos en USD.',
+  },
   '/envios': {
     title: 'Despachos',
     description: 'Gestión de envíos y guías de despacho.',
+  },
+  '/mis-despachos': {
+    title: 'Mis Despachos',
+    description: 'Tus repartos asignados: dirección, muebles a entregar y monitoreo de tu recorrido.',
   },
   '/gastos': {
     title: 'Gastos',
@@ -133,6 +179,18 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   '/cuentas': {
     title: 'Cuentas',
     description: 'Medios de pago (efectivo, Zelle, bancos) y movimientos de cada cuenta con responsable.',
+  },
+  '/costos-produccion': {
+    title: 'Costos de Producción',
+    description: 'Listado de precios de producción por área (Ebanistería, Preparación, Pintura, Tapicería).',
+  },
+  '/nomina': {
+    title: 'Nómina',
+    description: 'Nómina semanal, pagos por empleado y acumulación de aguinaldo.',
+  },
+  '/empleados': {
+    title: 'Empleados',
+    description: 'Registro del personal y configuración de nómina.',
   },
   '/usuarios': {
     title: 'Usuarios',
@@ -147,8 +205,9 @@ const pageMeta: Record<string, { title: string; description: string }> = {
 function App() {
   return (
     <HelmetProvider>
-      <AuthProvider>
-        <BrowserRouter>
+      <ToastProvider>
+        <AuthProvider>
+          <BrowserRouter>
           <OrganizationSchema />
           <Routes>
           <Route path="/login" element={<><SEO {...pageMeta['/login']} /><Login /></>} />
@@ -203,6 +262,16 @@ function App() {
             }
           />
           <Route
+            path="/historial"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/historial']} /><Expediente /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/produccion"
             element={
               <PrivateRoute>
@@ -228,6 +297,16 @@ function App() {
               <PrivateRoute>
                 <DashboardLayout>
                   <><SEO {...pageMeta['/reportes']} /><Reportes /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/reporte-diario"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/reporte-diario']} /><EstadoDia /></>
                 </DashboardLayout>
               </PrivateRoute>
             }
@@ -263,11 +342,31 @@ function App() {
             }
           />
           <Route
+            path="/facturacion"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/facturacion']} /><Facturacion /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/envios"
             element={
               <PrivateRoute>
                 <DashboardLayout>
                   <><SEO {...pageMeta['/envios']} /><Despachos /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/mis-despachos"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/mis-despachos']} /><MisDespachos /></>
                 </DashboardLayout>
               </PrivateRoute>
             }
@@ -293,6 +392,36 @@ function App() {
             }
           />
           <Route
+            path="/costos-produccion"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/costos-produccion']} /><CostosProduccion /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/nomina"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/nomina']} /><Nomina /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/empleados"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/empleados']} /><Empleados /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/usuarios"
             element={
               <PrivateRoute>
@@ -313,10 +442,12 @@ function App() {
             }
           />
           <Route path="/" element={<Navigate to="/dashboard" />} />
+          <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>
-    </HelmetProvider>
+    </ToastProvider>
+  </HelmetProvider>
   );
 }
 

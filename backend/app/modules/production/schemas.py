@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import date, datetime
 from typing import List, Optional
 from app.modules.catalogos.schemas import AreaResponse
@@ -9,16 +9,17 @@ from app.modules.productos.schemas import MaterialResponse, ProductoResponse
 # Consumo de Material
 # ------------------------------------------------------------
 class ConsumoMaterialBase(BaseModel):
-    cantidad: float
+    cantidad: float = Field(gt=0)
     fecha: datetime
     observaciones: Optional[str] = None
+    seccion: Optional[str] = None
 
 class ConsumoMaterialCreate(ConsumoMaterialBase):
     etapa_produccion_id: int
     material_id: int
 
 class ConsumoMaterialUpdate(BaseModel):
-    cantidad: Optional[float] = None
+    cantidad: Optional[float] = Field(None, gt=0)
     fecha: Optional[datetime] = None
     observaciones: Optional[str] = None
 
@@ -27,6 +28,8 @@ class ConsumoMaterialResponse(ConsumoMaterialBase):
     etapa_produccion_id: int
     material_id: int
     costo_unitario: Optional[float] = None
+    creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     material: Optional[MaterialResponse] = None
@@ -38,8 +41,8 @@ class ConsumoMaterialResponse(ConsumoMaterialBase):
 # Mano de Obra
 # ------------------------------------------------------------
 class ManoObraBase(BaseModel):
-    monto: float
-    porcentaje_recargo: Optional[float] = 0.0
+    monto: float = Field(ge=0)
+    porcentaje_recargo: Optional[float] = Field(0.0, ge=0, le=100)
     pagado: Optional[bool] = False
     observaciones: Optional[str] = None
 
@@ -48,14 +51,16 @@ class ManoObraCreate(ManoObraBase):
     empleado_id: int
 
 class ManoObraUpdate(BaseModel):
-    monto: Optional[float] = None
-    porcentaje_recargo: Optional[float] = None
+    monto: Optional[float] = Field(None, ge=0)
+    porcentaje_recargo: Optional[float] = Field(None, ge=0, le=100)
     observaciones: Optional[str] = None
 
 class ManoObraResponse(ManoObraBase):
     id: int
     etapa_produccion_id: int
     empleado_id: int
+    creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     empleado: Optional[EmpleadoResponse] = None
@@ -95,7 +100,6 @@ class EtapaProduccionCreate(EtapaProduccionBase):
 class EtapaProduccionUpdate(BaseModel):
     area_id: Optional[int] = None
     empleado_responsable_id: Optional[int] = None
-    estado: Optional[str] = None
     observaciones: Optional[str] = None
     fecha_inicio: Optional[datetime] = None
     fecha_fin: Optional[datetime] = None
@@ -105,6 +109,7 @@ class EtapaProduccionResponse(EtapaProduccionBase):
     orden_produccion_id: int
     area_id: int
     empleado_responsable_id: int
+    es_retrabajo: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     area: Optional[AreaResponse] = None
@@ -121,27 +126,27 @@ class EtapaProduccionResponse(EtapaProduccionBase):
 # Costo de Producción
 # ------------------------------------------------------------
 class CostoProduccionBase(BaseModel):
-    costo_material: float
-    costo_mano_obra: float
-    costo_gastos: float
-    precio_impuestos_base: float
-    ganancia_porcentaje: float
-    precio_venta_calculado: float
-    costo_total: float
+    costo_material: float = Field(ge=0)
+    costo_mano_obra: float = Field(ge=0)
+    costo_gastos: float = Field(ge=0)
+    precio_impuestos_base: float = Field(ge=0)
+    ganancia_porcentaje: float = Field(ge=0, le=100)
+    precio_venta_calculado: float = Field(ge=0)
+    costo_total: float = Field(ge=0)
 
 class CostoProduccionCreate(BaseModel): 
-    ganancia_porcentaje: Optional[float] = 0.0
-    costo_gastos: Optional[float] = 0.0
-    precio_impuestos_base: Optional[float] = 0.0
+    ganancia_porcentaje: Optional[float] = Field(0.0, ge=0, le=100)
+    costo_gastos: Optional[float] = Field(0.0, ge=0)
+    precio_impuestos_base: Optional[float] = Field(0.0, ge=0)
 
 class CostoProduccionUpdate(BaseModel):
-    costo_material: Optional[float] = None
-    costo_mano_obra: Optional[float] = None
-    costo_gastos: Optional[float] = None
-    precio_impuestos_base: Optional[float] = None
-    ganancia_porcentaje: Optional[float] = None
-    precio_venta_calculado: Optional[float] = None
-    costo_total: Optional[float] = None
+    costo_material: Optional[float] = Field(None, ge=0)
+    costo_mano_obra: Optional[float] = Field(None, ge=0)
+    costo_gastos: Optional[float] = Field(None, ge=0)
+    precio_impuestos_base: Optional[float] = Field(None, ge=0)
+    ganancia_porcentaje: Optional[float] = Field(None, ge=0, le=100)
+    precio_venta_calculado: Optional[float] = Field(None, ge=0)
+    costo_total: Optional[float] = Field(None, ge=0)
 
 class CostoProduccionResponse(CostoProduccionBase):
     id: int
@@ -164,7 +169,6 @@ class OrdenProduccionCreate(OrdenProduccionBase):
     detalle_pedido_id: int
 
 class OrdenProduccionUpdate(BaseModel):
-    estado: Optional[str] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
@@ -185,6 +189,7 @@ class PedidoBasicoEnDetalle(BaseModel):
 
 class DetalleDePedidoBasico(BaseModel):
     id: int
+    cantidad: Optional[float] = None
     ancho: Optional[float] = None
     largo: Optional[float] = None
     producto: Optional[ProductoResponse] = None
@@ -226,6 +231,8 @@ class MaterialReferencia(BaseModel):
     material_id: int
     nombre: str
     seccion: str
+    tipo_escala: str
+    condicion_cumplida: bool
     cantidad_base: float
     cantidad_esperada: float
     unidad: str
@@ -235,6 +242,7 @@ class ReferenciaRecetaResponse(BaseModel):
     producto_id: int
     producto_nombre: str
     dimensiones: dict
+    seccion_actual: Optional[str] = None
     materiales: List[MaterialReferencia]
 
 

@@ -11,6 +11,11 @@ from app.modules.envios.model import Envio, EnvioAsignacion, EnvioUbicacion
 from app.modules.orders.model import Pedido
 from app.modules.users.deps import tiene_alcance_total
 from app.modules.users.model import Usuario
+from app.core.state_machine import TRANSICIONES_ENVIO, validar_transicion
+
+# Estados del envío desde los que se permite crear un nuevo intento para el
+# mismo pedido (reintento tras un fallo de entrega).
+ESTADOS_REINTENTO = {"FALLIDO"}
 
 
 def _scope_envios(query, usuario: Usuario | None):
@@ -112,8 +117,17 @@ def crear_envio(db: Session, esquema: schemas.EnvioCreate, usuario: Usuario | No
         raise ValueError("El pedido especificado no existe.")
 
     existente = db.query(Envio).filter(Envio.pedido_id == esquema.pedido_id).first()
-    if existente:
+    if existente and existente.estado not in ESTADOS_REINTENTO:
         raise ValueError("Ya existe un registro de envío para este pedido.")
+
+    # Un pedido solo puede entregarse si terminó producción (TERMINADO).
+    # No se puede crear un envío directamente ENTREGADO de un pedido que
+    # nunca se fabricó.
+    if esquema.estado == "ENTREGADO" and pedido.estado not in ("TERMINADO", "ENTREGADO"):
+        raise ValueError(
+            f"No se puede marcar el envío como ENTREGADO: el pedido está en estado "
+            f"'{pedido.estado}'. El pedido debe estar TERMINADO para entregarse."
+        )
 
     datos = esquema.model_dump()
     db_envio = Envio(
@@ -209,6 +223,25 @@ def actualizar_envio(
     antes = _snapshot(db_envio)
     estado_anterior = db_envio.estado
     nuevo_estado = datos.get("estado")
+
+    # Máquina de estados del envío: PREPARADO→EN_TRANSITO→ENTREGADO/FALLIDO.
+    # Prohíbe retrocesos (ENTREGADO→PREPARADO) y transiciones inventadas.
+    # Se valida SIEMPRE (aunque el estado no cambie): re-marcar un estado
+    # terminal (ENTREGADO/FALLIDO) es rechazado por validar_transicion.
+    if nuevo_estado:
+        validar_transicion(TRANSICIONES_ENVIO, estado_anterior, nuevo_estado, "envío")
+        # Entregar exige que el pedido haya terminado producción. Sin esto, un
+        # conductor podía marcar ENTREGADO un pedido que nunca se fabricó.
+        if nuevo_estado == "ENTREGADO":
+            pedido = db.query(Pedido).filter(Pedido.id == db_envio.pedido_id).first()
+            if not pedido:
+                raise ValueError("El pedido asociado al envío no existe.")
+            if pedido.estado not in ("TERMINADO", "ENTREGADO"):
+                raise ValueError(
+                    f"No se puede entregar el pedido #{pedido.id}: está en estado "
+                    f"'{pedido.estado}'. El pedido debe estar TERMINADO para entregarse."
+                )
+
     empleado_nuevo = datos.get("empleado_id", db_envio.empleado_id)
     if empleado_nuevo != db_envio.empleado_id:
         _registrar_asignacion(db, db_envio, empleado_nuevo, usuario)
@@ -247,6 +280,13 @@ def eliminar_envio(db: Session, id_envio: int, usuario: Usuario | None = None):
     db_envio = db.query(Envio).filter(Envio.id == id_envio).first()
     if not db_envio:
         return False
+    # Borrar un envío EN_TRANSITO o ENTREGADO destruye la evidencia del despacho
+    # y puede dejar el pedido "entregado" sin envío que lo respalde.
+    if db_envio.estado in ("EN_TRANSITO", "ENTREGADO"):
+        raise ValueError(
+            f"No se puede eliminar un envío en estado '{db_envio.estado}'. "
+            "Solo se eliminan envíos PREPARADO o FALLIDO."
+        )
     record_event(
         db,
         actor=usuario,
@@ -269,10 +309,12 @@ def registrar_ubicacion(
     envio = db.query(Envio).filter(Envio.id == id_envio).first()
     if not envio:
         raise LookupError("Envío no encontrado.")
-    if envio.estado == "ENTREGADO":
-        raise ValueError("El seguimiento finalizó porque el pedido ya fue entregado.")
+    # Primero el permiso: un no-repartidor no debe poder inferir la existencia/
+    # estado de un envío ajeno a través de un 409 (fuga de información).
     if not tiene_alcance_total(usuario) and usuario.empleado_id != envio.empleado_id:
         raise PermissionError("Solo el repartidor asignado puede reportar su ubicación.")
+    if envio.estado == "ENTREGADO":
+        raise ValueError("El seguimiento finalizó porque el pedido ya fue entregado.")
 
     ubicacion = EnvioUbicacion(
         envio_id=envio.id,

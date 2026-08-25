@@ -61,7 +61,31 @@ def obtener_cotizaciones(
             extract('year', model.Cotizacion.fecha) == today.year
         )
 
+    query = query.order_by(model.Cotizacion.fecha.desc(), model.Cotizacion.id.desc())
+
     return query.offset(salto).limit(limite).all()
+
+def _validar_consistencia_detalles(moneda_id, total_estimado, detalles):
+    """Defensa en profundidad: cuando la cotización es en moneda extranjera, los
+    precios de los detalles deben estar expresados en esa moneda. Si la suma
+    precio × cantidad no cuadra con el total_estimado, el precio se envió sin
+    convertir (p. ej. un monto COP guardado como USD infla el total de la factura)."""
+    if moneda_id == MONEDA_BASE_ID:
+        return
+    if not detalles:
+        return
+    suma = sum(float(d.precio or 0) * float(d.cantidad or 1) for d in detalles)
+    total = float(total_estimado or 0)
+    if total <= 0 or suma <= 0:
+        return
+    tolerancia = max(total * 0.02, 1.0)
+    if abs(suma - total) > tolerancia:
+        raise ValueError(
+            f"La suma de los precios de los detalles ({suma:,.2f}) no coincide con el "
+            f"total estimado de la cotización ({total:,.2f}). En cotizaciones en moneda "
+            f"extranjera los precios deben enviarse convertidos a esa moneda "
+            f"(precio ÷ tasa de cambio). Revisa los precios de los productos."
+        )
 
 def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Usuario | None = None):
     datos = esquema.model_dump(exclude={"detalles"})
@@ -72,6 +96,7 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
     else:
         datos["tasa_cambio"] = 1.0
         datos["total_en_moneda_base"] = datos.get("total_estimado", 0)
+    _validar_consistencia_detalles(datos.get("moneda_id", MONEDA_BASE_ID), datos.get("total_estimado", 0), detalles_datos)
     if usuario is not None:
         datos["creado_por_id"] = usuario.id
         datos["actualizado_por_id"] = usuario.id

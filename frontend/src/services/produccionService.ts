@@ -35,6 +35,9 @@ export interface ConsumoMaterial {
   material_id: number;
   cantidad: number;
   costo_unitario?: number;
+  seccion?: string;
+  creado_por_id?: number;
+  creador_nombre?: string;
   fecha: string;
   observaciones?: string;
   material?: Material;
@@ -48,6 +51,8 @@ export interface ManoObra {
   porcentaje_recargo: number;
   pagado?: boolean;
   observaciones?: string;
+  creado_por_id?: number;
+  creador_nombre?: string;
   empleado?: Empleado;
 }
 
@@ -64,6 +69,7 @@ export interface EtapaProduccion {
   area_id: number;
   empleado_responsable_id: number;
   estado: 'ASIGNADA' | 'EN_PROCESO' | 'PAUSADA' | 'COMPLETADA';
+  es_retrabajo?: boolean;
   observaciones?: string;
   fecha_inicio?: string;
   fecha_fin?: string;
@@ -121,6 +127,7 @@ export interface PedidoBasico {
 
 export interface DetallePedidoBasico {
   id: number;
+  cantidad?: number;
   ancho?: number;
   largo?: number;
   producto?: ProductoBasico;
@@ -131,6 +138,8 @@ export interface MaterialReferencia {
   material_id: number;
   nombre: string;
   seccion: string;
+  tipo_escala: string;
+  condicion_cumplida: boolean;
   cantidad_base: number;
   cantidad_esperada: number;
   unidad: string;
@@ -141,13 +150,14 @@ export interface ReferenciaReceta {
   producto_id: number;
   producto_nombre: string;
   dimensiones: { ancho: number | null; largo: number | null };
+  seccion_actual?: string | null;
   materiales: MaterialReferencia[];
 }
 
 export const produccionService = {
-  getOrdenes: async (buscar?: string): Promise<OrdenProduccion[]> => {
+  getOrdenes: async (buscar?: string, salto = 0, limite = 100): Promise<OrdenProduccion[]> => {
     const response = await api.get<OrdenProduccion[]>('/produccion/orden/', {
-      params: buscar ? { buscar } : {},
+      params: { buscar, salto, limite },
     });
     return response.data;
   },
@@ -206,6 +216,7 @@ export const produccionService = {
     material_id: number;
     cantidad: number;
     fecha: string;
+    seccion?: string;
     observaciones?: string;
   }): Promise<ConsumoMaterial> => {
     const response = await api.post<ConsumoMaterial>('/produccion/consumo/', consumo);

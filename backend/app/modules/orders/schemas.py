@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import date, datetime
 from typing import List, Optional
 from app.modules.clients.schemas import ClientResponse
@@ -7,13 +7,13 @@ from app.modules.quotes.schemas import CotizacionResponse
 
 class DetallePedidoBase(BaseModel):
     producto_id: int
-    cantidad: float
-    precio: float
-    costo_unitario: Optional[float] = None
+    cantidad: float = Field(gt=0)
+    precio: float = Field(ge=0)
+    costo_unitario: Optional[float] = Field(None, ge=0)
     porcentaje_ganancia: Optional[float] = None
-    alto: Optional[float] = None
-    ancho: Optional[float] = None
-    largo: Optional[float] = None
+    alto: Optional[float] = Field(None, ge=0)
+    ancho: Optional[float] = Field(None, ge=0)
+    largo: Optional[float] = Field(None, ge=0)
     color: Optional[str] = None
     acabado: Optional[str] = None
     descripcion_especifica: Optional[str] = None

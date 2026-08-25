@@ -16,6 +16,37 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     setMobileOpen(false);
   }, [location.pathname]);
 
+  // Swipe desde el borde izquierdo para abrir el menú (iOS)
+  useEffect(() => {
+    if (mobileOpen) return;
+    if (!window.matchMedia('(max-width: 1023px)').matches) return;
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (t.clientX <= 28) {
+        startX = t.clientX;
+        startY = t.clientY;
+        tracking = true;
+      }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!tracking) return;
+      const t = e.touches[0];
+      if (t.clientX - startX > 45 && Math.abs(t.clientY - startY) < 60) {
+        tracking = false;
+        setMobileOpen(true);
+      }
+    };
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    return () => {
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchmove', onTouchMove);
+    };
+  }, [mobileOpen]);
+
   return (
     <div className="flex min-h-screen bg-yeikar-tertiary">
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />

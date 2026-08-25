@@ -16,7 +16,10 @@ def crear_cotizacion(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.crear_cotizacion(db, esquema, usuario_actual)
+    try:
+        return service.crear_cotizacion(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/", response_model=List[schemas.CotizacionResponse])
 def listar_cotizaciones(

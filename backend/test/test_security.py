@@ -121,6 +121,48 @@ def test_login_incorrecto_401(client):
     )
 
 
+def test_lockout_no_es_dos_entre_cuentas(client, db):
+    """5 fallos contra la cuenta A no deben bloquear la cuenta B (anti-DoS)."""
+    from app.modules.users.model import LoginIntento
+    import time
+    base = f"qa_lock_{uuid.uuid4().hex[:6]}"
+    username_a = f"{base}_a"
+    username_b = f"{base}_b"
+    try:
+        # Fallos contra una cuenta inexistente
+        for _ in range(5):
+            r = client.post("/api/auth/login", data={"username": username_a, "password": "clave-incorrecta-123"})
+            assert r.status_code == 401
+        # El usuario legítimo (otra cuenta) debe poder loguear sin bloqueo
+        r = client.post("/api/auth/login", data={"username": "carolina", "password": "carolina2025$"})
+        assert r.status_code == 200, (
+            f"BUG DoS: fallos contra {username_a} bloquearon a carolina → {r.status_code}"
+        )
+    finally:
+        db.query(LoginIntento).filter(LoginIntento.username.like(f"{base}%")).delete()
+        db.commit()
+
+
+def test_lockout_por_combinacion_cuenta_ip(client, db):
+    """El contador es por (cuenta, IP): fallos de una cuenta desde una IP
+    solo bloquean esa combinación, no la cuenta de forma global."""
+    from app.modules.users.model import LoginIntento
+    base = f"qa_combo_{uuid.uuid4().hex[:6]}"
+    username = f"{base}_x"
+    try:
+        for _ in range(5):
+            r = client.post("/api/auth/login", data={"username": username, "password": "clave-incorrecta-123"})
+            assert r.status_code == 401
+        # El 6º intento (misma cuenta, misma IP) debe ser 429 (combos bloqueados)
+        r = client.post("/api/auth/login", data={"username": username, "password": "clave-incorrecta-123"})
+        assert r.status_code == 429, (
+            f"BUG: la combinación (cuenta, IP) debió bloquear tras 5 fallos → {r.status_code}"
+        )
+    finally:
+        db.query(LoginIntento).filter(LoginIntento.username.like(f"{base}%")).delete()
+        db.commit()
+
+
 def test_refresh_rotation_replay(client, db):
     """Reusar un refresh token ya rotado (replay) debe ser rechazado con 401."""
     r_login = client.post("/api/auth/login", data={"username": "carolina", "password": "carolina2025$"})

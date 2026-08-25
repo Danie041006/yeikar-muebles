@@ -5,6 +5,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
+from app.core.client_ip import obtener_ip_cliente
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     VENTANA_SEGUNDOS = 60
@@ -13,6 +14,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
         self._requests = {}
+
+    def reset(self) -> None:
+        """Limpia el contador por IP (lo usan los tests: la suite comparte una
+        sola IP y agotaría la ventana de 60s sin esto)."""
+        self._requests.clear()
 
     async def dispatch(self, request, call_next):
         if not request.url.path.startswith("/api/"):
@@ -27,7 +33,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             for ip in vencidas:
                 del self._requests[ip]
 
-        ip = request.client.host if request.client else "unknown"
+        ip = obtener_ip_cliente(request)
         ahora = time.monotonic()
         inicio, contador = self._requests.get(ip, (ahora, 0))
         if ahora - inicio >= self.VENTANA_SEGUNDOS:

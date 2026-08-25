@@ -92,3 +92,13 @@ class Pago(Base):
 
     venta = relationship("Venta", back_populates="pagos")
     moneda = relationship("Moneda")
+
+    @property
+    def recibos(self):
+        """Comprobantes digitales del pago (adjuntos tipo PAGO)."""
+        from sqlalchemy.orm import object_session
+        from app.modules.adjuntos.service import adjuntos_info
+        s = object_session(self)
+        if s is None:
+            return []
+        return adjuntos_info(s, "PAGO", self.id)

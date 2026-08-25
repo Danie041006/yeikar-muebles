@@ -1,5 +1,6 @@
 import api from './api';
 import { Client } from './clienteService';
+import type { AdjuntoInfo } from './adjuntosService';
 
 export interface Moneda {
   id: number;
@@ -20,6 +21,8 @@ export interface Product {
   ancho_base: number;
   largo_base: number;
   categoria?: string;
+  /** Fotos de referencia del mueble. */
+  fotos?: AdjuntoInfo[];
 }
 
 export interface QuoteDetail {
@@ -75,6 +78,9 @@ export interface CalculationResult {
   costo_mano_obra: number;
   costo_gastos_indirectos: number;
   costo_total: number;
+  impuesto_porcentaje: number;
+  impuestos: number;
+  base_con_impuestos: number;
   precio_sugerido: number;
   precio_venta: number;
   materiales_detalle: Array<{
@@ -82,9 +88,22 @@ export interface CalculationResult {
     nombre: string;
     cantidad_calculada: number;
     unidad: string;
+    unidad_medida?: string;
+    seccion?: string;
+    es_nochero?: boolean;
+    costo_unitario?: number;
     costo_subtotal: number;
+    costo_total?: number;
   }>;
   desglose_por_seccion?: any;
+  // Estructura de costos (para la vista estilo Excel)
+  costo_produccion?: number;
+  ganancia_porcentaje?: number;
+  iva_porcentaje?: number;
+  precio_con_iva?: number;
+  producto_id?: number;
+  producto_nombre?: string;
+  dimensiones_base?: { ancho: number; largo: number };
 }
 
 export const cotizacionService = {
@@ -138,6 +157,7 @@ export const cotizacionService = {
       largo: number;
       ganancia?: number;
       iva?: number;
+      impuesto?: number;
       pct_mano_obra?: number;
       pct_gastos?: number;
     }
@@ -150,6 +170,7 @@ export const cotizacionService = {
           largo: params.largo,
           ganancia: params.ganancia ?? 40.0,
           iva: params.iva ?? 0.0,
+          impuesto: params.impuesto ?? 7.0,
           pct_mano_obra: params.pct_mano_obra ?? 15.0,
           pct_gastos: params.pct_gastos ?? 10.0,
         },
@@ -171,16 +192,22 @@ export const cotizacionService = {
       ? data.precio_venta 
       : (data.precio_con_iva !== undefined ? data.precio_con_iva : (data.precio_sin_iva !== undefined ? data.precio_sin_iva : 0));
 
-    // Backward-compatible mapping of materials list
+    // Backward-compatible mapping of materials list (se incluye sección/unidad
+    // para poder armar la estructura de costos por sección)
     const rawMateriales = data.materiales_detalle || data.materiales || [];
     const materiales_detalle = rawMateriales.map((mat: any) => ({
       material_id: mat.material_id,
       nombre: mat.nombre || mat.material_nombre || '',
       cantidad_calculada: mat.cantidad_calculada || 0,
       unidad: mat.unidad || '',
+      unidad_medida: mat.unidad_medida || mat.unidad || '',
+      seccion: mat.seccion || '',
+      es_nochero: mat.es_nochero || false,
+      costo_unitario: mat.costo_unitario || 0,
       costo_subtotal: mat.costo_subtotal !== undefined 
         ? mat.costo_subtotal 
         : (mat.costo_total !== undefined ? mat.costo_total : 0),
+      costo_total: mat.costo_total !== undefined ? mat.costo_total : (mat.costo_subtotal !== undefined ? mat.costo_subtotal : 0),
     }));
 
     return {
@@ -188,9 +215,20 @@ export const cotizacionService = {
       costo_mano_obra: data.costo_mano_obra || 0,
       costo_gastos_indirectos,
       costo_total,
+      impuesto_porcentaje: Number(data.impuesto_porcentaje) || 7,
+      impuestos: Number(data.impuestos) || 0,
+      base_con_impuestos: Number(data.base_con_impuestos) || 0,
       precio_sugerido: precio_venta,
       precio_venta,
       materiales_detalle,
+      desglose_por_seccion: data.desglose_por_seccion || {},
+      costo_produccion: data.costo_produccion || costo_total,
+      ganancia_porcentaje: Number(data.ganancia_porcentaje) || 40,
+      iva_porcentaje: Number(data.iva_porcentaje) || 0,
+      precio_con_iva: Number(data.precio_con_iva) || precio_venta,
+      producto_id: data.producto_id,
+      producto_nombre: data.producto_nombre,
+      dimensiones_base: data.dimensiones_base,
     };
   },
 
@@ -201,10 +239,12 @@ export const cotizacionService = {
 
   recalculateCustomRecipe: async (
     ganancia: number,
-    secciones: any[]
+    secciones: any[],
+    impuesto?: number
   ): Promise<CalculationResult> => {
     const response = await api.post<any>('/recalculate-custom-recipe', {
       ganancia,
+      impuesto: impuesto ?? 7.0,
       secciones,
     });
     const data = response.data;
@@ -223,6 +263,9 @@ export const cotizacionService = {
       costo_mano_obra: 0,
       costo_gastos_indirectos: 0,
       costo_total: data.costo_total || 0,
+      impuesto_porcentaje: Number(data.impuesto_porcentaje) || 7,
+      impuestos: Number(data.impuestos) || 0,
+      base_con_impuestos: Number(data.base_con_impuestos) || 0,
       precio_sugerido: data.precio_venta || 0,
       precio_venta: data.precio_venta || 0,
       materiales_detalle,

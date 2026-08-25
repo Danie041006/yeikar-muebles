@@ -800,7 +800,7 @@ def parse_price(val):
 
 def main():
     db = session_local()
-    print("🚀 Iniciando importación de insumos...")
+    print(" Iniciando importación de insumos...")
     
     # Cachear unidades de medida existentes
     unidades_existentes = {u.nombre.upper().strip(): u for u in db.query(UnidadMedida).all()}
@@ -824,7 +824,7 @@ def main():
             db.commit()
             db.refresh(unidad_obj)
             unidades_existentes[unidad_upper] = unidad_obj
-            print(f"  🆕 Creada unidad de medida: {unidad_nombre} ({abrev})")
+            print(f"   Creada unidad de medida: {unidad_nombre} ({abrev})")
             
         # Comprobar si ya existe el material con ese nombre exacto
         # para evitar duplicados en esta misma tanda
@@ -843,7 +843,7 @@ def main():
                 print(f"  • {contador} materiales insertados...")
                 
     db.commit()
-    print(f"✅ ¡Importación completada! Se crearon {contador} nuevos materiales.")
+    print(f" ¡Importación completada! Se crearon {contador} nuevos materiales.")
     db.close()
 
 if __name__ == '__main__':

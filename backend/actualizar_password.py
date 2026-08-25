@@ -21,26 +21,30 @@ def update_password(username: str, new_plain_password: str):
     try:
         user = db.query(Usuario).filter(Usuario.nombre_usuario == username).first()
         if not user:
-            print(f"❌ Usuario '{username}' no encontrado")
+            print(f" Usuario '{username}' no encontrado")
             return False
         old_hash = user.password_hash
         new_hash = pwd_context.hash(new_plain_password)
         user.password_hash = new_hash
         db.commit()
-        print(f"✅ Usuario '{username}' actualizado:")
+        print(f" Usuario '{username}' actualizado:")
         print(f"   Old hash: {old_hash[:30]}...")
         print(f"   New hash: {new_hash[:30]}...")
         return True
     except Exception as e:
-        print(f"❌ Error al actualizar {username}: {e}")
+        print(f" Error al actualizar {username}: {e}")
         db.rollback()
         return False
     finally:
         db.close()
 
 if __name__ == "__main__":
-    # Usa los nombres de usuario y contraseñas que quieras
-    print("Actualizando contraseñas de usuarios existentes...")
-    update_password("carolina", "carolina2025$")
-    update_password("jackson", "jackson2025$")
-    print("\n✅ Listo. Ahora puedes probar login con esos usuarios.")
+    # Uso: python actualizar_password.py <usuario> <nueva_contraseña>
+    # (las contraseñas NUNCA van en este archivo)
+    if len(sys.argv) != 3:
+        print("Uso: python actualizar_password.py <usuario> <nueva_contraseña>")
+        sys.exit(1)
+    usuario, contrasena = sys.argv[1], sys.argv[2]
+    print(f"Actualizando contraseña de '{usuario}'...")
+    ok = update_password(usuario, contrasena)
+    sys.exit(0 if ok else 1)

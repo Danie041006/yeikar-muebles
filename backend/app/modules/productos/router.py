@@ -1,5 +1,5 @@
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
@@ -7,7 +7,7 @@ from typing import List, Optional
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
-from app.modules.users.deps import require_module
+from app.modules.users.deps import es_admin_user, require_module
 from app.modules.productos import schemas, service
 from app.modules.productos import cost_service
 from app.modules.productos.model import ProductoMaterial
@@ -163,6 +163,7 @@ def calcular_precio_personalizado(
     largo: float = Query(..., gt=0, description="Largo nuevo en metros"),
     ganancia: float = Query(40.0, ge=0, description="Porcentaje de ganancia (ej. 40 = 40%)"),
     iva: float = Query(0.0, ge=0, description="Porcentaje de IVA (ej. 19 = 19%)"),
+    impuesto: float = Query(7.0, ge=0, description="Porcentaje de impuestos sobre el costo de producción (ej. 7 = 7%)"),
     pct_mano_obra: float = Query(15.0, ge=0, description="Porcentaje de mano de obra sobre materiales"),
     pct_gastos: float = Query(10.0, ge=0, description="Porcentaje de gastos indirectos sobre materiales"),
     db: Session = Depends(get_db),
@@ -172,6 +173,8 @@ def calcular_precio_personalizado(
     Calcula automáticamente el costo y precio de venta de un producto
     con dimensiones personalizadas. Usa las reglas de escala definidas
     en la tabla `producto_material`.
+
+    Fórmula: a = costo_producción × (1 + impuesto%); b = a × (1 + ganancia%).
     """
     try:
         resultado = cost_service.calcular_costo_producto(
@@ -181,10 +184,34 @@ def calcular_precio_personalizado(
             nuevo_largo=Decimal(str(largo)),
             ganancia_porcentaje=Decimal(str(ganancia)),
             iva_porcentaje=Decimal(str(iva)),
+            impuesto_porcentaje=Decimal(str(impuesto)),
             pct_mano_obra=Decimal(str(pct_mano_obra)),
             pct_gastos=Decimal(str(pct_gastos)),
         )
         return resultado
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/producto/recalcular-precios", tags=["costeo"])
+def recalcular_precios_productos(
+    aplicar: bool = Body(False, description="False = vista previa; True = aplicar los cambios"),
+    producto_ids: Optional[List[int]] = Body(None, description="Solo estos productos (o todos con receta)"),
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Recalcula (o previsualiza) `precio_costo_base`/`precio_venta_base` de los
+    productos con receta. Solo Dueño/Administrador. Incluye la guarda
+    anti-inflación: cambios >30% quedan en `requiere_revision` sin aplicarse."""
+    if not es_admin_user(usuario_actual):
+        raise HTTPException(status_code=403, detail="Solo un administrador puede recalcular precios.")
+    try:
+        return cost_service.recalcular_precios_productos(
+            db,
+            producto_ids=producto_ids,
+            aplicar=aplicar,
+            ganancia_porcentaje=Decimal("40"),
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -461,6 +488,8 @@ def recalcular_receta_personalizada(
     """
     from decimal import Decimal, ROUND_HALF_UP
 
+    from app.core.redondeo import redondear_precio_cop
+
     def _redondear(val: Decimal, decs: int = 2) -> Decimal:
         cuantificador = Decimal("0." + "0" * decs) if decs > 0 else Decimal("1")
         return val.quantize(cuantificador, rounding=ROUND_HALF_UP)
@@ -522,7 +551,12 @@ def recalcular_receta_personalizada(
         }
 
     costo_produccion = costo_total_elementos
-    precio_sin_iva = _redondear(costo_produccion * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2)
+    impuesto_porcentaje = Decimal(str(getattr(esquema, "impuesto", 7.0)))
+    monto_impuestos = _redondear(costo_produccion * impuesto_porcentaje / Decimal("100"), 2)
+    base_con_impuestos = _redondear(costo_produccion + monto_impuestos, 2)
+    precio_sin_iva = _redondear(base_con_impuestos * (Decimal("1") + ganancia_porcentaje / Decimal("100")), 2)
+    # Precio de venta sugerido siempre al millar COP (hacia arriba).
+    precio_sin_iva = redondear_precio_cop(precio_sin_iva, "ceil")
 
     return {
         "costo_materiales": float(costo_total_elementos),
@@ -531,13 +565,16 @@ def recalcular_receta_personalizada(
         "costo_gastos_indirectos": 0.0,
         "costo_produccion": float(costo_produccion),
         "costo_total": float(costo_produccion),
+        "impuesto_porcentaje": float(impuesto_porcentaje),
+        "impuestos": float(monto_impuestos),
+        "base_con_impuestos": float(base_con_impuestos),
         "ganancia_porcentaje": float(ganancia_porcentaje),
         "precio_sin_iva": float(precio_sin_iva),
         "iva_porcentaje": 0.0,
         "precio_con_iva": float(precio_sin_iva),
         "precio_sugerido": float(precio_sin_iva),
         "precio_venta": float(precio_sin_iva),
-        "ganancia_monto": float(precio_sin_iva - costo_produccion),
+        "ganancia_monto": float(precio_sin_iva - base_con_impuestos),
         "materiales": detalle_elementos,
         "desglose_por_seccion": desglose_por_seccion,
     }

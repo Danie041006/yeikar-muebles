@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { authApi } from '../services/api';
 import api from '../services/api';
+import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { useToast } from '../context/ToastContext';
+import { ResponsiveDataTable, type DataColumn } from '../components/ui';
 
 interface Role {
   id: number;
@@ -107,6 +110,9 @@ function onChangeNivel(
 }
 
 export default function Usuarios() {
+  const toast = useToast();
+  const [confirmUser, setConfirmUser] = useState<User | null>(null);
+  const [confirmRol, setConfirmRol] = useState<Role | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(false);
@@ -238,19 +244,22 @@ export default function Usuarios() {
     }
   };
 
-  const handleDeleteUser = async (user: User) => {
-    if (!window.confirm(`¿Estás seguro de que deseas eliminar permanentemente al usuario "${user.nombre_usuario}"?`)) {
-      return;
-    }
+  const handleDeleteUser = (user: User) => {
+    setConfirmUser(user);
+  };
+  const ejecutarDeleteUser = async () => {
+    if (!confirmUser) return;
+    const user = confirmUser;
+    setConfirmUser(null);
     setError('');
     setSuccess('');
     try {
       await authApi.delete(`/users/${user.id}`);
       setUsers(users.filter(u => u.id !== user.id));
-      setSuccess(`Usuario "${user.nombre_usuario}" eliminado correctamente.`);
+      toast.success(`Usuario "${user.nombre_usuario}" eliminado correctamente.`);
     } catch (err: any) {
       console.error(err);
-      setError(err.response?.data?.detail || 'Error al eliminar el usuario.');
+      toast.error(err.response?.data?.detail || 'Error al eliminar el usuario.');
     }
   };
 
@@ -347,18 +356,21 @@ export default function Usuarios() {
       setError(`El rol "${rol.nombre}" es un rol de acceso total y no se puede eliminar.`);
       return;
     }
-    if (!window.confirm(`¿Eliminar el rol "${rol.nombre}"? Los usuarios que lo tengan perderán esos privilegios.`)) {
-      return;
-    }
+    setConfirmRol(rol);
+  };
+  const ejecutarDeleteRol = async () => {
+    if (!confirmRol) return;
+    const rol = confirmRol;
+    setConfirmRol(null);
     setError('');
     setSuccess('');
     try {
       await api.delete(`/catalogos/rol/${rol.id}`);
       setRoles((prev) => prev.filter((r) => r.id !== rol.id));
-      setSuccess(`Rol "${rol.nombre}" eliminado.`);
+      toast.success(`Rol "${rol.nombre}" eliminado.`);
     } catch (err: any) {
       console.error(err);
-      setError(err.response?.data?.detail || 'Error al eliminar el rol.');
+      toast.error(err.response?.data?.detail || 'Error al eliminar el rol.');
     }
   };
 
@@ -369,6 +381,113 @@ export default function Usuarios() {
     const soloVer = permisos.filter((p) => !p.gestionar).length;
     return { gestiona, soloVer };
   };
+
+  const renderActions = (u: User) => (
+    <button
+      onClick={() => handleDeleteUser(u)}
+      className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded-lg transition-colors"
+      title="Eliminar usuario"
+    >
+      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+      </svg>
+    </button>
+  );
+
+  const columns: DataColumn<User>[] = [
+    {
+      key: 'usuario',
+      header: 'Usuario',
+      render: (u) => (
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-yeikar-secondary/10 flex items-center justify-center font-bold text-yeikar-secondary border border-yeikar-secondary/10 font-headline text-sm">
+            {u.nombre_usuario.substring(0, 2).toUpperCase()}
+          </div>
+          <span className="font-bold text-yeikar-secondary font-headline">{u.nombre_usuario}</span>
+        </div>
+      ),
+      mobilePrimary: true,
+    },
+    {
+      key: 'email',
+      header: 'Email',
+      render: (u) => (
+        <span className="text-yeikar-neutral/70 font-mono text-xs">
+          {u.email || <span className="text-yeikar-neutral/30 italic">Sin correo</span>}
+        </span>
+      ),
+      mobileLabel: 'Email',
+      mobileSecondary: true,
+    },
+    {
+      key: 'creado',
+      header: 'Creado el',
+      render: (u) => (
+        <span className="text-yeikar-neutral/50 font-mono text-xs">
+          {new Date(u.created_at).toLocaleDateString('es-ES')}
+        </span>
+      ),
+      mobileLabel: 'Creado',
+    },
+    {
+      key: 'ultimo_acceso',
+      header: 'Último Acceso',
+      render: (u) => (
+        <span className="text-yeikar-neutral/50 font-mono text-xs">
+          {u.ultimo_acceso ? (
+            new Date(u.ultimo_acceso).toLocaleDateString('es-ES', {
+              day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+            })
+          ) : (
+            <span className="text-yeikar-neutral/30 italic">Nunca</span>
+          )}
+        </span>
+      ),
+      mobileLabel: 'Último Acceso',
+    },
+    {
+      key: 'estado',
+      header: 'Estado',
+      render: (u) => (
+        <button
+          onClick={() => handleToggleStatus(u)}
+          className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+            u.activo
+              ? 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200'
+              : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
+          }`}
+        >
+          {u.activo ? 'Activo' : 'Inactivo'}
+        </button>
+      ),
+      mobileHidden: true,
+    },
+    {
+      key: 'roles',
+      header: 'Roles de Acceso',
+      render: (u) => (
+        <div className="flex flex-wrap gap-1.5 max-w-xs">
+          {roles.map((role) => {
+            const isAssigned = u.roles.some((r) => r.id === role.id);
+            return (
+              <button
+                key={role.id}
+                onClick={() => handleToggleRole(u, role)}
+                className={`px-2 py-1 rounded text-xs font-headline font-bold transition-all border ${
+                  isAssigned
+                    ? 'bg-yeikar-primary/10 border-yeikar-primary text-yeikar-primary-dark shadow-sm'
+                    : 'bg-white border-yeikar-secondary-light/10 text-yeikar-neutral/40 hover:bg-yeikar-tertiary'
+                }`}
+              >
+                {role.nombre}
+              </button>
+            );
+          })}
+        </div>
+      ),
+      mobileLabel: 'Roles de Acceso',
+    },
+  ];
 
   return (
     <div className="space-y-6">
@@ -420,114 +539,26 @@ export default function Usuarios() {
             <span className="text-sm font-mono">Cargando usuarios...</span>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-yeikar-tertiary/20 text-yeikar-secondary font-headline font-bold text-xs uppercase tracking-wider border-b border-yeikar-secondary-light/10">
-                  <th className="p-4">Usuario</th>
-                  <th className="p-4">Email</th>
-                  <th className="p-4">Creado el</th>
-                  <th className="p-4">Último Acceso</th>
-                  <th className="p-4">Estado</th>
-                  <th className="p-4">Roles de Acceso</th>
-                  <th className="p-4 text-center">Acciones</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-yeikar-secondary-light/5 text-sm">
-                {users.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="p-8 text-center text-yeikar-neutral/40 italic">
-                      No hay usuarios registrados.
-                    </td>
-                  </tr>
-                ) : (
-                  users.map((u) => (
-                    <tr key={u.id} className="hover:bg-yeikar-tertiary/10 transition-colors">
-                      {/* Username */}
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-yeikar-secondary/10 flex items-center justify-center font-bold text-yeikar-secondary border border-yeikar-secondary/10 font-headline text-sm">
-                            {u.nombre_usuario.substring(0, 2).toUpperCase()}
-                          </div>
-                          <span className="font-bold text-yeikar-secondary font-headline">{u.nombre_usuario}</span>
-                        </div>
-                      </td>
-
-                      {/* Email */}
-                      <td className="p-4 text-yeikar-neutral/70 font-mono text-xs">
-                        {u.email || <span className="text-yeikar-neutral/30 italic">Sin correo</span>}
-                      </td>
-
-                      {/* Created date */}
-                      <td className="p-4 text-yeikar-neutral/50 font-mono text-xs">
-                        {new Date(u.created_at).toLocaleDateString('es-ES')}
-                      </td>
-
-                      {/* Last access */}
-                      <td className="p-4 text-yeikar-neutral/50 font-mono text-xs">
-                        {u.ultimo_acceso ? (
-                          new Date(u.ultimo_acceso).toLocaleDateString('es-ES', {
-                            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-                          })
-                        ) : (
-                          <span className="text-yeikar-neutral/30 italic">Nunca</span>
-                        )}
-                      </td>
-
-                      {/* Active switch */}
-                      <td className="p-4">
-                        <button
-                          onClick={() => handleToggleStatus(u)}
-                          className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
-                            u.activo
-                              ? 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200'
-                              : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
-                          }`}
-                        >
-                          {u.activo ? 'Activo' : 'Inactivo'}
-                        </button>
-                      </td>
-
-                      {/* Role pills checkbox-like toggle */}
-                      <td className="p-4">
-                        <div className="flex flex-wrap gap-1.5 max-w-xs">
-                          {roles.map((role) => {
-                            const isAssigned = u.roles.some((r) => r.id === role.id);
-                            return (
-                              <button
-                                key={role.id}
-                                onClick={() => handleToggleRole(u, role)}
-                                className={`px-2 py-1 rounded text-xs font-headline font-bold transition-all border ${
-                                  isAssigned
-                                    ? 'bg-yeikar-primary/10 border-yeikar-primary text-yeikar-primary-dark shadow-sm'
-                                    : 'bg-white border-yeikar-secondary-light/10 text-yeikar-neutral/40 hover:bg-yeikar-tertiary'
-                                }`}
-                              >
-                                {role.nombre}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </td>
-
-                      {/* Actions */}
-                      <td className="p-4 text-center">
-                        <button
-                          onClick={() => handleDeleteUser(u)}
-                          className="text-red-500 hover:text-red-700 p-1.5 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Eliminar usuario"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <ResponsiveDataTable
+            columns={columns}
+            rows={users}
+            rowKey={(u) => u.id}
+            cardBadge={(u) => (
+              <button
+                onClick={() => handleToggleStatus(u)}
+                className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+                  u.activo
+                    ? 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-200'
+                    : 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-200'
+                }`}
+              >
+                {u.activo ? 'Activo' : 'Inactivo'}
+              </button>
+            )}
+            tableActions={renderActions}
+            cardActions={renderActions}
+            empty={<div className="p-8 text-center text-yeikar-neutral/40 italic">No hay usuarios registrados.</div>}
+          />
         )}
       </div>
 
@@ -851,6 +882,24 @@ export default function Usuarios() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={confirmUser !== null}
+        title="Eliminar usuario"
+        message={confirmUser ? `¿Estás seguro de que deseas eliminar permanentemente al usuario "${confirmUser.nombre_usuario}"?` : ''}
+        confirmLabel="Sí, eliminar"
+        danger
+        onConfirm={ejecutarDeleteUser}
+        onCancel={() => setConfirmUser(null)}
+      />
+      <ConfirmDialog
+        open={confirmRol !== null}
+        title="Eliminar rol"
+        message={confirmRol ? `¿Eliminar el rol "${confirmRol.nombre}"? Los usuarios que lo tengan perderán esos privilegios.` : ''}
+        confirmLabel="Sí, eliminar"
+        danger
+        onConfirm={ejecutarDeleteRol}
+        onCancel={() => setConfirmRol(null)}
+      />
     </div>
   );
 }

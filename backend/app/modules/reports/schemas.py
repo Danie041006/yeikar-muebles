@@ -12,6 +12,11 @@ class PnLDetail(BaseModel):
     ingresos: Decimal
     gastos: Decimal
     balance: Decimal
+    # Equivalentes en COP (moneda base): antes el P&L mezclaba USD con COP
+    # brutos y el balance no era comparable entre monedas.
+    ingresos_cop: Decimal = Decimal("0.0")
+    gastos_cop: Decimal = Decimal("0.0")
+    balance_cop: Decimal = Decimal("0.0")
 
 class PnLResponse(BaseModel):
     mes: str
@@ -119,7 +124,9 @@ class MovimientoCajaBase(BaseModel):
     metodo_caja_id: int
     fecha: date
     tipo: str = Field(..., pattern="^(APERTURA|ENTRADA|SALIDA|AJUSTE)$")
-    monto: Decimal
+    # monto > 0: la dirección del flujo la expresa el tipo (una SALIDA negativa
+    # INGRESABA dinero a la cuenta y permitía drenar caja con un solo request).
+    monto: Decimal = Field(..., gt=0)
     moneda_id: int = 1
     tasa_cambio: Decimal = Decimal("1.0")
     referencia: Optional[str] = None
@@ -162,15 +169,58 @@ class LineaSaldoMoneda(BaseModel):
         from_attributes = True
 
 
+# ------------------------------------------------------------
+# Reporte diario (estado del día)
+# ------------------------------------------------------------
+class MovimientoDiarioResponse(BaseModel):
+    """Un movimiento de caja del día con concepto legible y responsable."""
+    id: int
+    tipo: str  # APERTURA | ENTRADA | SALIDA | AJUSTE
+    moneda_codigo: str
+    moneda_simbolo: str
+    monto: Decimal = Decimal("0.0")
+    monto_cop: Decimal = Decimal("0.0")
+    cuenta_nombre: Optional[str] = None
+    referencia: Optional[str] = None
+    concepto: str
+    quien: Optional[str] = None
+
+class LineaMonedaDiaria(BaseModel):
+    moneda_id: int
+    codigo: str
+    simbolo: str
+    monto_ingresos: Decimal = Decimal("0.0")
+    monto_egresos: Decimal = Decimal("0.0")
+    monto_cop: Decimal = Decimal("0.0")
+
+class SaldoCuentaDiaria(BaseModel):
+    metodo_caja_id: int
+    cuenta_nombre: str
+    saldo_inicial_cop: Decimal = Decimal("0.0")
+    saldo_final_cop: Decimal = Decimal("0.0")
+
+class ResumenDiarioResponse(BaseModel):
+    fecha: date
+    saldo_inicial_cop: Decimal = Decimal("0.0")
+    total_ingresos_cop: Decimal = Decimal("0.0")
+    total_egresos_cop: Decimal = Decimal("0.0")
+    saldo_final_cop: Decimal = Decimal("0.0")
+    movimientos: List[MovimientoDiarioResponse] = []
+    por_moneda: List[LineaMonedaDiaria] = []
+    saldos_por_cuenta: List[SaldoCuentaDiaria] = []
+
+
 class DevolucionVentaBase(BaseModel):
     venta_id: int
     detalle_venta_id: Optional[int] = None
     fecha: date
     cantidad: Decimal = Decimal("1.0")
     motivo: Optional[str] = None
-    monto_devuelto: Decimal
+    # La devolución no puede superar lo efectivamente cobrado en la venta:
+    # una devolución de 999M sobre una venta de 2.7M era aceptada.
+    monto_devuelto: Decimal = Field(..., gt=0)
     moneda_id: int = 1
-    tasa_cambio: Decimal = Decimal("1.0")
+    tasa_cambio: Decimal = Field(Decimal("1.0"), gt=0)
 
 class DevolucionVentaCreate(DevolucionVentaBase):
     pass
@@ -256,10 +306,12 @@ class GastosEstadoResultados(BaseModel):
     administrativos: List[LineaGastoInforme]
     financieros: List[LineaGastoInforme]
     impuestos: List[LineaGastoInforme]
+    produccion: List[LineaGastoInforme] = []
     total_gastos_operativos: Decimal
     total_gastos_administrativos: Decimal
     total_financieros: Decimal
     total_impuestos: Decimal
+    total_gastos_produccion: Decimal = Decimal("0.0")
     total_gastos: Decimal
 
 class EstadoResultados(BaseModel):
@@ -297,6 +349,9 @@ class InformeMensualResponse(BaseModel):
     resumen: ResumenMes
     estado_resultados: EstadoResultados
     pendientes_de_pago: PendientesDePagoInforme
+    # Saldos de caja al cierre (COP). Antes se mezclaban con los inventarios
+    # finales fabricando utilidad ficticia; ahora van por separado.
+    saldos_caja: List[LineaValorConcepto] = []
 
 
 # Rebuilds para referencias circulares

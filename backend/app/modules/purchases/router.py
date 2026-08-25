@@ -53,6 +53,11 @@ def actualizar_estado_compra(
         moneda_id=compra.moneda_id,
         fecha=compra.fecha,
         estado=estado,
+        tipo_pago=compra.tipo_pago,
+        metodo_caja_id=compra.metodo_caja_id,
         observaciones=compra.observaciones
     )
-    return service.actualizar_compra(db, compra_id, compra_update)
+    try:
+        return service.actualizar_compra(db, compra_id, compra_update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

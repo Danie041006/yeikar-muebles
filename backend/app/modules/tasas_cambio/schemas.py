@@ -19,3 +19,11 @@ class TasaCambioResponse(TasaCambioBase):
 
     class Config:
         from_attributes = True
+
+
+class TasaConvertirResponse(BaseModel):
+    monto: Decimal
+    monto_convertido: Decimal
+    moneda_origen_id: int
+    moneda_destino_id: int
+    tasa: Decimal

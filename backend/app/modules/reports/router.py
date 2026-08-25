@@ -28,6 +28,15 @@ def get_pnl(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@router.get("/diario", response_model=schemas.ResumenDiarioResponse)
+def get_resumen_diario(
+    fecha: Optional[date] = Query(None, description="Fecha del día (YYYY-MM-DD). Por defecto, hoy"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """Estado del día: saldo inicial, ingresos, egresos, quién los hizo y saldo final."""
+    return service.resumen_diario(db, fecha or date.today())
+
 @router.get("/informe-mensual", response_model=schemas.InformeMensualResponse)
 def get_informe_mensual(
     mes: str = Query(..., description="Mes a consultar en formato YYYY-MM"),
@@ -224,7 +233,10 @@ def post_devolucion(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    return service.crear_devolucion(db, esquema)
+    try:
+        return service.crear_devolucion(db, esquema)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/devoluciones/{devolucion_id}", status_code=204)
 def delete_devolucion(

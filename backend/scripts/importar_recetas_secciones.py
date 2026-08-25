@@ -110,7 +110,7 @@ def extraer_monto(texto: str) -> Decimal | None:
 
 def procesar_hoja(sheet, db, dry_run=True):
     nombre_hoja = sheet.title.strip()
-    print(f"\n📄 Procesando hoja: '{nombre_hoja}'")
+    print(f"\n Procesando hoja: '{nombre_hoja}'")
 
     # 1. Obtener producto existente o crear
     nombre_prod = None
@@ -268,7 +268,7 @@ def procesar_hoja(sheet, db, dry_run=True):
     # Imprimir resumen de lo extraído
     for sec, elems in elementos_por_seccion.items():
         pol = politica_por_seccion[sec]
-        print(f"   📍 SECCIÓN: {sec} ({len(elems)} insumos físicos)")
+        print(f"    SECCIÓN: {sec} ({len(elems)} insumos físicos)")
         print(f"      MO Base: ${pol['mano_obra_base']:,.2f} | Liq: {pol['pct_liquidacion_mo']}% | Gastos: {pol['pct_gastos_seccion']}%")
         for el in elems[:3]:
             print(f"        • {el['nombre']} | Cant: {el['cantidad']} {el['unidad']}")
@@ -315,7 +315,7 @@ def procesar_hoja(sheet, db, dry_run=True):
                 db.add(db_el)
 
         db.commit()
-        print(f"   ✅ Secciones e insumos guardados correctamente para {producto.nombre}")
+        print(f"    Secciones e insumos guardados correctamente para {producto.nombre}")
 
 
 def main():
@@ -332,7 +332,7 @@ def main():
             if args.sheet in wb.sheetnames:
                 procesar_hoja(wb[args.sheet], db, dry_run=not args.write)
             else:
-                print(f"❌ Hoja '{args.sheet}' no encontrada.")
+                print(f" Hoja '{args.sheet}' no encontrada.")
         else:
             for sname in wb.sheetnames:
                 procesar_hoja(wb[sname], db, dry_run=not args.write)

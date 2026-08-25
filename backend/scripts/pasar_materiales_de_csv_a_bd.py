@@ -16,7 +16,7 @@ from sqlalchemy import text
 
 def limpiar_tabla_material():
     """Elimina todos los registros de material y reinicia la secuencia manualmente"""
-    print("🗑️ Limpiando tabla material...")
+    print("× Limpiando tabla material...")
 
     # 1. Eliminar todos los registros
     db.execute(text("DELETE FROM material;"))
@@ -25,7 +25,7 @@ def limpiar_tabla_material():
     db.execute(text("ALTER SEQUENCE material_id_seq RESTART WITH 1;"))
 
     db.commit()
-    print("✅ Tabla material limpiada y secuencia reiniciada.")
+    print(" Tabla material limpiada y secuencia reiniciada.")
 
 def normalizar_nombre_unidad(nombre):
     """Convierte nombres de unidad a un formato estándar para búsqueda"""
@@ -133,8 +133,8 @@ def obtener_unidad(nombre_raw):
             unidad = UnidadMedida(nombre="UNIDAD", abreviatura="UN")
             db.add(unidad)
             db.flush()
-            print(f"📌 Creada unidad por defecto: UNIDAD")
-        print(f"⚠️ Unidad no encontrada para '{nombre_raw}', se asigna UNIDAD por defecto")
+            print(f" Creada unidad por defecto: UNIDAD")
+        print(f" Unidad no encontrada para '{nombre_raw}', se asigna UNIDAD por defecto")
     return unidad
 
 def importar_materiales():
@@ -170,10 +170,10 @@ def importar_materiales():
             # No imprimo cada material para no saturar, solo progreso
     
     db.commit()
-    print(f"\n✅ Importación completada. {contador} materiales añadidos.")
+    print(f"\n Importación completada. {contador} materiales añadidos.")
 
 if __name__ == "__main__":
     limpiar_tabla_material()
     importar_materiales()
     db.close()
-    print("🎉 Listo")
+    print(" Listo")

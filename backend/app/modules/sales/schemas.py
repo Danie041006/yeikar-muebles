@@ -4,6 +4,7 @@ from typing import List, Optional
 from app.modules.clients.schemas import ClientResponse
 from app.modules.catalogos.schemas import MonedaResponse
 from app.modules.productos.schemas import ProductoResponse
+from app.modules.adjuntos.schemas import AdjuntoInfo
 
 # ------------------------------------------------------------
 # Detalle Venta
@@ -63,6 +64,8 @@ class PagoResponse(PagoBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     moneda: Optional[MonedaResponse] = None
+    # Comprobantes digitales del pago (adjuntos tipo PAGO)
+    recibos: List[AdjuntoInfo] = []
 
     class Config:
         from_attributes = True

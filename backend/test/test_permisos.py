@@ -88,8 +88,8 @@ class TestPermisos(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/gasto/gastos/", headers=self.h_fletes).status_code, 403)
 
     def test_iqe_requiere_autenticacion(self):
-        self.assertEqual(self.client.get("/api/v1/intelligent-quotation/health").status_code, 200)
-        r = self.client.post("/api/v1/intelligent-quotation/create-draft", json={})
+        r = self.client.post("/api/v1/intelligent-quotation/import-structure",
+                             json={"estructura_propuesta": []})
         self.assertEqual(r.status_code, 401)
 
     def test_admin_manager_usuario_requiere_admin(self):

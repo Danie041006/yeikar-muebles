@@ -38,10 +38,10 @@ try:
     engine = create_engine(db_url)
     with engine.connect() as conn:
         result = conn.execute(text("SELECT 1"))
-        print("✅ CONEXION EXITOSA!")
+        print(" CONEXION EXITOSA!")
         print(f"Resultado: {result.scalar()}")
 except Exception as e:
-    print(f"❌ ERROR de conexión: {e}")
+    print(f" ERROR de conexión: {e}")
     import traceback
     traceback.print_exc()
 

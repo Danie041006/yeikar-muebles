@@ -51,7 +51,7 @@ def main():
             # Buscar el material canónico
             canonical_material = db.query(Material).filter(Material.nombre.ilike(canonical_name)).first()
             if not canonical_material:
-                print(f"⚠️ No se encontró el material canónico '{canonical_name}' en la base de datos.")
+                print(f" No se encontró el material canónico '{canonical_name}' en la base de datos.")
                 continue
             
             # Insertar los sinónimos

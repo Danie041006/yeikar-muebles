@@ -70,10 +70,23 @@ def actualizar_material(db: Session, id_material: int, esquema: schemas.Material
     if not db_obj:
         return None
     datos = esquema.model_dump(exclude_unset=True)
+    from decimal import Decimal
+    costo_viejo = Decimal(str(db_obj.costo_base)) if db_obj.costo_base is not None else None
     for campo, valor in datos.items():
         setattr(db_obj, campo, valor)
     db.commit()
     db.refresh(db_obj)
+    # Recalcular (con cuidado) los productos que usan este insumo: si sube el
+    # precio del material, sube el precio del mueble automáticamente, sin inflar.
+    if "costo_base" in datos:
+        costo_nuevo = Decimal(str(db_obj.costo_base)) if db_obj.costo_base is not None else None
+        if costo_viejo is not None and costo_nuevo is not None and costo_viejo != costo_nuevo:
+            try:
+                from app.modules.productos.cost_service import recalcular_tras_cambio_material
+                recalcular_tras_cambio_material(db, id_material, costo_viejo, costo_nuevo)
+            except Exception:
+                # El recálculo jamás debe romper la actualización del material.
+                db.rollback()
     return db_obj
 
 def eliminar_material(db: Session, id_material: int):

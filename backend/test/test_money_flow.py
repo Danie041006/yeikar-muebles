@@ -480,3 +480,138 @@ def test_abono_metodo_obligatorio(client, cleaner, db):
     assert pedidos_despues == pedidos_antes, \
         f"La conversión rechazada no debe crear pedidos: antes={pedidos_antes} después={pedidos_despues}"
     assert _sin_pedido_ni_pago(db, cot["id"]), "No debe existir pedido ni pago"
+
+
+# ---------------------------------------------------------------------------
+# 16) Cobro USD genera movimiento de caja automático
+# ---------------------------------------------------------------------------
+def _movimiento_de_pago(db, pedido_id):
+    """Movimiento de caja vinculado a un pago de un pedido (via venta)."""
+    return db.execute(
+        text(
+            """SELECT mc.tipo, mc.monto, mc.moneda_id, mc.tasa_cambio,
+                      mc.monto_en_moneda_base, mca.codigo AS cuenta
+               FROM movimiento_caja mc
+               JOIN metodo_caja mca ON mca.id = mc.metodo_caja_id
+               JOIN pago p ON p.id = mc.pago_id
+               JOIN venta v ON v.id = p.venta_id
+               WHERE v.pedido_id = :pedido
+            """
+        ),
+        {"pedido": pedido_id},
+    ).fetchall()
+
+
+def test_abono_usd_genera_movimiento_caja(client, cleaner, db):
+    """Adelanto EFECTIVO_USD en factura USD → movimiento ENTRADA en la cuenta
+    EFECTIVO_USD, moneda del pago (USD) y tasa COP = TRM de la venta (3900)."""
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)
+    cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
+                           precio=500, moneda_id=2, tasa_cambio=3900)
+
+    r = _convertir(client, cleaner, cot["id"], producto_id=producto["id"], precio=500,
+                   adelanto=200, moneda_adelanto_id=2, metodo_pago="EFECTIVO_USD")
+    assert r.status_code == 201, f"Conversión con abono USD → {r.status_code}: {r.text}"
+    _buscar_venta(client, cleaner, db, r.json()["id"])  # registra venta/pagos para la limpieza
+
+    filas = _movimiento_de_pago(db, r.json()["id"])
+    assert filas, "El cobro debe generar un movimiento de caja automático"
+    fila = filas[0]
+    assert fila.cuenta == "EFECTIVO_USD", f"Cuenta debe ser EFECTIVO_USD, fue {fila.cuenta}"
+    assert fila.tipo == "ENTRADA"
+    assert fila.monto == pytest.approx(200.0, abs=0.01)
+    assert fila.moneda_id == 2, "El movimiento debe quedar en USD (moneda del pago)"
+    assert fila.tasa_cambio == pytest.approx(3900.0, abs=1e-6), \
+        f"Tasa COP por USD debe ser la TRM de la venta (3900), fue {fila.tasa_cambio}"
+    assert fila.monto_en_moneda_base == pytest.approx(200 * 3900, abs=0.01), \
+        f"Equivalente COP = 200 × 3900, fue {fila.monto_en_moneda_base}"
+
+
+# ---------------------------------------------------------------------------
+# 17) Cobro COP en factura USD → movimiento en COP con tasa 1.0
+# ---------------------------------------------------------------------------
+def test_abono_cop_genera_movimiento_caja(client, cleaner, db):
+    """Adelanto 780000 COP (BANCOLOMBIA) en factura USD 500@3900 → movimiento en la
+    cuenta BANCOLOMBIA con moneda COP y tasa COP = 1.0 (1/3900 × 3900)."""
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)
+    cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
+                           precio=500, moneda_id=2, tasa_cambio=3900)
+
+    r = _convertir(client, cleaner, cot["id"], producto_id=producto["id"], precio=500,
+                   adelanto=780000, moneda_adelanto_id=1, metodo_pago="BANCOLOMBIA")
+    assert r.status_code == 201, f"Conversión con abono COP → {r.status_code}: {r.text}"
+    _buscar_venta(client, cleaner, db, r.json()["id"])  # registra venta/pagos para la limpieza
+
+    filas = _movimiento_de_pago(db, r.json()["id"])
+    assert filas, "El cobro debe generar un movimiento de caja automático"
+    fila = filas[0]
+    assert fila.cuenta == "BANCOLOMBIA", f"Cuenta debe ser BANCOLOMBIA, fue {fila.cuenta}"
+    assert fila.tipo == "ENTRADA"
+    assert fila.monto == pytest.approx(780000.0, abs=0.01)
+    assert fila.moneda_id == 1, "El movimiento debe quedar en COP (moneda del pago)"
+    assert fila.tasa_cambio == pytest.approx(1.0, abs=1e-6), \
+        f"Tasa COP por COP debe ser 1.0, fue {fila.tasa_cambio}"
+    assert fila.monto_en_moneda_base == pytest.approx(780000.0, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# 18) El cobro se refleja en el resumen de cuentas
+# ---------------------------------------------------------------------------
+def test_resumen_cuentas_refleja_cobro(client, cleaner, db):
+    """Tras un cobro EFECTIVO_USD, el resumen /cuenta/resumen muestra la cuenta
+    EFECTIVO_USD con saldo en USD mayor a cero."""
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)
+    cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
+                           precio=500, moneda_id=2, tasa_cambio=3900)
+
+    r = _convertir(client, cleaner, cot["id"], producto_id=producto["id"], precio=500,
+                   adelanto=200, moneda_adelanto_id=2, metodo_pago="EFECTIVO_USD")
+    assert r.status_code == 201, f"Conversión → {r.status_code}: {r.text}"
+    _buscar_venta(client, cleaner, db, r.json()["id"])  # registra venta/pagos para la limpieza
+
+    rr = client.get("/api/v1/cuenta/resumen", headers=ADMIN_HEADERS)
+    assert rr.status_code == 200, f"GET /cuenta/resumen → {rr.status_code}: {rr.text}"
+    resumen = rr.json()
+    cuenta = next((x for x in resumen if x["metodo_caja"]["codigo"] == "EFECTIVO_USD"), None)
+    assert cuenta, "La cuenta EFECTIVO_USD debe aparecer en el resumen de cuentas"
+    linea_usd = next((l for l in cuenta["saldo_por_moneda"] if l["moneda_id"] == 2), None)
+    assert linea_usd, "Debe existir saldo en USD para EFECTIVO_USD"
+    assert float(linea_usd["monto"]) >= 200.0, \
+        f"El saldo en USD debe reflejar el cobro (>=200), fue {linea_usd['monto']}"
+
+
+# ---------------------------------------------------------------------------
+# 19) Cotización USD exige precios convertidos (defensa contra el bug de moneda)
+# ---------------------------------------------------------------------------
+def test_cotizacion_usd_rechaza_precios_sin_convertir(client, cleaner):
+    """Cotización USD cuyo precio de detalle no está convertido (precio COP como
+    USD) → 400 con mensaje claro, sin crear la cotización."""
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)
+
+    payload = {
+        "cliente_id": cliente["id"],
+        "fecha": "2026-08-06",
+        "estado": "BORRADOR",
+        "total_estimado": 928.0,
+        "moneda_id": 2,
+        "tasa_cambio": 3200.0,
+        "observaciones": "test validacion moneda",
+        "detalles": [{"producto_id": producto["id"], "cantidad": 1, "precio": 2968462.0}],
+    }
+    r = client.post("/api/v1/cotizacion/", json=payload, headers=ADMIN_HEADERS)
+    assert r.status_code == 400, f"Precio sin convertir debe ser 400, fue {r.status_code}: {r.text}"
+    msg = _sin_acentos(r.json().get("detail", "")).lower()
+    assert "no coincide con el total" in msg, f"El mensaje debe explicar la inconsistencia, fue: {r.text}"
+
+    # Con precios convertidos (consistente) → 201
+    payload_ok = {**payload, "detalles": [{"producto_id": producto["id"], "cantidad": 1, "precio": 928.0}],
+                  "observaciones": "test validacion ok"}
+    r_ok = client.post("/api/v1/cotizacion/", json=payload_ok, headers=ADMIN_HEADERS)
+    assert r_ok.status_code == 201, f"Precio convertido debe ser 201, fue {r_ok.status_code}: {r_ok.text}"
+    cleaner.registrar("cotizacion", r_ok.json()["id"])
+    for d in r_ok.json().get("detalles", []):
+        cleaner.registrar("detalle_cotizacion", d["id"])

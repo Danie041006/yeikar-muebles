@@ -29,12 +29,13 @@ def listar_gastos(
     limit: int = Query(100, ge=1, le=500),
     tipo_gasto_id: Optional[int] = Query(None),
     categoria: Optional[str] = Query(None, description="Filtrar por categoria: OPERATIVO, PASIVO, PRODUCCION"),
+    area_id: Optional[int] = Query(None, description="Filtrar por área/departamento"),
     fecha_desde: Optional[date] = Query(None),
     fecha_hasta: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_gastos(db, skip, limit, tipo_gasto_id, categoria, fecha_desde, fecha_hasta, current_user)
+    return service.obtener_gastos(db, skip, limit, tipo_gasto_id, categoria, area_id, fecha_desde, fecha_hasta, current_user)
 
 @router.get("/{gasto_id}", response_model=schemas.GastoResponse)
 def obtener_gasto(

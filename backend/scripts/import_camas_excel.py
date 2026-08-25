@@ -203,9 +203,9 @@ def get_or_create_material(db, nombre: str, v_unit: Decimal, um_id: int) -> Mate
 
 
 def main():
-    print(f"📂 Leyendo: {EXCEL_PATH}")
+    print(f" Leyendo: {EXCEL_PATH}")
     if not EXCEL_PATH.exists():
-        print(f"❌ No se encontró: {EXCEL_PATH}")
+        print(f" No se encontró: {EXCEL_PATH}")
         sys.exit(1)
 
     wb = openpyxl.load_workbook(str(EXCEL_PATH), data_only=True)
@@ -225,7 +225,7 @@ def main():
             db.query(ProductoMaterial).filter(ProductoMaterial.producto_id == p.id).delete()
             db.delete(p)
         db.flush()
-        print(f"🧹 Eliminados {len(prev)} productos anteriores del Excel\n")
+        print(f" Eliminados {len(prev)} productos anteriores del Excel\n")
 
         creados = 0
         for sheet_name in wb.sheetnames:
@@ -287,15 +287,15 @@ def main():
                 ))
 
             db.flush()
-            print(f"  ✅ {nombre[:40]:<40} | Costo: {costo:,.0f} | Venta: {pv:,.0f} | Cama: {len(datos['materiales_cama'])} noch: {len(datos['materiales_nochero'])}")
+            print(f"   {nombre[:40]:<40} | Costo: {costo:,.0f} | Venta: {pv:,.0f} | Cama: {len(datos['materiales_cama'])} noch: {len(datos['materiales_nochero'])}")
             creados += 1
 
         db.commit()
-        print(f"\n✅ ¡Importación finalizada con éxito! Total: {creados} productos.")
+        print(f"\n ¡Importación finalizada con éxito! Total: {creados} productos.")
 
     except Exception as e:
         db.rollback()
-        print(f"\n❌ Error: {e}")
+        print(f"\n Error: {e}")
         traceback.print_exc()
         sys.exit(1)
     finally:

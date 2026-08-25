@@ -20,7 +20,10 @@ def crear_orden(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.crear_orden_produccion(db, esquema, usuario_actual)
+    try:
+        return service.crear_orden_produccion(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/orden/desde-pedido/{detalle_pedido_id}", response_model=schemas.OrdenProduccionResponse, status_code=status.HTTP_201_CREATED)
 def crear_orden_desde_pedido(
@@ -89,7 +92,10 @@ def eliminar_orden(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_orden_produccion(db, id, usuario_actual)
+    try:
+        exito = service.eliminar_orden_produccion(db, id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not exito:
         raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
     return None
@@ -153,7 +159,10 @@ def eliminar_etapa(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_etapa_produccion(db, id, usuario_actual)
+    try:
+        exito = service.eliminar_etapa_produccion(db, id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not exito:
         raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
     return None
@@ -173,11 +182,16 @@ def pasar_a_area(
     from app.modules.catalogos.model import Area
     from app.modules.empleados.model import Empleado
     from app.modules.production.model import EtapaProduccion, EtapaAsignadoAdicional
+    from app.modules.production.service import _scope_stages
     from datetime import datetime
 
     # FOR UPDATE: dos "pasar a área" simultáneos sobre la misma etapa se serializan;
     # el segundo re-lee la etapa ya COMPLETADA y recibe 400 en vez de duplicar la etapa.
-    etapa_actual = db.query(EtapaProduccion).filter(EtapaProduccion.id == id).with_for_update().first()
+    # Además se respeta el alcance por creador (igual que el resto del módulo).
+    etapa_actual = _scope_stages(
+        db.query(EtapaProduccion).filter(EtapaProduccion.id == id),
+        usuario_actual,
+    ).with_for_update().first()
     if not etapa_actual:
         raise HTTPException(status_code=404, detail="Etapa no encontrada")
     if etapa_actual.estado == "COMPLETADA":
@@ -190,6 +204,23 @@ def pasar_a_area(
     if not db.query(Empleado).filter(Empleado.id == payload.empleado_responsable_id).first():
         raise HTTPException(status_code=404, detail="Responsable principal no encontrado")
 
+    # Misma regla que crear_etapa: NO se puede tener dos etapas activas de la
+    # misma área en la misma orden (dos activas = doble consumo/mano de obra y
+    # doble pago destajo). El retrabajo se modela DESPUÉS de completar la anterior.
+    activa_destino = db.query(EtapaProduccion).filter(
+        EtapaProduccion.orden_produccion_id == etapa_actual.orden_produccion_id,
+        EtapaProduccion.area_id == payload.area_id,
+        EtapaProduccion.estado.in_(["ASIGNADA", "EN_PROCESO", "PAUSADA"]),
+    ).first()
+    if activa_destino:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"El área destino ya tiene una etapa activa (etapa #{activa_destino.id}). "
+                "Complete esa etapa antes de pasar trabajo a esa área."
+            ),
+        )
+
     empleados_adicionales = list(dict.fromkeys(payload.empleados_adicionales_ids))
     if payload.empleado_responsable_id in empleados_adicionales:
         raise HTTPException(status_code=400, detail="El responsable principal no puede ser adicional")
@@ -197,19 +228,28 @@ def pasar_a_area(
     if len(empleados_validos) != len(empleados_adicionales):
         raise HTTPException(status_code=404, detail="Uno o mas empleados adicionales no existen")
 
-    # 1. Completar la etapa actual
+    # 1. Completar la etapa actual (fecha local, consistente con cambiar_estado:
+    #    antes se usaba utcnow() y una etapa completada de noche caía fuera del
+    #    período de nómina destajo).
     etapa_actual.estado = "COMPLETADA"
-    etapa_actual.fecha_fin = datetime.utcnow()
+    etapa_actual.fecha_fin = datetime.now()
     db.add(etapa_actual)
 
-    # 2. Crear nueva etapa en el área destino
+    # 2. Crear nueva etapa en el área destino. Si esa área ya tiene una etapa
+    #    COMPLETADA para esta orden, la nueva etapa es retrabajo (no paga destajo).
+    ya_completada_destino = db.query(EtapaProduccion).filter(
+        EtapaProduccion.orden_produccion_id == etapa_actual.orden_produccion_id,
+        EtapaProduccion.area_id == payload.area_id,
+        EtapaProduccion.estado == "COMPLETADA",
+    ).first()
     nueva_etapa = EtapaProduccion(
         orden_produccion_id=etapa_actual.orden_produccion_id,
         area_id=payload.area_id,
         empleado_responsable_id=payload.empleado_responsable_id,
         estado="ASIGNADA",
         observaciones=payload.observaciones,
-        fecha_inicio=datetime.utcnow(),
+        fecha_inicio=datetime.now(),
+        es_retrabajo=ya_completada_destino is not None,
     )
     db.add(nueva_etapa)
     db.flush()  # obtener ID de la nueva etapa
@@ -236,8 +276,12 @@ def agregar_asignado_adicional(
 ):
     from app.modules.empleados.model import Empleado
     from app.modules.production.model import EtapaAsignadoAdicional, EtapaProduccion
+    from app.modules.production.service import _scope_stages
 
-    etapa = db.query(EtapaProduccion).filter(EtapaProduccion.id == id).first()
+    etapa = _scope_stages(
+        db.query(EtapaProduccion).filter(EtapaProduccion.id == id),
+        usuario_actual,
+    ).first()
     if not etapa:
         raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
     empleado = db.query(Empleado).filter(Empleado.id == esquema.empleado_id).first()
@@ -267,7 +311,15 @@ def quitar_asignado_adicional(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    from app.modules.production.model import EtapaAsignadoAdicional
+    from app.modules.production.model import EtapaAsignadoAdicional, EtapaProduccion
+    from app.modules.production.service import _scope_stages
+
+    # La etapa debe existir y pertenecer al alcance del usuario
+    if not _scope_stages(
+        db.query(EtapaProduccion).filter(EtapaProduccion.id == id),
+        usuario_actual,
+    ).first():
+        raise HTTPException(status_code=404, detail="Etapa de produccion no encontrada")
 
     asignado = db.query(EtapaAsignadoAdicional).filter(
         EtapaAsignadoAdicional.etapa_produccion_id == id,
@@ -290,7 +342,7 @@ def registrar_consumo(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     try:
-        return service.crear_consumo_material(db, esquema)
+        return service.crear_consumo_material(db, esquema, usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -300,7 +352,7 @@ def listar_consumos_por_orden(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_consumos_por_orden(db, orden_id)
+    return service.obtener_consumos_por_orden(db, orden_id, usuario_actual)
 
 @router.delete("/consumo/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_consumo(
@@ -308,7 +360,10 @@ def eliminar_consumo(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_consumo_material(db, id)
+    try:
+        exito = service.eliminar_consumo_material(db, id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not exito:
         raise HTTPException(status_code=404, detail="Consumo de material no encontrado")
     return None
@@ -323,7 +378,10 @@ def registrar_mano_obra(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.crear_mano_obra(db, esquema)
+    try:
+        return service.crear_mano_obra(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/mano-obra/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_mano_obra(
@@ -331,7 +389,10 @@ def eliminar_mano_obra(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_mano_obra(db, id)
+    try:
+        exito = service.eliminar_mano_obra(db, id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not exito:
         raise HTTPException(status_code=404, detail="Mano de obra no encontrada")
     return None
@@ -348,7 +409,7 @@ def referencia_receta(
     """
     from app.modules.production.service import obtener_referencia_receta
 
-    data = obtener_referencia_receta(db, id)
+    data = obtener_referencia_receta(db, id, usuario_actual)
     if not data:
         raise HTTPException(status_code=404, detail="No se encontró receta de referencia para esta etapa")
     return data
@@ -361,8 +422,11 @@ def marcar_mano_obra_pagada(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    """Marca un registro de mano de obra como pagado (efectiviza el egreso en caja)."""
-    db_mano = service.marcar_mano_obra_pagada(db, id, pagado)
+    """Marca un registro de mano de obra como pagado (crea el egreso en Gastos)."""
+    try:
+        db_mano = service.marcar_mano_obra_pagada(db, id, pagado, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not db_mano:
         raise HTTPException(status_code=404, detail="Mano de obra no encontrada")
     return db_mano
@@ -397,7 +461,7 @@ def ver_costo(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.obtener_costo_por_orden(db, orden_id)
+    db_obj = service.obtener_costo_por_orden(db, orden_id, usuario_actual)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Costo de produccion no encontrado para esta orden")
     return db_obj

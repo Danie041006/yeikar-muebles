@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
   Activity,
@@ -7,7 +8,9 @@ import {
   Calculator,
   ChevronRight,
   CreditCard,
+  FileCheck2,
   FileText,
+  FolderOpen,
   Hammer,
   LayoutDashboard,
   LogOut,
@@ -47,8 +50,10 @@ const groups: { label: string; items: MenuItem[] }[] = [
       { name: 'Clientes', path: '/clientes', module: 'clientes', icon: Users },
       { name: 'Cotizaciones', path: '/cotizaciones', module: 'cotizaciones', icon: FileText },
       { name: 'Cotizador IA', path: '/cotizaciones-ia', module: 'cotizaciones_ia', icon: Sparkles, badge: 'IA' },
+      { name: 'Expediente', path: '/historial', module: 'pedidos', icon: FolderOpen },
       { name: 'Pedidos', path: '/pedidos', module: 'pedidos', icon: ShoppingBag },
       { name: 'Producción', path: '/produccion', module: 'produccion', icon: Hammer },
+      { name: 'Empleados', path: '/empleados', module: 'empleados', icon: Users },
       { name: 'Inventario', path: '/inventario', module: 'inventario', icon: Package },
       { name: 'Productos', path: '/productos', module: 'productos', icon: Box },
       { name: 'Calculadora de costos', path: '/costos', module: 'productos', icon: Calculator },
@@ -59,9 +64,13 @@ const groups: { label: string; items: MenuItem[] }[] = [
     label: 'Finanzas',
     items: [
       { name: 'Ventas y cobros', path: '/ventas', module: 'ventas', icon: Activity },
+      { name: 'Facturación', path: '/facturacion', module: 'facturacion', icon: FileCheck2 },
       { name: 'Egresos y gastos', path: '/gastos', module: 'gastos', icon: Receipt },
+      { name: 'Costos de Producción', path: '/costos-produccion', module: 'costos_produccion', icon: Hammer },
+      { name: 'Nómina', path: '/nomina', module: 'nomina', icon: Receipt },
       { name: 'Cuentas', path: '/cuentas', module: 'cuentas', icon: CreditCard },
       { name: 'Reportes financieros', path: '/reportes', module: 'reportes', icon: BarChart3 },
+      { name: 'Estado del día', path: '/reporte-diario', module: 'reportes', icon: CreditCard },
     ],
   },
   {
@@ -76,15 +85,31 @@ const groups: { label: string; items: MenuItem[] }[] = [
 export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, hasModulo, logout } = useAuth();
+  const { user, hasModulo, esAdmin, logout } = useAuth();
   const roles = user?.roles?.map((role) => role.nombre) || [];
   const nombreUsuario = user?.nombre_usuario || 'Usuario';
   const initials = nombreUsuario.slice(0, 2).toUpperCase();
+
+  // Vista bifurcada por rol: la administradora administra los Despachos
+  // (/envios); el chofer ve solo sus repartos (/mis-despachos).
+  const esChofer = !esAdmin && !!user?.empleado_id;
+  const despachoItem: MenuItem = esChofer
+    ? { name: 'Mis Despachos', path: '/mis-despachos', module: 'envios', icon: Truck }
+    : { name: 'Despachos', path: '/envios', module: 'envios', icon: Truck };
 
   const handleLogout = () => {
     logout();
     navigate('/login', { replace: true });
   };
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileOpen, onClose]);
 
   return (
     <>
@@ -102,7 +127,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           mobileOpen ? 'translate-x-0' : ''
         }`}
       >
-        <div className="flex items-center justify-between border-b border-white/10 px-6 py-5">
+        <div className="flex items-center justify-between border-b border-white/10 px-6 py-5 pt-safe">
           <Link to="/dashboard" onClick={onClose} className="group flex items-center gap-3.5">
             <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-xl font-black text-yeikar-neutral shadow-gold transition-transform duration-200 group-hover:scale-105">
               Y
@@ -125,7 +150,13 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
 
         <nav className="flex-1 overflow-y-auto px-4 py-5" aria-label="Navegación principal">
           {groups.map((group) => {
-            const items = group.items.filter((item) => item.path === '/dashboard' || hasModulo(item.module));
+            const items = group.items
+              .map((item) => (item.path === '/envios' ? despachoItem : item))
+              .filter((item) => {
+                if (item.path === '/dashboard') return true;
+                if (item.path === '/reportes' && !esAdmin) return false;
+                return hasModulo(item.module);
+              });
             if (items.length === 0) return null;
 
             return (
@@ -168,7 +199,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
           })}
         </nav>
 
-        <div className="border-t border-white/10 bg-black/10 p-4">
+        <div className="border-t border-white/10 bg-black/10 p-4 pb-safe">
           <div className="mb-3 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.045] p-2.5">
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-yeikar-primary/30 bg-yeikar-secondary font-headline text-xs font-bold text-yeikar-primary">
               {initials}

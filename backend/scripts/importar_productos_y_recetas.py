@@ -32,7 +32,7 @@ def mapear_tipo_escala(tipo):
     return None
 
 def importar_recetas():
-    print("📖 Leyendo recetas desde:", CSV_RECETAS)
+    print(" Leyendo recetas desde:", CSV_RECETAS)
     total_leidas = 0
     insertadas = 0
     saltadas_cero = 0
@@ -65,7 +65,7 @@ def importar_recetas():
             tipo_original = row.get('tipo_escala', 'LINEAL').strip().upper()
             tipo_final = mapear_tipo_escala(tipo_original)
             if tipo_final is None:
-                print(f"⚠️ Tipo de escala no válido o no mapeable: '{tipo_original}' para {pname} - {mname}")
+                print(f" Tipo de escala no válido o no mapeable: '{tipo_original}' para {pname} - {mname}")
                 saltadas_tipo += 1
                 continue
             
@@ -73,7 +73,7 @@ def importar_recetas():
             prod = db.query(Producto).filter(Producto.nombre == pname).first()
             mat = db.query(Material).filter(Material.nombre == mname).first()
             if not prod or not mat:
-                print(f"⚠️ No encontrado: producto '{pname}' o material '{mname}'")
+                print(f" No encontrado: producto '{pname}' o material '{mname}'")
                 errores_no_encontrados += 1
                 continue
             
@@ -107,15 +107,15 @@ def importar_recetas():
                 print(f"   Insertadas {insertadas} recetas...")
     
     db.commit()
-    print("\n📊 Resumen final:")
+    print("\n Resumen final:")
     print(f"   Total líneas leídas: {total_leidas}")
-    print(f"   ✅ Recetas insertadas: {insertadas}")
+    print(f"    Recetas insertadas: {insertadas}")
     print(f"   ⏩ Saltadas por cantidad <= 0: {saltadas_cero}")
     print(f"   ⏩ Saltadas por tipo_escala inválido: {saltadas_tipo}")
-    print(f"   ❌ Producto o material no encontrado: {errores_no_encontrados}")
-    print(f"   🔁 Duplicadas omitidas: {duplicados}")
+    print(f"    Producto o material no encontrado: {errores_no_encontrados}")
+    print(f"    Duplicadas omitidas: {duplicados}")
 
 if __name__ == "__main__":
     importar_recetas()
     db.close()
-    print("🎉 Proceso completado.")
+    print(" Proceso completado.")
