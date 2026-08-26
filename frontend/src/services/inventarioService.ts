@@ -38,6 +38,12 @@ export interface MovimientoCreate {
   referencia_tipo?: string;
   referencia_id?: number;
   observaciones?: string;
+  /** ENTRADA pagada de contado: genera gasto "COMPRA DE INSUMOS" + salida de caja. */
+  pagado_desde_metodo_caja_id?: number;
+  /** Moneda en la que sale el dinero de la cuenta (default COP). */
+  moneda_pago_id?: number;
+  /** Tasa manual "1 [moneda_pago] = X COP". Obligatoria si moneda_pago ≠ COP. */
+  tasa_pago?: number;
 }
 
 export interface MovimientoResponse {
@@ -88,6 +94,10 @@ export interface MovimientoProductoCreate {
   referencia_tipo?: string;
   referencia_id?: number;
   observaciones?: string;
+  /** ENTRADA pagada de contado: genera egreso automático + salida de esa caja. */
+  pagado_desde_metodo_caja_id?: number;
+  moneda_pago_id?: number;
+  tasa_pago?: number;
 }
 
 export interface MovimientoProductoResponse {

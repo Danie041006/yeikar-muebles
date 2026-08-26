@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse } from '../services/inventarioService';
 import { productosService, type MonedaInfo } from '../services/productosService';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
+import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
@@ -37,6 +38,16 @@ type Tab = 'insumos' | 'productos';
 
 const TIPOS_MOVIMIENTO = ['ENTRADA', 'SALIDA', 'AJUSTE', 'DAÑO', 'DEVOLUCION'];
 
+const MONEDA_BASE_ID = 1; // COP
+
+function parsePagoKey(key: string): { cuentaId: number | null; monedaId: number | null } {
+  const [cuentaId, monedaId] = (key || '').split(':');
+  return {
+    cuentaId: cuentaId ? Number(cuentaId) : null,
+    monedaId: monedaId ? Number(monedaId) : null,
+  };
+}
+
 export default function Inventario() {
   const toast = useToast();
   interface UnidadMedida {
@@ -47,10 +58,13 @@ export default function Inventario() {
 
   const [tab, setTab] = useState<Tab>('insumos');
 
-  // ---- Estado compartido ----
+  // ── Estado compartido ----
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
   const [unidades, setUnidades] = useState<UnidadMedida[]>([]);
   const [monedas, setMonedas] = useState<MonedaInfo[]>([]);
+  // Métodos de caja (Efectivo, Nequi, Bancolombia...): para el egreso
+  // automático al comprar reventa de contado.
+  const [metodosCaja, setMetodosCaja] = useState<{ id: number; nombre: string }[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ---- Insumos ----
@@ -69,8 +83,19 @@ export default function Inventario() {
     cantidad: '',
     costo_unitario: '',
     observaciones: '',
+    pago_key: '',   // "cuentaId:monedaId" — vacío = a crédito
+    tasa_pago: '',
   });
   const [savingMov, setSavingMov] = useState(false);
+
+  // Cuentas con su moneda para pagos de contado (una cuenta puede tener varias)
+  interface CuentaMonedaOpcion { key: string; cuentaId: number; nombre: string; monedaId: number; codigo: string; }
+  const [cuentasPago, setCuentasPago] = useState<CuentaMonedaOpcion[]>([]);
+
+  // ── Pago de contado en entradas ──
+  const parsePagoKeyLocal = parsePagoKey;
+  const codMonedaDe = (mid: number | null | undefined) =>
+    monedas.find((m) => m.id === Number(mid))?.codigo ?? 'COP';
 
   // Edición de insumo (dentro del panel)
   const [editMaterial, setEditMaterial] = useState({ nombre: '', costo_base: '', stock_minimo: '8' });
@@ -91,6 +116,9 @@ export default function Inventario() {
     tipo: 'ENTRADA',
     cantidad: '',
     costo_unitario: '',
+    pagado_desde_metodo_caja_id: '',   // key "cuentaId:monedaId"
+    moneda_pago_id: '',
+    tasa_pago: '',
     observaciones: '',
   });
   const [savingMovProd, setSavingMovProd] = useState(false);
@@ -112,6 +140,8 @@ export default function Inventario() {
     precio_venta: '',
     stock_minimo: '8',
     cantidad_inicial: '1',
+    cuenta_pago_id: '', // key "cuentaId:monedaId" — de qué caja salió el dinero (opcional)
+    tasa_pago: '',      // 1 [moneda_pago] = X COP (manual, obligatoria si aplica)
     moneda_id: '', // string para SearchSelect; default USD cuando cargan las monedas
   });
   const [savingProducto, setSavingProducto] = useState(false);
@@ -137,14 +167,41 @@ export default function Inventario() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [ubiData, uniData, monData] = await Promise.all([
+      const [ubiData, uniData, monData, metodosData] = await Promise.all([
         api.get<Ubicacion[]>('/catalogos/ubicacion/'),
         api.get<UnidadMedida[]>('/catalogos/unidad-medida/'),
         api.get<MonedaInfo[]>('/catalogos/moneda/'),
+        cuentasService.getResumen().catch(() => []),
       ]);
       setUbicaciones(ubiData.data);
       setUnidades(uniData.data);
       setMonedas(monData.data.filter(m => m.activo !== false));
+      // Métodos únicos de caja (el resumen trae una fila por cuenta)
+      const vistos = new Set<number>();
+      const metodos: { id: number; nombre: string }[] = [];
+      // Opciones cuenta+moneda para pagos de contado (una cuenta puede tener
+      // saldo en varias monedas; si no tiene movimientos aún, se ofrece COP).
+      const opciones: CuentaMonedaOpcion[] = [];
+      for (const r of metodosData) {
+        if (!vistos.has(r.metodo_caja.id)) {
+          vistos.add(r.metodo_caja.id);
+          metodos.push({ id: r.metodo_caja.id, nombre: r.metodo_caja.nombre });
+        }
+        const lineas = r.saldo_por_moneda.length
+          ? r.saldo_por_moneda
+          : [{ moneda_id: 1, codigo: 'COP', simbolo: '$', monto: 0 }];
+        for (const l of lineas) {
+          opciones.push({
+            key: `${r.metodo_caja.id}:${l.moneda_id}`,
+            cuentaId: r.metodo_caja.id,
+            nombre: r.metodo_caja.nombre,
+            monedaId: l.moneda_id,
+            codigo: l.codigo,
+          });
+        }
+      }
+      setMetodosCaja(metodos);
+      setCuentasPago(opciones);
     } catch (error) {
       console.error('Error fetching catalog data:', error);
     } finally {
@@ -220,6 +277,18 @@ export default function Inventario() {
   const handleCreateProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProducto.nombre.trim()) return;
+    const pagoModal = parsePagoKey(newProducto.cuenta_pago_id);
+    const prodMonedaNueva = parseInt(newProducto.moneda_id || String(MONEDA_BASE_ID)) || MONEDA_BASE_ID;
+    if (
+      pagoModal.cuentaId &&
+      (pagoModal.monedaId !== MONEDA_BASE_ID || prodMonedaNueva !== MONEDA_BASE_ID) &&
+      !(parseFloat(newProducto.tasa_pago || '0') > 0)
+    ) {
+      toast.error(
+        `Indica la tasa de cambio: 1 ${codMonedaDe(pagoModal.monedaId ?? prodMonedaNueva)} = ? COP.`
+      );
+      return;
+    }
     try {
       setSavingProducto(true);
       const creado = await productosService.crearProducto({
@@ -246,10 +315,11 @@ export default function Inventario() {
         setFotoProductoPreview(null);
       }
       setShowProductoModal(false);
-      setNewProducto({ nombre: '', codigo: '', costo_base: '', precio_venta: '', stock_minimo: '8', cantidad_inicial: '1', moneda_id: idMonedaPorDefecto() });
+      setNewProducto({ nombre: '', codigo: '', costo_base: '', precio_venta: '', stock_minimo: '8', cantidad_inicial: '1', cuenta_pago_id: '', tasa_pago: '', moneda_id: idMonedaPorDefecto() });
 
       // Entrada inicial al inventario: la cantidad la decide el usuario
-      // (default 1); el costo es opcional.
+      // (default 1); el costo es opcional. Si indica cuenta de pago, se
+      // genera el egreso automático (gasto + salida de caja).
       const cantInicial = parseFloat(newProducto.cantidad_inicial || '0') || 0;
       if (cantInicial > 0 && creado.id) {
         const ubi = ubicaciones[0];
@@ -260,6 +330,9 @@ export default function Inventario() {
             tipo: 'ENTRADA',
             cantidad: cantInicial,
             costo_unitario: newProducto.costo_base ? parseFloat(newProducto.costo_base) : undefined,
+            pagado_desde_metodo_caja_id: pagoModal.cuentaId ?? undefined,
+            moneda_pago_id: pagoModal.monedaId ?? undefined,
+            tasa_pago: pagoModal.cuentaId && parseFloat(newProducto.tasa_pago || '0') > 0 ? parseFloat(newProducto.tasa_pago) : undefined,
             observaciones: 'Carga inicial de producto de reventa',
           });
         }
@@ -280,7 +353,7 @@ export default function Inventario() {
       costo_base: mat.costo_base != null ? String(mat.costo_base) : '',
       stock_minimo: mat.stock_minimo != null ? String(mat.stock_minimo) : '8',
     });
-    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', observaciones: '' });
+    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', observaciones: '', pago_key: '', tasa_pago: '' });
     try {
       setLoadingKardex(true);
       const data = await inventarioService.getKardex(mat.id);
@@ -317,6 +390,12 @@ export default function Inventario() {
     if (!selectedMaterialId || !movMaterial.ubicacion_id || !movMaterial.cantidad) return;
 
     const esEntrada = movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION';
+    const pago = esEntrada ? parsePagoKey(movMaterial.pago_key) : { cuentaId: null, monedaId: null };
+    const tasaNum = parseFloat(movMaterial.tasa_pago || '0');
+    if (pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID && !(tasaNum > 0)) {
+      toast.error(`Indica la tasa de cambio: 1 ${codMonedaDe(pago.monedaId)} = ? COP.`);
+      return;
+    }
     try {
       setSavingMov(true);
       await inventarioService.crearMovimiento({
@@ -325,10 +404,13 @@ export default function Inventario() {
         tipo: movMaterial.tipo as any,
         cantidad: parseFloat(movMaterial.cantidad),
         costo_unitario: esEntrada && movMaterial.costo_unitario ? parseFloat(movMaterial.costo_unitario) : undefined,
+        pagado_desde_metodo_caja_id: esEntrada && pago.cuentaId ? pago.cuentaId : undefined,
+        moneda_pago_id: esEntrada && pago.cuentaId ? pago.monedaId ?? undefined : undefined,
+        tasa_pago: esEntrada && pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID ? tasaNum : undefined,
         observaciones: movMaterial.observaciones || undefined,
       });
 
-      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '' });
+      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '', pago_key: '', tasa_pago: '' });
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -342,7 +424,7 @@ export default function Inventario() {
   // ---- Abrir panel de producto ----
   const handleOpenProducto = async (p: Product) => {
     setSelectedProductoId(p.id);
-    setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '' });
+    setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '' });
     try {
       setLoadingKardexProducto(true);
       const data = await inventarioService.getKardexProducto(p.id);
@@ -360,6 +442,13 @@ export default function Inventario() {
     if (!selectedProductoId || !movProducto.ubicacion_id || !movProducto.cantidad) return;
 
     const esEntrada = movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION';
+    const pago = esEntrada ? parsePagoKey(movProducto.pagado_desde_metodo_caja_id) : { cuentaId: null as number | null, monedaId: null as number | null };
+    const refMid = Number(productoSeleccionado?.moneda_id ?? MONEDA_BASE_ID);
+    const tasaNum = parseFloat(movProducto.tasa_pago || '0');
+    if (pago.cuentaId && (pago.monedaId !== MONEDA_BASE_ID || refMid !== MONEDA_BASE_ID) && !(tasaNum > 0)) {
+      toast.error(`Indica la tasa de cambio: 1 ${codMonedaDe(pago.monedaId ?? refMid)} = ? COP.`);
+      return;
+    }
     try {
       setSavingMovProd(true);
       await inventarioService.crearMovimientoProducto({
@@ -368,10 +457,16 @@ export default function Inventario() {
         tipo: movProducto.tipo as any,
         cantidad: parseFloat(movProducto.cantidad),
         costo_unitario: esEntrada && movProducto.costo_unitario ? parseFloat(movProducto.costo_unitario) : undefined,
+        pagado_desde_metodo_caja_id:
+          movProducto.tipo === 'ENTRADA' && pago.cuentaId ? pago.cuentaId : undefined,
+        moneda_pago_id:
+          movProducto.tipo === 'ENTRADA' && pago.cuentaId ? (pago.monedaId ?? undefined) : undefined,
+        tasa_pago:
+          movProducto.tipo === 'ENTRADA' && pago.cuentaId && tasaNum > 0 ? tasaNum : undefined,
         observaciones: movProducto.observaciones || undefined,
       });
 
-      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', observaciones: '' });
+      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '' });
       fetchProductos();
       const p = productos.find(x => x.id === selectedProductoId);
       if (p) handleOpenProducto(p);
@@ -773,6 +868,46 @@ export default function Inventario() {
                     <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.costo_unitario} onChange={(e) => setMovMaterial(p => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
                   </div>
                 )}
+                {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && cuentasPago.length > 0 && (() => {
+                  const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
+                  const totalRef = (parseFloat(movMaterial.costo_unitario || '0') || 0) * (parseFloat(movMaterial.cantidad || '0') || 0);
+                  const pagoCod = codMonedaDe(monedaId);
+                  const necesitaTasa = !!cuentaId && monedaId !== MONEDA_BASE_ID;
+                  const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
+                  const deduc = cuentaId ? (necesitaTasa && tasaNum > 0 ? totalRef / tasaNum : totalRef) : 0;
+                  return (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — vacío = a crédito)</span>
+                        </label>
+                        <SearchSelect
+                          value={movMaterial.pago_key}
+                          onChange={(v) => setMovMaterial(p => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago }))}
+                          options={[
+                            { value: '', label: 'A crédito (no descuenta caja)' },
+                            ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
+                          ]}
+                          placeholder="Contado desde..."
+                        />
+                      </div>
+                      {necesitaTasa && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">
+                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">(1 {pagoCod} = ? COP · se ingresa manualmente)</span>
+                          </label>
+                          <input type="number" step="0.01" min="0" required value={movMaterial.tasa_pago} onChange={(e) => setMovMaterial(p => ({ ...p, tasa_pago: e.target.value }))} placeholder="Ej: 4000" className={inputCls} />
+                        </div>
+                      )}
+                      {!!cuentaId && (
+                        <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                          Se descontarán ≈ <b>${deduc.toLocaleString('es-CO')} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
+                          {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
                   <textarea rows={2} placeholder="Detalle o referencia..." value={movMaterial.observaciones} onChange={(e) => setMovMaterial(p => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
@@ -893,6 +1028,53 @@ export default function Inventario() {
                     <input type="number" step="0.01" min="0" placeholder="0.00" value={movProducto.costo_unitario} onChange={(e) => setMovProducto(p => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
                   </div>
                 )}
+                {movProducto.tipo === 'ENTRADA' && movProducto.costo_unitario && parseFloat(movProducto.costo_unitario) > 0 && cuentasPago.length > 0 && (() => {
+                  const refMid = Number(productoSeleccionado?.moneda_id ?? MONEDA_BASE_ID);
+                  const { cuentaId, monedaId } = parsePagoKey(movProducto.pagado_desde_metodo_caja_id);
+                  const pagoMid = monedaId ?? refMid;
+                  const pagoCod = codMonedaDe(pagoMid);
+                  const refCod = codMonedaDe(refMid);
+                  // Tasa manual obligatoria si el pago o la referencia no son COP
+                  const necesitaTasa = !!cuentaId && (pagoMid !== MONEDA_BASE_ID || refMid !== MONEDA_BASE_ID);
+                  const tasaNum = parseFloat(movProducto.tasa_pago || '0') || 0;
+                  const totalRef = parseFloat(movProducto.costo_unitario);
+                  const deduc = !cuentaId ? 0
+                    : pagoMid === refMid ? totalRef
+                    : pagoMid === MONEDA_BASE_ID ? totalRef * tasaNum
+                    : totalRef / tasaNum;
+                  return (
+                    <>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — genera el egreso)</span>
+                        </label>
+                        <SearchSelect
+                          value={movProducto.pagado_desde_metodo_caja_id}
+                          onChange={(v) => setMovProducto(p => ({ ...p, pagado_desde_metodo_caja_id: String(v), tasa_pago: '' }))}
+                          options={[
+                            { value: '', label: 'A crédito (no descuenta caja)' },
+                            ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
+                          ]}
+                          placeholder="Contado desde... (vacío = a crédito)"
+                        />
+                      </div>
+                      {cuentaId && necesitaTasa && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">
+                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">(1 {pagoCod === 'COP' ? refCod : pagoCod} = ? COP)</span>
+                          </label>
+                          <input type="number" step="0.01" min="0" required value={movProducto.tasa_pago} onChange={(e) => setMovProducto(p => ({ ...p, tasa_pago: e.target.value }))} placeholder="Ej: 4000" className={inputCls} />
+                        </div>
+                      )}
+                      {!!cuentaId && (
+                        <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                          Se descontarán ≈ <b>${deduc.toLocaleString('es-CO')} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movProducto.pagado_desde_metodo_caja_id)?.nombre}</b>
+                          {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
                   <textarea rows={2} placeholder="Detalle o referencia..." value={movProducto.observaciones} onChange={(e) => setMovProducto(p => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
@@ -1090,6 +1272,49 @@ export default function Inventario() {
                   La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
                 </p>
               </div>
+              {parseFloat(newProducto.costo_base || '0') > 0 && cuentasPago.length > 0 && (() => {
+                const refMid = Number(newProducto.moneda_id || MONEDA_BASE_ID);
+                const { cuentaId, monedaId } = parsePagoKey(newProducto.cuenta_pago_id);
+                const pagoMid = monedaId ?? refMid;
+                const pagoCod = codMonedaDe(pagoMid);
+                const refCod = codMonedaDe(refMid);
+                const necesitaTasa = !!cuentaId && (pagoMid !== MONEDA_BASE_ID || refMid !== MONEDA_BASE_ID);
+                return (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                        ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span>
+                      </label>
+                      <SearchSelect
+                        value={newProducto.cuenta_pago_id}
+                        onChange={(v) => setNewProducto(prev => ({ ...prev, cuenta_pago_id: String(v), tasa_pago: '' }))}
+                        options={[
+                          { value: '', label: 'A crédito (no descuenta caja)' },
+                          ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
+                        ]}
+                        placeholder="Contado desde... (vacío = a crédito)"
+                      />
+                      <p className="text-[10px] text-yeikar-neutral/40 mt-1">
+                        Si eliges una, se registra el egreso de la compra y sale de esa caja automáticamente.
+                      </p>
+                    </div>
+                    {cuentaId && necesitaTasa && (
+                      <div>
+                        <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                          Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">(1 {pagoCod === 'COP' ? refCod : pagoCod} = ? COP · manual)</span>
+                        </label>
+                        <input
+                          type="number" step="0.01" min="0" required
+                          value={newProducto.tasa_pago}
+                          onChange={(e) => setNewProducto(prev => ({ ...prev, tasa_pago: e.target.value }))}
+                          placeholder="Ej: 4000"
+                          className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {parseFloat(newProducto.cantidad_inicial || '0') > 0 && (
                 <p className="text-[11px] text-yeikar-neutral/50 italic bg-yeikar-tertiary/30 border border-yeikar-secondary-light/5 rounded-lg px-3 py-2">
                   Se registrará una entrada inicial de {newProducto.cantidad_inicial || 1} unidad(es) en {ubicaciones[0]?.nombre || 'Depósito Principal'}{parseFloat(newProducto.costo_base || '0') > 0 ? ` con ese costo (${simboloPrecio}${newProducto.costo_base} c/u)` : ''}.

@@ -45,7 +45,7 @@ def crear_movimiento(
     y actualiza el stock automáticamente.
     """
     try:
-        mov = service.registrar_movimiento(db, movimiento)
+        mov = service.registrar_movimiento(db, movimiento, usuario=current_user)
         db.commit()
         db.refresh(mov)
         return mov
@@ -104,7 +104,7 @@ def crear_movimiento_producto(
     opcional, salida, ajuste, daño, devolución) y actualiza stock + costo promedio.
     """
     try:
-        mov = service.registrar_movimiento_producto(db, movimiento)
+        mov = service.registrar_movimiento_producto(db, movimiento, usuario=current_user)
         db.commit()
         db.refresh(mov)
         return mov

@@ -29,6 +29,13 @@ class MovimientoCreate(BaseModel):
     referencia_tipo: Optional[str] = None
     referencia_id: Optional[int] = None
     observaciones: Optional[str] = None
+    # Compra de contado: si la ENTRADA se paga desde una cuenta de caja, se
+    # genera automáticamente un gasto "COMPRA DE INSUMOS" + la salida de esa caja.
+    # La tasa es obligatoria cuando la moneda de pago no es COP (insumos en COP):
+    # convención "1 [moneda_pago] = X COP".
+    pagado_desde_metodo_caja_id: Optional[int] = None
+    moneda_pago_id: Optional[int] = None
+    tasa_pago: Optional[Decimal] = Field(None, gt=0)
 
 class MovimientoResponse(MovimientoCreate):
     id: int
@@ -81,6 +88,15 @@ class MovimientoProductoCreate(BaseModel):
     referencia_tipo: Optional[str] = None
     referencia_id: Optional[int] = None
     observaciones: Optional[str] = None
+    # Egreso automático de compra: si la ENTRADA se pagó de contado, indica
+    # desde qué cuenta de caja salió el dinero. Con costo + cuenta se genera
+    # un gasto "Compra inventario reventa" + la salida de esa caja.
+    # Moneda de pago opcional (default: la moneda del producto) y tasa manual
+    # "1 [moneda_pago] = X COP" — obligatoria cuando moneda_pago ≠ COP y la del
+    # producto tampoco lo es (la tabla de tasas ya no se usa: tasa por operación).
+    pagado_desde_metodo_caja_id: Optional[int] = None
+    moneda_pago_id: Optional[int] = None
+    tasa_pago: Optional[Decimal] = Field(None, gt=0)
 
 
 class MovimientoProductoResponse(MovimientoProductoCreate):

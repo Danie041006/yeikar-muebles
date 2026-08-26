@@ -282,6 +282,16 @@ function App() {
             }
           />
           <Route
+            path="/inventario"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/inventario']} /><Inventario /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/reportes"
             element={
               <PrivateRoute>
