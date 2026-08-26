@@ -11,6 +11,7 @@ from app.modules.production.schemas import (
 from app.modules.orders.model import DetallePedido
 from app.modules.orders.model import DetallePedido, Pedido
 from app.modules.productos.model import Material, Producto, ProductoMaterial
+from app.modules.empleados.model import Empleado
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Ubicacion, TipoGasto
 from app.modules.inventory.service import registrar_movimiento
@@ -126,8 +127,15 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
     )
     if usuario is not None and not tiene_alcance_total(usuario):
         detalle_query = detalle_query.filter(Pedido.creado_por_id == usuario.id)
-    if not detalle_query.first():
+    # Los productos de REVENTA no se fabrican: se venden del inventario.
+    _detalle = detalle_query.first()
+    if not _detalle:
         raise ValueError("El detalle de pedido no existe o no está disponible para este usuario.")
+    if _detalle.producto is not None and _detalle.producto.es_reventa:
+        raise ValueError(
+            f"El producto '{_detalle.producto.nombre}' es de reventa: no entra a producción. "
+            "Su venta descuenta stock del inventario al facturar."
+        )
 
     db_orden = OrdenProduccion(
         detalle_pedido_id=esquema.detalle_pedido_id,
@@ -153,7 +161,15 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuari
     detalle = detalle_query.with_for_update().first()
     if not detalle:
         raise ValueError("El detalle de pedido especificado no existe.")
-    
+
+    # Los productos de REVENTA no se fabrican: se venden del inventario.
+    # Nunca deben entrar al tablero de producción.
+    if detalle.producto is not None and detalle.producto.es_reventa:
+        raise ValueError(
+            f"El producto '{detalle.producto.nombre}' es de reventa: no entra a producción. "
+            "Su venta descuenta stock del inventario al facturar."
+        )
+
     # Verificar si ya existe una orden de producción para este detalle
     existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle_pedido_id).first()
     if existente:
@@ -445,6 +461,11 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
     material = db.query(Material).filter(Material.id == esquema.material_id).first()
     if not material:
         raise ValueError("El material especificado no existe.")
+    # 3.5 Validar el SOLICITANTE (quién pide el material). Es obligatorio:
+    # queda registrado el empleado que solicita, no solo el usuario que digita.
+    solicitante = db.query(Empleado).filter(Empleado.id == esquema.solicitante_empleado_id).first()
+    if not solicitante:
+        raise ValueError("Debe indicar quién solicita el material (solicitante inválido).")
     # 4. Crear el registro de consumo
     seccion = esquema.seccion or _normalizar_seccion(etapa.area.nombre if etapa.area else None)
     db_consumo = ConsumoMaterial(
@@ -453,6 +474,7 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         cantidad=esquema.cantidad,
         costo_unitario=material.costo_base,
         seccion=seccion,
+        solicitante_empleado_id=solicitante.id,
         creado_por_id=usuario.id if usuario is not None else None,
         fecha=esquema.fecha,
         observaciones=esquema.observaciones
@@ -467,7 +489,7 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         cantidad=Decimal(str(esquema.cantidad)),
         referencia_tipo="produccion",
         referencia_id=db_consumo.id,
-        observaciones=f"Consumo en etapa {esquema.etapa_produccion_id}"
+        observaciones=f"Consumo en etapa {esquema.etapa_produccion_id} — Solicitante: {solicitante.nombre}"
     )
     try:
         registrar_movimiento(db, movimiento)
@@ -485,7 +507,7 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
             tipo_gasto_id=tipo_gasto_consumo.id,
             moneda_id=1,
             fecha=esquema.fecha or date.today(),
-            descripcion=f"Consumo {material.nombre} ({esquema.cantidad}) - Etapa #{esquema.etapa_produccion_id}",
+            descripcion=f"Consumo {material.nombre} ({esquema.cantidad}) - Etapa #{esquema.etapa_produccion_id} — Solicita: {solicitante.nombre}",
             monto=costo_total,
             tasa_cambio=Decimal("1.0"),
             monto_en_moneda_base=costo_total,
@@ -498,7 +520,13 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
     record_event(
         db, actor=usuario, action="CREATE", entity_type="consumo_material",
         entity_id=db_consumo.id,
-        after={"material_id": db_consumo.material_id, "cantidad": float(db_consumo.cantidad), "etapa_produccion_id": db_consumo.etapa_produccion_id},
+        after={
+            "material_id": db_consumo.material_id,
+            "cantidad": float(db_consumo.cantidad),
+            "etapa_produccion_id": db_consumo.etapa_produccion_id,
+            "solicitante_empleado_id": db_consumo.solicitante_empleado_id,
+            "solicitante": solicitante.nombre,
+        },
     )
     db.commit()
     db.refresh(db_consumo)
@@ -645,6 +673,13 @@ def crear_mano_obra(db: Session, esquema: ManoObraCreate, usuario: Usuario | Non
             f"No se puede registrar mano de obra en una etapa en estado '{etapa.estado}'. "
             "La etapa debe estar EN_PROCESO."
         )
+    # Tarifa del listado de costos de producción (trazabilidad opcional).
+    precio_produccion_id = getattr(esquema, "precio_produccion_id", None)
+    if precio_produccion_id is not None:
+        from app.modules.costos_produccion.model import PrecioProduccion
+        tarifa = db.query(PrecioProduccion).filter(PrecioProduccion.id == precio_produccion_id).first()
+        if not tarifa:
+            raise ValueError(f"El costo de producción #{precio_produccion_id} no existe.")
     db_mano_obra = ManoObra(
         etapa_produccion_id=esquema.etapa_produccion_id,
         empleado_id=esquema.empleado_id,
@@ -652,6 +687,7 @@ def crear_mano_obra(db: Session, esquema: ManoObraCreate, usuario: Usuario | Non
         porcentaje_recargo=esquema.porcentaje_recargo,
         pagado=getattr(esquema, "pagado", False),
         observaciones=esquema.observaciones,
+        precio_produccion_id=precio_produccion_id,
         creado_por_id=usuario.id if usuario is not None else None,
     )
     db.add(db_mano_obra)

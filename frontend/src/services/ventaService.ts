@@ -20,6 +20,8 @@ export interface ClienteInfo {
 export interface ProductoInfo {
   id: number;
   nombre: string;
+  /** Fotos de referencia del producto (adjuntos tipo PRODUCTO). */
+  fotos?: { url?: string }[];
 }
 
 export interface DetalleVenta {

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from app.modules.catalogos.schemas import TipoProductoResponse, UnidadMedidaResponse
+from app.modules.catalogos.schemas import TipoProductoResponse, UnidadMedidaResponse, MonedaResponse
 from app.modules.adjuntos.schemas import AdjuntoInfo
 
 # ------------------------------------------------------------
@@ -18,9 +18,14 @@ class ProductoBase(BaseModel):
     alto_base: Optional[float] = None
     stock_minimo: Optional[float] = 8.0
     es_reventa: Optional[bool] = False
+    # Moneda de los precios de referencia (COP=1 por defecto). Los productos de
+    # reventa suelen crearse en USD.
+    moneda_id: Optional[int] = 1
 
 class ProductoCreate(ProductoBase):
-    pass
+    # Precios de referencia en la moneda declarada (moneda_id).
+    precio_costo_base: Optional[float] = None
+    precio_venta_base: Optional[float] = None
 
 class ProductoUpdate(BaseModel):
     nombre: Optional[str] = None
@@ -33,6 +38,9 @@ class ProductoUpdate(BaseModel):
     alto_base: Optional[float] = None
     stock_minimo: Optional[float] = None
     es_reventa: Optional[bool] = None
+    moneda_id: Optional[int] = None
+    precio_costo_base: Optional[float] = None
+    precio_venta_base: Optional[float] = None
 
 class ProductoResponse(ProductoBase):
     id: int
@@ -41,6 +49,7 @@ class ProductoResponse(ProductoBase):
     created_at: Optional[datetime] = None
     # Fotos de referencia del mueble (adjuntos tipo PRODUCTO)
     fotos: List["AdjuntoInfo"] = []
+    moneda: Optional[MonedaResponse] = None
 
     class Config:
         from_attributes = True
@@ -231,3 +240,17 @@ class RecalculateCustomRecipeRequest(BaseModel):
     ganancia: float = 40.0
     impuesto: float = 7.0
     secciones: List[SeccionProductoResponse]
+
+# ------------------------------------------------------------
+# Importación de estructura de costos pegada desde Excel
+# ------------------------------------------------------------
+class ImportarEstructuraTextoIn(BaseModel):
+    texto: str = Field(..., min_length=10, description="Filas copiadas de la hoja de Excel")
+    nombre: Optional[str] = Field(None, max_length=150)
+    tipo_producto_id: Optional[int] = None
+    nuevo_tipo_producto: Optional[str] = Field(None, max_length=80)
+    ancho: float = Field(1.60, gt=0)
+    largo: float = Field(1.90, gt=0)
+    ganancia_porcentaje: float = Field(40.0, ge=0, le=999)
+    impuesto_porcentaje: float = Field(7.0, ge=0, le=100)
+    dry_run: bool = True

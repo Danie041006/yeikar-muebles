@@ -218,9 +218,9 @@ export default function Gastos() {
     {
       key: 'descripcion',
       header: 'Descripción',
-      render: (g) => <span>{g.descripcion || '-'}</span>,
-      cellClassName: 'max-w-[200px] truncate',
-      mobileSecondary: true,
+      render: (g) => <span className="break-words">{g.descripcion || '-'}</span>,
+      mobileLabel: 'Descripción',
+      mobileFull: true,
     },
     {
       key: 'comprobante',
@@ -456,7 +456,13 @@ export default function Gastos() {
               onChange={(v) => setForm({ ...form, metodo_caja_id: Number(v) })}
               options={cuentas.map((c) => ({
                 value: c.metodo_caja.id,
-                label: `${c.metodo_caja.nombre} (saldo ${fmtMoneda(c.saldo_cop, 'COP')})`,
+                // Saldo en la moneda propia de cada cuenta (sin conversión a COP:
+                // la tasa cambia a diario y se ingresa manualmente por operación).
+                label: `${c.metodo_caja.nombre} (saldo ${
+                  c.saldo_por_moneda.length
+                    ? c.saldo_por_moneda.map((l) => `${l.simbolo} ${fmtMoneda(Number(l.monto), l.codigo)}`).join(' / ')
+                    : 'sin movimientos'
+                })`,
               }))}
               placeholder="Seleccione la cuenta..."
             />

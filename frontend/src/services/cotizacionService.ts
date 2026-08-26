@@ -17,9 +17,15 @@ export interface Product {
   descripcion?: string;
   precio_venta_base?: number;
   precio_costo_base?: number;
-  alto_base: number;
-  ancho_base: number;
-  largo_base: number;
+  /** Moneda de los precios de referencia (COP=1). Los reventa suelen ser USD. */
+  moneda_id?: number | null;
+  moneda?: Moneda | null;
+  es_reventa?: boolean;
+  tipo_producto_id?: number;
+  tipo_producto?: { nombre: string } | null;
+  alto_base: number | null;
+  ancho_base: number | null;
+  largo_base: number | null;
   categoria?: string;
   /** Fotos de referencia del mueble. */
   fotos?: AdjuntoInfo[];
@@ -103,6 +109,8 @@ export interface CalculationResult {
   precio_con_iva?: number;
   producto_id?: number;
   producto_nombre?: string;
+  /** Moneda en la que vienen TODOS los montos del cálculo (reventa: su propia moneda, ej. 'USD'; fabricados: 'COP'). */
+  moneda_codigo?: string | null;
   dimensiones_base?: { ancho: number; largo: number };
 }
 
@@ -228,6 +236,7 @@ export const cotizacionService = {
       precio_con_iva: Number(data.precio_con_iva) || precio_venta,
       producto_id: data.producto_id,
       producto_nombre: data.producto_nombre,
+      moneda_codigo: data.moneda_codigo || null,
       dimensiones_base: data.dimensiones_base,
     };
   },

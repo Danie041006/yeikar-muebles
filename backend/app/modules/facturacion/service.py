@@ -89,7 +89,7 @@ def obtener_facturas(db: Session, usuario: Usuario | None = None):
     query = db.query(Factura)
     if usuario is not None:
         query = filtrar_registros_propios(query, Factura.creado_por_id, usuario)
-    return query.order_by(Factura.id.desc()).all()
+    return query.order_by(Factura.id.desc()).limit(500).all()
 
 
 # ------------------------------------------------------------
@@ -112,7 +112,7 @@ def pedidos_facturables(db: Session, usuario: Usuario | None = None):
         query = filtrar_registros_propios(query, Pedido.creado_por_id, usuario)
 
     resultado = []
-    for pedido, venta in query.all():
+    for pedido, venta in query.limit(500).all():
         if pedido.id in facturados:
             continue
         total_pagado = sum(float(p.monto_en_moneda_base) for p in venta.pagos)

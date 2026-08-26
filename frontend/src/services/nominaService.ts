@@ -136,6 +136,10 @@ export const nominaService = {
     const res = await api.post('/nomina/generar', { periodo_desde, periodo_hasta });
     return res.data;
   },
+  resumenSemanal: async (desde: string, hasta: string): Promise<ResumenSemanal> => {
+    const res = await api.get<ResumenSemanal>('/nomina/resumen-semanal', { params: { desde, hasta } });
+    return res.data;
+  },
   crear: async (periodo_desde: string, periodo_hasta: string, descripcion?: string): Promise<Nomina> => {
     const res = await api.post('/nomina/', { periodo_desde, periodo_hasta, descripcion });
     return res.data;
@@ -187,3 +191,40 @@ export const nominaService = {
     return res.data;
   },
 };
+
+// ---------------- Producción de la semana (vista previa) ----------------
+export interface PiezaSemana {
+  producto: string;
+  area: string | null;
+  cliente: string | null;
+  cantidad: number;
+  precio_unitario: number | null;
+  total: number | null;
+  fecha_fin?: string | null;
+}
+
+export interface ManoObraSemana {
+  total: number;
+  pagado: number;
+  pendiente: number;
+  lineas: { descripcion: string; monto: number; pagado: boolean }[];
+}
+
+export interface EmpleadoSemana {
+  empleado_id: number;
+  nombre: string;
+  cargo?: string | null;
+  tipo_pago?: 'DESTAJO' | 'FIJO' | null;
+  en_nomina: boolean;
+  piezas: PiezaSemana[];
+  piezas_sin_precio: number;
+  total_destajo: number;
+  aguinaldo_estimado: number;
+  mano_obra: ManoObraSemana;
+}
+
+export interface ResumenSemanal {
+  desde: string;
+  hasta: string;
+  empleados: EmpleadoSemana[];
+}

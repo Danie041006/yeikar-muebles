@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   nominaService,
   Nomina as NominaData, NominaDraft, SaldoAguinaldo, NominaAreaConfig, NominaDetalle, NominaLinea,
+  ResumenSemanal,
 } from '../services/nominaService';
 import { cuentasService, ResumenCuenta } from '../services/cuentasService';
 import { useToast } from '../context/ToastContext';
@@ -49,6 +50,8 @@ export default function Nomina() {
   const [hasta, setHasta] = useState(sabadoDeSemana());
   const [generando, setGenerando] = useState(false);
   const [draft, setDraft] = useState<NominaDraft | null>(null);
+  const [resumenSem, setResumenSem] = useState<ResumenSemanal | null>(null);
+  const [cargandoResumen, setCargandoResumen] = useState(false);
 
   // Detalle
   const [detalle, setDetalle] = useState<NominaData | null>(null);
@@ -93,22 +96,75 @@ export default function Nomina() {
   const totalPagado = nominas.filter((n) => n.estado === 'PAGADA').reduce((s, n) => s + Number(n.total_nomina), 0);
   const enBorrador = nominas.filter((n) => n.estado === 'BORRADOR').length;
 
+  // ── Cuentas de pago por empleado ─────────────────────────────────────────
+  // Cada empleado puede cobrar por una cuenta distinta (efectivo, Nequi,
+  // Bancolombia...). El pago no se habilita hasta que TODOS los que tienen
+  // monto > 0 tengan su cuenta asignada.
+  const [cuentaMasiva, setCuentaMasiva] = useState<number | null>(null);
+  const [aplicandoMasivo, setAplicandoMasivo] = useState(false);
+
+  const detallesConPago = detalle?.detalles.filter((d) => Number(d.monto_a_pagar) > 0) ?? [];
+  const sinCuenta = detallesConPago.filter((d) => !d.metodo_caja_id);
+
+  // La semana del modal ya tiene nómina activa (BORRADOR o PAGADA)?
+  const semanaYaExiste = nominas.some(
+    (n) =>
+      (n.estado === 'BORRADOR' || n.estado === 'PAGADA') &&
+      String(n.periodo_desde) === String(desde) &&
+      String(n.periodo_hasta) === String(hasta),
+  );
+
+  const aplicarCuentaATodos = async () => {
+    if (!detalle || !cuentaMasiva) return;
+    setAplicandoMasivo(true);
+    try {
+      for (const d of sinCuenta) {
+        await nominaService.actualizarDetalle(d.id, { metodo_caja_id: cuentaMasiva });
+      }
+      refrescarDetalle();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al asignar la cuenta.');
+    } finally {
+      setAplicandoMasivo(false);
+    }
+  };
+
   const generarDraft = async () => {
     setGenerando(true);
     try {
       const d = await nominaService.generar(desde, hasta);
       setDraft(d);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al generar la vista previa.');
     } finally {
       setGenerando(false);
     }
   };
 
-  const crearBorrador = async () => {
-    const n = await nominaService.crear(desde, hasta);
-    setShowNueva(false);
-    setDraft(null);
-    await cargarNominas();
-    await abrirDetalle(n.id);
+  const cargarResumenSemanal = async () => {
+    if (!desde || !hasta) return;
+    setCargandoResumen(true);
+    setResumenSem(null);
+    try {
+      setResumenSem(await nominaService.resumenSemanal(desde, hasta));
+    } catch (e: any) {
+      toast.error(e?.response?.data?.detail || 'No se pudo cargar la producción de la semana.');
+    } finally {
+      setCargandoResumen(false);
+    }
+  };
+
+  const crearBorrador = async () => {    try {
+      const n = await nominaService.crear(desde, hasta);
+      setShowNueva(false);
+      setDraft(null);
+      await cargarNominas();
+      await abrirDetalle(n.id);
+      toast.success('Nómina creada.');
+    } catch (err: any) {
+      // Ej.: "Ya existe una nómina para esa semana" — mostrar el motivo real.
+      toast.error(err?.response?.data?.detail || 'Error al crear la nómina.');
+    }
   };
 
   const abrirDetalle = async (id: number) => {
@@ -127,43 +183,67 @@ export default function Nomina() {
 
   const guardarMonto = async (d: NominaDetalle, monto: number) => {
     if (isNaN(monto) || monto < 0) return;
-    await nominaService.actualizarDetalle(d.id, { monto_a_pagar: monto });
-    refrescarDetalle();
+    try {
+      await nominaService.actualizarDetalle(d.id, { monto_a_pagar: monto });
+      refrescarDetalle();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al guardar el monto.');
+    }
   };
 
   const cambiarCuenta = async (d: NominaDetalle, cuentaId: number) => {
-    await nominaService.actualizarDetalle(d.id, { metodo_caja_id: cuentaId });
-    refrescarDetalle();
+    try {
+      await nominaService.actualizarDetalle(d.id, { metodo_caja_id: cuentaId });
+      refrescarDetalle();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al asignar la cuenta.');
+    }
   };
 
   const agregarLinea = async (d: NominaDetalle) => {
     const f = lineaForm[d.id];
     if (!f || !f.descripcion.trim() || !Number(f.cantidad) || !Number(f.precio)) return;
-    await nominaService.agregarLinea(d.id, {
-      descripcion: f.descripcion.trim(),
-      cantidad: Number(f.cantidad),
-      precio_unitario: Number(f.precio),
-    });
-    refrescarDetalle();
+    try {
+      await nominaService.agregarLinea(d.id, {
+        descripcion: f.descripcion.trim(),
+        cantidad: Number(f.cantidad),
+        precio_unitario: Number(f.precio),
+      });
+      refrescarDetalle();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al agregar la línea.');
+    }
   };
 
   const eliminarLinea = async (lineaId: number) => {
-    await nominaService.eliminarLinea(lineaId);
-    refrescarDetalle();
+    try {
+      await nominaService.eliminarLinea(lineaId);
+      refrescarDetalle();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al eliminar la línea.');
+    }
   };
 
   const agregarVario = async () => {
     if (!detalle || !varioForm.descripcion.trim() || !Number(varioForm.monto)) return;
-    await nominaService.agregarConceptoVario(detalle.id, {
-      descripcion: varioForm.descripcion.trim(),
-      monto: Number(varioForm.monto),
-    });
-    refrescarDetalle();
+    try {
+      await nominaService.agregarConceptoVario(detalle.id, {
+        descripcion: varioForm.descripcion.trim(),
+        monto: Number(varioForm.monto),
+      });
+      refrescarDetalle();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al agregar el concepto.');
+    }
   };
 
   const eliminarVario = async (conceptoId: number) => {
-    await nominaService.eliminarConceptoVario(conceptoId);
-    refrescarDetalle();
+    try {
+      await nominaService.eliminarConceptoVario(conceptoId);
+      refrescarDetalle();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al eliminar el concepto.');
+    }
   };
 
   const pagar = async () => {
@@ -173,6 +253,9 @@ export default function Nomina() {
       const n = await nominaService.pagar(detalle.id);
       setDetalle(n);
       await cargarNominas();
+      toast.success('Nómina pagada: se generaron los gastos y salidas de caja.');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al pagar la nómina.');
     } finally {
       setPaginando(false);
     }
@@ -180,10 +263,15 @@ export default function Nomina() {
 
   const anular = async () => {
     if (!detalle) return;
-    const n = await nominaService.anular(detalle.id);
-    setDetalle(n);
-    setConfirmAnular(false);
-    await cargarNominas();
+    try {
+      const n = await nominaService.anular(detalle.id);
+      setDetalle(n);
+      setConfirmAnular(false);
+      await cargarNominas();
+      toast.success('Nómina anulada y gastos revertidos.');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Error al anular la nómina.');
+    }
   };
 
   const verAguinaldo = async () => {
@@ -436,18 +524,26 @@ export default function Nomina() {
       {/* ---------------- Modal: Nueva Nómina ---------------- */}
       <Modal
         open={showNueva}
-        onClose={() => { setShowNueva(false); setDraft(null); }}
+        onClose={() => { setShowNueva(false); setDraft(null); setResumenSem(null); }}
         title="Nueva Nómina"
         subtitle="Selecciona la semana de la nómina (lunes a sábado por defecto)"
         size="xl"
         footer={
           <>
-            <Button variant="outline" onClick={() => { setShowNueva(false); setDraft(null); }}>Cancelar</Button>
-            <Button onClick={crearBorrador} disabled={!draft}>Guardar borrador</Button>
+            <Button variant="outline" onClick={() => { setShowNueva(false); setDraft(null); setResumenSem(null); }}>Cancelar</Button>
+            <Button onClick={crearBorrador} disabled={!draft || semanaYaExiste} title={semanaYaExiste ? 'Esa semana ya tiene una nómina' : undefined}>
+              Guardar borrador
+            </Button>
           </>
         }
       >
         <div className="space-y-4">
+          {/* Aviso preventivo: no se puede duplicar la semana */}
+          {semanaYaExiste && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50/70 px-3 py-2 text-xs font-bold text-amber-900">
+              Ya existe una nómina para {desde} → {hasta}. Elige otra semana o trabaja sobre la existente.
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Field label="Desde" required>
               <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} />
@@ -456,14 +552,101 @@ export default function Nomina() {
               <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
             </Field>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" size="sm" onClick={usarSemanaActual}>
               Usar esta semana
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={cargarResumenSemanal}
+              disabled={cargandoResumen || !desde || !hasta}
+            >
+              {cargandoResumen ? 'Cargando…' : 'Ver producción de la semana'}
             </Button>
             <span className="text-xs text-yeikar-neutral/50">
               Lunes → Sábado (hoy: {lunesDeSemana()} → {sabadoDeSemana()})
             </span>
           </div>
+
+          {resumenSem && (
+            <div className="space-y-3 border border-yeikar-secondary-light/15 rounded-xl p-4 bg-yeikar-tertiary/20">
+              <p className="text-xs font-bold uppercase tracking-wider text-yeikar-neutral/50">
+                Producción completada {resumenSem.desde} → {resumenSem.hasta}
+              </p>
+              {resumenSem.empleados.length === 0 && (
+                <p className="text-sm text-yeikar-neutral/50">Sin producción completada ni mano de obra en este rango.</p>
+              )}
+              {resumenSem.empleados.map((e) => (
+                <div key={e.empleado_id} className="bg-white rounded-xl border border-yeikar-secondary-light/10 p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="font-headline font-bold text-sm text-yeikar-secondary">
+                      {e.nombre}
+                      {e.cargo && <span className="ml-1.5 text-xs font-normal text-yeikar-neutral/50">{e.cargo}</span>}
+                    </p>
+                    <div className="flex items-center gap-1.5">
+                      <Badge tone={e.tipo_pago === 'DESTAJO' ? 'blue' : 'neutral'}>{e.tipo_pago || '—'}</Badge>
+                      {!e.en_nomina && <Badge tone="red">fuera de nómina</Badge>}
+                    </div>
+                  </div>
+                  {e.piezas.length > 0 && (
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-[10px] uppercase text-yeikar-neutral/45 border-b border-yeikar-secondary-light/10">
+                          <th className="py-1">Producto</th>
+                          <th className="py-1">Área</th>
+                          <th className="py-1">Cliente</th>
+                          <th className="py-1 text-right">Cant</th>
+                          <th className="py-1 text-right">Precio</th>
+                          <th className="py-1 text-right">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {e.piezas.map((pz, i) => (
+                          <tr key={i} className="border-b border-yeikar-secondary-light/5">
+                            <td className="py-1 pr-2 text-yeikar-secondary">{pz.producto}</td>
+                            <td className="py-1 pr-2 text-yeikar-neutral/70">{pz.area ?? '—'}</td>
+                            <td className="py-1 pr-2 text-yeikar-neutral/70">{pz.cliente ?? '—'}</td>
+                            <td className="py-1 text-right font-mono">{pz.cantidad}</td>
+                            <td className="py-1 text-right font-mono">
+                              {pz.precio_unitario != null ? fmtCOP(pz.precio_unitario) : (
+                                <span className="text-red-600 font-bold">SIN PRECIO</span>
+                              )}
+                            </td>
+                            <td className="py-1 text-right font-mono font-semibold">
+                              {pz.total != null ? fmtCOP(pz.total) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
+                    <span>Total destajo: <b className="font-mono">{fmtCOP(e.total_destajo)}</b></span>
+                    {e.piezas_sin_precio > 0 && (
+                      <span className="text-red-600 font-bold">{e.piezas_sin_precio} pieza(s) SIN PRECIO en el tarifario</span>
+                    )}
+                    <span>Aguinaldo estimado: <b className="font-mono">{fmtCOP(e.aguinaldo_estimado)}</b></span>
+                    {e.mano_obra.total > 0 && (
+                      <span>Mano de obra: <b className="font-mono">{fmtCOP(e.mano_obra.total)}</b>
+                        {' '}({fmtCOP(e.mano_obra.pagado)} pagada / {fmtCOP(e.mano_obra.pendiente)} pendiente)
+                      </span>
+                    )}
+                  </div>
+                  {e.mano_obra.lineas.length > 0 && (
+                    <ul className="text-[11px] text-yeikar-neutral/60 space-y-0.5 pl-3 list-disc">
+                      {e.mano_obra.lineas.map((l, i) => (
+                        <li key={i}>
+                          MO {l.descripcion} — {fmtCOP(l.monto)} {l.pagado ? '(pagada)' : '(pendiente)'}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <Button variant="outline" onClick={generarDraft} disabled={generando || !desde || !hasta}>
             {generando ? 'Generando...' : 'Generar borrador automático'}
           </Button>
@@ -504,7 +687,10 @@ export default function Nomina() {
             <>
               <Button variant="outline" onClick={() => setDetalle(null)}>Cerrar</Button>
               <Button variant="outline" onClick={() => imprimir(detalle)}>Imprimir</Button>
-              <Button onClick={pagar} disabled={paginando}>
+              <span className="text-[11px] font-bold text-red-600 max-w-[220px] text-right leading-tight">
+                {sinCuenta.length > 0 ? `Asigna la cuenta de ${sinCuenta.length} empleado(s) para poder pagar` : ''}
+              </span>
+              <Button onClick={pagar} disabled={paginando || sinCuenta.length > 0} title={sinCuenta.length > 0 ? 'Faltan cuentas de pago por asignar' : undefined}>
                 {paginando ? 'Pagando...' : 'Pagar Nómina'}
               </Button>
             </>
@@ -524,6 +710,30 @@ export default function Nomina() {
       >
         {detalle && (
           <div className="space-y-4">
+            {/* Aviso de cuentas pendientes: cada empleado puede cobrar por una
+                cuenta distinta; el pago se bloquea hasta asignarlas todas. */}
+            {detalle.estado === 'BORRADOR' && sinCuenta.length > 0 && (
+              <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-3 space-y-2">
+                <p className="text-xs font-bold text-amber-900">
+                  Falta la cuenta de pago de {sinCuenta.length} empleado(s): {sinCuenta.map((d) => d.empleado_nombre).join(', ')}
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] text-amber-900/70">Asignar una misma cuenta a todos los faltantes:</span>
+                  <div className="w-56">
+                    <SearchSelect
+                      value={cuentaMasiva ?? 0}
+                      onChange={(v) => setCuentaMasiva(Number(v))}
+                      options={cuentas.map((c) => ({ value: c.metodo_caja.id, label: c.metodo_caja.nombre }))}
+                      placeholder="Seleccionar..."
+                    />
+                  </div>
+                  <Button size="sm" variant="outline" disabled={!cuentaMasiva || aplicandoMasivo} onClick={aplicarCuentaATodos}>
+                    {aplicandoMasivo ? 'Aplicando...' : 'Aplicar a todos'}
+                  </Button>
+                  <span className="text-[10px] text-amber-800/60 italic">Luego ajusta individualmente quien pida otro método (Nequi, etc.).</span>
+                </div>
+              </div>
+            )}
             {detalle.detalles.map((d) => (
               <div key={d.id} className="rounded-xl border border-yeikar-secondary-light/10 bg-white/60 p-4 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -533,8 +743,10 @@ export default function Nomina() {
                     {d.cargo_nombre && <span className="text-xs text-yeikar-neutral/40">{d.cargo_nombre}</span>}
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="text-xs text-yeikar-neutral/50">Cuenta:</span>
-                    <div className="w-52">
+                    <span className={`text-xs ${!d.metodo_caja_id && Number(d.monto_a_pagar) > 0 ? 'font-bold text-red-600' : 'text-yeikar-neutral/50'}`}>
+                      Cuenta:{!d.metodo_caja_id && Number(d.monto_a_pagar) > 0 ? ' ¡falta!' : ''}
+                    </span>
+                    <div className={`w-52 rounded-lg ${!d.metodo_caja_id && Number(d.monto_a_pagar) > 0 ? 'ring-2 ring-red-400' : ''}`}>
                       <SearchSelect
                         value={d.metodo_caja_id || 0}
                         onChange={(v) => cambiarCuenta(d, Number(v))}

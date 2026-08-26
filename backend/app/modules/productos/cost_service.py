@@ -26,6 +26,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from sqlalchemy.orm import Session, joinedload
 from app.core.redondeo import redondear_precio_cop
 from app.modules.productos.model import Producto, ProductoMaterial, Material, ReglaGastoSeccion, SeccionProducto, ElementoSeccion, PoliticaSeccion, CostoProduccionSeccion
+from app.modules.productos import service as service_productos
 
 
 # Porcentaje de impuestos adicional sobre el costo de producción (configurable).
@@ -600,12 +601,32 @@ def calcular_costo_producto(
         # Si el producto no tiene secciones ni receta pero sí precios fijos del
         # Excel, se usan como último recurso (NO antes de las secciones).
         if producto.precio_venta_base is not None:
+            # Precio de referencia del producto EN SU PROPIA MONEDA (reventa en
+            # USD → USD). La conversión a la moneda de la cotización ocurre UNA
+            # sola vez en el frontend con la tasa del día que el usuario ingresa
+            # y confirma: aquí NO se convierte ni se aplica tasa alguna en
+            # silencio (eso causaba dobles conversiones y precios inflados).
+            es_moneda_base = not producto.moneda_id or producto.moneda_id == service_productos.MONEDA_BASE_ID
             precio_sin_iva = Decimal(str(producto.precio_venta_base))
-            precio_con_iva = redondear_precio_cop(
-                Decimal(str(producto.precio_venta_con_iva)) if producto.precio_venta_con_iva else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100"))),
-                "ceil",
+            if es_moneda_base:
+                # Producto COP: se respeta el precio congelado si existe y el
+                # redondeo al millar propio de la moneda base.
+                precio_con_iva = redondear_precio_cop(
+                    Decimal(str(producto.precio_venta_con_iva)) if producto.precio_venta_con_iva else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100"))),
+                    "ceil",
+                )
+            else:
+                # Moneda extranjera: sin redondeo millar (ese paso es de COP).
+                precio_con_iva = (
+                    Decimal(str(producto.precio_venta_con_iva))
+                    if producto.precio_venta_con_iva
+                    else (precio_sin_iva * (Decimal("1") + iva_porcentaje / Decimal("100")))
+                ).quantize(Decimal("0.01"))
+            costo_produccion = (
+                Decimal(str(producto.precio_costo_base))
+                if producto.precio_costo_base
+                else (precio_sin_iva / (Decimal("1") + ganancia_porcentaje / Decimal("100")))
             )
-            costo_produccion = Decimal(str(producto.precio_costo_base)) if producto.precio_costo_base else (precio_sin_iva / (Decimal("1") + ganancia_porcentaje / Decimal("100")))
             costo_total_materiales = costo_produccion / (Decimal("1") + (pct_mano_obra + pct_gastos) / Decimal("100"))
             costo_mano_obra = costo_total_materiales * pct_mano_obra / Decimal("100")
             costo_gastos = costo_total_materiales * pct_gastos / Decimal("100")
@@ -613,6 +634,14 @@ def calcular_costo_producto(
             return {
                 "producto_id": producto.id,
                 "producto_nombre": producto.nombre,
+                # Moneda en la que vienen TODOS los montos de este resultado
+                # (el frontend convierte a la moneda de la cotización).
+                "moneda_id": producto.moneda_id or service_productos.MONEDA_BASE_ID,
+                "moneda_codigo": (
+                    producto.moneda.codigo
+                    if not es_moneda_base and producto.moneda is not None
+                    else "COP"
+                ),
                 "dimensiones_base": {"ancho": float(ancho_base), "largo": float(largo_base)},
                 "dimensiones_nuevas": {"ancho": float(nuevo_ancho), "largo": float(nuevo_largo)},
                 "materiales": [],

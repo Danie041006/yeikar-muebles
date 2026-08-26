@@ -1,12 +1,14 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { productosService, Product, ProductoMaterial, TipoProducto, SeccionProducto } from '../services/productosService';
 import api from '../services/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect, Modal } from '../components/ui';
+import { Hammer, Package, Sparkles, Layers, Search, Plus, RefreshCw, Copy, Pencil, Trash2, Tag, ChevronRight, LayoutGrid, X, FileSpreadsheet } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import EstructuraCostos from '../components/EstructuraCostos';
 import { normalizarEstructuraCostos, EstructuraCostos as EstructuraCostosData } from '../utils/estructuraCostos';
+import { formatCurrency } from '../utils/format';
 import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 
 interface Material {
@@ -63,6 +65,10 @@ export default function Productos() {
   const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+
+  // Filtros de navegación por Origen y Subcategorías
+  const [tipoOrigenFiltro, setTipoOrigenFiltro] = useState<'TODOS' | 'FABRICADOS' | 'REVENTA'>('TODOS');
+  const [subcategoriaFiltro, setSubcategoriaFiltro] = useState<string>('TODAS');
 
   // Selected product, legacy recipe and structured section recipe
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -141,6 +147,18 @@ export default function Productos() {
   });
   const [fotoArchivo, setFotoArchivo] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+
+  // ── Importar estructura de costos pegada desde Excel ──
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importTexto, setImportTexto] = useState('');
+  const [importNombre, setImportNombre] = useState('');
+  const [importTipoId, setImportTipoId] = useState('');
+  const [importNuevoTipo, setImportNuevoTipo] = useState('');
+  const [importAncho, setImportAncho] = useState('1.60');
+  const [importLargo, setImportLargo] = useState('1.90');
+  const [importFoto, setImportFoto] = useState<File | null>(null);
+  const [importPreview, setImportPreview] = useState<any>(null);
+  const [importando, setImportando] = useState(false);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
 
   const [showRecipeModal, setShowRecipeModal] = useState(false);
@@ -322,8 +340,8 @@ export default function Productos() {
       codigo: productForm.codigo || undefined,
       tipo_producto_id: parseInt(productForm.tipo_producto_id),
       descripcion: productForm.descripcion || undefined,
-      ancho_base: parseFloat(productForm.ancho_base),
-      largo_base: parseFloat(productForm.largo_base),
+      ancho_base: productForm.ancho_base ? parseFloat(productForm.ancho_base) : undefined,
+      largo_base: productForm.largo_base ? parseFloat(productForm.largo_base) : undefined,
       alto_base: productForm.alto_base ? parseFloat(productForm.alto_base) : undefined,
     };
     try {
@@ -624,25 +642,275 @@ export default function Productos() {
     }
   };
 
-  const filteredProducts = productos.filter((p) => {
-    const term = search.toLowerCase();
-    return p.nombre.toLowerCase().includes(term) || p.codigo?.toLowerCase().includes(term);
-  });
+  // Totales principales
+  const totalFabricados = useMemo(() => productos.filter((p) => !p.es_reventa).length, [productos]);
+  const totalReventa = useMemo(() => productos.filter((p) => p.es_reventa).length, [productos]);
+
+  // Lista de subcategorías disponibles según el filtro de origen
+  const subcategoriasDisponibles = useMemo(() => {
+    const prodsBase = productos.filter((p) => {
+      if (tipoOrigenFiltro === 'FABRICADOS') return !p.es_reventa;
+      if (tipoOrigenFiltro === 'REVENTA') return p.es_reventa;
+      return true;
+    });
+
+    const mapa = new Map<string, number>();
+    prodsBase.forEach((p) => {
+      const cat = p.tipo_producto?.nombre || (p.es_reventa ? 'Reventa' : 'Sin clasificar');
+      mapa.set(cat, (mapa.get(cat) || 0) + 1);
+    });
+
+    return Array.from(mapa.entries())
+      .map(([nombre, count]) => ({ nombre, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [productos, tipoOrigenFiltro]);
+
+  // Filtrado final de productos
+  const filteredProducts = useMemo(() => {
+    const term = search.toLowerCase().trim();
+
+    return productos.filter((p) => {
+      // Filtro de origen (Fabricados vs Reventa)
+      if (tipoOrigenFiltro === 'FABRICADOS' && p.es_reventa) return false;
+      if (tipoOrigenFiltro === 'REVENTA' && !p.es_reventa) return false;
+
+      // Filtro de subcategoría
+      if (subcategoriaFiltro !== 'TODAS') {
+        const cat = p.tipo_producto?.nombre || (p.es_reventa ? 'Reventa' : 'Sin clasificar');
+        if (cat !== subcategoriaFiltro) return false;
+      }
+
+      // Filtro de búsqueda textual
+      if (!term) return true;
+      const matchName = p.nombre.toLowerCase().includes(term);
+      const matchCode = p.codigo?.toLowerCase().includes(term);
+      const matchDesc = p.descripcion?.toLowerCase().includes(term);
+      const matchCat = (p.tipo_producto?.nombre || '').toLowerCase().includes(term);
+      return matchName || matchCode || matchDesc || matchCat;
+    });
+  }, [productos, tipoOrigenFiltro, subcategoriaFiltro, search]);
+
+  // Agrupación de productos por categoría para la vista estructurada
+  const productosPorCategoria = useMemo(() => {
+    const mapa = new Map<string, Product[]>();
+    filteredProducts.forEach((p) => {
+      const cat = p.tipo_producto?.nombre || (p.es_reventa ? 'Reventa Comercial' : 'Sin clasificar');
+      if (!mapa.has(cat)) mapa.set(cat, []);
+      mapa.get(cat)!.push(p);
+    });
+    return Array.from(mapa.entries()).map(([categoria, items]) => ({
+      categoria,
+      items,
+    }));
+  }, [filteredProducts]);
+
+  // Renderizador de una tarjeta individual de producto
+  const renderProductCard = (p: Product) => (
+    <div
+      key={p.id}
+      onClick={() => handleOpenRecipe(p)}
+      className={`relative bg-white border rounded-2xl p-4 cursor-pointer transition-all hover:shadow-md group flex flex-col justify-between ${
+        selectedProduct?.id === p.id
+          ? 'border-yeikar-primary shadow-md ring-2 ring-yeikar-primary/30 bg-amber-50/10'
+          : 'border-yeikar-secondary-light/10 hover:border-yeikar-primary/40'
+      }`}
+    >
+      <div>
+        {/* Selected indicator */}
+        {selectedProduct?.id === p.id && (
+          <div className="absolute top-3 right-3 flex items-center gap-1 bg-yeikar-primary text-yeikar-neutral text-[10px] font-black font-headline px-2 py-0.5 rounded-full shadow">
+            <span>Activo</span>
+          </div>
+        )}
+
+        {/* Foto de referencia */}
+        <div className="mb-3 h-32 rounded-xl overflow-hidden bg-yeikar-tertiary/30 relative">
+          {p.fotos && p.fotos.length > 0 && p.fotos[0].url ? (
+            <img
+              src={p.fotos[0].url}
+              alt={p.nombre}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-yeikar-neutral/25">
+              <Package className="w-8 h-8" />
+            </div>
+          )}
+
+          {/* Badges sobre la foto */}
+          <div className="absolute bottom-2 left-2 flex items-center gap-1 flex-wrap">
+            <span
+              className={`text-[9px] font-black font-headline uppercase tracking-wider px-2 py-0.5 rounded-md shadow-xs ${
+                p.es_reventa
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-amber-600 text-white'
+              }`}
+            >
+              {p.es_reventa ? 'Reventa' : 'Fabricado'}
+            </span>
+          </div>
+        </div>
+
+        {/* Type / Subcategory badge */}
+        <div className="flex items-center justify-between gap-1 mb-1">
+          <span className="text-[10px] font-black font-headline uppercase tracking-wider text-yeikar-primary-dark/80 bg-yeikar-primary/10 px-2 py-0.5 rounded">
+            {p.tipo_producto?.nombre || 'General'}
+          </span>
+          {p.codigo && (
+            <span className="text-[10px] font-mono text-yeikar-neutral/50">#{p.codigo}</span>
+          )}
+        </div>
+
+        <h3 className="font-headline font-bold text-yeikar-secondary text-sm sm:text-base mt-1 leading-snug line-clamp-2">
+          {p.nombre}
+        </h3>
+
+        {/* Dimensions (muebles fabricados) o badge Reventa */}
+        <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+          {p.es_reventa ? (
+            <>
+              <span className="bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded-lg text-[10px] font-black font-headline uppercase tracking-wider">
+                Reventa{p.moneda && p.moneda.codigo !== 'COP' ? ` · ${p.moneda.codigo}` : ''}
+              </span>
+              {p.precio_venta_base != null && Number(p.precio_venta_base) > 0 && (
+                <span className="text-[11px] font-mono font-bold text-yeikar-secondary">
+                  {formatCurrency(Number(p.precio_venta_base), p.moneda?.codigo)}
+                </span>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center gap-1 bg-yeikar-tertiary/40 px-2 py-0.5 rounded-lg text-[11px] font-mono font-bold text-yeikar-secondary">
+              <svg className="w-3 h-3 text-yeikar-neutral/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              {p.ancho_base}m × {p.largo_base}m
+              {p.alto_base ? ` × ${p.alto_base}m` : ''}
+            </div>
+          )}
+        </div>
+
+        {p.descripcion && (
+          <p className="mt-2 text-xs text-yeikar-neutral/55 line-clamp-2 leading-relaxed">{p.descripcion}</p>
+        )}
+      </div>
+
+      {/* Actions row */}
+      <div
+        className="mt-3 pt-2.5 border-t border-yeikar-secondary-light/10 flex gap-1.5 opacity-80 group-hover:opacity-100 transition-opacity"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={() => handleDuplicar(p)}
+          title="Duplicar con su receta"
+          className="flex-1 flex items-center justify-center gap-1 bg-yeikar-tertiary/60 hover:bg-yeikar-tertiary text-yeikar-secondary px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
+        >
+          <Copy className="w-3 h-3" />
+          <span>Duplicar</span>
+        </button>
+        <button
+          onClick={() => {
+            setProductForm({ id: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo_producto_id: String(p.tipo_producto_id), descripcion: p.descripcion || '', ancho_base: String(p.ancho_base ?? ''), largo_base: String(p.largo_base ?? ''), alto_base: p.alto_base ? String(p.alto_base) : '' });
+            setShowProductModal(true);
+          }}
+          className="flex-1 flex items-center justify-center gap-1 bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-secondary px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
+        >
+          <Pencil className="w-3 h-3" />
+          <span>Editar</span>
+        </button>
+        <button
+          onClick={() => handleDeleteProduct(p.id)}
+          className="flex items-center justify-center bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
+          title="Eliminar producto"
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── Importar estructura desde Excel (copy-paste) ──
+  const abrirImportModal = () => {
+    setImportTexto('');
+    setImportNombre('');
+    setImportTipoId('');
+    setImportNuevoTipo('');
+    setImportAncho('1.60');
+    setImportLargo('1.90');
+    setImportFoto(null);
+    setImportPreview(null);
+    setShowImportModal(true);
+  };
+
+  const analizarImport = async () => {
+    if (!importTexto.trim()) {
+      toast.error('Pega primero las filas del Excel.');
+      return;
+    }
+    setImportando(true);
+    setImportPreview(null);
+    try {
+      const resp = await api.post('/producto/importar-estructura-texto', {
+        texto: importTexto,
+        dry_run: true,
+        tipo_producto_id: importTipoId ? Number(importTipoId) : null,
+        nuevo_tipo_producto: importNuevoTipo.trim() || null,
+        ancho: Number(importAncho) || 1.6,
+        largo: Number(importLargo) || 1.9,
+      });
+      setImportPreview(resp.data);
+      const sugerido: string | null = resp.data?.nombre_sugerido ?? null;
+      if (sugerido && !importNombre.trim()) setImportNombre(sugerido);
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'No se pudo analizar el texto pegado.');
+    } finally {
+      setImportando(false);
+    }
+  };
+
+  const crearDesdeImport = async () => {
+    if (!importNombre.trim()) { toast.error('Indica el nombre del producto.'); return; }
+    if (!importTipoId && !importNuevoTipo.trim()) { toast.error('Selecciona o escribe el tipo de mueble.'); return; }
+    if (!importPreview) { toast.error('Analiza el texto primero.'); return; }
+    setImportando(true);
+    try {
+      const resp = await api.post('/producto/importar-estructura-texto', {
+        texto: importTexto,
+        dry_run: false,
+        nombre: importNombre.trim(),
+        tipo_producto_id: importTipoId ? Number(importTipoId) : null,
+        nuevo_tipo_producto: importNuevoTipo.trim() || null,
+        ancho: Number(importAncho) || 1.6,
+        largo: Number(importLargo) || 1.9,
+      });
+      const pid = resp.data?.producto?.id;
+      if (importFoto && pid) {
+        await subirAdjunto(importFoto, TIPO_ADJUNTO.PRODUCTO, pid);
+      }
+      toast.success(`Producto "${importNombre.trim()}" creado con su estructura de costos.`);
+      setShowImportModal(false);
+      fetchData();
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'No se pudo crear el producto.');
+    } finally {
+      setImportando(false);
+    }
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* ── Header ── */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-black font-headline text-yeikar-secondary tracking-tight">
-            Catálogo de Productos 
+            Catálogo de Productos
           </h1>
           <p className="text-yeikar-neutral/60 mt-1 text-sm font-body">
-            Define los muebles del catálogo, su receta de materiales y simula precios antes de cotizar.
+            Explore y administre muebles fabricados y de reventa, configure recetas y simule costos de producción.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {/* Search */}
           <div className="relative w-64">
             <input
@@ -650,162 +918,259 @@ export default function Productos() {
               placeholder="Buscar producto..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-white border border-yeikar-secondary-light/10 rounded-xl pl-9 pr-4 py-2.5 text-sm focus:outline-none focus:border-yeikar-primary shadow-sm"
+              className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl pl-9 pr-8 py-2.5 text-sm focus:outline-none focus:border-yeikar-primary shadow-sm font-body"
             />
-            <svg className="absolute left-3 top-3 w-4 h-4 text-yeikar-neutral/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </div>
-
-            <button
-              onClick={() => {
-                setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '1.60', largo_base: '1.90', alto_base: '' });
-                setShowProductModal(true);
-              }}
-              className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm whitespace-nowrap"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Nuevo Mueble
-            </button>
-            {esAdmin && (
+            <Search className="w-4 h-4 text-yeikar-neutral/40 absolute left-3 top-3" />
+            {search && (
               <button
-                onClick={verRecalcular}
-                className="border border-yeikar-secondary-light/20 text-yeikar-secondary px-4 py-2.5 rounded-xl font-bold font-headline hover:bg-yeikar-tertiary transition-all text-sm whitespace-nowrap"
-                title="Recalcula los precios base de los productos con receta cuando cambian los insumos (vista previa)"
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 top-3 text-stone-400 hover:text-stone-600"
+                title="Limpiar búsqueda"
               >
-                Recalcular precios
+                <X className="w-4 h-4" />
               </button>
             )}
           </div>
+
+          <button
+            onClick={abrirImportModal}
+            className="bg-white hover:bg-yeikar-tertiary/60 text-yeikar-secondary border border-yeikar-secondary-light/20 px-4 py-2.5 rounded-xl font-bold font-headline shadow-sm transition-all flex items-center gap-2 text-sm whitespace-nowrap"
+            title="Pega las filas de una hoja de Excel con la estructura de costos"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-yeikar-primary-dark" />
+            Importar estructura
+          </button>
+          <button
+            onClick={() => {
+              setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '1.60', largo_base: '1.90', alto_base: '' });
+              setShowProductModal(true);
+            }}
+            className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" />
+            Nuevo Mueble
+          </button>
+          {esAdmin && (
+            <button
+              onClick={verRecalcular}
+              className="border border-yeikar-secondary-light/20 text-yeikar-secondary px-4 py-2.5 rounded-xl font-bold font-headline hover:bg-yeikar-tertiary transition-all text-sm whitespace-nowrap flex items-center gap-1.5"
+              title="Recalcula los precios base de los productos con receta cuando cambian los insumos (vista previa)"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Recalcular precios</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Barra de Navegación por Origen y Subcategorías ── */}
+      <div className="bg-white rounded-2xl border border-yeikar-secondary-light/15 p-4 shadow-xs space-y-3.5">
+        {/* Nivel 1: Origen (Todos / Fabricados / Revendidos) */}
+        <div className="flex items-center justify-between gap-3 flex-wrap border-b border-stone-100 pb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] uppercase font-bold text-stone-400 font-headline tracking-wider mr-1 flex items-center gap-1">
+              <Layers className="w-3.5 h-3.5 text-yeikar-primary" /> Origen:
+            </span>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTipoOrigenFiltro('TODOS');
+                setSubcategoriaFiltro('TODAS');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border flex items-center gap-2 ${
+                tipoOrigenFiltro === 'TODOS'
+                  ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary shadow-sm'
+                  : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Todos los Muebles</span>
+              <span className="font-mono text-[10px] bg-white/20 px-1.5 py-0.5 rounded-full">
+                {productos.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTipoOrigenFiltro('FABRICADOS');
+                setSubcategoriaFiltro('TODAS');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border flex items-center gap-2 ${
+                tipoOrigenFiltro === 'FABRICADOS'
+                  ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
+                  : 'bg-amber-50/70 text-amber-900 border-amber-200/80 hover:bg-amber-100/60'
+              }`}
+            >
+              <Hammer className="w-3.5 h-3.5" />
+              <span>Fabricados (Taller)</span>
+              <span className="font-mono text-[10px] bg-amber-950/20 px-1.5 py-0.5 rounded-full font-bold">
+                {totalFabricados}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTipoOrigenFiltro('REVENTA');
+                setSubcategoriaFiltro('TODAS');
+              }}
+              className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border flex items-center gap-2 ${
+                tipoOrigenFiltro === 'REVENTA'
+                  ? 'bg-sky-700 text-white border-sky-700 shadow-sm'
+                  : 'bg-sky-50/70 text-sky-900 border-sky-200/80 hover:bg-sky-100/60'
+              }`}
+            >
+              <Package className="w-3.5 h-3.5" />
+              <span>Revendidos (Comerciales)</span>
+              <span className="font-mono text-[10px] bg-sky-950/20 px-1.5 py-0.5 rounded-full font-bold">
+                {totalReventa}
+              </span>
+            </button>
+          </div>
+
+          <div className="text-xs text-stone-500 font-medium">
+            Mostrando <strong className="text-yeikar-secondary">{filteredProducts.length}</strong> muebles
+          </div>
         </div>
 
-      {/* ── Main Layout ── */}
+        {/* Nivel 2: Subcategorías (Camas, Sillones, Comedores, Armarios, etc.) */}
+        {subcategoriasDisponibles.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-stone-200">
+            <span className="text-[11px] uppercase font-bold text-stone-400 font-headline tracking-wider shrink-0 mr-1 flex items-center gap-1">
+              <Tag className="w-3 h-3 text-yeikar-primary" /> Categorías:
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setSubcategoriaFiltro('TODAS')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 border ${
+                subcategoriaFiltro === 'TODAS'
+                  ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary shadow-xs'
+                  : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+              }`}
+            >
+              Todas ({subcategoriasDisponibles.reduce((acc, c) => acc + c.count, 0)})
+            </button>
+
+            {subcategoriasDisponibles.map((cat) => (
+              <button
+                key={cat.nombre}
+                type="button"
+                onClick={() => setSubcategoriaFiltro(cat.nombre)}
+                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 border flex items-center gap-1.5 ${
+                  subcategoriaFiltro === cat.nombre
+                    ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary shadow-xs'
+                    : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-yeikar-primary/40 hover:bg-stone-100'
+                }`}
+              >
+                <span>{cat.nombre}</span>
+                <span className="font-mono text-[10px] opacity-70">({cat.count})</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Main Layout: Grid / Categories Sections + Side Panel ── */}
       <div className="flex flex-col xl:flex-row gap-6">
 
-        {/* ── Products Grid ── */}
-        <div className="flex-1 min-w-0">
+        {/* ── Products Grid / Categorized Groups ── */}
+        <div className="flex-1 min-w-0 space-y-6">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-24 space-y-4">
+            <div className="flex flex-col items-center justify-center py-24 space-y-4 bg-white rounded-3xl border border-yeikar-secondary-light/10">
               <div className="w-10 h-10 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-mono text-yeikar-neutral/60">Cargando catálogo...</p>
+              <p className="text-sm font-mono text-yeikar-neutral/60">Cargando catálogo de productos...</p>
             </div>
           ) : filteredProducts.length === 0 ? (
             <div className="bg-white border border-dashed border-yeikar-secondary-light/15 rounded-3xl p-14 text-center text-yeikar-neutral/40">
-              <svg className="w-12 h-12 mx-auto text-yeikar-neutral/20 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
-              <p className="font-semibold text-sm">No hay productos en el catálogo.</p>
-              <p className="text-xs mt-1">Crea el primer mueble para empezar a cotizar.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filteredProducts.map((p) => (
-                <div
-                  key={p.id}
-                  onClick={() => handleOpenRecipe(p)}
-                  className={`relative bg-white border rounded-2xl p-5 cursor-pointer transition-all hover:shadow-md group ${
-                    selectedProduct?.id === p.id
-                      ? 'border-yeikar-primary shadow-md ring-2 ring-yeikar-primary/20'
-                      : 'border-yeikar-secondary-light/10 hover:border-yeikar-primary/40'
-                  }`}
+              <Package className="w-12 h-12 mx-auto text-yeikar-neutral/20 mb-3" />
+              <p className="font-semibold text-sm text-stone-700">No se encontraron productos.</p>
+              <p className="text-xs text-stone-400 mt-1">
+                Prueba ajustando los filtros o la búsqueda.
+              </p>
+              {(search || subcategoriaFiltro !== 'TODAS' || tipoOrigenFiltro !== 'TODOS') && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearch('');
+                    setSubcategoriaFiltro('TODAS');
+                    setTipoOrigenFiltro('TODOS');
+                  }}
+                  className="mt-4 px-4 py-1.5 bg-yeikar-secondary text-yeikar-tertiary rounded-xl text-xs font-bold hover:bg-yeikar-secondary-light transition-all shadow-xs"
                 >
-                  {/* Selected indicator */}
-                  {selectedProduct?.id === p.id && (
-                    <div className="absolute top-3 right-3 w-2.5 h-2.5 bg-yeikar-primary rounded-full shadow" />
-                  )}
-
-                  {/* Foto de referencia */}
-                  <div className="mb-3 h-32 rounded-xl overflow-hidden bg-yeikar-tertiary/30">
-                    {p.fotos && p.fotos.length > 0 && p.fotos[0].url ? (
-                      <img
-                        src={p.fotos[0].url}
-                        alt={p.nombre}
-                        className="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-yeikar-neutral/30">
-                        <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Type badge */}
-                  <span className="text-[10px] font-black font-headline uppercase tracking-wider text-yeikar-neutral/40">
-                    {p.tipo_producto?.nombre || 'Producto'}
-                  </span>
-
-                  <h3 className="font-headline font-bold text-yeikar-secondary text-base mt-1 leading-tight">
-                    {p.nombre}
-                  </h3>
-
-                  {p.codigo && (
-                    <p className="text-[11px] font-mono text-yeikar-neutral/50 mt-0.5">#{p.codigo}</p>
-                  )}
-
-                  {/* Dimensions */}
-                  <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 bg-yeikar-tertiary/40 px-2 py-1 rounded-lg text-[11px] font-mono font-bold text-yeikar-secondary">
-                      <svg className="w-3 h-3 text-yeikar-neutral/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                      </svg>
-                      {p.ancho_base}m × {p.largo_base}m
-                      {p.alto_base ? ` × ${p.alto_base}m` : ''}
+                  Restablecer todos los filtros
+                </button>
+              )}
+            </div>
+          ) : subcategoriaFiltro === 'TODAS' && productosPorCategoria.length > 1 ? (
+            /* ── Vista Agrupada por Categorías ── */
+            <div className="space-y-7">
+              {productosPorCategoria.map((grupo) => (
+                <div key={grupo.categoria} className="space-y-3.5">
+                  {/* Encabezado de la Subcategoría */}
+                  <div className="flex items-center justify-between border-b border-yeikar-secondary-light/15 pb-2.5 pt-1">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2.5 h-2.5 rounded-full bg-yeikar-primary" />
+                      <h3 className="font-headline font-black text-lg text-yeikar-secondary tracking-tight">
+                        {grupo.categoria}
+                      </h3>
+                      <span className="text-xs font-mono font-bold bg-yeikar-secondary/10 text-yeikar-secondary px-2.5 py-0.5 rounded-full">
+                        {grupo.items.length} {grupo.items.length === 1 ? 'modelo' : 'modelos'}
+                      </span>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSubcategoriaFiltro(grupo.categoria)}
+                      className="text-xs font-bold text-yeikar-primary hover:text-yeikar-secondary transition-colors flex items-center gap-1"
+                    >
+                      <span>Ver solo esta categoría</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
                   </div>
 
-                  {p.descripcion && (
-                    <p className="mt-3 text-xs text-yeikar-neutral/55 line-clamp-2 leading-relaxed">{p.descripcion}</p>
-                  )}
-
-                  {/* Actions row */}
-                  <div
-                    className="mt-4 pt-3 border-t border-yeikar-secondary-light/5 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <button
-                      onClick={() => handleDuplicar(p)}
-                      title="Duplicar con su receta"
-                      className="flex-1 flex items-center justify-center gap-1 bg-yeikar-tertiary/60 hover:bg-yeikar-tertiary text-yeikar-secondary px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                      Duplicar
-                    </button>
-                    <button
-                      onClick={() => {
-                        setProductForm({ id: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo_producto_id: String(p.tipo_producto_id), descripcion: p.descripcion || '', ancho_base: String(p.ancho_base), largo_base: String(p.largo_base), alto_base: p.alto_base ? String(p.alto_base) : '' });
-                        setShowProductModal(true);
-                      }}
-                      className="flex-1 flex items-center justify-center gap-1 bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-primary px-3 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => handleDeleteProduct(p.id)}
-                      className="flex items-center justify-center bg-red-50 hover:bg-red-100 text-red-500 px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                  {/* Cuadrícula de tarjetas del grupo */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {grupo.items.map(renderProductCard)}
                   </div>
                 </div>
               ))}
+            </div>
+          ) : (
+            /* ── Vista Cuadrícula para una sola Categoría / Búsqueda Filtrada ── */
+            <div className="space-y-4">
+              {subcategoriaFiltro !== 'TODAS' && (
+                <div className="flex items-center justify-between bg-amber-50/60 border border-amber-200/60 rounded-xl p-3">
+                  <div className="flex items-center gap-2">
+                    <Tag className="w-4 h-4 text-yeikar-secondary" />
+                    <span className="font-headline font-black text-sm text-yeikar-secondary">
+                      Categoría: {subcategoriaFiltro}
+                    </span>
+                    <span className="text-xs font-mono font-bold bg-amber-200/60 text-amber-900 px-2 py-0.5 rounded-full">
+                      {filteredProducts.length} modelos
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSubcategoriaFiltro('TODAS')}
+                    className="text-xs font-bold text-stone-600 hover:text-yeikar-secondary underline"
+                  >
+                    Ver todas las categorías
+                  </button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {filteredProducts.map(renderProductCard)}
+              </div>
             </div>
           )}
         </div>
 
         {/* ── Right Panel: Recipe + Price Simulator ── */}
-        {selectedProduct && (
+        {selectedProduct && !selectedProduct.es_reventa && (
           <div className="w-full xl:w-[440px] shrink-0 space-y-4">
 
             {/* Recipe header */}
@@ -1204,6 +1569,46 @@ export default function Productos() {
             </div>
           </div>
         )}
+
+        {/* ── Right Panel: aviso para productos de REVENTA (sin receta ni dimensiones) ── */}
+        {selectedProduct?.es_reventa && (
+          <div className="w-full xl:w-[440px] shrink-0">
+            <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl overflow-hidden shadow-sm">
+              <div className="bg-gradient-to-r from-sky-600 to-sky-500 p-5">
+                <span className="text-[10px] font-mono font-bold text-white/60 uppercase tracking-widest">Producto de Reventa</span>
+                <h2 className="font-headline font-black text-white text-lg mt-0.5 leading-tight">
+                  {selectedProduct.nombre}
+                </h2>
+              </div>
+              <div className="p-5 space-y-3 text-sm text-yeikar-neutral/70">
+                <p>
+                  Este producto se compra y revende: no tiene receta de materiales,
+                  secciones ni dimensiones de fabricación.
+                </p>
+                <p>
+                  Su stock, costo de compra y precio de referencia se gestionan en{' '}
+                  <strong className="text-yeikar-secondary">Inventario → Productos (Terminados / Reventa)</strong>.
+                </p>
+                {(selectedProduct.precio_venta_base != null || selectedProduct.precio_costo_base != null) && (
+                  <div className="bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-3 space-y-1.5 font-mono text-xs">
+                    {selectedProduct.precio_venta_base != null && (
+                      <div className="flex justify-between">
+                        <span className="text-yeikar-neutral/50">Precio de venta ref.</span>
+                        <span className="font-bold text-yeikar-secondary">{formatCurrency(Number(selectedProduct.precio_venta_base), selectedProduct.moneda?.codigo)}</span>
+                      </div>
+                    )}
+                    {selectedProduct.precio_costo_base != null && (
+                      <div className="flex justify-between">
+                        <span className="text-yeikar-neutral/50">Costo de compra ref.</span>
+                        <span className="font-bold text-yeikar-secondary">{formatCurrency(Number(selectedProduct.precio_costo_base), selectedProduct.moneda?.codigo)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ═══════════════════════════════════════════════════════════ */}
@@ -1256,31 +1661,33 @@ export default function Productos() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-yeikar-neutral/55 mb-2">
-                  Dimensiones Base (referencia para escalar la receta)
-                </label>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { label: 'Ancho (m)', key: 'ancho_base', req: true },
-                    { label: 'Largo (m)', key: 'largo_base', req: true },
-                    { label: 'Alto (m)', key: 'alto_base', req: false },
-                  ].map(({ label, key, req }) => (
-                    <div key={key}>
-                      <label className="block text-[10px] text-yeikar-neutral/40 mb-1">{label}{req ? ' *' : ''}</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        required={req}
-                        placeholder={req ? '0.00' : 'Opc.'}
-                        value={productForm[key as keyof typeof productForm] as string}
-                        onChange={(e) => setProductForm({ ...productForm, [key]: e.target.value })}
-                        className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
-                      />
-                    </div>
-                  ))}
+              {!(productForm.id && productos.find((p) => p.id === productForm.id)?.es_reventa) && (
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-neutral/55 mb-2">
+                    Dimensiones Base (referencia para escalar la receta)
+                  </label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      { label: 'Ancho (m)', key: 'ancho_base', req: true },
+                      { label: 'Largo (m)', key: 'largo_base', req: true },
+                      { label: 'Alto (m)', key: 'alto_base', req: false },
+                    ].map(({ label, key, req }) => (
+                      <div key={key}>
+                        <label className="block text-[10px] text-yeikar-neutral/40 mb-1">{label}{req ? ' *' : ''}</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required={req}
+                          placeholder={req ? '0.00' : 'Opc.'}
+                          value={productForm[key as keyof typeof productForm] as string}
+                          onChange={(e) => setProductForm({ ...productForm, [key]: e.target.value })}
+                          className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">Descripción</label>
@@ -2060,6 +2467,184 @@ export default function Productos() {
             </table>
           </div>
         )}
+      </Modal>
+      {/* ── Modal: Importar estructura de costos desde Excel (copy-paste) ── */}
+      <Modal
+        open={showImportModal}
+        onClose={() => setShowImportModal(false)}
+        title="Importar estructura de costos (Excel)"
+        subtitle="Copia las filas de la hoja en Excel (Ctrl+C) y pégalas aquí. El ERP detecta secciones, insumos, mano de obra y gastos, y crea el producto con el mismo precio que tu Excel."
+        size="4xl"
+      >
+        <div className="space-y-5">
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
+              1 · Pega las filas del Excel (incluye las filas SECCION ...)
+            </label>
+            <textarea
+              value={importTexto}
+              onChange={(e) => setImportTexto(e.target.value)}
+              rows={9}
+              className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/20 rounded-xl p-3 text-xs font-mono focus:outline-none focus:border-yeikar-primary"
+              placeholder={'SECCION EBANISTERIA\nMADERA\t700\tAPAMATE\t\t140\t98000\nCOLBON\t1.5\tLITRO\t\t14000\t21000\nFABRICACION 300.000 *8% EDUARDO\t\t\t\t\t324000\ngastos de Ebanisteria e 10%\nTOTAL PRODUCCION\t\t\t\t\t2120330\n...'}
+            />
+            <button
+              type="button"
+              onClick={analizarImport}
+              disabled={importando || !importTexto.trim()}
+              className="mt-2 bg-yeikar-secondary text-yeikar-tertiary px-4 py-2 rounded-xl text-xs font-bold font-headline hover:bg-yeikar-secondary-light transition-all disabled:opacity-50"
+            >
+              {importando ? 'Analizando…' : 'Analizar estructura'}
+            </button>
+          </div>
+
+          {importPreview && (
+            <>
+              {importPreview.advertencias?.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
+                  {importPreview.advertencias.map((a: string, i: number) => (
+                    <p key={i} className="text-xs text-amber-800">⚠ {a}</p>
+                  ))}
+                </div>
+              )}
+
+              <div>
+                <p className="text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
+                  2 · Revisa los totales (así se calcula el precio)
+                </p>
+                <div className="border border-yeikar-secondary-light/15 rounded-xl overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-yeikar-neutral text-yeikar-tertiary font-headline">
+                        <th className="px-3 py-2 text-left">Sección</th>
+                        <th className="px-2 py-2 text-right">Insumos</th>
+                        <th className="px-2 py-2 text-right">Mano de obra</th>
+                        <th className="px-2 py-2 text-right">Gastos</th>
+                        <th className="px-3 py-2 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-yeikar-secondary-light/10">
+                      {(importPreview.resumen?.por_seccion ?? []).map((s: any, i: number) => (
+                        <tr key={i} className={i % 2 ? 'bg-yeikar-tertiary/20' : ''}>
+                          <td className="px-3 py-1.5 font-semibold text-yeikar-secondary">{s.nombre}</td>
+                          <td className="px-2 py-1.5 text-right font-mono">{formatCurrency(s.insumos_total, 'COP')}</td>
+                          <td className="px-2 py-1.5 text-right font-mono">{formatCurrency(s.costos_produccion_total, 'COP')}</td>
+                          <td className="px-2 py-1.5 text-right font-mono text-yeikar-neutral/60">
+                            {s.pct_gastos != null ? `${s.pct_gastos}% → ${formatCurrency(s.gasto, 'COP')}` : '—'}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono font-bold">{formatCurrency(s.total_seccion, 'COP')}</td>
+                        </tr>
+                      ))}
+                      <tr className="bg-yeikar-primary/10 font-black">
+                        <td className="px-3 py-2" colSpan={4}>TOTAL PRODUCCIÓN (calculado)</td>
+                        <td className="px-3 py-2 text-right font-mono">{formatCurrency(importPreview.resumen?.costo_produccion, 'COP')}</td>
+                      </tr>
+                      {importPreview.resumen?.total_declarado_excel != null && (
+                        <tr className="font-bold">
+                          <td className="px-3 py-1.5" colSpan={4}>
+                            TOTAL declarado en tu Excel
+                            {importPreview.resumen.desviacion_porcentual != null && (
+                              <span className={`ml-2 text-[10px] px-1.5 py-0.5 rounded-full ${importPreview.resumen.excede_gate_15 ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                Δ {importPreview.resumen.desviacion_porcentual}%
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono">{formatCurrency(importPreview.resumen.total_declarado_excel, 'COP')}</td>
+                        </tr>
+                      )}
+                      <tr className="bg-amber-50/80">
+                        <td className="px-3 py-2" colSpan={4}>
+                          Precio sugerido (+{importPreview.resumen?.impuesto_porcentaje}% impuesto, +{importPreview.resumen?.ganancia_porcentaje}% ganancia, redondeado)
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono font-black text-yeikar-primary-dark">
+                          {formatCurrency(importPreview.resumen?.precio_sin_iva, 'COP')}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
+                    3 · Nombre del producto *
+                  </label>
+                  <input
+                    type="text"
+                    value={importNombre}
+                    onChange={(e) => setImportNombre(e.target.value)}
+                    className="w-full p-2.5 border border-yeikar-secondary-light/20 rounded-xl text-sm focus:outline-none focus:border-yeikar-primary"
+                    placeholder={importPreview.nombre_sugerido || 'Ej: CAMA NUBE 1.60'}
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
+                    Tipo de mueble * <span className="normal-case font-normal">(para dividir el catálogo)</span>
+                  </label>
+                  {!importNuevoTipo && (
+                    <SearchSelect
+                      value={importTipoId}
+                      onChange={(v) => setImportTipoId(String(v))}
+                      options={tiposProducto.map((t) => ({ value: String(t.id), label: t.nombre }))}
+                      placeholder="Selecciona el tipo..."
+                    />
+                  )}
+                  <input
+                    type="text"
+                    value={importNuevoTipo}
+                    onChange={(e) => {
+                      setImportNuevoTipo(e.target.value);
+                      if (e.target.value.trim()) setImportTipoId('');
+                    }}
+                    className={`w-full p-2.5 border border-yeikar-secondary-light/20 rounded-xl text-sm focus:outline-none focus:border-yeikar-primary ${importNuevoTipo ? '' : 'mt-1.5'}`}
+                    placeholder={importNuevoTipo ? `Se creará el tipo "${importNuevoTipo}"` : '…o escribe un tipo nuevo (ej. Comedor, Silla)'}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">Ancho base (m)</label>
+                    <input type="number" step="0.01" value={importAncho} onChange={(e) => setImportAncho(e.target.value)} className="w-full p-2.5 border border-yeikar-secondary-light/20 rounded-xl text-sm font-mono" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">Largo base (m)</label>
+                    <input type="number" step="0.01" value={importLargo} onChange={(e) => setImportLargo(e.target.value)} className="w-full p-2.5 border border-yeikar-secondary-light/20 rounded-xl text-sm font-mono" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">Foto (opcional)</label>
+                  <label className="flex items-center justify-center gap-2 w-full cursor-pointer bg-white border border-dashed border-yeikar-secondary-light/30 rounded-xl px-3 py-2.5 text-xs font-bold text-yeikar-neutral/60 hover:border-yeikar-primary transition-colors">
+                    <FileSpreadsheet className="w-4 h-4 text-yeikar-primary-dark" />
+                    {importFoto ? importFoto.name : 'Subir foto'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic"
+                      className="hidden"
+                      onChange={(e) => setImportFoto(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 pt-4 border-t border-yeikar-secondary-light/10 mt-4">
+          <button
+            type="button"
+            onClick={() => setShowImportModal(false)}
+            className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={crearDesdeImport}
+            disabled={importando || !importPreview}
+            className="px-5 py-2 bg-yeikar-primary text-yeikar-neutral font-bold rounded-xl shadow-md hover:bg-yeikar-primary-light transition-all text-sm font-headline disabled:opacity-50"
+          >
+            {importando ? 'Creando…' : 'Crear producto'}
+          </button>
+        </div>
       </Modal>
     </div>
   );

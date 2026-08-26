@@ -78,6 +78,21 @@ def saldos_aguinaldo(
 ):
     return service.saldos_aguinaldo(db)
 
+@router.get("/resumen-semanal")
+def resumen_semanal(
+    desde: date = Query(..., description="Inicio del rango (YYYY-MM-DD)"),
+    hasta: date = Query(..., description="Fin del rango (YYYY-MM-DD)"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Qué hizo cada empleado de producción en el rango: piezas completadas con
+    valor de destajo según el tarifario y mano de obra registrada. Solo consulta."""
+    try:
+        return service.resumen_semanal(db, desde, hasta)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # Antes de las rutas dinámicas /{nomina_id} para que FastAPI resuelva el
 # prefijo literal /aguinaldo/pagar (no compite con /{nomina_id}, pero se
 # mantiene el orden correcto como buena práctica).

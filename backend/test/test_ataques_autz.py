@@ -292,6 +292,7 @@ def test_09_consumo_material_sin_stock_rechazado(client, db, cleaner):
     payload = {
         "etapa_produccion_id": etapa, "material_id": mat["id"], "cantidad": 10,
         "fecha": datetime.utcnow().isoformat(),
+        "solicitante_empleado_id": 3,
     }
     r = client.post("/api/v1/produccion/consumo/", json=payload, headers=ADMIN_HEADERS)
     print(f"  consumo sin stock → {r.status_code} {r.text[:120]}")

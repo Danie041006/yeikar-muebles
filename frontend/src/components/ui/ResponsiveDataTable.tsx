@@ -11,6 +11,7 @@ export interface DataColumn<T> {
   mobilePrimary?: boolean;
   mobileSecondary?: boolean;
   mobileHidden?: boolean;
+  mobileFull?: boolean;
 }
 
 interface ResponsiveDataTableProps<T> {
@@ -133,11 +134,11 @@ export default function ResponsiveDataTable<T>({
                 {bodyCols.length > 0 && (
                   <div className="grid grid-cols-2 gap-x-3 gap-y-2.5 px-4 pb-4">
                     {bodyCols.map((col) => (
-                      <div key={col.key} className="min-w-0">
+                      <div key={col.key} className={`min-w-0 ${col.mobileFull ? 'col-span-2' : ''}`}>
                         <p className="font-mono text-[9px] uppercase tracking-wider text-yeikar-neutral/40">
                           {col.mobileLabel ?? col.header ?? col.key}
                         </p>
-                        <div className="mt-0.5 truncate text-sm text-yeikar-neutral/90">{col.render(row)}</div>
+                        <div className="mt-0.5 break-words text-sm text-yeikar-neutral/90">{col.render(row)}</div>
                       </div>
                     ))}
                   </div>

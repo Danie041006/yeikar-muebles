@@ -260,13 +260,6 @@ export default function DocumentoCotizacion({
                 </span>
               </div>
 
-              {cotizacion.tasa_cambio && moneda !== 'COP' && (
-                <div className="flex justify-between items-baseline text-[8.5px] text-stone-600 font-mono font-medium border-t border-amber-200/60 pt-1">
-                  <span>EQUIVALENTE EN COP:</span>
-                  <span>{formatCurrency(grandTotal * Number(cotizacion.tasa_cambio), 'COP')}</span>
-                </div>
-              )}
-
               {venta && Number(venta.total_pagado) > 0 && (
                 <div className="flex justify-between items-baseline text-[8.5px] text-emerald-800 font-mono font-extrabold border-t border-amber-200/60 pt-1">
                   <span>TOTAL ABONADO:</span>

@@ -92,8 +92,6 @@ export default function Cuentas() {
   const monedaCopId = monedas.find((m) => m.codigo === 'COP')?.id ?? 1;
   const monedaDe = (id?: number) => monedas.find((m) => m.id === id);
 
-  const totalCop = resumen.reduce((s, r) => s + Number(r.saldo_cop || 0), 0);
-
   // ─── Cuentas ───────────────────────────────────────────────────────────
   const abrirCuenta = (cuenta?: MetodoCaja) => {
     setEditCuenta(cuenta ?? null);
@@ -287,21 +285,13 @@ export default function Cuentas() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 gap-5">
         <StatCard
-          label="Total en cuentas (COP)"
-          value={`$${fmt(totalCop)}`}
-          accent="from-yeikar-primary to-yeikar-primary-light"
-          hint="Suma de saldos convertidos"
+          label="Cuentas activas"
+          value={resumen.filter((r) => r.metodo_caja.activo).length}
+          accent="from-yeikar-secondary to-yeikar-secondary-light"
+          hint={`${resumen.filter((r) => !r.metodo_caja.activo).length} inactivas`}
         />
-        <div className="md:col-span-3">
-          <StatCard
-            label="Cuentas activas"
-            value={resumen.filter((r) => r.metodo_caja.activo).length}
-            accent="from-yeikar-secondary to-yeikar-secondary-light"
-            hint={`${resumen.filter((r) => !r.metodo_caja.activo).length} inactivas`}
-          />
-        </div>
       </div>
 
       {/* Tarjetas por cuenta */}
@@ -333,16 +323,9 @@ export default function Cuentas() {
                   <span className="text-yeikar-neutral/50">{nombreMoneda(l.codigo)}</span>
                   <span className="font-mono font-semibold">
                     {l.simbolo} {fmt(Number(l.monto))}
-                    {l.codigo !== 'COP' && <span className="text-yeikar-neutral/40 text-xs"> · ≈ {fmtMoneda(Number(l.monto_cop), 'COP')}</span>}
                   </span>
                 </div>
               ))}
-              <div className="flex justify-between text-sm border-t border-yeikar-secondary-light/10 pt-2 mt-2">
-                <span className="text-yeikar-neutral/50">Saldo COP</span>
-                <span className={`font-mono font-bold ${Number(r.saldo_cop) < 0 ? 'text-red-600' : 'text-yeikar-primary-dark'}`}>
-                  ${fmt(Number(r.saldo_cop))}
-                </span>
-              </div>
             </div>
             <div className="flex gap-2 mt-auto">
               <Button size="sm" className="flex-1" onClick={() => abrirMovimiento(r.metodo_caja.id)}>

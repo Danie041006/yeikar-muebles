@@ -31,11 +31,14 @@ export interface ClienteInfo {
   nombre: string;
   telefono?: string;
   direccion?: string;
+  cedula?: string | null;
 }
 
 export interface ProductoInfo {
   id: number;
   nombre: string;
+  /** Fotos de referencia del producto (adjuntos tipo PRODUCTO). */
+  fotos?: { url?: string }[];
 }
 
 export interface DetalleFactura {

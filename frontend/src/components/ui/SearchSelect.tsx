@@ -4,6 +4,8 @@ import { Check, ChevronDown, Search } from 'lucide-react';
 export interface SearchSelectOption {
   value: string | number;
   label: string;
+  /** Grupo opcional (se renderiza como encabezado de sección / optgroup). */
+  group?: string;
 }
 
 function useCoarsePointer(): boolean {
@@ -64,6 +66,20 @@ export default function SearchSelect({
     if (!q) return options;
     return options.filter((o) => o.label.toLowerCase().includes(q));
   }, [options, query]);
+
+  // Agrupa las opciones filtradas conservando el orden de aparición. Los
+  // índices originales en `filtered` se preservan para la navegación con
+  // teclado (highlighted apunta a posiciones del array plano).
+  const clusters = useMemo(() => {
+    if (!filtered.some((o) => o.group)) return null;
+    const map = new Map<string, { group: string; items: { opt: SearchSelectOption; index: number }[] }>();
+    filtered.forEach((opt, index) => {
+      const group = opt.group ?? '';
+      if (!map.has(group)) map.set(group, { group, items: [] });
+      map.get(group)!.items.push({ opt, index });
+    });
+    return Array.from(map.values());
+  }, [filtered]);
 
   const openDropdown = () => {
     if (disabled) return;
@@ -133,9 +149,19 @@ export default function SearchSelect({
           className="input min-h-11 cursor-pointer appearance-none pr-9"
         >
           <option value="" disabled>{placeholder}</option>
-          {options.map((opt) => (
-            <option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>
-          ))}
+          {clusters ? (
+            clusters.map((cluster) => (
+              <optgroup key={cluster.group || 'sin-grupo'} label={cluster.group}>
+                {cluster.items.map(({ opt }) => (
+                  <option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>
+                ))}
+              </optgroup>
+            ))
+          ) : (
+            options.map((opt) => (
+              <option key={String(opt.value)} value={String(opt.value)}>{opt.label}</option>
+            ))
+          )}
         </select>
         <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-yeikar-primary-dark/60" />
       </div>
@@ -202,29 +228,44 @@ export default function SearchSelect({
             <div className="px-4 py-6 text-center text-sm text-yeikar-neutral/40">{emptyText}</div>
           )}
 
-          {filtered.map((opt, i) => {
-            const isSelected = String(opt.value) === String(value);
-            const isHighlighted = i === highlighted;
-            return (
-              <button
-                key={String(opt.value)}
-                ref={(el) => {
-                  itemRefs.current[i] = el;
-                }}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                onMouseEnter={() => setHighlighted(i)}
-                onClick={() => selectOption(opt)}
-                className={`flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left text-sm transition-colors ${
-                  isHighlighted ? 'bg-yeikar-tertiary' : ''
-                } ${isSelected ? 'font-bold text-yeikar-primary-dark' : 'text-yeikar-neutral/90'}`}
-              >
-                <span className="truncate">{opt.label}</span>
-                {isSelected && <Check className="h-4 w-4 shrink-0" />}
-              </button>
-            );
-          })}
+          {(() => {
+            const renderItem = (opt: SearchSelectOption, i: number, indented: boolean) => {
+              const isSelected = String(opt.value) === String(value);
+              const isHighlighted = i === highlighted;
+              return (
+                <button
+                  key={String(opt.value)}
+                  ref={(el) => {
+                    itemRefs.current[i] = el;
+                  }}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setHighlighted(i)}
+                  onClick={() => selectOption(opt)}
+                  className={`flex w-full items-center justify-between gap-2 py-2.5 pr-4 text-left text-sm transition-colors ${
+                    indented ? 'pl-6' : 'px-4'
+                  } ${isHighlighted ? 'bg-yeikar-tertiary' : ''} ${
+                    isSelected ? 'font-bold text-yeikar-primary-dark' : 'text-yeikar-neutral/90'
+                  }`}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {isSelected && <Check className="h-4 w-4 shrink-0" />}
+                </button>
+              );
+            };
+            if (!clusters) return filtered.map((opt, i) => renderItem(opt, i, false));
+            return clusters.map((cluster) => (
+              <div key={cluster.group || '__sin_grupo'}>
+                {cluster.group && (
+                  <div className="border-b border-yeikar-secondary-light/10 bg-yeikar-tertiary/60 px-4 py-1.5 font-mono text-[10px] font-bold uppercase tracking-wider text-yeikar-neutral/50">
+                    {cluster.group}
+                  </div>
+                )}
+                {cluster.items.map(({ opt, index }) => renderItem(opt, index, true))}
+              </div>
+            ));
+          })()}
         </div>
       )}
     </div>

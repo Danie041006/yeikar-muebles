@@ -153,17 +153,20 @@ class MovimientoCajaResponse(MovimientoCajaBase):
     usuario: Optional[ResponsableResponse] = None
 
 class ResumenCuentaResponse(BaseModel):
-    """Saldo de una cuenta: por moneda (monto en su propia moneda) + total COP."""
+    """Saldo de una cuenta, por moneda (monto en su propia moneda).
+
+    Sin conversión a COP: la tasa cambia a diario y se ingresa manualmente en
+    cada operación; consolidar saldos con tasas históricas mezcladas no tiene
+    sentido contable.
+    """
     metodo_caja: MetodoCajaResponse
     saldo_por_moneda: List["LineaSaldoMoneda"] = []
-    saldo_cop: Decimal = Decimal("0.0")
 
 class LineaSaldoMoneda(BaseModel):
     moneda_id: int
     codigo: str
     simbolo: str
     monto: Decimal = Decimal("0.0")
-    monto_cop: Decimal = Decimal("0.0")
 
     class Config:
         from_attributes = True

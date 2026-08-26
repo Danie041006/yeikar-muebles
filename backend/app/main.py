@@ -18,7 +18,6 @@ from app.modules.production.router import router as produccion_router
 from app.modules.sales.router import router as sales_router, pago_router as pagos_router
 from app.modules.facturacion.router import router as facturacion_router
 from app.modules.gastos.router import router as gastos_router
-from app.modules.tasas_cambio.router import router as tasas_router, router_convertir as tasas_convertir_router
 from app.modules.inventory.router import router as inventario_router
 from app.modules.purchases.router import router as compras_router
 from app.modules.reports.router import router as reportes_router
@@ -110,8 +109,6 @@ app.include_router(sales_router, prefix="/api/v1/venta", tags=["ventas"])
 app.include_router(pagos_router, prefix="/api/v1/pago", tags=["pagos"])
 app.include_router(facturacion_router, prefix="/api/v1/factura", tags=["facturación"])
 app.include_router(gastos_router, prefix="/api/v1/gasto", tags=["gastos"])
-app.include_router(tasas_router, prefix="/api/v1/tasa", tags=["tasas de cambio"])
-app.include_router(tasas_convertir_router, prefix="/api/v1/tasa", tags=["tasas de cambio"])
 app.include_router(inventario_router, prefix="/api/v1", tags=["inventario"])
 app.include_router(compras_router, prefix="/api/v1", tags=["compras"])
 app.include_router(reportes_router, prefix="/api/v1", tags=["reportes"])

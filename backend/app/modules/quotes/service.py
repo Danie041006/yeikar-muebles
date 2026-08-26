@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, extract
+from sqlalchemy import or_
 from datetime import date
 from app.modules.quotes import model, schemas
 from app.modules.clients.model import Client
@@ -48,17 +48,39 @@ def obtener_cotizaciones(
             )
         )
 
-    # Date/history filters
+    # Date/history filters: rango [inicio, fin) para que el índice (fecha, id)
+    # sea usable (extract(month/year) no puede usar un índice btree).
     if mes is not None or anio is not None:
-        if mes is not None:
-            query = query.filter(extract('month', model.Cotizacion.fecha) == mes)
-        if anio is not None:
-            query = query.filter(extract('year', model.Cotizacion.fecha) == anio)
+        if mes is not None and anio is not None:
+            inicio = date(anio, mes, 1)
+            if mes == 12:
+                fin = date(anio + 1, 1, 1)
+            else:
+                fin = date(anio, mes + 1, 1)
+            query = query.filter(model.Cotizacion.fecha >= inicio, model.Cotizacion.fecha < fin)
+        elif anio is not None:
+            query = query.filter(
+                model.Cotizacion.fecha >= date(anio, 1, 1),
+                model.Cotizacion.fecha < date(anio + 1, 1, 1),
+            )
+        else:
+            # Solo mes sin año: se asume el año en curso.
+            today = date.today()
+            inicio = date(today.year, mes, 1)
+            if mes == 12:
+                fin = date(today.year + 1, 1, 1)
+            else:
+                fin = date(today.year, mes + 1, 1)
+            query = query.filter(model.Cotizacion.fecha >= inicio, model.Cotizacion.fecha < fin)
     elif solo_mes_actual:
         today = date.today()
+        if today.month == 12:
+            fin = date(today.year + 1, 1, 1)
+        else:
+            fin = date(today.year, today.month + 1, 1)
         query = query.filter(
-            extract('month', model.Cotizacion.fecha) == today.month,
-            extract('year', model.Cotizacion.fecha) == today.year
+            model.Cotizacion.fecha >= date(today.year, today.month, 1),
+            model.Cotizacion.fecha < fin,
         )
 
     query = query.order_by(model.Cotizacion.fecha.desc(), model.Cotizacion.id.desc())

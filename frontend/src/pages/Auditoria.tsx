@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Activity, ChevronDown, Clock3, Filter, ShieldCheck, UserRound } from 'lucide-react';
 import api from '../services/api';
 import { Badge, Card, PageHeader, Spinner } from '../components/ui';
+import { ACCION_LABELS, accionLabel } from '../utils/auditoria';
 
 interface AuditEvent {
   id: number;
@@ -16,15 +17,7 @@ interface AuditEvent {
   created_at: string;
 }
 
-const actionLabels: Record<string, string> = {
-  CREATE: 'Creó',
-  UPDATE: 'Editó',
-  STATE_CHANGE: 'Cambió estado',
-  DELETE: 'Eliminó',
-  ASSIGN: 'Asignó',
-  LOCATION_UPDATE: 'Reportó ubicación',
-  SYSTEM_CREATE: 'Creación automática',
-};
+const actionLabels: Record<string, string> = ACCION_LABELS;
 
 const entityLabels: Record<string, string> = {
   cliente: 'cliente',
@@ -111,7 +104,7 @@ export default function Auditoria() {
                 {events.map((event) => (
                   <tr key={event.id} className="transition-colors hover:bg-yeikar-tertiary/50">
                     <td className="table-td"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-yeikar-secondary text-yeikar-primary"><UserRound className="h-3.5 w-3.5" /></span><span className="font-semibold text-yeikar-secondary">{event.actor_name || 'Sistema'}</span></div></td>
-                    <td className="table-td"><Badge tone={event.action === 'DELETE' ? 'red' : event.action === 'LOCATION_UPDATE' ? 'blue' : 'gold'} dot>{actionLabels[event.action] || event.action}</Badge></td>
+                    <td className="table-td"><Badge tone={event.action === 'DELETE' ? 'red' : event.action === 'LOCATION_UPDATE' ? 'blue' : 'gold'} dot>{accionLabel(event.action)}</Badge></td>
                     <td className="table-td"><span className="font-semibold">{entityLabels[event.entity_type] || event.entity_type}</span><span className="ml-2 font-mono text-xs text-yeikar-neutral/45">#{event.entity_id}</span></td>
                     <td className="table-td text-xs text-yeikar-neutral/55">{event.changed_fields?.length ? event.changed_fields.join(', ') : 'Registro creado'}</td>
                     <td className="table-td"><span className="flex items-center gap-1.5 whitespace-nowrap font-mono text-xs text-yeikar-neutral/55"><Clock3 className="h-3.5 w-3.5 text-yeikar-primary-dark" />{new Date(event.created_at).toLocaleString('es-CO')}</span></td>

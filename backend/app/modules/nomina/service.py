@@ -241,6 +241,133 @@ def _validar_semana_disponible(db: Session, desde: date, hasta: date) -> None:
         raise ValueError(f"Ya existe una nómina para esa semana ({desde} → {hasta}).")
 
 
+def resumen_semanal(db: Session, desde: date, hasta: date) -> dict:
+    """Vista previa de "qué hizo cada empleado de producción" en el rango.
+
+    - Piezas: etapas COMPLETADAS no-retrabajo del responsable, con el valor de
+      destajo según `precio_produccion` (área+producto). Piezas sin precio
+      vinculado se marcan (no pagan).
+    - Mano de obra: registros de `mano_obra` creados en el rango (pagado/pendiente).
+
+    NO genera ni guarda nada: es solo consulta, para revisar antes de armar la nómina.
+    """
+    if desde > hasta:
+        raise ValueError("La fecha inicial no puede ser posterior a la final.")
+
+    from app.modules.production.model import ManoObra
+
+    etapas = _etapas_del_periodo(db, desde, hasta)
+    empleados_ids = {ep.empleado_responsable_id for ep in etapas}
+
+    inicio = datetime.combine(desde, time.min)
+    fin = datetime.combine(hasta, time.max)
+    manos = (
+        db.query(ManoObra)
+        .options(
+            joinedload(ManoObra.empleado),
+            joinedload(ManoObra.etapa)
+            .joinedload(EtapaProduccion.orden)
+            .joinedload(OrdenProduccion.detalle_pedido)
+            .joinedload(DetallePedido.producto),
+        )
+        .filter(
+            ManoObra.created_at >= inicio,
+            ManoObra.created_at <= fin,
+        )
+        .all()
+    )
+    for mo in manos:
+        if mo.empleado_id:
+            empleados_ids.add(mo.empleado_id)
+
+    emps = []
+    if empleados_ids:
+        emps = (
+            db.query(Empleado)
+            .options(joinedload(Empleado.cargo))
+            .filter(Empleado.id.in_(empleados_ids))
+            .all()
+        )
+    emp_map = {e.id: e for e in emps}
+
+    salida = []
+    for eid in sorted(empleados_ids, key=lambda i: (emp_map[i].nombre if i in emp_map else "")):
+        emp = emp_map.get(eid)
+        piezas = []
+        total_destajo = Decimal("0")
+        sin_precio = 0
+        lineas_bono: list = []
+        for ep in etapas:
+            if ep.empleado_responsable_id != eid:
+                continue
+            detalle = ep.orden.detalle_pedido
+            producto = detalle.producto
+            cliente = detalle.pedido.cliente
+            cantidad = detalle.cantidad
+            precio = _precio_catalogo(db, ep.area_id, detalle.producto_id)
+            tiene_precio = precio > 0
+            total = precio * cantidad if tiene_precio else None
+            piezas.append({
+                "producto": producto.nombre if producto else "Producción",
+                "area": ep.area.nombre if ep.area else None,
+                "cliente": cliente.nombre if cliente else None,
+                "cantidad": float(cantidad or 1),
+                "precio_unitario": float(precio) if tiene_precio else None,
+                "total": float(total) if total is not None else None,
+                "fecha_fin": ep.fecha_fin.isoformat() if ep.fecha_fin else None,
+            })
+            if not tiene_precio:
+                sin_precio += 1
+            else:
+                total_destajo += total
+                lineas_bono.append((total, ep.area_id))
+
+        bono = Decimal("0")
+        tipo_pago = emp.tipo_pago if emp else None
+        if tipo_pago == "DESTAJO":
+            for t, aid in lineas_bono:
+                bono += t * _porcentaje_area(db, aid) / Decimal("100")
+            if emp.porcentaje_aguinaldo is not None:
+                bono = total_destajo * emp.porcentaje_aguinaldo / Decimal("100")
+
+        mo_lineas = []
+        mo_total = mo_pagado = Decimal("0")
+        for mo in manos:
+            if mo.empleado_id != eid:
+                continue
+            recargo = mo.porcentaje_recargo or Decimal("0")
+            monto = (mo.monto or Decimal("0")) * (Decimal("1") + recargo / Decimal("100"))
+            mo_total += monto
+            if mo.pagado:
+                mo_pagado += monto
+            det = mo.etapa.orden.detalle_pedido if mo.etapa and mo.etapa.orden else None
+            mo_lineas.append({
+                "descripcion": det.producto.nombre if det and det.producto else "Producción",
+                "monto": float(monto.quantize(Decimal("0.01"))),
+                "pagado": bool(mo.pagado),
+            })
+
+        salida.append({
+            "empleado_id": eid,
+            "nombre": emp.nombre if emp else f"Empleado #{eid}",
+            "cargo": (emp.cargo.nombre if emp and emp.cargo else None),
+            "tipo_pago": tipo_pago,
+            "en_nomina": bool(emp.en_nomina) if emp else False,
+            "piezas": piezas,
+            "piezas_sin_precio": sin_precio,
+            "total_destajo": float(total_destajo),
+            "aguinaldo_estimado": float(bono.quantize(Decimal("0.01"))),
+            "mano_obra": {
+                "total": float(mo_total.quantize(Decimal("0.01"))),
+                "pagado": float(mo_pagado.quantize(Decimal("0.01"))),
+                "pendiente": float((mo_total - mo_pagado).quantize(Decimal("0.01"))),
+                "lineas": mo_lineas,
+            },
+        })
+
+    return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "empleados": salida}
+
+
 def crear_nomina(db: Session, esquema: schemas.NominaCreate, usuario: Optional[Usuario] = None) -> model.Nomina:
     _validar_semana_disponible(db, esquema.periodo_desde, esquema.periodo_hasta)
     draft = generar_nomina(db, esquema.periodo_desde, esquema.periodo_hasta)
@@ -448,11 +575,17 @@ def pagar_nomina(db: Session, nomina_id: int, usuario: Optional[Usuario] = None)
     periodo = f"{nomina.periodo_desde} al {nomina.periodo_hasta}"
     detalles_con_pago = [d for d in nomina.detalles if (d.monto_a_pagar or 0) > 0]
 
+    # Validación temprana de cuentas: listar TODOS los faltantes de una vez
+    # (no uno por request) para que el usuario corrija todo en una pasada.
+    sin_cuenta = [
+        d.empleado.nombre for d in detalles_con_pago if not d.metodo_caja_id
+    ]
+    if sin_cuenta:
+        raise ValueError(
+            "Falta la cuenta de pago de: " + ", ".join(sin_cuenta)
+        )
+
     for detalle in detalles_con_pago:
-        if detalle.metodo_caja_id is None:
-            raise ValueError(
-                f"Falta la cuenta de caja del empleado {detalle.empleado.nombre}."
-            )
         # commit=False: todo el pago se commitea en UNA transacción al final.
         # crear_gasto con commit interno liberaría el lock FOR UPDATE a mitad
         # del proceso y un segundo pago simultáneo re-leería BORRADOR.

@@ -1,6 +1,52 @@
+from typing import Optional
+
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.modules.productos import model, schemas
+
+# Moneda base del ERP: COP (id=1). Todos los costos internos del motor de
+# costos, cotizaciones y ventas se calculan en esta moneda.
+MONEDA_BASE_ID = 1
+
+
+def convertir_a_moneda_base(
+    db: Session,
+    moneda_id: Optional[int],
+    monto: Optional[float],
+) -> Optional[float]:
+    """Convierte un precio de referencia a la moneda base (COP) con la tasa vigente.
+
+    Los precios de referencia (precio_costo_base / precio_venta_base) se guardan
+    en la moneda declarada del producto (`moneda_id`); si no hay moneda explícita
+    o ya es la base, el monto pasa tal cual. `monto=None` devuelve None para que
+    el caller aplique su propio fallback.
+
+    Filosofía de tasas: se ingresan MANUALMENTE en cada operación (cotización,
+    pago, facturación) porque cambian a diario; NO se guardan en una tabla.
+    Si no existe una tasa registrada para la moneda, devuelve None (sin
+    conversión): el caller decide su fallback en vez de convertir mal un
+    precio financiero en silencio (leería "US$45" como "45 COP").
+    """
+    if monto is None:
+        return None
+    from decimal import Decimal
+    monto_dec = Decimal(str(monto))
+    if not moneda_id or moneda_id == MONEDA_BASE_ID:
+        return float(monto_dec)
+    from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop, obtener_ultima_tasa
+    from app.modules.tasas_cambio.model import TasaCambio
+    if not obtener_ultima_tasa(db, moneda_id, MONEDA_BASE_ID):
+        # ¿Tasa invertida (1 COP = X moneda)? Se acepta y se invierte.
+        inversa = db.query(TasaCambio).filter(
+            TasaCambio.moneda_origen_id == MONEDA_BASE_ID,
+            TasaCambio.moneda_destino_id == moneda_id,
+        ).order_by(TasaCambio.fecha.desc()).first()
+        if not inversa or not inversa.valor or float(inversa.valor) <= 0:
+            return None
+        tasa = Decimal("1") / Decimal(str(inversa.valor))
+    else:
+        tasa = obtener_tasa_moneda_a_cop(db, moneda_id)
+    return float(monto_dec * tasa)
 
 # ------------------------------------------------------------
 # Producto

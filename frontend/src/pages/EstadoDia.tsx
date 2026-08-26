@@ -17,6 +17,7 @@ const TIPO_TONE: Record<string, 'green' | 'red' | 'blue' | 'neutral'> = {
   ENTRADA: 'green',
   APERTURA: 'blue',
   SALIDA: 'red',
+  EGRESO: 'red',
   AJUSTE: 'neutral',
 };
 

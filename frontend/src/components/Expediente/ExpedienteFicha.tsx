@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatCurrency } from '../../utils/format';
+import { accionVerbo } from '../../utils/auditoria';
 import BadgeEstado from '../BadgeEstado';
 import AdjuntoImagen from '../AdjuntoImagen';
 import DocumentoCotizacion from './DocumentoCotizacion';
@@ -486,11 +487,15 @@ function SeccionAuditoria({ eventos }: { eventos: AuditoriaExp[] }) {
         {eventos.map((ev, i) => (
           <li key={i} className="flex gap-2 text-[11px]">
             <span className="font-mono text-yeikar-neutral/40 shrink-0 w-[92px]">{fmtFechaHora(ev.fecha)}</span>
-            <span className="font-mono shrink-0">{ev.actor || 'sistema'}</span>
-            <span className="text-yeikar-neutral/60 shrink-0">
-              {entidadLabel[ev.entidad] || ev.entidad} #{ev.entidad_id}
+            <span className="text-yeikar-neutral/80">
+              <span className="font-mono font-bold text-yeikar-secondary">{ev.actor || 'el sistema'}</span>
+              {' '}
+              <span className="text-yeikar-neutral/60">{accionVerbo(ev.accion)}</span>
+              {' '}
+              <span className="font-semibold text-yeikar-secondary">
+                {entidadLabel[ev.entidad] || ev.entidad} #{ev.entidad_id}
+              </span>
             </span>
-            <span className="font-bold text-yeikar-secondary uppercase tracking-wider">{ev.accion}</span>
           </li>
         ))}
       </ol>

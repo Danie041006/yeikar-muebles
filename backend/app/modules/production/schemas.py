@@ -17,6 +17,8 @@ class ConsumoMaterialBase(BaseModel):
 class ConsumoMaterialCreate(ConsumoMaterialBase):
     etapa_produccion_id: int
     material_id: int
+    # Obligatorio: quién pide el material (empleado). Trazabilidad por honestidad.
+    solicitante_empleado_id: int
 
 class ConsumoMaterialUpdate(BaseModel):
     cantidad: Optional[float] = Field(None, gt=0)
@@ -28,6 +30,8 @@ class ConsumoMaterialResponse(ConsumoMaterialBase):
     etapa_produccion_id: int
     material_id: int
     costo_unitario: Optional[float] = None
+    solicitante_empleado_id: Optional[int] = None
+    solicitante_nombre: Optional[str] = None
     creado_por_id: Optional[int] = None
     creador_nombre: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -49,6 +53,8 @@ class ManoObraBase(BaseModel):
 class ManoObraCreate(ManoObraBase):
     etapa_produccion_id: int
     empleado_id: int
+    # Tarifa del listado de costos de producción de la que salió el monto.
+    precio_produccion_id: Optional[int] = None
 
 class ManoObraUpdate(BaseModel):
     monto: Optional[float] = Field(None, ge=0)
@@ -59,6 +65,8 @@ class ManoObraResponse(ManoObraBase):
     id: int
     etapa_produccion_id: int
     empleado_id: int
+    precio_produccion_id: Optional[int] = None
+    precio_produccion_descripcion: Optional[str] = None
     creado_por_id: Optional[int] = None
     creador_nombre: Optional[str] = None
     created_at: Optional[datetime] = None

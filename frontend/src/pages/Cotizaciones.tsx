@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -16,6 +16,9 @@ import { productosService } from '../services/productosService';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import AdjuntoImagen from '../components/AdjuntoImagen';
+import ProductSelectorModal from '../components/ProductSelectorModal';
+import { Package, Sparkles, RefreshCw, Ruler } from 'lucide-react';
 
 interface CotizacionItemForm {
   producto_id: string;
@@ -30,8 +33,20 @@ interface CotizacionItemForm {
   receta_personalizada?: any[] | null;
 }
 
+// Ordena productos por tipo (id del catálogo) y nombre dentro de cada tipo,
+// para que el selector agrupado muestre Fabricado → Revendido → Cama → ...
+// (mañana: Comedor, Silla... aparecen solos al crearse en el catálogo).
+const ordenarProductosPorTipo = (prods: Product[]): Product[] =>
+  [...prods].sort((a, b) => {
+    const ta = a.tipo_producto_id ?? Number.MAX_SAFE_INTEGER;
+    const tb = b.tipo_producto_id ?? Number.MAX_SAFE_INTEGER;
+    if (ta !== tb) return ta - tb;
+    return a.nombre.localeCompare(b.nombre);
+  });
+
 export default function Cotizaciones() {
   const toast = useToast();
+  const lastCalcErrorRef = useRef('');
   const navigate = useNavigate();
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -85,6 +100,8 @@ export default function Cotizaciones() {
   const [items, setItems] = useState<CotizacionItemForm[]>([
     { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
   ]);
+  const [isProductSelectorOpen, setIsProductSelectorOpen] = useState(false);
+  const [productSelectorTargetIndex, setProductSelectorTargetIndex] = useState<number | null>(null);
 
   // Modal de personalización de receta ad-hoc por renglón
   const [showPersonalizarModal, setShowPersonalizarModal] = useState(false);
@@ -111,6 +128,15 @@ export default function Cotizaciones() {
   const [currencies, setCurrencies] = useState<Moneda[]>([]);
   const [selectedMonedaId, setSelectedMonedaId] = useState<number>(1);
   const [tasaCambio, setTasaCambio] = useState<number>(1);
+
+  // ── Tasas del día para renglones en moneda extranjera (reventa) ──────────
+  // El backend devuelve los montos de un producto de reventa EN SU MONEDA; la
+  // conversión a la moneda de la cotización se hace aquí UNA sola vez con la
+  // tasa que el usuario ingresa y confirma. Nunca una tasa en silencio: el
+  // campo es visible, se pre-rellena con la última tasa registrada (Tasas de
+  // Cambio) y es requerido para guardar.
+  const [tasasDia, setTasasDia] = useState<Record<string, string>>({});
+  const tasasRegistradasRef = useRef<Record<string, number>>({});
 
   const selectedMoneda = currencies.find(c => c.id === selectedMonedaId);
   const currencyCode = selectedMoneda?.codigo || 'COP';
@@ -156,13 +182,45 @@ export default function Cotizaciones() {
         cotizacionService.fetchCurrencies(),
       ]);
       setClients(cls);
-      setProducts(prds);
+      setProducts(ordenarProductosPorTipo(prds));
       setMateriales(mats);
       setCurrencies(currs);
     } catch (err) {
       console.error('Error fetching initial data:', err);
     }
   };
+
+  // Precargar la última tasa registrada por moneda (para prellenar "Tasas del
+  // día" del formulario de cotización). Preferencia: la más reciente con fecha
+  // <= hoy; si solo hay futuras, la más cercana.
+  useEffect(() => {
+    if (!currencies.length) return;
+    api.get('/tasa/tasas-cambio/', { params: { limit: 200 } })
+      .then(({ data }) => {
+        const hoy = new Date().toISOString().slice(0, 10);
+        const codigoPorId = new Map(currencies.map((c) => [c.id, c.codigo]));
+        const mejores: Record<string, { valor: number; fecha: string }> = {};
+        for (const t of data as any[]) {
+          if (Number(t.moneda_destino_id) !== 1) continue;
+          const cod = codigoPorId.get(Number(t.moneda_origen_id));
+          if (!cod) continue;
+          const prev = mejores[cod];
+          if (!prev) {
+            mejores[cod] = { valor: Number(t.valor), fecha: String(t.fecha) };
+            continue;
+          }
+          const tOk = String(t.fecha) <= hoy;
+          const pOk = prev.fecha <= hoy;
+          if ((tOk && pOk && String(t.fecha) > prev.fecha) || (tOk && !pOk) || (!tOk && !pOk && String(t.fecha) < prev.fecha)) {
+            mejores[cod] = { valor: Number(t.valor), fecha: String(t.fecha) };
+          }
+        }
+        tasasRegistradasRef.current = Object.fromEntries(
+          Object.entries(mejores).map(([k, v]) => [k, v.valor]),
+        );
+      })
+      .catch((err) => console.error('Error precargando tasas registradas:', err));
+  }, [currencies]);
 
   const fetchQuotes = async (searchTerm?: string) => {
     setLoading(true);
@@ -227,8 +285,17 @@ export default function Cotizaciones() {
         newItems[index] = { ...newItems[index], calcResult: res, calcLoading: false };
         return newItems;
       });
-    } catch (err) {
+      lastCalcErrorRef.current = '';
+    } catch (err: any) {
       console.error('Error calculating price for item:', err);
+      // Superficiar el error real (ej. falta registrar la tasa de cambio de un
+      // producto en USD). Una vez por mensaje distinto para no spamear toasts
+      // mientras se escribe en el formulario.
+      const detail = String(err?.response?.data?.detail || err?.message || '');
+      if (detail && detail !== lastCalcErrorRef.current) {
+        lastCalcErrorRef.current = detail;
+        toast.error(detail);
+      }
       setItems((prevItems) => {
         const newItems = [...prevItems];
         newItems[index] = { ...newItems[index], calcLoading: false };
@@ -242,12 +309,12 @@ export default function Cotizaciones() {
       const newItems = [...prevItems];
       newItems[index] = { ...newItems[index], [field]: value };
       
-      // Auto-dimensions if product changed
+      // Auto-dimensions if product changed (los reventa no tienen dimensiones)
       if (field === 'producto_id') {
         const selectedProd = products.find(p => p.id === Number(value));
         if (selectedProd) {
-          newItems[index].ancho = selectedProd.ancho_base.toString();
-          newItems[index].largo = selectedProd.largo_base.toString();
+          newItems[index].ancho = String(selectedProd.ancho_base ?? 1);
+          newItems[index].largo = String(selectedProd.largo_base ?? 1);
         }
         newItems[index].receta_personalizada = null;
       }
@@ -444,6 +511,43 @@ export default function Cotizaciones() {
     ]);
   };
 
+  const handleOpenProductSelector = (index?: number) => {
+    if (index !== undefined) {
+      setProductSelectorTargetIndex(index);
+    } else {
+      setProductSelectorTargetIndex(null);
+    }
+    setIsProductSelectorOpen(true);
+  };
+
+  const handleSelectProductFromModal = (product: Product) => {
+    if (productSelectorTargetIndex !== null && productSelectorTargetIndex >= 0) {
+      updateItemField(productSelectorTargetIndex, 'producto_id', String(product.id));
+    } else {
+      // Agregar un nuevo renglón directamente con el producto elegido
+      const newItem: CotizacionItemForm = {
+        producto_id: String(product.id),
+        cantidad: 1,
+        ancho: String(product.ancho_base ?? 1),
+        largo: String(product.largo_base ?? 1),
+        ganancia: '40.0',
+        impuesto: '7',
+        observaciones: '',
+        calcResult: null,
+        calcLoading: false,
+        receta_personalizada: null,
+      };
+      setItems((prev) => {
+        const next = [...prev, newItem];
+        const nextIdx = next.length - 1;
+        calculateItemPrice(nextIdx, String(product.id), newItem.ancho, newItem.largo, newItem.ganancia, null, newItem.impuesto);
+        return next;
+      });
+    }
+    setIsProductSelectorOpen(false);
+    setProductSelectorTargetIndex(null);
+  };
+
   const removeItem = (index: number) => {
     if (items.length === 1) return;
     setItems((prev) => prev.filter((_, i) => i !== index));
@@ -455,6 +559,7 @@ export default function Cotizaciones() {
     setObservaciones('');
     setSelectedMonedaId(1);
     setTasaCambio(1);
+    setTasasDia({});
     setItems([
       { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
     ]);
@@ -474,15 +579,33 @@ export default function Cotizaciones() {
       return;
     }
 
+    // No permitir guardar cotizaciones sin precio real: si falta la tasa del
+    // día de un producto en moneda extranjera, el precio convertido es inválido.
+    const itemSinPrecio = items.find((it) => {
+      if (!it.producto_id) return false;
+      if (!it.calcResult) return true;
+      const p = precioRenglonEnMoneda(it);
+      return !(isFinite(p) && p > 0);
+    });
+    if (itemSinPrecio) {
+      setError(
+        'Hay un renglón sin precio calculado o sin tasa de cambio del día. Ingresa/confirmar la tasa en "Tasas del día" del formulario.',
+      );
+      return;
+    }
+
     let globalTotal = 0;
     const detalles: QuoteDetail[] = items.map((item) => {
-      const itemPrice = item.calcResult ? item.calcResult.precio_venta : 0.0;
-      const subtotal = itemPrice * item.cantidad;
+      // Conversión ÚNICA: el cálculo viene en la moneda del producto (reventa)
+      // o en COP (fabricados); aquí queda en la moneda de la cotización.
+      const r = item.calcResult;
+      const conv = (v: number) => {
+        const c = convertirAPrecioCotizacion(Number(v), r?.moneda_codigo);
+        return Math.round(c * 100) / 100;
+      };
+      const precioMoneda = conv(r ? r.precio_venta : 0.0);
+      const subtotal = precioMoneda * item.cantidad;
       globalTotal += subtotal;
-      const precioMoneda =
-        selectedMonedaId !== 1 && tasaCambio > 0
-          ? Math.round((itemPrice / tasaCambio) * 100) / 100
-          : itemPrice;
 
       return {
         producto_id: Number(item.producto_id),
@@ -491,10 +614,10 @@ export default function Cotizaciones() {
         ancho: Number(item.ancho) || 1.0,
         largo: Number(item.largo) || 1.0,
         observaciones: item.observaciones || null,
-        costo_materiales: (item.calcResult?.costo_materiales || 0.0) * item.cantidad,
-        costo_mano_obra: (item.calcResult?.costo_mano_obra || 0.0) * item.cantidad,
-        costo_gastos: (item.calcResult?.costo_gastos_indirectos || 0.0) * item.cantidad,
-        costo_total: (item.calcResult?.costo_total || 0.0) * item.cantidad,
+        costo_materiales: conv(r?.costo_materiales || 0.0) * item.cantidad,
+        costo_mano_obra: conv(r?.costo_mano_obra || 0.0) * item.cantidad,
+        costo_gastos: conv(r?.costo_gastos_indirectos || 0.0) * item.cantidad,
+        costo_total: conv(r?.costo_total || 0.0) * item.cantidad,
         receta_personalizada: item.receta_personalizada || null,
       };
     });
@@ -509,9 +632,9 @@ export default function Cotizaciones() {
       ? `Productos: ${itemsDescription}\nNota: ${observaciones}`
       : `Productos: ${itemsDescription}`;
 
-    const totalEstimado = selectedMonedaId !== 1
-      ? Math.round(globalTotal / tasaCambio)
-      : Math.round(globalTotal);
+    // globalTotal ya está en la moneda de la cotización (conversión única por
+    // renglón); no se vuelve a dividir.
+    const totalEstimado = Math.round(globalTotal);
 
     const quoteData: QuoteCreate = {
       cliente_id: Number(selectedClientId),
@@ -747,29 +870,96 @@ export default function Cotizaciones() {
   };
 
   // Calculations summaries
+  // Un renglón es de reventa cuando su producto está marcado como tal: no tiene
+  // receta ni dimensiones; su precio sale del precio de referencia (convertido).
+  const esItemReventa = (item: { producto_id: string | number }) =>
+    products.find((p) => p.id === Number(item.producto_id))?.es_reventa === true;
+
+  // ── Conversión única al precio de cotización ─────────────────────────────
+  // Fabricados: vienen en COP → comportamiento previo (dividir por la tasa si
+  // la cotización no es COP). Reventa: viene en su moneda (`moneda_codigo`) →
+  // misma moneda: sin conversión; distinta: × tasa del día ÷ tasa cotización.
+  const convertirAPrecioCotizacion = (precioProducto: number, monedaCodigo?: string | null): number => {
+    if (!monedaCodigo || monedaCodigo === 'COP') {
+      return selectedMonedaId === 1 ? precioProducto : precioProducto / (tasaCambio || 1);
+    }
+    if (monedaCodigo === currencyCode) return precioProducto;
+    const tasaProd = parseFloat(tasasDia[monedaCodigo] || '');
+    if (!(tasaProd > 0)) return NaN;
+    const precioCop = precioProducto * tasaProd;
+    return selectedMonedaId === 1 ? precioCop : precioCop / (tasaCambio || 1);
+  };
+
+  /** Precio unitario del renglón ya en la moneda de la cotización (NaN si falta tasa). */
+  const precioRenglonEnMoneda = (item: { calcResult: CalculationResult | null }): number =>
+    item.calcResult
+      ? convertirAPrecioCotizacion(Number(item.calcResult.precio_venta), item.calcResult.moneda_codigo)
+      : NaN;
+
+  /** Texto del subtotal del renglón; avisa cuando falta la tasa del día. */
+  const textoSubtotalRenglon = (it: { calcResult: CalculationResult | null; cantidad: number }): string => {
+    if (!it.calcResult) return formatCurrency(0, currencyCode);
+    const v = precioRenglonEnMoneda(it);
+    if (!isFinite(v)) return 'Falta tasa del día';
+    return formatCurrency(v * it.cantidad, currencyCode);
+  };
+
+  // Monedas extranjeras presentes en los renglones y distintas de la moneda de
+  // la cotización: para esas se requiere la tasa del día. Se detecta desde el
+  // cálculo ya hecho O desde el producto seleccionado (reventa aún sin calcular).
+  const monedasRequeridas = useMemo(() => {
+    const set = new Set<string>();
+    items.forEach((it) => {
+      const code =
+        it.calcResult?.moneda_codigo ||
+        products.find((p) => p.id === Number(it.producto_id))?.moneda?.codigo;
+      if (code && code !== 'COP' && code !== currencyCode) set.add(code);
+    });
+    return Array.from(set).sort();
+  }, [items, products, currencyCode]);
+
+  // Prellenar cada moneda nueva con su última tasa registrada (visible y
+  // editable: el usuario siempre confirma el valor).
+  useEffect(() => {
+    setTasasDia((prev) => {
+      let cambio = false;
+      const next = { ...prev };
+      for (const code of monedasRequeridas) {
+        if (!next[code]) {
+          const reg = tasasRegistradasRef.current[code];
+          if (reg > 0) {
+            next[code] = String(reg);
+            cambio = true;
+          }
+        }
+      }
+      return cambio ? next : prev;
+    });
+  }, [monedasRequeridas]);
+
   const globalTotalCalc = items.reduce((acc, item) => {
-    const price = item.calcResult ? item.calcResult.precio_venta : 0;
-    return acc + (price * item.cantidad);
+    const price = precioRenglonEnMoneda(item);
+    return acc + (isFinite(price) ? price * item.cantidad : 0);
   }, 0);
 
   const globalMaterialCost = items.reduce((acc, item) => {
-    const mat = item.calcResult ? item.calcResult.costo_materiales : 0;
-    return acc + (mat * item.cantidad);
+    const mat = item.calcResult ? convertirAPrecioCotizacion(Number(item.calcResult.costo_materiales), item.calcResult.moneda_codigo) : 0;
+    return acc + (isFinite(mat) ? mat * item.cantidad : 0);
   }, 0);
 
   const globalManoObraCost = items.reduce((acc, item) => {
-    const mo = item.calcResult ? item.calcResult.costo_mano_obra : 0;
-    return acc + (mo * item.cantidad);
+    const mo = item.calcResult ? convertirAPrecioCotizacion(Number(item.calcResult.costo_mano_obra), item.calcResult.moneda_codigo) : 0;
+    return acc + (isFinite(mo) ? mo * item.cantidad : 0);
   }, 0);
 
   const globalGastosCost = items.reduce((acc, item) => {
-    const g = item.calcResult ? item.calcResult.costo_gastos_indirectos : 0;
-    return acc + (g * item.cantidad);
+    const g = item.calcResult ? convertirAPrecioCotizacion(Number(item.calcResult.costo_gastos_indirectos), item.calcResult.moneda_codigo) : 0;
+    return acc + (isFinite(g) ? g * item.cantidad : 0);
   }, 0);
 
   const globalCostoTotal = items.reduce((acc, item) => {
-    const t = item.calcResult ? item.calcResult.costo_total : 0;
-    return acc + (t * item.cantidad);
+    const t = item.calcResult ? convertirAPrecioCotizacion(Number(item.calcResult.costo_total), item.calcResult.moneda_codigo) : 0;
+    return acc + (isFinite(t) ? t * item.cantidad : 0);
   }, 0);
 
   const quoteEstadoBadge = (estado: string) => (
@@ -1109,171 +1299,345 @@ export default function Cotizaciones() {
                       className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm font-mono"
                     />
                     <p className="mt-1 text-[11px] text-stone-500 font-mono">
-                      {formatCurrency(Math.round(globalTotalCalc / tasaCambio), currencyCode)} → {(Math.round(globalTotalCalc)).toLocaleString('es-CO')} COP
+                      {formatCurrency(Math.round(globalTotalCalc), currencyCode)} → {(Math.round(globalTotalCalc * tasaCambio)).toLocaleString('es-CO')} COP
                     </p>
                   </div>
                 )}
               </div>
 
+              {/* Tasas del día: requeridas cuando hay productos de reventa en
+                  moneda extranjera (su precio viene en su moneda y se convierte
+                  aquí con la tasa que el usuario ingresa y confirma). */}
+              {monedasRequeridas.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 space-y-2">
+                  <div>
+                    <span className="text-xs uppercase tracking-wider font-bold text-amber-800 font-headline">
+                      Tasas del día *
+                    </span>
+                    <p className="text-[11px] text-amber-800/70 mt-0.5">
+                      Confirma cuántos COP vale 1 unidad de cada moneda de tus productos de reventa (cambian a diario).
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {monedasRequeridas.map((code) => (
+                      <div key={code}>
+                        <label className="block text-[11px] font-bold text-amber-900 mb-1">
+                          1 {code} = ? COP
+                        </label>
+                        <input
+                          type="number"
+                          min="0.000001"
+                          step="0.000001"
+                          placeholder="Ej. 4000"
+                          value={tasasDia[code] ?? ''}
+                          onChange={(e) => setTasasDia((prev) => ({ ...prev, [code]: e.target.value }))}
+                          className="w-full p-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-sm font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="border-t border-yeikar-secondary-light/15 my-4 pt-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="font-headline font-black text-sm text-yeikar-secondary tracking-tight">
-                    Renglones / Productos Cotizados
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={addItem}
-                    className="bg-yeikar-secondary text-yeikar-tertiary text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-yeikar-secondary-light transition-all flex items-center gap-1"
-                  >
-                    <span>+ Añadir Mueble</span>
-                  </button>
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                  <div>
+                    <h4 className="font-headline font-black text-sm text-yeikar-secondary tracking-tight">
+                      Renglones / Productos Cotizados
+                    </h4>
+                    <p className="text-[11px] text-stone-500 font-body">
+                      Seleccione los modelos del catálogo e ingrese dimensiones y condiciones
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenProductSelector()}
+                      className="bg-yeikar-secondary text-yeikar-tertiary text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-yeikar-primary hover:text-yeikar-neutral transition-all flex items-center gap-1.5 shadow-sm"
+                      title="Abrir catálogo para añadir un nuevo mueble"
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      <span>+ Añadir Mueble del Catálogo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addItem}
+                      className="bg-stone-100 text-stone-600 hover:text-stone-900 border border-stone-200 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all"
+                      title="Añadir renglón en blanco"
+                    >
+                      + Renglón vacío
+                    </button>
+                  </div>
                 </div>
 
                 <div className="space-y-4">
-                  {items.map((item, index) => (
-                    <div key={index} className="bg-yeikar-tertiary/25 p-4 rounded-xl border border-yeikar-secondary-light/5 relative space-y-3">
-                      {items.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeItem(index)}
-                          className="absolute top-2 right-2 text-red-500 hover:text-red-700 text-xs font-bold font-headline"
-                          title="Eliminar renglón"
-                        >
-                          Eliminar
-                        </button>
-                      )}
+                  {items.map((item, index) => {
+                    const selectedProd = products.find((p) => p.id === Number(item.producto_id));
+                    const basePrecio = Number(selectedProd?.precio_venta_base ?? selectedProd?.precio_costo_base ?? 0);
+                    const monedaExtranjera = selectedProd?.moneda && selectedProd.moneda.codigo !== 'COP' ? selectedProd.moneda.codigo : null;
+                    const baseMostrar = isFinite(basePrecio) && basePrecio > 0
+                      ? (monedaExtranjera
+                        ? formatCurrency(basePrecio, monedaExtranjera)
+                        : formatCurrency(basePrecio / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode))
+                      : null;
+                    const firstPhoto = selectedProd?.fotos && selectedProd.fotos.length > 0 ? selectedProd.fotos[0] : null;
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                        <div className="sm:col-span-2">
-                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
-                            Mueble Modelo *
-                          </label>
-                          <SearchSelect
-                            value={item.producto_id}
-                            onChange={(v) => updateItemField(index, 'producto_id', String(v))}
-                            options={products.map((p) => {
-                              const basePrecio = Number(p.precio_venta_base ?? p.precio_costo_base ?? 0);
-                              const baseMostrar = isFinite(basePrecio) && basePrecio > 0
-                                ? formatCurrency(basePrecio / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)
-                                : null;
-                              return {
-                                value: p.id,
-                                label: `${p.nombre}${baseMostrar ? ` (${baseMostrar} base)` : ''}`,
-                              };
-                            })}
-                            placeholder="Seleccione mueble..."
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
-                            Cantidad
-                          </label>
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.cantidad}
-                            onChange={(e) => updateItemField(index, 'cantidad', parseInt(e.target.value) || 1)}
-                            required
-                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                          />
-                        </div>
-                      </div>
+                    return (
+                      <div key={index} className="bg-stone-50/80 p-4 rounded-2xl border border-yeikar-secondary-light/15 relative space-y-3.5 shadow-xs">
+                        {/* Row Header */}
+                        <div className="flex items-center justify-between border-b border-stone-200/60 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-5 h-5 rounded-full bg-yeikar-secondary text-yeikar-tertiary text-[10px] font-bold flex items-center justify-center font-mono">
+                              {index + 1}
+                            </span>
+                            <span className="text-xs font-bold font-headline text-stone-700 uppercase tracking-wider">
+                              Renglón {index + 1}
+                            </span>
+                            {selectedProd && (
+                              <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-md ${
+                                selectedProd.es_reventa
+                                  ? 'bg-sky-100 text-sky-800'
+                                  : 'bg-amber-100 text-amber-900'
+                              }`}>
+                                {selectedProd.es_reventa ? 'Reventa' : 'Fabricado'}
+                              </span>
+                            )}
+                          </div>
 
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
-                            Ancho (m)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={item.ancho}
-                            onChange={(e) => updateItemField(index, 'ancho', e.target.value)}
-                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                          />
+                          {items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeItem(index)}
+                              className="text-red-500 hover:text-red-700 text-xs font-bold font-headline hover:bg-red-50 px-2 py-0.5 rounded-md transition-colors"
+                              title="Eliminar este renglón"
+                            >
+                              Eliminar
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
-                            Largo (m)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={item.largo}
-                            onChange={(e) => updateItemField(index, 'largo', e.target.value)}
-                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
-                            % Ganancia
-                          </label>
-                          <input
-                            type="number"
-                            value={item.ganancia}
-                            onChange={(e) => updateItemField(index, 'ganancia', e.target.value)}
-                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1" title="Impuestos adicionales sobre el costo de producción">
-                            % Impuestos
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            value={item.impuesto}
-                            onChange={(e) => updateItemField(index, 'impuesto', e.target.value)}
-                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                          />
-                        </div>
-                      </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
-                        <div className="sm:col-span-2">
-                          <input
-                            type="text"
-                            placeholder="Observación de este mueble (ej: Tela gris, patas madera)"
-                            value={item.observaciones}
-                            onChange={(e) => updateItemField(index, 'observaciones', e.target.value)}
-                            className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
-                          />
-                        </div>
-                        <div className="sm:col-span-1 flex items-center gap-1.5 justify-start">
+                        {/* Product Selection Block */}
+                        {!selectedProd ? (
                           <button
                             type="button"
-                            onClick={() => handleOpenPersonalizarReceta(index)}
-                            className="bg-amber-100/70 hover:bg-amber-100 text-amber-900 border border-amber-200/50 px-2 py-1.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 leading-none"
-                            title="Personalizar materiales, insumos y políticas para esta cotización"
+                            onClick={() => handleOpenProductSelector(index)}
+                            className="w-full py-4 px-4 border-2 border-dashed border-yeikar-primary/40 hover:border-yeikar-primary rounded-xl bg-white hover:bg-amber-50/30 transition-all flex items-center justify-center gap-3 text-yeikar-secondary group text-left cursor-pointer shadow-2xs"
                           >
-                            <svg className="w-3.5 h-3.5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-                            </svg>
-                            <span>Estructura / Secciones</span>
+                            <div className="w-9 h-9 rounded-xl bg-yeikar-primary/15 text-yeikar-secondary flex items-center justify-center group-hover:bg-yeikar-primary group-hover:text-yeikar-neutral transition-colors shrink-0">
+                              <Package className="w-5 h-5" />
+                            </div>
+                            <div className="flex-1">
+                              <div className="text-xs font-bold font-headline text-yeikar-neutral group-hover:text-yeikar-secondary transition-colors flex items-center gap-1.5">
+                                <span>Seleccionar Mueble / Modelo del Catálogo *</span>
+                                <span className="text-[10px] bg-yeikar-primary/20 text-yeikar-neutral px-1.5 py-0.5 rounded font-mono font-bold">
+                                  Abrir catálogo
+                                </span>
+                              </div>
+                              <div className="text-[11px] text-stone-400 mt-0.5">
+                                Explorar fotos, medidas sugeridas, precios base de referencia y categorías
+                              </div>
+                            </div>
                           </button>
-                          {item.receta_personalizada && (
-                            <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full font-sans uppercase shrink-0 leading-none">
-                              Personalizado
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-right font-mono text-xs font-bold text-yeikar-secondary sm:col-span-1">
-                          {item.calcLoading ? (
-                            <span className="text-yeikar-neutral/40">Calculando...</span>
-                          ) : item.calcResult ? (
-                            <span className="block">Subt: {formatCurrency(item.calcResult.precio_venta * item.cantidad / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)}</span>
+                        ) : (
+                          <div className="p-3 bg-white rounded-xl border border-yeikar-secondary-light/15 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              {firstPhoto ? (
+                                <div className="w-12 h-12 rounded-lg overflow-hidden border border-stone-200 shrink-0 bg-stone-100">
+                                  <AdjuntoImagen adjunto={firstPhoto} alt={selectedProd.nombre} className="w-full h-full object-cover" />
+                                </div>
+                              ) : (
+                                <div className="w-12 h-12 rounded-lg bg-yeikar-tertiary/60 border border-yeikar-secondary-light/10 flex items-center justify-center text-yeikar-secondary/60 shrink-0">
+                                  <Package className="w-5 h-5" />
+                                </div>
+                              )}
+
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h5 className="font-headline font-black text-sm text-yeikar-neutral truncate">
+                                    {selectedProd.nombre}
+                                  </h5>
+                                  {selectedProd.tipo_producto?.nombre && (
+                                    <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-md">
+                                      {selectedProd.tipo_producto.nombre}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="text-[11px] text-stone-500 font-mono mt-0.5 flex items-center gap-2.5 flex-wrap">
+                                  {selectedProd.codigo && (
+                                    <span>Cód: <strong className="text-stone-700">{selectedProd.codigo}</strong></span>
+                                  )}
+                                  {baseMostrar && (
+                                    <span>Ref: <strong className="text-stone-700">{baseMostrar} base</strong></span>
+                                  )}
+                                  {!selectedProd.es_reventa && (selectedProd.ancho_base || selectedProd.largo_base) && (
+                                    <span className="flex items-center gap-1">
+                                      <Ruler className="w-3 h-3 text-yeikar-primary" />
+                                      Base: {Number(selectedProd.ancho_base || 1).toFixed(2)}m × {Number(selectedProd.largo_base || 1).toFixed(2)}m
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenProductSelector(index)}
+                              className="px-3 py-1.5 bg-stone-100 hover:bg-yeikar-primary/20 text-stone-700 hover:text-yeikar-neutral border border-stone-200 rounded-lg text-xs font-bold font-headline transition-all flex items-center gap-1.5 self-start sm:self-center shrink-0"
+                              title="Cambiar mueble seleccionado"
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                              <span>Cambiar Modelo</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Quantity, Dimensions & Commercial Params */}
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
+                              Cantidad
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.cantidad}
+                              onChange={(e) => updateItemField(index, 'cantidad', parseInt(e.target.value) || 1)}
+                              required
+                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold"
+                            />
+                          </div>
+
+                          {!esItemReventa(item) ? (
+                            <>
+                              <div>
+                                <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
+                                  Ancho (m)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.ancho}
+                                  onChange={(e) => updateItemField(index, 'ancho', e.target.value)}
+                                  className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
+                                  Largo (m)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={item.largo}
+                                  onChange={(e) => updateItemField(index, 'largo', e.target.value)}
+                                  className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
+                                />
+                              </div>
+                            </>
                           ) : (
-                            <span>{formatCurrency(0, currencyCode)}</span>
+                            <div className="col-span-2 flex items-end">
+                              <div className="w-full space-y-1">
+                                <span className="block text-[10px] text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-2 w-full font-medium">
+                                  Reventa comercial (precio de lista)
+                                </span>
+                                {!item.calcResult && item.producto_id && (
+                                  <span className="block text-[10px] font-bold text-amber-700">
+                                    Confirma la tasa del día en el formulario ↑
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           )}
-                          {item.calcResult && Number(item.calcResult.impuestos) > 0 && (
-                            <span className="block text-[9px] font-normal text-yeikar-neutral/45">
-                              incl. {formatCurrency(item.calcResult.impuestos * item.cantidad / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)} imp. ({Number(item.impuesto) || 7}%)
+
+                          <div>
+                            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
+                              % Ganancia
+                            </label>
+                            <input
+                              type="number"
+                              value={item.ganancia}
+                              onChange={(e) => updateItemField(index, 'ganancia', e.target.value)}
+                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Secondary row: Taxes, Observations, Recipe Structure, Subtotal */}
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center pt-1 border-t border-stone-150">
+                          <div className="sm:col-span-2">
+                            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1" title="Impuestos adicionales sobre el costo">
+                              % Impuestos
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.impuesto}
+                              onChange={(e) => updateItemField(index, 'impuesto', e.target.value)}
+                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-5">
+                            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
+                              Observación / Especificaciones de este mueble
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="Ej: Tela lino gris perla, patas en roble..."
+                              value={item.observaciones}
+                              onChange={(e) => updateItemField(index, 'observaciones', e.target.value)}
+                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2 flex items-end">
+                            {!esItemReventa(item) && (
+                              <div className="flex items-center gap-1 w-full">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenPersonalizarReceta(index)}
+                                  className="w-full bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 px-2 py-2 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 leading-none"
+                                  title="Personalizar materiales e insumos de la receta para esta cotización"
+                                >
+                                  <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>Receta</span>
+                                </button>
+                                {item.receta_personalizada && (
+                                  <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full font-sans uppercase shrink-0">
+                                    Modificada
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="sm:col-span-3 text-right font-mono">
+                            <span className="block text-[9px] uppercase font-bold text-stone-400">
+                              Subtotal Renglón
                             </span>
-                          )}
+                            {item.calcLoading ? (
+                              <span className="text-xs text-stone-400 font-bold">Calculando...</span>
+                            ) : item.calcResult ? (
+                              <span className="text-sm font-black text-yeikar-secondary">
+                                {textoSubtotalRenglon(item)}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-stone-400 font-bold">{formatCurrency(0, currencyCode)}</span>
+                            )}
+                            {item.calcResult && Number(item.calcResult.impuestos) > 0 && (
+                              <span className="block text-[9px] font-normal text-stone-400">
+                                incl. {(() => {
+                                  const impConv = convertirAPrecioCotizacion(Number(item.calcResult?.impuestos), item.calcResult?.moneda_codigo);
+                                  return isFinite(impConv) ? formatCurrency(impConv * item.cantidad, currencyCode) : '—';
+                                })()} imp.
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1316,12 +1680,12 @@ export default function Cotizaciones() {
                   </h4>
                   <div className="space-y-2">
                     <div className="flex justify-between text-xs text-yeikar-tertiary/60">
-                      <span>Costo Total Fábrica:</span>
-                      <span className="font-mono font-bold">{formatCurrency(Math.round(globalCostoTotal / (selectedMonedaId === 1 ? 1 : tasaCambio)), currencyCode)}</span>
+                      <span>{items.some(esItemReventa) ? 'Costo de Compra:' : 'Costo Total Fábrica:'}</span>
+                      <span className="font-mono font-bold">{formatCurrency(Math.round(globalCostoTotal), currencyCode)}</span>
                     </div>
                     <div className="flex justify-between text-xs text-green-500">
                       <span>Ganancia Estimada:</span>
-                      <span className="font-mono font-bold">+ {formatCurrency(Math.round((globalTotalCalc - globalCostoTotal) / (selectedMonedaId === 1 ? 1 : tasaCambio)), currencyCode)}</span>
+                      <span className="font-mono font-bold">+ {formatCurrency(Math.round(globalTotalCalc - globalCostoTotal), currencyCode)}</span>
                     </div>
                   </div>
                 </div>
@@ -1352,9 +1716,28 @@ export default function Cotizaciones() {
                 {/* Desglose Detallado de Secciones de ese Renglón */}
                 <div className="border-t border-yeikar-secondary-light/10 pt-3 space-y-3">
                   <h5 className="text-[10px] font-bold text-yeikar-primary uppercase tracking-widest">
-                    Desglose de Secciones (Renglón {desgloseIndex + 1})
+                    {esItemReventa(items[desgloseIndex]) ? 'Detalle de Reventa' : `Desglose de Secciones (Renglón ${desgloseIndex + 1})`}
                   </h5>
-                  {items[desgloseIndex]?.calcResult?.desglose_por_seccion ? (
+                  {esItemReventa(items[desgloseIndex]) && items[desgloseIndex]?.calcResult ? (
+                    <div className="bg-yeikar-secondary/10 rounded-lg p-2.5 space-y-1.5 border border-yeikar-secondary-light/5 text-[10px] text-yeikar-tertiary/75 font-mono">
+                      <div className="flex justify-between">
+                        <span>Costo de compra</span>
+                        <span className="font-bold">{formatCurrency(convertirAPrecioCotizacion(Number(items[desgloseIndex].calcResult?.costo_total), items[desgloseIndex].calcResult?.moneda_codigo), currencyCode)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Precio de lista</span>
+                        <span className="font-bold">{formatCurrency(convertirAPrecioCotizacion(Number(items[desgloseIndex].calcResult?.precio_venta), items[desgloseIndex].calcResult?.moneda_codigo), currencyCode)}</span>
+                      </div>
+                      <div className="flex justify-between text-green-500 border-t border-yeikar-secondary-light/15 pt-1.5">
+                        <span>Margen</span>
+                        <span className="font-bold">+ {formatCurrency(
+                          convertirAPrecioCotizacion(Number(items[desgloseIndex].calcResult?.precio_venta), items[desgloseIndex].calcResult?.moneda_codigo)
+                          - convertirAPrecioCotizacion(Number(items[desgloseIndex].calcResult?.costo_total), items[desgloseIndex].calcResult?.moneda_codigo),
+                          currencyCode
+                        )}</span>
+                      </div>
+                    </div>
+                  ) : items[desgloseIndex]?.calcResult?.desglose_por_seccion ? (
                     <div className="space-y-3">
                       {Object.entries(items[desgloseIndex].calcResult.desglose_por_seccion).map(([seccionNombre, datosSec]: [string, any]) => (
                         <div key={seccionNombre} className="bg-yeikar-secondary/10 rounded-lg p-2.5 space-y-1.5 border border-yeikar-secondary-light/5">
@@ -1398,7 +1781,7 @@ export default function Cotizaciones() {
                   PRECIO TOTAL SUGERIDO:
                 </span>
                 <div className="text-2xl font-black text-yeikar-primary font-mono">
-                  {formatCurrency(Math.round(globalTotalCalc / (selectedMonedaId === 1 ? 1 : tasaCambio)), currencyCode)}
+                  {formatCurrency(Math.round(globalTotalCalc), currencyCode)}
                 </div>
               </div>
             </div>
@@ -2147,6 +2530,32 @@ export default function Cotizaciones() {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* Modal Selector de Productos / Catálogo Interactivo */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      <ProductSelectorModal
+        open={isProductSelectorOpen}
+        onClose={() => {
+          setIsProductSelectorOpen(false);
+          setProductSelectorTargetIndex(null);
+        }}
+        products={products}
+        selectedProductId={
+          productSelectorTargetIndex !== null && items[productSelectorTargetIndex]
+            ? items[productSelectorTargetIndex].producto_id
+            : null
+        }
+        onSelectProduct={handleSelectProductFromModal}
+        currencyCode={currencyCode}
+        tasaCambio={tasaCambio}
+        selectedMonedaId={selectedMonedaId}
+        title={
+          productSelectorTargetIndex !== null
+            ? `Seleccionar Mueble para Renglón ${productSelectorTargetIndex + 1}`
+            : 'Catálogo de Modelos y Muebles'
+        }
+      />
 
       <ConfirmDialog
         open={confirmDeleteId !== null}

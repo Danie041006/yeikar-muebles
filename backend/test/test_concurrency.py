@@ -373,6 +373,7 @@ def test_consumos_simultaneos_no_exceden_stock(client, db, cleaner):
             "etapa_produccion_id": etapa_id,
             "material_id": material_id,
             "cantidad": cantidad,
+            "solicitante_empleado_id": 1,
             "fecha": datetime.utcnow().isoformat(),
             "observaciones": "consumo-concurrente",
         })

@@ -6,12 +6,13 @@ interface FacturaFiscalPDFProps {
   numero: string;
   numeroControl: string;
   fechaEmision: string;
-  cliente?: { nombre?: string; telefono?: string; direccion?: string };
+  cliente?: { nombre?: string; telefono?: string; direccion?: string; cedula?: string | null };
   monedaCodigo: string;
   tasaBs: number;
   lineas: {
     key: string | number;
     descripcion: string;
+    foto?: string | null;
     cantidad: number;
     precioBs: number;
     subtotalBs: number;
@@ -100,6 +101,11 @@ export default function FacturaFiscalPDF({
             <div className="col-span-2 border-t border-stone-200 pt-1.5">
               <span className="font-bold text-stone-500 uppercase text-[7.5px] block">Identificación</span>
               <span className="font-bold text-stone-900 font-mono text-[8.5px]">RIF&#160;(&#160;&#160;)&#160;&#160;&#160;C.I.&#160;(&#160;&#160;)</span>
+              {cliente?.cedula && (
+                <span className="block font-bold text-stone-700 font-mono text-[8px] mt-0.5">
+                  {cliente.cedula}
+                </span>
+              )}
             </div>
             <div className="col-span-2 border-t border-stone-200 pt-1.5">
               <span className="font-bold text-stone-500 uppercase text-[7.5px] block">Teléfono</span>
@@ -132,7 +138,18 @@ export default function FacturaFiscalPDF({
                 {lineas.map((l, i) => (
                   <tr key={l.key} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                     <td className="p-2 text-center font-mono font-bold text-stone-900">{l.cantidad}</td>
-                    <td className="p-2 font-serif font-bold text-stone-950">{l.descripcion}</td>
+                    <td className="p-2 font-serif font-bold text-stone-950">
+                      <div className="flex items-center gap-2">
+                        {l.foto && (
+                          <img
+                            src={l.foto}
+                            alt={l.descripcion}
+                            className="h-16 w-16 rounded-lg object-cover border border-stone-300 shrink-0"
+                          />
+                        )}
+                        <span>{l.descripcion}</span>
+                      </div>
+                    </td>
                     <td className="p-2 text-right font-mono text-stone-800">Bs. {fmtBs(l.precioBs)}</td>
                     <td className="p-2 text-right font-mono font-black text-stone-950">Bs. {fmtBs(l.subtotalBs)}</td>
                   </tr>
@@ -148,10 +165,7 @@ export default function FacturaFiscalPDF({
             {/* Nota Legal izquierda */}
             <div className="text-[8px] text-stone-600 space-y-1.5">
               <p className="font-bold text-stone-800 uppercase tracking-wider">Esta factura va sin enmienda ni tachadura.</p>
-              <p className="italic">ORIGINAL · Comprobante fiscal de venta Comercializadora Yeikar (Ureña, Edo. Táchira).</p>
-              <p className="text-[7.5px] text-stone-500 font-mono">
-                Tasa de Cambio Oficial: 1 {monedaCodigo} = {tasaBs.toLocaleString('es-VE')} Bs.
-              </p>
+              
             </div>
 
             {/* Tarjeta de Resumen Fiscal SENIAT Oficial */}

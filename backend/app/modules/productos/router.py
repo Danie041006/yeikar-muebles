@@ -10,6 +10,7 @@ from app.modules.users.model import Usuario
 from app.modules.users.deps import es_admin_user, require_module
 from app.modules.productos import schemas, service
 from app.modules.productos import cost_service
+from app.modules.productos import estructura_import
 from app.modules.productos.model import ProductoMaterial
 
 router = APIRouter(dependencies=[Depends(require_module("productos"))])
@@ -214,6 +215,89 @@ def recalcular_precios_productos(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/producto/importar-estructura-texto", tags=["costeo"])
+def importar_estructura_texto(
+    payload: schemas.ImportarEstructuraTextoIn,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Crea un producto a partir de la estructura de costos PEGADA desde Excel.
+
+    Acepta las filas copiadas de una hoja (MATERIAL | CANTIDAD | UNIDAD |
+    V/UNIT | PRECIO TOTAL, con SECCION X, líneas de HECHURA/PREPARADO y
+    'gastos de X e N%'). Con dry_run=True devuelve la vista previa con los
+    totales por sección y el precio calculado con el mismo motor del ERP;
+    con dry_run=False crea el Producto con su estructura jerárquica completa
+    (SeccionProducto + ElementoSeccion + PoliticaSeccion + CostoProduccionSeccion).
+    """
+    try:
+        estructura = estructura_import.parsear_texto_estructura(payload.texto)
+        if not estructura["secciones"]:
+            raise ValueError(
+                "No se detectó ninguna estructura en el texto pegado. "
+                "Copia las filas completas de la hoja (incluyendo las filas SECCION ...)."
+            )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Tipo de mueble: en preview un tipo nuevo solo se anuncia; al crear se crea.
+    tipo = None
+    advertencias_tipo: list[str] = []
+    try:
+        tipo = estructura_import.resolver_tipo(
+            db, payload.tipo_producto_id, payload.nuevo_tipo_producto, crear=not payload.dry_run
+        )
+    except ValueError as exc:
+        if not payload.dry_run:
+            raise HTTPException(status_code=400, detail=str(exc))
+        advertencias_tipo.append(str(exc))
+
+    resumen = estructura_import.resumen_calculo(
+        estructura, payload.ganancia_porcentaje, payload.impuesto_porcentaje
+    )
+    nombre = (payload.nombre or estructura.get("nombre_sugerido") or "").strip()
+    preview = {
+        "dry_run": payload.dry_run,
+        "tipo": ({"id": tipo.id, "nombre": tipo.nombre} if tipo
+                 else {"nuevo": (payload.nuevo_tipo_producto or "").strip()}),
+        "nombre_sugerido": estructura.get("nombre_sugerido"),
+        "totales_excel": {k: float(v) for k, v in estructura["totales"].items()},
+        "resumen": resumen,
+        "referencias_descartadas": estructura["referencias_descartadas"][:20],
+        "advertencias": advertencias_tipo,
+    }
+    if resumen["excede_gate_15"]:
+        preview["advertencias"].append(
+            f"El total calculado difiere {resumen['desviacion_porcentual']}% del TOTAL declarado en el Excel."
+        )
+    if not nombre:
+        preview["advertencias"].append("Falta el nombre del producto.")
+
+    if payload.dry_run:
+        return preview
+
+    if not nombre:
+        raise HTTPException(status_code=400, detail="Indica el nombre del producto.")
+    if tipo is None:
+        raise HTTPException(status_code=400, detail="Indica el tipo de mueble.")
+
+    try:
+        producto = estructura_import.crear_producto_desde_estructura(
+            db,
+            nombre=nombre,
+            tipo=tipo,
+            estructura=estructura,
+            ancho=payload.ancho,
+            largo=payload.largo,
+            resumen=resumen,
+            usuario=usuario_actual,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    preview["producto"] = schemas.ProductoResponse.model_validate(producto).model_dump()
+    return preview
 
 
 # ------------------------------------------------------------
@@ -443,7 +527,7 @@ def crear_costo_produccion_seccion(
     return item
 
 
-@router.put("/costo-produccion/{item_id}", response_model=schemas.CostoProduccionSeccionResponse, tags=["receta-secciones"])
+@router.put("/seccion-costo-produccion/{item_id}", response_model=schemas.CostoProduccionSeccionResponse, tags=["receta-secciones"])
 def actualizar_costo_produccion_seccion(
     item_id: int,
     esquema: schemas.CostoProduccionSeccionUpdate,
@@ -462,7 +546,7 @@ def actualizar_costo_produccion_seccion(
     return item
 
 
-@router.delete("/costo-produccion/{item_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["receta-secciones"])
+@router.delete("/seccion-costo-produccion/{item_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["receta-secciones"])
 def eliminar_costo_produccion_seccion(
     item_id: int,
     db: Session = Depends(get_db),

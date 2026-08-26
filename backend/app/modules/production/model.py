@@ -70,6 +70,9 @@ class ConsumoMaterial(Base):
     cantidad = Column(Numeric(12, 2), nullable=False)
     costo_unitario = Column(Numeric(15, 2), nullable=True)
     seccion = Column(String(50), nullable=True)
+    # Quién PIDE el material (empleado), distinto de creado_por_id (usuario que
+    # digita). Obligatorio a nivel de API para trazabilidad/honestidad.
+    solicitante_empleado_id = Column(BigInteger, ForeignKey("empleado.id"), nullable=True, index=True)
     creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
     fecha = Column(DateTime, nullable=False)
     observaciones = Column(Text, nullable=True)
@@ -79,11 +82,16 @@ class ConsumoMaterial(Base):
 
     etapa = relationship("EtapaProduccion", back_populates="consumos")
     material = relationship("Material")
+    solicitante = relationship("Empleado", foreign_keys=[solicitante_empleado_id])
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
 
     @property
     def creador_nombre(self):
         return self.creador.nombre_usuario if self.creador else None
+
+    @property
+    def solicitante_nombre(self):
+        return self.solicitante.nombre if self.solicitante else None
 
 class ManoObra(Base):
     __tablename__ = "mano_obra"
@@ -95,6 +103,8 @@ class ManoObra(Base):
     porcentaje_recargo = Column(Numeric(5, 2), default=0.0, nullable=False)
     pagado = Column(Boolean, default=False, nullable=False)
     observaciones = Column(Text, nullable=True)
+    # Tarifario de costos de producción del que salió el monto (trazabilidad).
+    precio_produccion_id = Column(BigInteger, ForeignKey("precio_produccion.id", ondelete="SET NULL"), nullable=True, index=True)
     creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
 
     created_at = Column(DateTime, server_default=func.now())
@@ -102,11 +112,19 @@ class ManoObra(Base):
 
     etapa = relationship("EtapaProduccion", back_populates="mano_obras")
     empleado = relationship("Empleado")
+    # Import directo (no string) porque PrecioProduccion vive en otro módulo y
+    # puede no estar registrado en el registry al configurar los mappers.
+    from app.modules.costos_produccion.model import PrecioProduccion
+    precio_produccion = relationship(PrecioProduccion)
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
 
     @property
     def creador_nombre(self):
         return self.creador.nombre_usuario if self.creador else None
+
+    @property
+    def precio_produccion_descripcion(self):
+        return self.precio_produccion.descripcion if self.precio_produccion else None
 
 class CostoProduccion(Base):
     __tablename__ = "costo_produccion"

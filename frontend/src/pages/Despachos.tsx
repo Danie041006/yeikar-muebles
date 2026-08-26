@@ -5,6 +5,7 @@ import { envioService, Envio, EnvioUpdate } from '../services/envioService';
 import { OrderDetail } from '../services/pedidoService';
 import { Empleado } from '../services/produccionService';
 import api from '../services/api';
+import { esperarImagenesCargadas } from '../utils/pdfImagenes';
 import LocationTracker from '../components/LocationTracker';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect } from '../components/ui';
@@ -78,6 +79,8 @@ export default function Despachos() {
       const element = document.getElementById(`pdf-guia-container-${showGuiaModal.id}`);
       if (!element) { setIsGeneratingGuia(false); return; }
       try {
+        // Las fotos de producto deben estar cargadas antes de capturar.
+        await esperarImagenesCargadas(element);
         const html2canvas = (await import('html2canvas')).default;
         const { jsPDF } = await import('jspdf');
         const canvas = await html2canvas(element, { scale: 2, useCORS: true });
@@ -353,7 +356,7 @@ export default function Despachos() {
                   <div className="text-xs text-yeikar-secondary flex items-center gap-2">
                     <span className="text-[10px] font-black uppercase text-yeikar-neutral/45">Chofer:</span>
                     <span className="font-bold bg-yeikar-tertiary/40 px-2 py-0.5 rounded text-yeikar-primary">
-                      {envio.empleado.nombre} {envio.empleado.apellido}
+                      {envio.empleado.nombre}
                     </span>
                   </div>
                 )}
@@ -457,7 +460,7 @@ export default function Despachos() {
                   onChange={(v) => setSelectedEmpleadoId(String(v))}
                   options={empleados.map((emp) => ({
                     value: emp.id,
-                    label: `${emp.nombre} ${emp.apellido} (${emp.cargo?.nombre || 'Empleado'})`,
+                    label: `${emp.nombre} (${emp.cargo?.nombre || 'Empleado'})`,
                   }))}
                   placeholder="Selecciona Conductor..."
                 />
@@ -716,8 +719,8 @@ export default function Despachos() {
                     </div>
                     <div className="grid grid-cols-2 border-b border-stone-200">
                       <div className="px-2 py-1 border-r border-stone-200">
-                        <span className="font-bold text-stone-500 uppercase text-[7px] block">N° de Registro Único de Información Fiscal (RIF)</span>
-                        <span className="font-bold text-stone-900 font-mono">—</span>
+                        <span className="font-bold text-stone-500 uppercase text-[7px] block">N° de Registro Único de Información Fiscal (RIF) / C.I.</span>
+                        <span className="font-bold text-stone-900 font-mono">{selectedEnvioForGuia.pedido?.cliente?.cedula || '—'}</span>
                       </div>
                       <div className="px-2 py-1">
                         <span className="font-bold text-stone-500 uppercase text-[7px] block">Domicilio Fiscal</span>
@@ -757,12 +760,24 @@ export default function Despachos() {
                           const detVenta = venta?.detalles?.find(dv => dv.producto_id === det.producto_id);
                           const precio = detVenta ? Number(detVenta.precio) : 0;
                           const monto = precio * det.cantidad;
+                          const foto = det.producto?.fotos?.[0]?.url ?? null;
                           return (
                             <tr key={det.id || i} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                               <td className="px-2 py-1.5 text-center font-mono font-bold border-r border-stone-200">{det.cantidad}</td>
                               <td className="px-2 py-1.5 font-bold border-r border-stone-200">
-                                {det.producto?.nombre || 'Mueble Yeikar'}
-                                {det.ancho && det.largo ? <span className="font-normal text-stone-500"> ({det.ancho}×{det.largo}m)</span> : ''}
+                                <div className="flex items-center gap-2">
+                                  {foto && (
+                                    <img
+                                      src={foto}
+                                      alt={det.producto?.nombre ?? ''}
+                                      className="h-14 w-14 rounded object-cover border border-stone-300 shrink-0"
+                                    />
+                                  )}
+                                  <span>
+                                    {det.producto?.nombre || 'Mueble Yeikar'}
+                                    {det.ancho && det.largo ? <span className="font-normal text-stone-500"> ({det.ancho}×{det.largo}m)</span> : ''}
+                                  </span>
+                                </div>
                                 {det.observaciones && <span className="block text-[7.5px] text-stone-400 font-normal italic">{det.observaciones}</span>}
                               </td>
                               <td className="px-2 py-1.5 text-right font-mono border-r border-stone-200">
@@ -810,7 +825,7 @@ export default function Despachos() {
                         <span className="font-bold text-stone-500 uppercase text-[7px] block">Conductor:</span>
                         <span className="font-bold text-stone-900">
                           {selectedEnvioForGuia.empleado
-                            ? `${selectedEnvioForGuia.empleado.nombre} ${selectedEnvioForGuia.empleado.apellido}`
+                            ? `${selectedEnvioForGuia.empleado.nombre}`
                             : 'Por Asignar'}
                         </span>
                       </div>

@@ -408,8 +408,25 @@ export default function Pedidos() {
                   selectedOrder.detalles.map((det) => (
                     <div key={det.id} className="p-3 bg-yeikar-tertiary/25 rounded-xl border border-yeikar-secondary-light/10 space-y-2">
                       <div className="flex justify-between font-headline font-bold text-sm">
-                        <span className="text-yeikar-secondary">
-                          {det.producto?.nombre || 'Producto Personalizado'}
+                        <span className="flex items-center gap-2">
+                          <span className="text-yeikar-secondary">
+                            {det.producto?.nombre || 'Producto Personalizado'}
+                          </span>
+                          {det.producto?.es_reventa ? (
+                            <span
+                              className="bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                              title="Producto de reventa: se entrega del inventario, no pasa por producción"
+                            >
+                              Reventa
+                            </span>
+                          ) : (
+                            <span
+                              className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                              title="Se fabrica a medida: genera orden de producción"
+                            >
+                              Fabricar
+                            </span>
+                          )}
                         </span>
                         <span className="text-yeikar-primary-dark">
                           ${Number(det.precio).toLocaleString()} COP

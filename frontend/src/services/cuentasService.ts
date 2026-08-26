@@ -36,13 +36,11 @@ export interface LineaSaldoMoneda {
   codigo: string;
   simbolo: string;
   monto: number;
-  monto_cop: number;
 }
 
 export interface ResumenCuenta {
   metodo_caja: MetodoCaja;
   saldo_por_moneda: LineaSaldoMoneda[];
-  saldo_cop: number;
 }
 
 export interface Moneda {

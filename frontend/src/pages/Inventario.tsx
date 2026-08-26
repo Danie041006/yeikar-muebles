@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse } from '../services/inventarioService';
-import { productosService } from '../services/productosService';
+import { productosService, type MonedaInfo } from '../services/productosService';
+import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
@@ -28,6 +29,8 @@ interface Product {
   codigo?: string;
   stock_minimo?: number;
   es_reventa?: boolean;
+  moneda_id?: number | null;
+  moneda?: MonedaInfo | null;
 }
 
 type Tab = 'insumos' | 'productos';
@@ -47,6 +50,7 @@ export default function Inventario() {
   // ---- Estado compartido ----
   const [ubicaciones, setUbicaciones] = useState<Ubicacion[]>([]);
   const [unidades, setUnidades] = useState<UnidadMedida[]>([]);
+  const [monedas, setMonedas] = useState<MonedaInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
   // ---- Insumos ----
@@ -107,18 +111,40 @@ export default function Inventario() {
     costo_base: '',
     precio_venta: '',
     stock_minimo: '8',
+    cantidad_inicial: '1',
+    moneda_id: '', // string para SearchSelect; default USD cuando cargan las monedas
   });
   const [savingProducto, setSavingProducto] = useState(false);
+  const [fotoProducto, setFotoProducto] = useState<File | null>(null);
+  const [fotoProductoPreview, setFotoProductoPreview] = useState<string | null>(null);
+
+  /** Los productos de reventa se compran en USD; si no existe, primera moneda o COP. */
+  const idMonedaPorDefecto = () => {
+    const usd = monedas.find(m => m.codigo === 'USD');
+    return String(usd?.id ?? monedas[0]?.id ?? 1);
+  };
+
+  // Al cargar el catálogo de monedas, preseleccionar la moneda por defecto.
+  useEffect(() => {
+    if (monedas.length && !newProducto.moneda_id) {
+      setNewProducto(prev => ({ ...prev, moneda_id: idMonedaPorDefecto() }));
+    }
+  }, [monedas]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const monedaSeleccionada = monedas.find(m => String(m.id) === newProducto.moneda_id);
+  const simboloPrecio = monedaSeleccionada?.simbolo || '$';
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [ubiData, uniData] = await Promise.all([
+      const [ubiData, uniData, monData] = await Promise.all([
         api.get<Ubicacion[]>('/catalogos/ubicacion/'),
         api.get<UnidadMedida[]>('/catalogos/unidad-medida/'),
+        api.get<MonedaInfo[]>('/catalogos/moneda/'),
       ]);
       setUbicaciones(ubiData.data);
       setUnidades(uniData.data);
+      setMonedas(monData.data.filter(m => m.activo !== false));
     } catch (error) {
       console.error('Error fetching catalog data:', error);
     } finally {
@@ -202,24 +228,38 @@ export default function Inventario() {
         tipo_producto_id: 2, // Revendido
         descripcion: 'Producto de reventa',
         activo: true,
-        ancho_base: 0,
-        largo_base: 0,
+        // Un reventa no tiene dimensiones de mueble: se omiten (null en BD)
+        ancho_base: undefined,
+        largo_base: undefined,
         stock_minimo: newProducto.stock_minimo ? parseFloat(newProducto.stock_minimo) : 8.0,
         es_reventa: true,
+        // Precios de referencia en la moneda elegida (USD por defecto)
+        moneda_id: parseInt(newProducto.moneda_id || '1') || 1,
+        precio_costo_base: newProducto.costo_base ? parseFloat(newProducto.costo_base) : undefined,
+        precio_venta_base: newProducto.precio_venta ? parseFloat(newProducto.precio_venta) : undefined,
       });
+      // Foto de referencia (opcional): se sube y el servidor la optimiza
+      if (fotoProducto && creado.id) {
+        await subirAdjunto(fotoProducto, TIPO_ADJUNTO.PRODUCTO, creado.id);
+        setFotoProducto(null);
+        if (fotoProductoPreview) URL.revokeObjectURL(fotoProductoPreview);
+        setFotoProductoPreview(null);
+      }
       setShowProductoModal(false);
-      setNewProducto({ nombre: '', codigo: '', costo_base: '', precio_venta: '', stock_minimo: '8' });
+      setNewProducto({ nombre: '', codigo: '', costo_base: '', precio_venta: '', stock_minimo: '8', cantidad_inicial: '1', moneda_id: idMonedaPorDefecto() });
 
-      // Si viene con costo, registrar entrada inicial en Depósito Principal
-      if (newProducto.costo_base && parseFloat(newProducto.costo_base) > 0 && creado.id) {
+      // Entrada inicial al inventario: la cantidad la decide el usuario
+      // (default 1); el costo es opcional.
+      const cantInicial = parseFloat(newProducto.cantidad_inicial || '0') || 0;
+      if (cantInicial > 0 && creado.id) {
         const ubi = ubicaciones[0];
         if (ubi) {
           await inventarioService.crearMovimientoProducto({
             producto_id: creado.id,
             ubicacion_id: ubi.id,
             tipo: 'ENTRADA',
-            cantidad: 1,
-            costo_unitario: parseFloat(newProducto.costo_base),
+            cantidad: cantInicial,
+            costo_unitario: newProducto.costo_base ? parseFloat(newProducto.costo_base) : undefined,
             observaciones: 'Carga inicial de producto de reventa',
           });
         }
@@ -444,6 +484,10 @@ export default function Inventario() {
     return { s, c, low: c <= (p.stock_minimo ?? 8) };
   };
 
+  /** Prefijo del precio según la moneda declarada del producto ($ para COP). */
+  const simboloMonedaProducto = (p: Product) =>
+    p.moneda && p.moneda.codigo !== 'COP' ? `${p.moneda.simbolo} ` : '$';
+
   const productoColumns: DataColumn<Product>[] = [
     {
       key: 'nombre',
@@ -489,7 +533,7 @@ export default function Inventario() {
       render: (p) => {
         const { s } = productoStock(p);
         return s?.costo_promedio ? (
-          <span className="font-mono text-xs text-yeikar-neutral/60">${Number(s.costo_promedio).toLocaleString('es-ES')}</span>
+          <span className="font-mono text-xs text-yeikar-neutral/60">{simboloMonedaProducto(p)}{Number(s.costo_promedio).toLocaleString('es-ES')}</span>
         ) : (
           <span className="italic text-yeikar-neutral/30">—</span>
         );
@@ -507,7 +551,7 @@ export default function Inventario() {
             Inventario
           </h1>
           <p className="text-yeikar-neutral/60 mt-1">
-            Controla existencias de insumos y de productos terminados / de reventa, con alertas de stock crítico.
+            Controla existencias de insumos y productos de reventa, con alertas de stock crítico.
           </p>
         </div>
 
@@ -554,7 +598,7 @@ export default function Inventario() {
               : 'text-yeikar-neutral/50 hover:text-yeikar-neutral'
           }`}
         >
-          Productos (Terminados / Reventa)
+          Productos de Reventa
           {alertasProductos.length > 0 && (
             <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{alertasProductos.length}</span>
           )}
@@ -845,7 +889,7 @@ export default function Inventario() {
                 </div>
                 {(movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION') && (
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(Actualiza el precio al instante)</span></label>
+                    <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(en {productoSeleccionado?.moneda?.codigo ?? 'COP'} · actualiza el precio al instante)</span></label>
                     <input type="number" step="0.01" min="0" placeholder="0.00" value={movProducto.costo_unitario} onChange={(e) => setMovProducto(p => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
                   </div>
                 )}
@@ -981,19 +1025,74 @@ export default function Inventario() {
                   <input type="number" min="0" step="0.5" value={newProducto.stock_minimo} onChange={(e) => setNewProducto(prev => ({ ...prev, stock_minimo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
               </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda de los Precios *</label>
+                <SearchSelect
+                  value={newProducto.moneda_id}
+                  onChange={(v) => setNewProducto(prev => ({ ...prev, moneda_id: String(v) }))}
+                  options={monedas.map((m) => ({ value: m.id, label: `${m.codigo} (${m.simbolo})` }))}
+                  placeholder="Seleccionar..."
+                />
+                <p className="text-[10px] text-yeikar-neutral/40 mt-1">En qué moneda compraste este producto (p. ej. USD para importados).</p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo de Compra <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
-                  <input type="number" min="0" step="0.01" placeholder="0.00" value={newProducto.costo_base} onChange={(e) => setNewProducto(prev => ({ ...prev, costo_base: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-yeikar-neutral/40">{simboloPrecio}</span>
+                    <input type="number" min="0" step="0.01" placeholder="0.00" value={newProducto.costo_base} onChange={(e) => setNewProducto(prev => ({ ...prev, costo_base: e.target.value }))} className="w-full pl-8 pr-3 py-2.5 bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio de Venta <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
-                  <input type="number" min="0" step="0.01" placeholder="0.00" value={newProducto.precio_venta} onChange={(e) => setNewProducto(prev => ({ ...prev, precio_venta: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-yeikar-neutral/40">{simboloPrecio}</span>
+                    <input type="number" min="0" step="0.01" placeholder="0.00" value={newProducto.precio_venta} onChange={(e) => setNewProducto(prev => ({ ...prev, precio_venta: e.target.value }))} className="w-full pl-8 pr-3 py-2.5 bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad Inicial</label>
+                  <input type="number" min="0" step="1" placeholder="1" value={newProducto.cantidad_inicial} onChange={(e) => setNewProducto(prev => ({ ...prev, cantidad_inicial: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+                <div className="flex items-end">
+                  <p className="text-[10px] text-yeikar-neutral/40 leading-tight pb-1">
+                    Unidades que entran al inventario al crear el producto. Después puedes agregar más o descontar con movimientos.
+                  </p>
                 </div>
               </div>
-              {parseFloat(newProducto.costo_base || '0') > 0 && (
+              {/* Foto de referencia (opcional) */}
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de Referencia <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
+                <div className="flex items-center gap-3">
+                  {fotoProductoPreview && (
+                    <img src={fotoProductoPreview} alt="Vista previa de la foto de referencia" className="h-16 w-16 rounded-xl object-cover border border-yeikar-primary/40" />
+                  )}
+                  <label className={`flex items-center justify-center gap-1.5 h-16 flex-1 px-3 rounded-xl border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-[11px] font-bold text-yeikar-neutral/50 transition-colors ${fotoProductoPreview ? '' : 'border-solid bg-yeikar-tertiary/20'}`}>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    {fotoProducto ? 'Cambiar foto' : 'Subir foto'}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (!f) return;
+                        setFotoProducto(f);
+                        if (fotoProductoPreview) URL.revokeObjectURL(fotoProductoPreview);
+                        setFotoProductoPreview(URL.createObjectURL(f));
+                      }}
+                    />
+                  </label>
+                </div>
+                <p className="text-[10px] text-yeikar-neutral/40 mt-1.5">
+                  La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
+                </p>
+              </div>
+              {parseFloat(newProducto.cantidad_inicial || '0') > 0 && (
                 <p className="text-[11px] text-yeikar-neutral/50 italic bg-yeikar-tertiary/30 border border-yeikar-secondary-light/5 rounded-lg px-3 py-2">
-                  Se registrará una entrada inicial de 1 unidad en {ubicaciones[0]?.nombre || 'Depósito Principal'} con ese costo.
+                  Se registrará una entrada inicial de {newProducto.cantidad_inicial || 1} unidad(es) en {ubicaciones[0]?.nombre || 'Depósito Principal'}{parseFloat(newProducto.costo_base || '0') > 0 ? ` con ese costo (${simboloPrecio}${newProducto.costo_base} c/u)` : ''}.
                 </p>
               )}
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">

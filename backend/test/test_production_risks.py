@@ -359,7 +359,8 @@ def test_c6_eliminar_consumo_revierte_stock(client, cleaner, db):
 
     r_cons = client.post("/api/v1/produccion/consumo/", json={
         "etapa_produccion_id": etapa_id, "material_id": material["id"],
-        "cantidad": 10, "fecha": "2026-08-05T00:00:00", "observaciones": "c6"},
+        "cantidad": 10, "fecha": "2026-08-05T00:00:00", "observaciones": "c6",
+        "solicitante_empleado_id": 1},
         headers=ADMIN_HEADERS)
     assert r_cons.status_code == 201, f"consumo → {r_cons.status_code}: {r_cons.text}"
     consumo_id = r_cons.json()["id"]
@@ -640,7 +641,8 @@ def test_c11_eliminar_consumo_revierte_gasto(client, cleaner, db):
 
     r_cons = client.post("/api/v1/produccion/consumo/", json={
         "etapa_produccion_id": etapa_id, "material_id": material["id"],
-        "cantidad": 10, "fecha": "2026-08-05T00:00:00", "observaciones": "c11"},
+        "cantidad": 10, "fecha": "2026-08-05T00:00:00", "observaciones": "c11",
+        "solicitante_empleado_id": 1},
         headers=ADMIN_HEADERS)
     assert r_cons.status_code == 201, f"consumo → {r_cons.status_code}: {r_cons.text}"
     consumo_id = r_cons.json()["id"]

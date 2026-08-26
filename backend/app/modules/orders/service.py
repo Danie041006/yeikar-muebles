@@ -1,6 +1,6 @@
 from datetime import date
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, extract
+from sqlalchemy import or_
 from app.modules.orders import model, schemas
 from app.modules.quotes.model import Cotizacion
 from app.modules.clients.model import Client
@@ -51,17 +51,39 @@ def obtener_pedidos(
             )
         )
 
-    # Date/history filters
+    # Date/history filters: rango [inicio, fin) para que el índice (fecha, id)
+    # sea usable (extract(month/year) no puede usar un índice btree).
     if mes is not None or anio is not None:
-        if mes is not None:
-            query = query.filter(extract('month', model.Pedido.fecha) == mes)
-        if anio is not None:
-            query = query.filter(extract('year', model.Pedido.fecha) == anio)
+        if mes is not None and anio is not None:
+            inicio = date(anio, mes, 1)
+            if mes == 12:
+                fin = date(anio + 1, 1, 1)
+            else:
+                fin = date(anio, mes + 1, 1)
+            query = query.filter(model.Pedido.fecha >= inicio, model.Pedido.fecha < fin)
+        elif anio is not None:
+            query = query.filter(
+                model.Pedido.fecha >= date(anio, 1, 1),
+                model.Pedido.fecha < date(anio + 1, 1, 1),
+            )
+        else:
+            # Solo mes sin año: se asume el año en curso.
+            today = date.today()
+            inicio = date(today.year, mes, 1)
+            if mes == 12:
+                fin = date(today.year + 1, 1, 1)
+            else:
+                fin = date(today.year, mes + 1, 1)
+            query = query.filter(model.Pedido.fecha >= inicio, model.Pedido.fecha < fin)
     elif solo_mes_actual:
         today = date.today()
+        if today.month == 12:
+            fin = date(today.year + 1, 1, 1)
+        else:
+            fin = date(today.year, today.month + 1, 1)
         query = query.filter(
-            extract('month', model.Pedido.fecha) == today.month,
-            extract('year', model.Pedido.fecha) == today.year
+            model.Pedido.fecha >= date(today.year, today.month, 1),
+            model.Pedido.fecha < fin,
         )
 
     query = query.order_by(model.Pedido.fecha.desc(), model.Pedido.id.desc())
@@ -124,21 +146,28 @@ def actualizar_pedido(
         validar_transicion(TRANSICIONES_PEDIDO, estado_anterior, nuevo_estado, "pedido")
         # PRODUCCION → TERMINADO manual: exigir que TODAS las órdenes de
         # producción del pedido estén FINALIZADA (no se "come" la producción).
+        # Solo cuentan las líneas FABRICABLES: los productos de REVENTA no
+        # entran a producción (se venden del inventario), así que no deben
+        # bloquear el cierre del pedido.
         if estado_anterior == "PRODUCCION" and nuevo_estado == "TERMINADO":
             from app.modules.production.model import OrdenProduccion
-            n_detalles = db.query(model.DetallePedido).filter(
-                model.DetallePedido.pedido_id == db_pedido.id
-            ).count()
+            detalles_fabricables = [
+                d for d in db_pedido.detalles
+                if not (d.producto is not None and d.producto.es_reventa)
+            ]
             n_ordenes_finalizadas = db.query(OrdenProduccion).join(
                 model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id
             ).filter(
                 model.DetallePedido.pedido_id == db_pedido.id,
                 OrdenProduccion.estado == "FINALIZADA",
             ).count()
-            if n_detalles == 0 or n_ordenes_finalizadas != n_detalles:
+            if not detalles_fabricables:
+                # Pedido solo de reventa: nada que fabricar, puede cerrarse.
+                pass
+            elif n_ordenes_finalizadas < len(detalles_fabricables):
                 raise ValueError(
-                    "No se puede marcar el pedido como TERMINADO: todas las líneas del pedido "
-                    "deben tener su orden de producción FINALIZADA."
+                    "No se puede marcar el pedido como TERMINADO: todas las líneas a fabricar "
+                    "del pedido deben tener su orden de producción FINALIZADA."
                 )
     
     for campo, valor in datos.items():
@@ -147,11 +176,15 @@ def actualizar_pedido(
     # If transitioning to PRODUCCION, generate production orders and stages
     # Todo en la MISMA transacción: un crash no puede dejar el pedido en
     # PRODUCCION sin sus órdenes de producción.
+    # Los productos de REVENTA no generan orden: no se fabrican, se venden del
+    # inventario (su descuento ocurre al facturar).
     if estado_anterior != "PRODUCCION" and nuevo_estado == "PRODUCCION":
         from app.modules.production.model import OrdenProduccion
         from datetime import date
-        
+
         for detalle in db_pedido.detalles:
+            if detalle.producto is not None and detalle.producto.es_reventa:
+                continue
             existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
             if not existente:
                 db_orden = OrdenProduccion(

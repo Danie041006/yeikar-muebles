@@ -28,6 +28,7 @@ from app.modules.productos.model import (
     ElementoSeccion,
     CostoProduccionSeccion,
 )
+from app.modules.productos import service as service_productos
 from app.modules.quotes.similarity_engine import buscar_similares, SimilarityResult
 from app.modules.quotes.atributos import FurnitureAttributes, VOCABULARIO_PREGUNTAS, ANATOMIA_POR_TIPO
 from app.modules.productos.medidas_colchon import medidas_desde_nombre
@@ -1332,7 +1333,12 @@ def build_cost_structure(
     pct_g_dec = D(str(pct_gastos)) / D("100")
 
     if producto_base and producto_base.precio_costo_base:
-        ref_base = D(str(producto_base.precio_costo_base))
+        # El ancla puede estar en la moneda del producto (reventa en USD): se
+        # normaliza a COP (moneda base del ERP) antes de escalarla por área.
+        ref_cop = service_productos.convertir_a_moneda_base(
+            db, producto_base.moneda_id, float(producto_base.precio_costo_base)
+        )
+        ref_base = D(str(ref_cop or 0))
         if dims_iguales:
             costo_prod = ref_base
         elif area_base > 0 and ref_base > 0:
@@ -1386,7 +1392,9 @@ def build_cost_structure(
     desviacion_vs_referencia: Optional[float] = None
     advertencias: list[str] = []
     if producto_base and producto_base.precio_costo_base:
-        ref = float(producto_base.precio_costo_base)
+        ref = float(service_productos.convertir_a_moneda_base(
+            db, producto_base.moneda_id, float(producto_base.precio_costo_base)
+        ) or 0.0)
         if ref > 0:
             desviacion_vs_referencia = round((float(costo_prod) - ref) / ref * 100, 1)
             if abs(desviacion_vs_referencia) >= 30:

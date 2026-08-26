@@ -6,6 +6,14 @@ export interface TipoProducto {
   nombre: string;
 }
 
+export interface MonedaInfo {
+  id: number;
+  codigo: string; // COP, USD, VES, EUR
+  nombre: string;
+  simbolo: string;
+  activo?: boolean;
+}
+
 export interface Product {
   id: number;
   nombre: string;
@@ -18,6 +26,12 @@ export interface Product {
   alto_base?: number;
   stock_minimo?: number;
   es_reventa?: boolean;
+  /** Moneda de los precios de referencia (COP=1). Los reventa suelen ser USD. */
+  moneda_id?: number | null;
+  moneda?: MonedaInfo | null;
+  /** Precio de referencia en la moneda declarada (moneda_id), NO en COP. */
+  precio_costo_base?: number | null;
+  precio_venta_base?: number | null;
   tipo_producto?: TipoProducto;
   /** Fotos de referencia del mueble. */
   fotos?: AdjuntoInfo[];
@@ -209,12 +223,12 @@ export const productosService = {
   },
 
   actualizarCostoProduccion: async (itemId: number, data: Partial<CostoProduccionSeccion>): Promise<CostoProduccionSeccion> => {
-    const response = await api.put<CostoProduccionSeccion>(`/costo-produccion/${itemId}`, data);
+    const response = await api.put<CostoProduccionSeccion>(`/seccion-costo-produccion/${itemId}`, data);
     return response.data;
   },
 
   eliminarCostoProduccion: async (itemId: number): Promise<void> => {
-    await api.delete(`/costo-produccion/${itemId}`);
+    await api.delete(`/seccion-costo-produccion/${itemId}`);
   },
 };
 

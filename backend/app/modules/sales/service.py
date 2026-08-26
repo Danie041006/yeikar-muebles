@@ -10,6 +10,7 @@ from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
 from app.modules.tasas_cambio import service as tasa_cambio_service
 from app.modules.tasas_cambio.model import TasaCambio
+from app.modules.productos import service as productos_service
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios
 from app.modules.users.model import Usuario
@@ -138,8 +139,15 @@ def crear_venta_desde_pedido(
         total += subtotal
         costo_unit = float(dp.costo_unitario) if dp.costo_unitario is not None else None
         if costo_unit is None:
-            # Fallback: costo del producto
-            costo_unit = float(dp.producto.precio_costo_base) if dp.producto and dp.producto.precio_costo_base is not None else 0.0
+            # Fallback: costo de referencia del producto. Puede estar en la moneda
+            # del producto (p. ej. reventa comprada en USD), así que se normaliza
+            # a COP antes de aplicar el factor hacia la moneda de la venta.
+            if dp.producto and dp.producto.precio_costo_base is not None:
+                costo_unit = productos_service.convertir_a_moneda_base(
+                    db, dp.producto.moneda_id, float(dp.producto.precio_costo_base)
+                ) or 0.0
+            else:
+                costo_unit = 0.0
         costo_unit_moneda = costo_unit * factor_costo_a_moneda
         pct_ganancia = float(dp.porcentaje_ganancia) if dp.porcentaje_ganancia is not None else (
             # Clamp: la columna es numeric(5,2) → máx 999.99. Un margen mayor no
@@ -372,8 +380,8 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
             TasaCambio.moneda_origen_id == esquema.moneda_id,
             TasaCambio.moneda_destino_id == 1,
         ).order_by(TasaCambio.fecha.desc()).first()
-        if tasa_registrada and tasa_registrada.tasa > 0:
-            vigente = float(tasa_registrada.tasa)
+        if tasa_registrada and tasa_registrada.valor > 0:
+            vigente = float(tasa_registrada.valor)
             if abs(tasa_cambio - vigente) / vigente > 0.5:
                 raise ValueError(
                     f"La tasa del pago ({tasa_cambio}) difiere más de 50% de la tasa registrada "

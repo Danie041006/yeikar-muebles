@@ -962,39 +962,127 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
         val_cuenta = final_por_cuenta.get(m.metodo_caja_id, Decimal("0"))
         final_por_cuenta[m.metodo_caja_id] = val_cuenta + signo(m) * montocop
         if m.tipo == "SALIDA":
-            total_egresos_cop += montocop
+            # Los egresos con cuenta se listan desde la TABLA GASTO (más abajo)
+            # para no duplicarlos: su movimiento de caja sale por referencia.
+            es_salida_de_gasto = bool((m.referencia or "").startswith("Gasto #"))
+            if not es_salida_de_gasto:
+                total_egresos_cop += montocop
+                meta = por_moneda.setdefault(
+                    m.moneda_id,
+                    {"moneda_id": m.moneda_id,
+                     "codigo": m.moneda.codigo if m.moneda else "?",
+                     "simbolo": m.moneda.simbolo if m.moneda else "?",
+                     "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
+                     "monto_cop": Decimal("0.0")},
+                )
+                meta["monto_egresos"] += Decimal(str(m.monto))
+                meta["monto_cop"] += montocop
+                concepto, quien = _concepto_movimiento(db, m)
+                movimientos.append(
+                    schemas.MovimientoDiarioResponse(
+                        id=m.id,
+                        tipo=m.tipo,
+                        moneda_codigo=m.moneda.codigo if m.moneda else "?",
+                        moneda_simbolo=m.moneda.simbolo if m.moneda else "?",
+                        monto=m.monto,
+                        monto_cop=montocop,
+                        cuenta_nombre=m.metodo_caja.nombre if m.metodo_caja else None,
+                        referencia=m.referencia,
+                        concepto=concepto,
+                        quien=quien,
+                    )
+                )
         else:
             total_ingresos_cop += montocop
-
-        meta = por_moneda.setdefault(
-            m.moneda_id,
-            {"moneda_id": m.moneda_id,
-             "codigo": m.moneda.codigo if m.moneda else "?",
-             "simbolo": m.moneda.simbolo if m.moneda else "?",
-             "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
-             "monto_cop": Decimal("0.0")},
-        )
-        if m.tipo == "SALIDA":
-            meta["monto_egresos"] += Decimal(str(m.monto))
-        else:
-            meta["monto_ingresos"] += Decimal(str(m.monto))
-        meta["monto_cop"] += montocop
-
-        concepto, quien = _concepto_movimiento(db, m)
-        movimientos.append(
-            schemas.MovimientoDiarioResponse(
-                id=m.id,
-                tipo=m.tipo,
-                moneda_codigo=m.moneda.codigo if m.moneda else "?",
-                moneda_simbolo=m.moneda.simbolo if m.moneda else "?",
-                monto=m.monto,
-                monto_cop=montocop,
-                cuenta_nombre=m.metodo_caja.nombre if m.metodo_caja else None,
-                referencia=m.referencia,
-                concepto=concepto,
-                quien=quien,
+            meta = por_moneda.setdefault(
+                m.moneda_id,
+                {"moneda_id": m.moneda_id,
+                 "codigo": m.moneda.codigo if m.moneda else "?",
+                 "simbolo": m.moneda.simbolo if m.moneda else "?",
+                 "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
+                 "monto_cop": Decimal("0.0")},
             )
+            meta["monto_ingresos"] += Decimal(str(m.monto))
+            meta["monto_cop"] += montocop
+
+            concepto, quien = _concepto_movimiento(db, m)
+            movimientos.append(
+                schemas.MovimientoDiarioResponse(
+                    id=m.id,
+                    tipo=m.tipo,
+                    moneda_codigo=m.moneda.codigo if m.moneda else "?",
+                    moneda_simbolo=m.moneda.simbolo if m.moneda else "?",
+                    monto=m.monto,
+                    monto_cop=montocop,
+                    cuenta_nombre=m.metodo_caja.nombre if m.metodo_caja else None,
+                    referencia=m.referencia,
+                    concepto=concepto,
+                    quien=quien,
+                )
+            )
+
+    # ── Egresos del día desde la TABLA GASTO ─────────────────────────────
+    # Incluye los gastos SIN cuenta de caja (p.ej. consumo de materia prima en
+    # producción), que nunca generaban movimiento y quedaban invisibles.
+    gastos_dia = (
+        db.query(Gasto)
+        .options(
+            sa_orm.joinedload(Gasto.tipo_gasto),
+            sa_orm.joinedload(Gasto.moneda),
+            sa_orm.joinedload(Gasto.area),
+            sa_orm.joinedload(Gasto.creador),
         )
+        .filter(Gasto.fecha == dia)
+        .order_by(Gasto.id)
+        .all()
+    )
+    if gastos_dia:
+        refs = {f"Gasto #{g.id}": g for g in gastos_dia}
+        movs_gasto = (
+            db.query(model.MovimientoCaja)
+            .options(sa_orm.joinedload(model.MovimientoCaja.metodo_caja))
+            .filter(model.MovimientoCaja.referencia.in_(refs.keys()))
+            .all()
+        )
+        cuenta_por_ref = {
+            mv.referencia: (mv.metodo_caja.nombre if mv.metodo_caja else None)
+            for mv in movs_gasto
+        }
+        for g in gastos_dia:
+            montocop = (
+                Decimal(str(g.monto_en_moneda_base))
+                if g.monto_en_moneda_base is not None
+                else Decimal(str(g.monto)) * Decimal(str(g.tasa_cambio or 1.0))
+            )
+            total_egresos_cop += montocop
+            meta = por_moneda.setdefault(
+                g.moneda_id,
+                {"moneda_id": g.moneda_id,
+                 "codigo": g.moneda.codigo if g.moneda else "?",
+                 "simbolo": g.moneda.simbolo if g.moneda else "?",
+                 "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
+                 "monto_cop": Decimal("0.0")},
+            )
+            meta["monto_egresos"] += Decimal(str(g.monto))
+            meta["monto_cop"] += montocop
+
+            concepto = g.tipo_gasto.nombre if g.tipo_gasto else "Egreso"
+            if g.area and g.area.nombre:
+                concepto += f" · {g.area.nombre}"
+            movimientos.append(
+                schemas.MovimientoDiarioResponse(
+                    id=g.id,
+                    tipo="EGRESO",
+                    moneda_codigo=g.moneda.codigo if g.moneda else "?",
+                    moneda_simbolo=g.moneda.simbolo if g.moneda else "?",
+                    monto=g.monto,
+                    monto_cop=montocop,
+                    cuenta_nombre=cuenta_por_ref.get(f"Gasto #{g.id}"),
+                    referencia=f"Gasto #{g.id}",
+                    concepto=concepto,
+                    quien=(g.creador.nombre_usuario if g.creador else "Sistema"),
+                )
+            )
 
     saldo_inicial_cop = sum(inicial_por_cuenta.values(), Decimal("0"))
     saldo_final_cop = sum(final_por_cuenta.values(), Decimal("0"))
@@ -1042,26 +1130,20 @@ def resumen_cuentas(db: Session) -> List[dict]:
     resumen: List[schemas.ResumenCuentaResponse] = []
     for mc in metodos:
         lineas: List[schemas.LineaSaldoMoneda] = []
-        total_cop = Decimal("0.0")
         for m in movs:
             if m.metodo_caja_id != mc.id:
                 continue
             signo = Decimal("-1") if m.tipo == "SALIDA" else Decimal("1")
-            cop = Decimal(str(m.monto_en_moneda_base)) if m.monto_en_moneda_base is not None else (
-                Decimal(str(m.monto)) * Decimal(str(m.tasa_cambio or 1.0))
-            )
             linea = next((l for l in lineas if l.moneda_id == m.moneda_id), None)
             if linea is None:
                 meta = monedas.get(m.moneda_id, {"codigo": "?", "simbolo": "?"})
                 linea = schemas.LineaSaldoMoneda(
                     moneda_id=m.moneda_id, codigo=meta["codigo"], simbolo=meta["simbolo"],
-                    monto=Decimal("0.0"), monto_cop=Decimal("0.0"),
+                    monto=Decimal("0.0"),
                 )
                 lineas.append(linea)
             linea.monto += signo * Decimal(str(m.monto))
-            linea.monto_cop += signo * cop
-            total_cop += signo * cop
-        resumen.append(schemas.ResumenCuentaResponse(metodo_caja=mc, saldo_por_moneda=lineas, saldo_cop=total_cop))
+        resumen.append(schemas.ResumenCuentaResponse(metodo_caja=mc, saldo_por_moneda=lineas))
     return resumen
 
 

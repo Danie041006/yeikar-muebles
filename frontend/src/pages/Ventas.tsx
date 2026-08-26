@@ -1,6 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { SearchInput, SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
@@ -78,7 +76,6 @@ function ModalDetalle({
   const toast = useToast();
   const [detalle, setDetalle] = useState<VentaDetalle | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   // ── Formulario de nuevo pago ──────────────────────────────────────────────
   const [showForm, setShowForm] = useState(false);
@@ -94,53 +91,6 @@ function ModalDetalle({
   const [reciboPreview, setReciboPreview] = useState<string | null>(null);
   const [reciboVer, setReciboVer] = useState<{ id: number; mime: string } | null>(null);
   const [monedas, setMonedas] = useState<{ id: number; codigo: string; nombre: string; simbolo: string }[]>([]);
-  const [tasaBsInput, setTasaBsInput] = useState<string>('50');
-
-  // ── Generación de PDF ───────────────────────────────────────────────────
-  const handleGeneratePdf = async () => {
-    if (!detalle) return;
-    setIsGeneratingPdf(true);
-    const element = document.getElementById(`pdf-factura-container-${detalle.id}`);
-    if (!element) {
-      setIsGeneratingPdf(false);
-      return;
-    }
-    try {
-      const canvas = await html2canvas(element, { scale: 2, useCORS: true });
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
-      const totalH = (canvas.height * pdfW) / canvas.width;
-
-      if (totalH <= pdfH) {
-        pdf.addImage(canvas.toDataURL('image/jpeg', 0.98), 'JPEG', 0, 0, pdfW, totalH);
-      } else {
-        const pxPerMm = canvas.width / pdfW;
-        const pageHpx = Math.floor(pdfH * pxPerMm);
-        const totalPages = Math.ceil(canvas.height / pageHpx);
-
-        for (let pg = 0; pg < totalPages; pg++) {
-          const sliceY = pg * pageHpx;
-          const slicePx = Math.min(pageHpx, canvas.height - sliceY);
-          const sc = document.createElement('canvas');
-          sc.width = canvas.width;
-          sc.height = slicePx;
-          const ctx = sc.getContext('2d');
-          if (ctx) {
-            ctx.drawImage(canvas, 0, sliceY, canvas.width, slicePx, 0, 0, canvas.width, slicePx);
-          }
-          if (pg > 0) pdf.addPage('letter', 'portrait');
-          pdf.addImage(sc.toDataURL('image/jpeg', 0.98), 'JPEG', 0, 0, pdfW, (slicePx / canvas.width) * pdfW);
-        }
-      }
-      pdf.save(`Factura_Yeikar_${detalle.id}.pdf`);
-    } catch (err) {
-      console.error('Error al generar PDF:', err);
-      toast.error('Hubo un error al generar el archivo PDF.');
-    } finally {
-      setIsGeneratingPdf(false);
-    }
-  };
 
   const cargar = useCallback(async () => {
     try {
@@ -185,25 +135,6 @@ function ModalDetalle({
   const monedaPago = monedas.find(m => m.id === monedaPagoId);
   const monedaVenta = monedas.find(m => m.id === monedaVentaId);
   const saldoRestante = detalle ? Number(detalle.saldo_pendiente) : 0;
-
-  // ── Cálculos Fiscales SENIAT Venezuela (en Bolívares Bs.) ──
-  useEffect(() => {
-    if (detalle?.moneda?.codigo === 'VES') {
-      setTasaBsInput('1');
-    } else if (detalle?.moneda?.codigo === 'USD') {
-      setTasaBsInput('50');
-    } else if (detalle?.moneda?.codigo === 'COP') {
-      setTasaBsInput('0.0125');
-    }
-  }, [detalle]);
-
-  const tasaBs = parseFloat(tasaBsInput) || 1;
-  const baseImponibleBase = detalle ? Number(detalle.total) : 0;
-  const baseImponibleBs = baseImponibleBase * tasaBs;
-  const iva16Bs = baseImponibleBs * 0.16;
-  const totalVentaBs = baseImponibleBs + iva16Bs;
-  const igtf3Bs = totalVentaBs * 0.03;
-  const totalAPagarBs = totalVentaBs + igtf3Bs;
 
   const handlePago = async () => {
     if (!detalle) return;
@@ -291,33 +222,6 @@ function ModalDetalle({
             )}
           </div>
           <div className="flex items-center gap-3">
-            {detalle && (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-yeikar-tertiary/20 px-2.5 py-1 rounded-xl text-xs border border-yeikar-tertiary/30">
-                  <span className="text-yeikar-tertiary/80 text-[10px] font-bold uppercase">
-                    {detalle.moneda?.codigo === 'VES' ? 'Tasa Bs.:' : `Tasa (1 ${detalle.moneda?.codigo ?? 'USD'} → Bs.):`}
-                  </span>
-                  <input
-                    type="number"
-                    step="any"
-                    value={tasaBsInput}
-                    onChange={(e) => setTasaBsInput(e.target.value)}
-                    className="w-16 bg-white text-yeikar-neutral text-xs font-mono font-bold px-1.5 py-0.5 rounded border border-yeikar-secondary-light/30 focus:outline-none focus:ring-1 focus:ring-yeikar-primary text-center"
-                    placeholder="50"
-                  />
-                </div>
-                <button
-                  onClick={handleGeneratePdf}
-                  disabled={isGeneratingPdf}
-                  className="px-3 py-1.5 bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary/90 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  {isGeneratingPdf ? 'Generando PDF…' : 'Descargar PDF'}
-                </button>
-              </div>
-            )}
             {detalle?.pedido_id && (
               <button
                 onClick={() => { window.location.href = `/historial?tipo=pedido&id=${detalle.pedido_id}`; }}
@@ -724,174 +628,6 @@ function ModalDetalle({
                 </div>
               )}
 
-              {/* ── Plantilla para la generación del PDF con jsPDF (Factura Fiscal Oficial Yeikar) ── */}
-              <div className="fixed -left-[9999px] top-0 pointer-events-none z-[-100]">
-                <div
-                  id={`pdf-factura-container-${detalle.id}`}
-                  className="bg-white text-stone-900 font-sans p-8 relative"
-                  style={{ width: '215.9mm', minHeight: '279.4mm', boxSizing: 'border-box' }}
-                >
-                  {/* Filigrana / Logo Marca de Agua */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-[0.03] select-none z-0">
-                    <img src="/logo-marca-de-agua.PNG" alt="" className="w-[400px] h-auto" />
-                  </div>
-
-                  <div className="relative z-10 flex flex-col justify-between min-h-[255mm]">
-                    <div>
-                      {/* Encabezado Oficial */}
-                      <div className="flex justify-between items-start pb-3 border-b-2 border-stone-800">
-                        <div className="space-y-1 max-w-[62%]">
-                          <img src="/Logo-yeikar.png" alt="Yeikar" className="h-10 object-contain mb-1" />
-                          <h1 className="font-serif font-black text-stone-900 text-sm tracking-widest uppercase">
-                            Comercializadora Yeikar
-                          </h1>
-                          <p className="text-[9px] font-bold text-stone-700">RIF. V-18969838-7 · Lilia Carolina Bautista (Propietaria)</p>
-                          <p className="text-[8px] text-stone-600 leading-tight">
-                            Fabricación, Compra, Venta, Importación, Comercialización al Mayor y Detal de todo tipo de Muebles.
-                          </p>
-                          <p className="text-[8px] text-stone-600">
-                            <strong>Dirección:</strong> Av. Intercomunal con Calle 16 Local N° 15-205 B. Simón Bolívar, Ureña, Edo. Táchira
-                          </p>
-                          <p className="text-[8px] text-stone-600 font-mono">
-                            <strong>Tel:</strong> (0276) 7874095 · Cel: 0414-7393699 / 0414-7398817
-                          </p>
-                          <p className="text-[8px] text-stone-600 font-mono">
-                            <strong>Instagram:</strong> @mueblesyeikar.fabricantes &nbsp;·&nbsp; <strong>Facebook:</strong> Muebles Yeikar
-                          </p>
-                        </div>
-
-                        {/* Recuadro de Control / Número */}
-                        <div className="text-right border-2 border-stone-800 rounded-lg p-3 bg-stone-50/80 min-w-[170px] shadow-sm">
-                          <div className="text-[9px] font-black text-stone-800 uppercase tracking-widest">FACTURA DE VENTA</div>
-                          <div className="text-sm font-black text-amber-800 font-mono tracking-widest mt-1">
-                            N°: 00 – {detalle.id.toString().padStart(5, '0')}
-                          </div>
-                          <div className="text-[8px] font-mono text-stone-700 font-bold mt-1">
-                            N° DE CONTROL: 00 – {detalle.id.toString().padStart(6, '0')}
-                          </div>
-                          <div className="text-[8px] font-mono text-stone-700 font-bold mt-0.5">
-                            FECHA DE EMISIÓN: {new Date(detalle.fecha).toLocaleDateString('es-ES')}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Datos del Cliente — Conforme SENIAT */}
-                      <div className="grid grid-cols-4 gap-x-3 gap-y-2 bg-stone-50/80 border border-stone-300 rounded-xl p-3 my-3 text-[9px] shadow-sm">
-                        <div className="col-span-4">
-                          <span className="font-bold text-stone-500 uppercase text-[7.5px] block">Nombre y Apellido o Razón Social</span>
-                          <span className="font-extrabold text-stone-950 text-xs">{detalle.cliente?.nombre ?? '—'}</span>
-                        </div>
-                        <div className="col-span-2 border-t border-stone-200 pt-1.5">
-                          <span className="font-bold text-stone-500 uppercase text-[7.5px] block">Identificación</span>
-                          <span className="font-bold text-stone-900 font-mono text-[8.5px]">RIF&#160;(&#160;&#160;)&#160;&#160;&#160;C.I.&#160;(&#160;&#160;)</span>
-                        </div>
-                        <div className="col-span-2 border-t border-stone-200 pt-1.5">
-                          <span className="font-bold text-stone-500 uppercase text-[7.5px] block">Teléfono</span>
-                          <span className="font-extrabold text-stone-900 font-mono">{detalle.cliente?.telefono || '—'}</span>
-                        </div>
-                        <div className="col-span-4 border-t border-stone-200 pt-1.5">
-                          <span className="font-bold text-stone-500 uppercase text-[7.5px] block">Domicilio Fiscal</span>
-                          <span className="font-semibold text-stone-900 italic">{detalle.cliente?.direccion || '—'}</span>
-                        </div>
-                        <div className="col-span-4 border-t border-stone-200 pt-1.5">
-                          <span className="font-bold text-stone-500 uppercase text-[7.5px] block">Forma de Pago</span>
-                          <span className="font-bold text-stone-900 font-mono text-[8px]">
-                            Efectivo&#160;(&#160;&#160;)&#160;&#160;Tarjeta de Débito&#160;(&#160;&#160;)&#160;&#160;Tarjeta de Crédito&#160;(&#160;&#160;)&#160;&#160;Otros&#160;(&#160;&#160;)
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Tabla de Productos / Concepto o Descripción con montos en Bolívares */}
-                      <div className="mb-4 border border-stone-300 rounded-lg overflow-hidden shadow-sm">
-                        <table className="w-full border-collapse text-[9.5px]">
-                          <thead>
-                            <tr className="bg-stone-900 text-stone-100 uppercase font-serif text-[8px] tracking-wider">
-                              <th className="p-2 text-center w-[8%]">Cant.</th>
-                              <th className="p-2 text-left">Concepto o Descripción</th>
-                              <th className="p-2 text-right w-[20%]">P. Unitario (Bs.)</th>
-                              <th className="p-2 text-right w-[22%]">Monto Total (Bs.)</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-stone-200">
-                            {detalle.detalles.map((d, i) => {
-                              const precioBs = Number(d.precio) * tasaBs;
-                              const rowTotalBs = d.cantidad * precioBs;
-                              return (
-                                <tr key={d.id} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
-                                  <td className="p-2 text-center font-mono font-bold text-stone-900">{d.cantidad}</td>
-                                  <td className="p-2 font-serif font-bold text-stone-950">
-                                    {d.producto?.nombre ?? `Producto #${d.producto_id}`}
-                                  </td>
-                                  <td className="p-2 text-right font-mono text-stone-800">
-                                    Bs. {precioBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </td>
-                                  <td className="p-2 text-right font-mono font-black text-stone-950">
-                                    Bs. {rowTotalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    {/* Sección Inferior: Desglose Fiscal SENIAT Venezuela y Firmas */}
-                    <div>
-                      <div className="grid grid-cols-2 gap-4 items-end mb-4">
-                        {/* Nota Legal izquierda */}
-                        <div className="text-[8px] text-stone-600 space-y-1.5">
-                          <p className="font-bold text-stone-800 uppercase tracking-wider">Esta factura va sin enmienda ni tachadura.</p>
-                          <p className="italic">ORIGINAL · Comprobante fiscal de venta Comercializadora Yeikar (Ureña, Edo. Táchira).</p>
-                          <p className="text-[7.5px] text-stone-500 font-mono">
-                            Tasa de Cambio Oficial: 1 {detalle.moneda?.codigo ?? 'USD'} = {tasaBs.toLocaleString('es-VE')} Bs.
-                          </p>
-                        </div>
-
-                        {/* Tarjeta de Resumen Fiscal SENIAT Oficial (Sin fondo negro, alta legibilidad) */}
-                        <div className="border border-stone-400 rounded-xl overflow-hidden shadow-sm font-mono text-[8.5px]">
-                          <div className="bg-stone-900 text-stone-100 px-3 py-1 font-serif font-bold uppercase tracking-wider text-[7.5px] flex justify-between items-center">
-                            <span>Resumen Fiscal</span>                           
-                          </div>
-                          <div className="p-2.5 space-y-1 bg-stone-50/90">
-                            <div className="flex justify-between items-center text-stone-700 border-t border-stone-200 pt-1">
-                              <span>Monto Total de la Base Imponible al Valor Agregado Bs:</span>
-                              <span className="font-bold text-stone-900">{baseImponibleBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-stone-700">
-                              <span>Monto Total del Impuesto al Valor Agregado — Alícuota 16% Bs:</span>
-                              <span className="font-bold text-stone-900">{iva16Bs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-stone-800 font-bold border-t border-stone-300 pt-1">
-                              <span>Monto Total de la Venta de los Bienes o la Prestación del Servicio Bs:</span>
-                              <span>{totalVentaBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-stone-700">
-                              <span>Monto Total de la Base Imponible del IGTF (3%) Bs:</span>
-                              <span className="font-bold text-stone-900">{igtf3Bs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                            </div>
-                          </div>
-
-                          {/* Destacado de TOTAL A PAGAR Bs. */}
-                          <div className="bg-amber-100/90 border-t-2 border-stone-800 p-2.5 flex justify-between items-center">
-                            <div>
-                              <span className="font-serif font-black text-stone-950 uppercase text-[9px] tracking-wider block">TOTAL A PAGAR</span>                              
-                            </div>
-                            <div className="text-right">
-                              <span className="text-sm font-black text-amber-950 font-mono tracking-tight block">
-                                Bs. {totalAPagarBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* el men es el men */}
-                      
-                    </div>
-                  </div>
-                </div>
-              </div>
             </>
           )}
         </div>

@@ -3,6 +3,7 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import FacturaFiscalPDF from '../components/FacturaFiscalPDF';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import { esperarImagenesCargadas } from '../utils/pdfImagenes';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -48,6 +49,8 @@ const fmtEs = (n: number) => n.toLocaleString('es-ES');
 async function generarPdfFactura(idFactura: number) {
   const element = document.getElementById(`pdf-factura-container-${idFactura}`);
   if (!element) return;
+  // Las fotos de producto deben estar cargadas antes de capturar.
+  await esperarImagenesCargadas(element);
   const canvas = await html2canvas(element, { scale: 2, useCORS: true });
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
   const pdfW = pdf.internal.pageSize.getWidth();
@@ -497,6 +500,7 @@ function ModalDetalleFactura({
                   lineas={factura.detalles.map((d) => ({
                     key: d.id,
                     descripcion: d.descripcion ?? d.producto?.nombre ?? `Producto #${d.producto_id}`,
+                    foto: d.producto?.fotos?.[0]?.url ?? null,
                     cantidad: Number(d.cantidad),
                     precioBs: Number(d.precio_usd) * tasa,
                     subtotalBs: Number(d.subtotal_bs),

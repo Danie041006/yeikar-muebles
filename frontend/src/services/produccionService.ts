@@ -7,7 +7,6 @@ export interface Area {
 export interface Empleado {
   id: number;
   nombre: string;
-  apellido: string;
   cedula: string;
   email?: string;
   telefono?: string;
@@ -36,6 +35,8 @@ export interface ConsumoMaterial {
   cantidad: number;
   costo_unitario?: number;
   seccion?: string;
+  solicitante_empleado_id?: number;
+  solicitante_nombre?: string;
   creado_por_id?: number;
   creador_nombre?: string;
   fecha: string;
@@ -51,6 +52,8 @@ export interface ManoObra {
   porcentaje_recargo: number;
   pagado?: boolean;
   observaciones?: string;
+  precio_produccion_id?: number | null;
+  precio_produccion_descripcion?: string | null;
   creado_por_id?: number;
   creador_nombre?: string;
   empleado?: Empleado;
@@ -112,6 +115,8 @@ export interface ProductoBasico {
   codigo?: string;
   descripcion?: string;
   activo?: boolean;
+  /** True = se revende (colchón, nevera): nunca entra a producción. */
+  es_reventa?: boolean;
 }
 
 export interface ClienteBasico {
@@ -218,6 +223,7 @@ export const produccionService = {
     fecha: string;
     seccion?: string;
     observaciones?: string;
+    solicitante_empleado_id: number;
   }): Promise<ConsumoMaterial> => {
     const response = await api.post<ConsumoMaterial>('/produccion/consumo/', consumo);
     return response.data;
@@ -233,6 +239,7 @@ export const produccionService = {
     monto: number;
     porcentaje_recargo?: number;
     observaciones?: string;
+    precio_produccion_id?: number;
   }): Promise<ManoObra> => {
     const response = await api.post<ManoObra>('/produccion/mano-obra/', manoObra);
     return response.data;

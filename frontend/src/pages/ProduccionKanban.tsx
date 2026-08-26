@@ -19,7 +19,6 @@ const TRANSICIONES_ETAPA: Record<string, string[]> = {
 interface Empleado {
   id: number;
   nombre: string;
-  apellido: string;
 }
 
 // Material interface for selection (extended for cost display)
@@ -189,7 +188,7 @@ function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdati
           </svg>
           <span className="truncate max-w-[120px] font-medium">
             {stage.empleado_responsable
-              ? `${stage.empleado_responsable.nombre} ${stage.empleado_responsable.apellido}`
+              ? `${stage.empleado_responsable.nombre}`
               : 'Sin asignar'}
           </span>
         </div>
@@ -210,7 +209,7 @@ function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdati
       {stage.asignados_adicionales?.length > 0 && (
         <div className="mt-2 text-[10px] text-yeikar-neutral/50">
           Adicionales: {stage.asignados_adicionales.map((asignado) =>
-            asignado.empleado ? `${asignado.empleado.nombre} ${asignado.empleado.apellido}` : `#${asignado.empleado_id}`
+            asignado.empleado ? `${asignado.empleado.nombre}` : `#${asignado.empleado_id}`
           ).join(', ')}
         </div>
       )}
@@ -246,10 +245,14 @@ export default function ProduccionKanban() {
   // Detail Modal Forms state
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [materiales, setMateriales] = useState<Material[]>([]);
-  const [newConsumo, setNewConsumo] = useState({ material_id: '', cantidad: '', observaciones: '' });
+  const [newConsumo, setNewConsumo] = useState({ material_id: '', cantidad: '', observaciones: '', solicitante_id: '' });
   const [materialSearch, setMaterialSearch] = useState('');
   const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
-  const [newManoObra, setNewManoObra] = useState({ empleado_id: '', monto: '', observaciones: '' });
+  const [newManoObra, setNewManoObra] = useState({ empleado_id: '', costo_id: '', monto: '', observaciones: '' });
+  const [opcionesCosto, setOpcionesCosto] = useState<{ id: number; descripcion: string; precio: number }[]>([]);
+  const [mostrarNuevoCosto, setMostrarNuevoCosto] = useState(false);
+  const [nuevoCosto, setNuevoCosto] = useState({ descripcion: '', precio: '', area_id: '' });
+  const [creandoCosto, setCreandoCosto] = useState(false);
 
   // Referencia receta
   const [referenciaReceta, setReferenciaReceta] = useState<ReferenciaReceta | null>(null);
@@ -295,6 +298,9 @@ export default function ProduccionKanban() {
     const sinActiva: OrdenProduccion[] = [];
 
     ordenesData.forEach((orden) => {
+      // Los productos de REVENTA no se fabrican: sus órdenes (legacy o creadas
+      // por error) no se muestran en el tablero.
+      if (orden.detalle_pedido?.producto?.es_reventa) return;
       if (orden.etapas && orden.etapas.length > 0) {
         orden.etapas.forEach((etapa) => allStages.push(etapa));
         // Órdenes activas sin ninguna etapa activa
@@ -386,14 +392,33 @@ export default function ProduccionKanban() {
   useEffect(() => {
     if (selectedStage?.orden?.detalle_pedido?.producto?.id) {
       setLoadingReceta(true);
-      produccionService.getReferenciaReceta(selectedStage.id)
-        .then(setReferenciaReceta)
+      produccionService.getReferenciaReceta(selectedStage.id)        .then(setReferenciaReceta)
         .catch(() => setReferenciaReceta(null))
         .finally(() => setLoadingReceta(false));
     } else {
       setReferenciaReceta(null);
     }
   }, [selectedStage]);
+
+  // Al abrir la etapa, pre-selecciona como solicitante al responsable de la
+  // etapa (normalmente es quien pide); el campo sigue siendo editable y
+  // obligatorio antes de guardar.
+  useEffect(() => {
+    if (selectedStage) {
+      setNewConsumo((prev) => ({
+        ...prev,
+        solicitante_id: selectedStage.empleado_responsable_id ? String(selectedStage.empleado_responsable_id) : '',
+      }));
+    }
+  }, [selectedStage?.id]);
+
+  // Tarifario de costos de producción del área de la etapa (form de mano de obra)
+  useEffect(() => {
+    if (!selectedStage) { setOpcionesCosto([]); setMostrarNuevoCosto(false); return; }
+    api.get('/produccion/opciones-costo-produccion', {
+      params: selectedStage.area_id ? { area_id: selectedStage.area_id } : {},
+    }).then((r) => setOpcionesCosto(r.data)).catch(() => setOpcionesCosto([]));
+  }, [selectedStage?.id, selectedStage?.area_id]);
 
   const handleStatusChange = async (stageId: number, newStatus: string) => {
     if (statusUpdatingId !== null) return; // evita PUTs concurrentes sobre estados
@@ -462,6 +487,10 @@ export default function ProduccionKanban() {
     e.preventDefault();
     if (consumoSubmitting) return; // evita doble descuento de stock
     if (!selectedStage || !newConsumo.material_id || !newConsumo.cantidad) return;
+    if (!newConsumo.solicitante_id) {
+      toast.error('Selecciona quién solicita el material.');
+      return;
+    }
     setConsumoSubmitting(true);
     try {
       const materialId = parseInt(newConsumo.material_id);
@@ -474,11 +503,12 @@ export default function ProduccionKanban() {
         fecha: new Date().toISOString(),
         seccion: referenciaReceta?.seccion_actual || undefined,
         observaciones: newConsumo.observaciones || undefined,
+        solicitante_empleado_id: parseInt(newConsumo.solicitante_id),
       });
       // Recargar etapa + inventario (el consumo descontó stock)
       const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${selectedStage.id}`);
       setSelectedStage(updated.data);
-      setNewConsumo({ material_id: '', cantidad: '', observaciones: '' });
+      setNewConsumo({ material_id: '', cantidad: '', observaciones: '', solicitante_id: selectedStage.empleado_responsable_id ? String(selectedStage.empleado_responsable_id) : '' });
       setMaterialSearch('');
       await cargarInventario();
       fetchKanbanData();
@@ -520,15 +550,50 @@ export default function ProduccionKanban() {
         monto: parseFloat(newManoObra.monto),
         porcentaje_recargo: 0.0,
         observaciones: newManoObra.observaciones || undefined,
+        precio_produccion_id: newManoObra.costo_id ? parseInt(newManoObra.costo_id) : undefined,
       });
       // Recargar etapa
       const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${selectedStage.id}`);
       setSelectedStage(updated.data);
-      setNewManoObra({ empleado_id: '', monto: '', observaciones: '' });
+      setNewManoObra({ empleado_id: '', costo_id: '', monto: '', observaciones: '' });
       fetchKanbanData();
       toast.success('Mano de obra registrada para la etapa.');
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Error al registrar la mano de obra. La etapa debe estar EN PROCESO.');
+    }
+  };
+
+  const seleccionarCostoMo = (costoId: string) => {
+    setNewManoObra((prev) => {
+      const opcion = opcionesCosto.find((o) => String(o.id) === String(costoId));
+      return { ...prev, costo_id: costoId, monto: opcion ? String(opcion.precio) : prev.monto };
+    });
+  };
+
+  const crearCostoAlVuelo = async () => {
+    if (!selectedStage) return;
+    const areaFinal = Number(nuevoCosto.area_id) || selectedStage.area_id;
+    if (!nuevoCosto.descripcion.trim() || !nuevoCosto.precio || !areaFinal) {
+      toast.error('Descripción, precio y área son obligatorios para el nuevo costo.');
+      return;
+    }
+    setCreandoCosto(true);
+    try {
+      const resp = await api.post('/produccion/opciones-costo-produccion', {
+        area_id: areaFinal,
+        descripcion: nuevoCosto.descripcion.trim(),
+        precio: parseFloat(nuevoCosto.precio),
+      });
+      const creado = resp.data;
+      setOpcionesCosto((prev) => [...prev, creado].sort((a, b) => a.descripcion.localeCompare(b.descripcion)));
+      setNewManoObra((prev) => ({ ...prev, costo_id: String(creado.id), monto: String(creado.precio) }));
+      setNuevoCosto({ descripcion: '', precio: '', area_id: '' });
+      setMostrarNuevoCosto(false);
+      toast.success('Costo de producción creado y seleccionado.');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'No se pudo crear el costo.');
+    } finally {
+      setCreandoCosto(false);
     }
   };
 
@@ -624,7 +689,7 @@ export default function ProduccionKanban() {
     const obsMatch = stage.observaciones?.toLowerCase().includes(term) || false;
     const empMatch =
       stage.empleado_responsable
-        ? `${stage.empleado_responsable.nombre} ${stage.empleado_responsable.apellido}`.toLowerCase().includes(term)
+        ? `${stage.empleado_responsable.nombre}`.toLowerCase().includes(term)
         : false;
     const clientMatch = stage.orden?.detalle_pedido?.pedido?.cliente?.nombre?.toLowerCase().includes(term) || false;
     const prodMatch = stage.orden?.detalle_pedido?.producto?.nombre?.toLowerCase().includes(term) || false;
@@ -888,7 +953,7 @@ export default function ProduccionKanban() {
                   <span className="flex items-center gap-1">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                     Encargado: {selectedStage.empleado_responsable
-                      ? `${selectedStage.empleado_responsable.nombre} ${selectedStage.empleado_responsable.apellido}`
+                      ? `${selectedStage.empleado_responsable.nombre}`
                       : 'Sin asignar'}
                   </span>
                   {selectedStage.fecha_inicio && (
@@ -934,6 +999,17 @@ export default function ProduccionKanban() {
 
               {/* Consumption form */}
               <form onSubmit={handleAddConsumo} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
+                <div className="sm:col-span-12">
+                  <label className="block text-[10px] font-headline font-bold uppercase tracking-wider text-yeikar-secondary/70 mb-1">
+                    ¿Quién solicita el material? <span className="text-red-500">*</span>
+                  </label>
+                  <SearchSelect
+                    value={newConsumo.solicitante_id || null}
+                    onChange={(v) => setNewConsumo(prev => ({ ...prev, solicitante_id: String(v) }))}
+                    options={empleados.map((emp) => ({ value: emp.id, label: emp.nombre }))}
+                    placeholder="Selecciona al empleado que pide el material..."
+                  />
+                </div>
                 <div className="sm:col-span-7 relative">
                   <div className="relative">
                     <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-yeikar-neutral/30 text-xs"></span>
@@ -1042,6 +1118,10 @@ export default function ProduccionKanban() {
                             Cantidad: <span className="font-bold text-yeikar-secondary">{c.cantidad}</span> | Costo unitario: <span className="font-bold">${costo.toLocaleString('es-CO')}</span>
                           </p>
                           <p className="text-[10px] text-yeikar-neutral/40 mt-0.5">
+                            {c.solicitante_nombre && (
+                              <span className="font-semibold text-yeikar-secondary/70">Pide: {c.solicitante_nombre}</span>
+                            )}
+                            {c.solicitante_nombre && c.creador_nombre ? ' · ' : ''}
                             {c.creador_nombre ? `Registrado por ${c.creador_nombre}` : ''}
                             {' · '}
                             <span className="text-emerald-600/70 font-medium">Egreso generado en Gastos</span>
@@ -1100,32 +1180,117 @@ export default function ProduccionKanban() {
                 </span>
               </h3>
 
-              <form onSubmit={handleAddManoObra} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
-                <div className="sm:col-span-5">
-                  <SearchSelect
-                    value={newManoObra.empleado_id}
-                    onChange={(v) => setNewManoObra(prev => ({ ...prev, empleado_id: String(v) }))}
-                    options={empleados.map((e) => ({ value: e.id, label: `${e.nombre} ${e.apellido}` }))}
-                    placeholder="Empleado..."
-                  />
+              <form onSubmit={handleAddManoObra} className="space-y-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <div className="sm:col-span-4">
+                    <SearchSelect
+                      value={newManoObra.empleado_id}
+                      onChange={(v) => setNewManoObra(prev => ({ ...prev, empleado_id: String(v) }))}
+                      options={empleados.map((e) => ({ value: e.id, label: `${e.nombre}` }))}
+                      placeholder="Empleado..."
+                    />
+                  </div>
+                  <div className="sm:col-span-5">
+                    <SearchSelect
+                      value={newManoObra.costo_id}
+                      onChange={(v) => seleccionarCostoMo(String(v))}
+                      options={[
+                        { value: '', label: '— Sin tarifa (monto manual) —' },
+                        ...opcionesCosto.map((o) => ({ value: String(o.id), label: `${o.descripcion} · $${o.precio.toLocaleString('es-CO')}` })),
+                      ]}
+                      placeholder="Costo de producción (autocompleta el monto)"
+                    />
+                  </div>
+                  <div className="sm:col-span-3">
+                    <input
+                      type="number"
+                      min="0"
+                      step="1000"
+                      placeholder="Monto ($)"
+                      value={newManoObra.monto}
+                      onChange={(e) => setNewManoObra(prev => ({ ...prev, monto: e.target.value }))}
+                      required
+                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                    />
+                  </div>
                 </div>
-                <div className="sm:col-span-4">
-                  <input
-                    type="number"
-                    min="0"
-                    step="1000"
-                    placeholder="Monto ($)"
-                    value={newManoObra.monto}
-                    onChange={(e) => setNewManoObra(prev => ({ ...prev, monto: e.target.value }))}
-                    required
-                    className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
-                  />
-                </div>
-                <div className="sm:col-span-3">
+
+                {mostrarNuevoCosto && (
+                  <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-white border border-dashed border-yeikar-primary/40 rounded-xl p-2 items-center">
+                    <div className="sm:col-span-6">
+                      <input
+                        type="text"
+                        value={nuevoCosto.descripcion}
+                        onChange={(e) => setNuevoCosto(prev => ({ ...prev, descripcion: e.target.value }))}
+                        placeholder="Tipo de costo (ej. HECHURA EXTRA)"
+                        className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        value={nuevoCosto.precio}
+                        onChange={(e) => setNuevoCosto(prev => ({ ...prev, precio: e.target.value }))}
+                        placeholder="Precio ($)"
+                        className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <select
+                        value={nuevoCosto.area_id || String(selectedStage?.area_id ?? '')}
+                        onChange={(e) => setNuevoCosto(prev => ({ ...prev, area_id: e.target.value }))}
+                        className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary"
+                        title="Área del tarifario (por defecto, la de la etapa)"
+                      >
+                        {areas.map((a) => (
+                          <option key={a.id} value={a.id}>{a.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={crearCostoAlVuelo}
+                        disabled={creandoCosto}
+                        className="flex-1 bg-emerald-500 text-white text-[11px] font-bold py-2 px-2 rounded-xl hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                      >
+                        {creandoCosto ? '…' : 'Crear'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setMostrarNuevoCosto(false); setNuevoCosto({ descripcion: '', precio: '', area_id: '' }); }}
+                        className="px-2 text-yeikar-neutral/40 hover:text-yeikar-neutral font-bold"
+                        title="Cancelar"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <input
+                  type="text"
+                  value={newManoObra.observaciones}
+                  onChange={(e) => setNewManoObra(prev => ({ ...prev, observaciones: e.target.value }))}
+                  placeholder="Comentario (opcional): detalle de la tarea, acuerdo con el trabajador..."
+                  className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary"
+                />
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMostrarNuevoCosto(v => !v)}
+                    className="text-[11px] font-bold text-yeikar-primary-dark hover:underline"
+                  >
+                    {mostrarNuevoCosto ? '× Cancelar nuevo costo' : '+ Nuevo costo de producción'}
+                  </button>
+                  <span className="flex-1" />
                   <button
                     type="submit"
                     disabled={selectedStage.estado !== 'EN_PROCESO'}
-                    className="w-full h-full bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2 px-3 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                    className="bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2 px-4 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
                     title={selectedStage.estado !== 'EN_PROCESO' ? 'La etapa debe estar EN PROCESO para registrar mano de obra' : undefined}
                   >
                     + Agregar MO
@@ -1139,12 +1304,20 @@ export default function ProduccionKanban() {
                     <div key={mo.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/10 p-3.5 rounded-xl shadow-xs text-xs hover:border-yeikar-primary/30 transition-colors">
                       <div className="min-w-0">
                         <p className="font-bold text-yeikar-secondary text-sm">
-                          {mo.empleado ? `${mo.empleado.nombre} ${mo.empleado.apellido}` : `Empleado #${mo.empleado_id}`}
+                          {mo.empleado ? `${mo.empleado.nombre}` : `Empleado #${mo.empleado_id}`}
                         </p>
                         <p className="text-[10px] text-yeikar-neutral/40 mt-0.5">
                           {mo.creador_nombre ? `Registrado por ${mo.creador_nombre}` : ''}
                           {mo.pagado ? ' · Egreso generado en Gastos' : ''}
                         </p>
+                        {mo.precio_produccion_descripcion && (
+                          <span className="inline-block mt-1 text-[9px] font-bold uppercase bg-yeikar-primary/10 text-yeikar-primary-dark px-1.5 py-0.5 rounded">
+                            {mo.precio_produccion_descripcion}
+                          </span>
+                        )}
+                        {mo.observaciones && (
+                          <p className="text-[11px] text-yeikar-neutral/60 italic mt-0.5">{mo.observaciones}</p>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 shrink-0">
                         <span className={`font-mono font-bold text-sm ${mo.pagado ? 'text-emerald-600' : 'text-yeikar-primary'}`}>
@@ -1308,7 +1481,7 @@ export default function ProduccionKanban() {
                         </div>
                         <div className="flex items-center gap-3 shrink-0 text-[10px] font-mono text-yeikar-neutral/50">
                           {et.empleado_responsable && (
-                            <span>{et.empleado_responsable.nombre} {et.empleado_responsable.apellido}</span>
+                            <span>{et.empleado_responsable.nombre}</span>
                           )}
                           <span className="font-bold">{et.estado.replace('_', ' ')}</span>
                           {et.fecha_fin && <span>{new Date(et.fecha_fin).toLocaleDateString('es-CO')}</span>}
@@ -1431,7 +1604,7 @@ export default function ProduccionKanban() {
                   }}
                   options={empleados.filter((empleado) => empleado.id !== pasarStage.empleado_responsable_id).map((empleado) => ({
                     value: empleado.id,
-                    label: `${empleado.nombre} ${empleado.apellido}`,
+                    label: `${empleado.nombre}`,
                   }))}
                   placeholder="Seleccione empleado..."
                 />
@@ -1450,7 +1623,7 @@ export default function ProduccionKanban() {
                         onChange={() => togglePasarEmpleadoAdicional(empleado.id)}
                         className="rounded border-yeikar-secondary-light/30 text-yeikar-primary focus:ring-yeikar-primary"
                       />
-                      {empleado.nombre} {empleado.apellido}
+                      {empleado.nombre}
                     </label>
                   ))}
                   {empleados.length === 0 && <span className="text-xs text-yeikar-neutral/40">No hay empleados disponibles.</span>}
@@ -1521,7 +1694,7 @@ export default function ProduccionKanban() {
                 <SearchSelect
                   value={nuevaEtapaForm.empleado_id}
                   onChange={(v) => setNuevaEtapaForm(prev => ({ ...prev, empleado_id: String(v) }))}
-                  options={empleados.map(e => ({ value: e.id, label: `${e.nombre} ${e.apellido}` }))}
+                  options={empleados.map(e => ({ value: e.id, label: `${e.nombre}` }))}
                   placeholder="Seleccione Empleado..."
                 />
               </div>

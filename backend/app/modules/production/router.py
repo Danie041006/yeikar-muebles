@@ -372,6 +372,56 @@ def eliminar_consumo(
 # ------------------------------------------------------------
 # Endpoints de Mano de Obra
 # ------------------------------------------------------------
+@router.get("/opciones-costo-produccion")
+def opciones_costo_produccion(
+    area_id: Optional[int] = Query(None, description="Filtrar por área de la etapa"),
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Tarifario activo de costos de producción (id, descripción, precio) para
+    el formulario de mano de obra. Vive bajo el módulo `produccion` porque quien
+    registra MO puede no tener el módulo `costos_produccion`."""
+    from app.modules.costos_produccion.model import PrecioProduccion
+    query = db.query(PrecioProduccion).filter(PrecioProduccion.activo.is_(True))
+    if area_id is not None:
+        query = query.filter(PrecioProduccion.area_id == area_id)
+    items = query.order_by(PrecioProduccion.descripcion).all()
+    return [
+        {"id": p.id, "descripcion": p.descripcion, "precio": float(p.precio), "area_id": p.area_id}
+        for p in items
+    ]
+
+
+@router.post("/opciones-costo-produccion", status_code=status.HTTP_201_CREATED)
+def crear_opcion_costo_produccion(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Crea al vuelo un costo del tarifario (área + descripción + precio) desde
+    el formulario de mano de obra, sin requerir el módulo costos_produccion."""
+    from decimal import Decimal
+    from app.modules.catalogos.model import Area
+    from app.modules.costos_produccion.model import PrecioProduccion
+
+    try:
+        area_id = int(payload.get("area_id") or 0)
+        descripcion = str(payload.get("descripcion") or "").strip()
+        precio = float(payload.get("precio") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Datos inválidos.")
+    if not area_id or not descripcion or precio <= 0:
+        raise HTTPException(status_code=400, detail="Área, descripción y precio (> 0) son obligatorios.")
+    if not db.query(Area).filter(Area.id == area_id).first():
+        raise HTTPException(status_code=400, detail="El área especificada no existe.")
+
+    item = PrecioProduccion(area_id=area_id, descripcion=descripcion[:200], precio=Decimal(str(precio)), activo=True)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {"id": item.id, "descripcion": item.descripcion, "precio": float(item.precio), "area_id": item.area_id}
+
+
 @router.post("/mano-obra/", response_model=schemas.ManoObraResponse, status_code=status.HTTP_201_CREATED)
 def registrar_mano_obra(
     esquema: schemas.ManoObraCreate,

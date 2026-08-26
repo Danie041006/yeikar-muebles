@@ -96,9 +96,10 @@ export default function Calculadora() {
   const [cargando, setCargando]   = useState(false);
   const [error, setError]         = useState('');
 
-  // Cargar productos
+  // Cargar productos (solo muebles fabricados: la calculadora es de costeo
+  // paramétrico y un reventa no tiene receta ni dimensiones de fabricación).
   useEffect(() => {
-    cotizacionService.getProducts().then(setProductos).catch(console.error);
+    cotizacionService.getProducts().then((prods) => setProductos(prods.filter((p) => !p.es_reventa))).catch(console.error);
   }, []);
 
   // Al seleccionar producto, pre-llenar dimensiones base

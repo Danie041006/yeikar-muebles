@@ -4,7 +4,7 @@ from sqlalchemy.sql import func
 from app.db.base import Base
 
 # Importar catalogos para que SQLAlchemy los registre y resuelva las relaciones
-from app.modules.catalogos.model import TipoProducto, UnidadMedida
+from app.modules.catalogos.model import TipoProducto, UnidadMedida, Moneda
 
 
 class Producto(Base):
@@ -27,11 +27,16 @@ class Producto(Base):
     hoja_excel          = Column(String(150), nullable=True)       # Nombre de la hoja fuente en el Excel
     stock_minimo        = Column(Numeric(10, 2), nullable=False, server_default="8")
     es_reventa          = Column(Boolean, default=False, nullable=False)  # True = se revende (colchón, nevera...); False = se fabrica
+    # Moneda de los precios de referencia (costo/venta). Base del ERP: COP (id=1).
+    # Los productos de reventa suelen comprarse en USD; la conversión a COP se
+    # hace con la tasa vigente al USAR el precio, nunca congelada.
+    moneda_id           = Column(BigInteger, ForeignKey("moneda.id", ondelete="RESTRICT"), nullable=True, server_default="1")
     # --------------------------------------------------------------
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, onupdate=func.now())
 
     tipo_producto   = relationship("TipoProducto")
+    moneda          = relationship("Moneda")
     materiales      = relationship("ProductoMaterial", back_populates="producto", cascade="all, delete-orphan")
     secciones       = relationship("SeccionProducto", back_populates="producto", cascade="all, delete-orphan")
 

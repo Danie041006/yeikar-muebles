@@ -1,0 +1,13 @@
+venv
+.venv
+__pycache__
+*.pyc
+test
+scripts
+docs
+.env
+.env.*
+celular-logs
+alembic/versions/__pycache__
+check_areas.py
+actualizar_password.py
