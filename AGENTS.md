@@ -122,3 +122,9 @@ docker compose up -d --build    # builds backend + frontend + db
 - Alembic env has an explicit import list for all models — adding a new module means adding its model import there
 - `ALLOWED_ORIGINS` default includes `localhost:5173` (Vite dev) — add yours if using a different port
 - The `backend/` Dockerfile uses Python 3.11, not 3.13 — dev uses whatever is installed
+
+## Deployment (Vercel)
+
+- Production se despliega AUTOMÁTICAMENTE en cada `git push` a `main` (GitHub integrado con Vercel). No hace falta `vercel --prod`.
+- Dos proyectos conectados al mismo repo: `yeikar-api` (root dir `backend`, Python) y `yeikar-web` (root dir `frontend`, Vite). Cada push dispara ambos.
+- URLs: https://yeikar-api.vercel.app y https://yeikar-web.vercel.app
