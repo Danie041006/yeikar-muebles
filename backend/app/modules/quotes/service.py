@@ -171,14 +171,36 @@ def crear_cliente_rapido(
 
     existente = db.query(Client).filter(Client.telefono == telefono).first()
     if existente:
-        return {"id": existente.id, "nombre": existente.nombre, "telefono": existente.telefono}
+        return {
+            "id": existente.id,
+            "nombre": existente.nombre,
+            "telefono": existente.telefono,
+            "cedula": existente.cedula,
+            "direccion": existente.direccion,
+            "ciudad": existente.ciudad,
+            "estado": existente.estado,
+            "observaciones": existente.observaciones,
+        }
 
     cliente = create_client(db, ClientCreate(
         nombre=nombre,
         telefono=telefono,
         cedula=esquema.cedula or None,
+        direccion=esquema.direccion or None,
+        ciudad=esquema.ciudad or None,
+        estado=esquema.estado or None,
+        observaciones=esquema.observaciones or None,
     ), usuario)
-    return {"id": cliente.id, "nombre": cliente.nombre, "telefono": cliente.telefono}
+    return {
+        "id": cliente.id,
+        "nombre": cliente.nombre,
+        "telefono": cliente.telefono,
+        "cedula": cliente.cedula,
+        "direccion": cliente.direccion,
+        "ciudad": cliente.ciudad,
+        "estado": cliente.estado,
+        "observaciones": cliente.observaciones,
+    }
 
 
 def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Usuario | None = None):

@@ -159,13 +159,17 @@ export const cotizacionService = {
     await api.delete(`/cotizacion/${id}`);
   },
 
-  /** Alta mínima de cliente desde el formulario de cotización (no exige el
-   *  módulo clientes). Si el teléfono ya existe, devuelve el cliente actual. */
+  /** Alta de cliente desde el formulario de cotización (no exige el módulo
+   *  clientes). Si el teléfono ya existe, devuelve el cliente actual. */
   crearClienteRapido: async (payload: {
     nombre: string;
     telefono: string;
     cedula?: string;
-  }): Promise<{ id: number; nombre: string; telefono: string }> => {
+    direccion?: string;
+    ciudad?: string;
+    estado?: string;
+    observaciones?: string;
+  }): Promise<Client> => {
     const response = await api.post('/cotizacion/cliente-rapido', payload);
     return response.data;
   },

@@ -6,18 +6,28 @@ from app.modules.catalogos.schemas import MonedaResponse
 from app.modules.productos.schemas import MaterialResponse
 
 class ClienteRapidoCreate(BaseModel):
-    """Alta mínima de cliente desde el flujo de cotización: solo lo necesario
-    para cotizar. El resto del perfil se completa desde el módulo Clientes."""
+    """Alta de cliente desde el flujo de cotización con el mismo perfil
+    completo que el módulo Clientes. Si el teléfono ya existe se devuelve
+    ESE en vez de duplicar."""
 
     nombre: str = Field(min_length=1, max_length=150)
     telefono: str = Field(min_length=1, max_length=50)
     cedula: Optional[str] = Field(None, max_length=30)
+    direccion: Optional[str] = Field(None, max_length=2000)
+    ciudad: Optional[str] = Field(None, max_length=100)
+    estado: Optional[str] = Field(None, max_length=100)
+    observaciones: Optional[str] = Field(None, max_length=2000)
 
 
 class ClienteRapidoResponse(BaseModel):
     id: int
     nombre: str
     telefono: str
+    cedula: Optional[str] = None
+    direccion: Optional[str] = None
+    ciudad: Optional[str] = None
+    estado: Optional[str] = None
+    observaciones: Optional[str] = None
 
 
 class DetalleCotizacionBase(BaseModel):

@@ -191,9 +191,9 @@ export default function Cotizaciones() {
   const [dpMoneda, setDpMoneda] = useState('1');
   const [savingDp, setSavingDp] = useState(false);
 
-  // ── "Cliente nuevo" desde la cotización (nombre + teléfono + cédula opcional) ──
+  // ── "Cliente nuevo" desde la cotización (mismos datos que el módulo Clientes) ──
   const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false);
-  const [ncForm, setNcForm] = useState({ nombre: '', telefono: '', cedula: '' });
+  const [ncForm, setNcForm] = useState({ nombre: '', telefono: '', cedula: '', direccion: '', ciudad: '', estado: '', observaciones: '' });
   const [savingNc, setSavingNc] = useState(false);
 
   // Modal de personalización de receta ad-hoc por renglón
@@ -741,11 +741,15 @@ export default function Cotizaciones() {
         nombre: ncForm.nombre.trim().toUpperCase(),
         telefono: ncForm.telefono.trim(),
         cedula: ncForm.cedula.trim() || undefined,
+        direccion: ncForm.direccion.trim() || undefined,
+        ciudad: ncForm.ciudad.trim() || undefined,
+        estado: ncForm.estado.trim() || undefined,
+        observaciones: ncForm.observaciones.trim() || undefined,
       });
       setClients((prev) => (prev.some((c) => c.id === creado.id) ? prev : [...prev, creado]));
       setSelectedClientId(String(creado.id));
       setShowNuevoClienteModal(false);
-      setNcForm({ nombre: '', telefono: '', cedula: '' });
+      setNcForm({ nombre: '', telefono: '', cedula: '', direccion: '', ciudad: '', estado: '', observaciones: '' });
       toast.success(`Cliente "${creado.nombre}" seleccionado.`);
     } catch (err: any) {
       setError(String(err?.response?.data?.detail || 'No se pudo crear el cliente.'));
@@ -1635,16 +1639,6 @@ export default function Cotizaciones() {
               <div>
                 <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
                   Cliente *
-                  <button
-                    type="button"
-                    onClick={() => setShowNuevoClienteModal(true)}
-                    title="Crear cliente nuevo"
-                    className="ml-2 text-yeikar-neutral/40 hover:text-yeikar-primary transition-colors align-middle"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 5v14M5 12h14" />
-                    </svg>
-                  </button>
                 </label>
                 <SearchSelect
                   value={selectedClientId}
@@ -1655,6 +1649,17 @@ export default function Cotizaciones() {
                   }))}
                   placeholder="Selecciona un cliente..."
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowNuevoClienteModal(true)}
+                  title="Crear cliente nuevo"
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-yeikar-primary/60 bg-yeikar-primary/10 px-3 py-2 text-xs font-bold text-yeikar-primary transition-colors hover:bg-yeikar-primary hover:text-yeikar-neutral"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 5v14M5 12h14" />
+                  </svg>
+                  Nuevo cliente
+                </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3184,16 +3189,17 @@ export default function Cotizaciones() {
         </div>
       )}
 
-      {/* Modal Cliente Nuevo (alta mínima desde la cotización) */}
+      {/* Modal Cliente Nuevo (alta completa desde la cotización, mismos campos que Clientes) */}
       {showNuevoClienteModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full overflow-hidden border border-yeikar-secondary-light/10">
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden border border-yeikar-secondary-light/10 max-h-[90vh] flex flex-col">
             <div className="bg-yeikar-secondary text-white px-5 py-4">
               <h3 className="font-headline font-black text-base">Nuevo Cliente</h3>
+              <p className="text-xs text-white/60 mt-0.5">Los mismos datos que el módulo Clientes</p>
             </div>
-            <form onSubmit={handleCrearClienteDesdeCotizacion} className="p-5 space-y-4 font-body">
+            <form onSubmit={handleCrearClienteDesdeCotizacion} className="p-5 space-y-4 font-body overflow-y-auto">
               <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre *</label>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre Completo / Razón Social *</label>
                 <input
                   type="text"
                   required
@@ -3203,27 +3209,79 @@ export default function Cotizaciones() {
                   className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase"
                 />
               </div>
-              <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Teléfono *</label>
-                <input
-                  type="tel"
-                  required
-                  placeholder="Ej. 0412-5555555"
-                  value={ncForm.telefono}
-                  onChange={(e) => setNcForm((f) => ({ ...f, telefono: e.target.value }))}
-                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Teléfono *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. 0412-5555555"
+                    value={ncForm.telefono}
+                    onChange={(e) => setNcForm((f) => ({ ...f, telefono: e.target.value }))}
+                    className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                    Cédula / RIF <span className="text-yeikar-neutral/40 font-normal">opcional</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={ncForm.cedula}
+                    onChange={(e) => setNcForm((f) => ({ ...f, cedula: e.target.value }))}
+                    placeholder="V-12345678"
+                    className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
+                  />
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">
-                  Cédula <span className="text-yeikar-neutral/40 font-normal">opcional</span>
+                  Dirección <span className="text-yeikar-neutral/40 font-normal">opcional</span>
                 </label>
                 <input
                   type="text"
-                  value={ncForm.cedula}
-                  onChange={(e) => setNcForm((f) => ({ ...f, cedula: e.target.value }))}
-                  placeholder="V-12345678"
-                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
+                  value={ncForm.direccion}
+                  onChange={(e) => setNcForm((f) => ({ ...f, direccion: e.target.value }))}
+                  placeholder="Ej. Av. Principal, local 5"
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                    Ciudad <span className="text-yeikar-neutral/40 font-normal">opcional</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={ncForm.ciudad}
+                    onChange={(e) => setNcForm((f) => ({ ...f, ciudad: e.target.value }))}
+                    placeholder="Ej. Ureña"
+                    className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                    Estado / Departamento <span className="text-yeikar-neutral/40 font-normal">opcional</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={ncForm.estado}
+                    onChange={(e) => setNcForm((f) => ({ ...f, estado: e.target.value }))}
+                    placeholder="Ej. Táchira"
+                    className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                  Observaciones <span className="text-yeikar-neutral/40 font-normal">opcional</span>
+                </label>
+                <textarea
+                  rows={3}
+                  value={ncForm.observaciones}
+                  onChange={(e) => setNcForm((f) => ({ ...f, observaciones: e.target.value }))}
+                  placeholder="Notas adicionales sobre el cliente"
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary resize-none"
                 />
               </div>
               <p className="text-[11px] text-yeikar-neutral/50">
