@@ -249,7 +249,7 @@ export default function CostosProduccion() {
       <PageHeader
         eyebrow="Finanzas"
         title="Costos de Producción"
-        subtitle="Listado de precios por área para la nómina (destajo)"
+        subtitle="Listado de precios por área para la nómina (mano de obra / por producción)"
         actions={
           <Button onClick={() => setShowModal(true)}>
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

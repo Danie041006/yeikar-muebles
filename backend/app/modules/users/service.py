@@ -55,6 +55,7 @@ def crear_usuario(db: Session, user: schemas.UsuarioCreate):
     
     db_user = model.Usuario(
         nombre_usuario=user.nombre_usuario,
+        nombre=user.nombre,
         email=user.email,
         password_hash=obtener_password_hash(user.password),
         activo=True

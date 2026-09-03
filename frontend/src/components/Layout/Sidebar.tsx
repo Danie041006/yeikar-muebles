@@ -5,7 +5,6 @@ import {
   Activity,
   BarChart3,
   Box,
-  Calculator,
   ChevronRight,
   CreditCard,
   FileCheck2,
@@ -17,7 +16,6 @@ import {
   Package,
   Receipt,
   ScrollText,
-  Sparkles,
   ShoppingBag,
   Truck,
   Users,
@@ -35,6 +33,7 @@ interface MenuItem {
   module: string;
   icon: typeof LayoutDashboard;
   badge?: string;
+  children?: { name: string; path: string }[];
 }
 
 const groups: { label: string; items: MenuItem[] }[] = [
@@ -49,14 +48,15 @@ const groups: { label: string; items: MenuItem[] }[] = [
     items: [
       { name: 'Clientes', path: '/clientes', module: 'clientes', icon: Users },
       { name: 'Cotizaciones', path: '/cotizaciones', module: 'cotizaciones', icon: FileText },
-      { name: 'Cotizador IA', path: '/cotizaciones-ia', module: 'cotizaciones_ia', icon: Sparkles, badge: 'IA' },
       { name: 'Expediente', path: '/historial', module: 'pedidos', icon: FolderOpen },
       { name: 'Pedidos', path: '/pedidos', module: 'pedidos', icon: ShoppingBag },
-      { name: 'Producción', path: '/produccion', module: 'produccion', icon: Hammer },
+      { name: 'Producción', path: '/produccion', module: 'produccion', icon: Hammer, children: [
+        { name: 'Producción por Pedido', path: '/produccion' },
+        { name: 'Producción de Productos en Crudo', path: '/produccion-crudo' },
+      ] },
       { name: 'Empleados', path: '/empleados', module: 'empleados', icon: Users },
       { name: 'Inventario', path: '/inventario', module: 'inventario', icon: Package },
       { name: 'Productos', path: '/productos', module: 'productos', icon: Box },
-      { name: 'Calculadora de costos', path: '/costos', module: 'productos', icon: Calculator },
       { name: 'Despachos', path: '/envios', module: 'envios', icon: Truck },
     ],
   },
@@ -87,7 +87,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const { user, hasModulo, esAdmin, logout } = useAuth();
   const roles = user?.roles?.map((role) => role.nombre) || [];
-  const nombreUsuario = user?.nombre_usuario || 'Usuario';
+  const nombreUsuario = user?.nombre || user?.nombre_usuario || 'Usuario';
   const initials = nombreUsuario.slice(0, 2).toUpperCase();
 
   // Vista bifurcada por rol: la administradora administra los Despachos
@@ -166,6 +166,54 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                   {items.map((item) => {
                     const Icon = item.icon;
                     const isActive = location.pathname === item.path;
+                    const hasChildren = !!item.children?.length;
+                    const childActive = hasChildren
+                      ? item.children!.some((c) => location.pathname === c.path)
+                      : false;
+
+                    if (hasChildren) {
+                      return (
+                        <div key={item.path} className="group">
+                          <div
+                            aria-current={childActive ? 'page' : undefined}
+                            className={`flex min-h-10 cursor-default items-center justify-between rounded-xl px-3.5 text-[13px] font-medium transition-all duration-200 ${
+                              childActive
+                                ? 'bg-yeikar-primary font-bold text-yeikar-neutral shadow-gold'
+                                : 'text-white/60 hover:bg-white/[0.06] hover:text-white'
+                            }`}
+                          >
+                            <span className="flex items-center gap-3">
+                              <Icon className={`h-[17px] w-[17px] transition-colors ${childActive ? 'text-yeikar-neutral' : 'text-white/40 group-hover:text-yeikar-primary'}`} strokeWidth={1.8} />
+                              <span>{item.name}</span>
+                            </span>
+                            <ChevronRight className={`h-3.5 w-3.5 transition-transform duration-200 ${childActive ? 'text-yeikar-neutral' : 'text-white/40'} group-hover:rotate-90`} />
+                          </div>
+
+                          {/* Submenú desplegable al hacer hover */}
+                          <div className="mt-1 hidden space-y-1 pl-4 group-hover:block">
+                            {item.children!.map((child) => {
+                              const childSelected = location.pathname === child.path;
+                              return (
+                                <Link
+                                  key={child.path}
+                                  to={child.path}
+                                  onClick={onClose}
+                                  aria-current={childSelected ? 'page' : undefined}
+                                  className={`flex min-h-9 items-center gap-2.5 rounded-lg border-l-2 px-3.5 text-[13px] font-medium transition-all duration-150 ${
+                                    childSelected
+                                      ? 'border-yeikar-primary bg-yeikar-primary/15 font-bold text-yeikar-primary'
+                                      : 'border-white/10 text-white/60 hover:bg-white/[0.06] hover:text-white'
+                                  }`}
+                                >
+                                  <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
+                                  <span>{child.name}</span>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    }
 
                     return (
                       <Link

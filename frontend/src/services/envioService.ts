@@ -60,10 +60,18 @@ export interface ProductoReparto {
   nombre?: string | null;
 }
 
+export interface MaterialReparto {
+  id: number;
+  nombre?: string | null;
+}
+
 export interface DetallePedidoReparto {
   id: number;
   pedido_id: number;
-  producto_id: number;
+  /** INSUMO vendido suelto: producto_id null, material_id presente. */
+  producto_id?: number | null;
+  material_id?: number | null;
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   cantidad: number;
   alto?: number | null;
   ancho?: number | null;
@@ -72,6 +80,7 @@ export interface DetallePedidoReparto {
   acabado?: string | null;
   observaciones?: string | null;
   producto?: ProductoReparto | null;
+  material?: MaterialReparto | null;
 }
 
 export interface PedidoReparto {

@@ -191,12 +191,14 @@ def test_c3_pedido_terminado_con_lineas_sin_producir(client, cleaner, db):
     detalle1 = pedido["detalles"][0]["id"]
     detalle2 = pedido["detalles"][1]["id"]
 
-    # Solo la línea 1 tiene orden de producción
+    # La conversión auto-genera la orden de producción de cada línea FABRICADO
+    # (el pedido nace en PRODUCCION). Ambas líneas tienen orden; solo la 1 se
+    # finaliza: el pedido NO debe auto-terminar ni crear envío.
     orden = crear_orden_desde_pedido(client, cleaner, detalle1)
     n_ordenes_linea2 = db.execute(text(
         "SELECT COUNT(*) FROM orden_produccion WHERE detalle_pedido_id=:d"
     ), {"d": detalle2}).scalar()
-    assert n_ordenes_linea2 == 0, "Precondición: la línea 2 no debe tener orden"
+    assert n_ordenes_linea2 == 1, "Precondición: la conversión crea la orden de la línea 2"
 
     # Finalizar la única orden
     r = client.put(f"/api/v1/produccion/orden/{orden['id']}/estado", params={"estado": "FINALIZADA"}, headers=ADMIN_HEADERS)

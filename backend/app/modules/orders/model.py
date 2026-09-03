@@ -4,7 +4,7 @@ from sqlalchemy.sql import func
 from app.db.base import Base
 from app.modules.clients.model import Client
 from app.modules.quotes.model import Cotizacion
-from app.modules.productos.model import Producto
+from app.modules.productos.model import Producto, Material
 
 class Pedido(Base):
     __tablename__ = "pedido"
@@ -36,7 +36,9 @@ class DetallePedido(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     pedido_id = Column(BigInteger, ForeignKey("pedido.id", ondelete="CASCADE"), nullable=False)
-    producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=False)
+    producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=True)
+    material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
+    tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO
     cantidad = Column(Numeric(10, 2), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
     # Snapshot de costos al convertir cotización → pedido
@@ -54,3 +56,4 @@ class DetallePedido(Base):
 
     pedido = relationship("Pedido", back_populates="detalles")
     producto = relationship("Producto")
+    material = relationship("Material")

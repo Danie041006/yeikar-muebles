@@ -5,7 +5,6 @@ export interface Client {
   nombre: string;
   telefono: string;
   direccion?: string;
-  email?: string;
   ciudad?: string;
   estado?: string;
   cedula?: string;
@@ -19,7 +18,6 @@ export interface ClientCreate {
   nombre: string;
   telefono: string;
   direccion?: string | null;
-  email?: string | null;
   ciudad?: string | null;
   estado?: string | null;
   cedula?: string | null;

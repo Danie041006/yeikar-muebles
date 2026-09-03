@@ -27,10 +27,15 @@ export interface ProductoInfo {
 export interface DetalleVenta {
   id: number;
   venta_id: number;
-  producto_id: number;
+  producto_id?: number | null;
+  material_id?: number | null;
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   cantidad: number;
   precio: number;
+  costo_unitario?: number;
+  utilidad?: number;
   producto?: ProductoInfo;
+  material?: { id: number; nombre: string; costo_base: number; unidad_medida?: { abreviatura: string } };
 }
 
 export interface Pago {
@@ -100,7 +105,9 @@ export interface PagoCreate {
   tasa_cambio?: number;
 }
 
-// Métodos de pago disponibles
+// Métodos de pago disponibles (FALLBACK estático: solo para labels de pagos
+// históricos y el PDF cuando la carga dinámica falla. La fuente de verdad son
+// las cuentas de metodo_caja vía cargarMetodosPago()).
 export const METODOS_PAGO = [
   { value: 'EFECTIVO_COP', label: 'Efectivo COP', moneda: 'COP' },
   { value: 'EFECTIVO_USD', label: 'Efectivo USD', moneda: 'USD' },
@@ -108,7 +115,37 @@ export const METODOS_PAGO = [
   { value: 'BANCOLOMBIA', label: 'Bancolombia', moneda: 'COP' },
   { value: 'BANCARIBE', label: 'Bancaribe', moneda: 'VES' },
   { value: 'ZELLE', label: 'Zelle', moneda: 'USD' },
+  { value: 'BINANCE', label: 'Binance', moneda: 'USD' },
+  { value: 'NEQUI', label: 'Nequi', moneda: 'COP' },
+  { value: 'SOFITASA', label: 'Sofitasa', moneda: 'COP' },
+  { value: 'BANESCO', label: 'Banesco', moneda: 'COP' },
 ] as const;
+
+export type MetodoPagoOption = { value: string; label: string; moneda: string };
+
+// Carga las cuentas reales de metodo_caja (activas) desde el backend:
+// value = codigo de la cuenta (el backend mapea metodo_pago → codigo),
+// label = nombre de la cuenta, moneda = moneda propia de la cuenta.
+export const cargarMetodosPago = async (): Promise<MetodoPagoOption[]> => {
+  const res = await api.get<{ id: number; nombre: string; codigo: string; activo: boolean; moneda_codigo?: string | null }[]>('/reports/metodos-caja');
+  return res.data
+    .filter((m) => m.activo)
+    .map((m) => ({
+      value: m.codigo,
+      label: m.nombre,
+      moneda: m.moneda_codigo || 'COP',
+    }));
+};
+
+// Label de un método de pago (históricos): lista dinámica con fallback estático.
+export const labelMetodoPago = (metodos: MetodoPagoOption[] | undefined, valor: string | null | undefined): string => {
+  if (!valor) return '—';
+  return (
+    metodos?.find((m) => m.value === valor)?.label ??
+    METODOS_PAGO.find((m) => m.value === valor)?.label ??
+    valor
+  );
+};
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 

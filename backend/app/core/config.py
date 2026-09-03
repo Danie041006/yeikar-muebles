@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", 8))
     # IPs de proxies de confianza (coma separada). Si está vacío, se ignora
     # el header X-Forwarded-For y se usa la IP real del socket (anti-spoofing).
+    # "*" = confiar en el XFF que fija el edge de la plataforma (solo serverless
+    # tipo Vercel, donde el cliente no puede alterar ese header).
     FORWARDED_ALLOW_IPS: str = os.getenv("FORWARDED_ALLOW_IPS", "")
 
 settings = Settings()

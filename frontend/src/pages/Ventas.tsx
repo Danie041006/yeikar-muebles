@@ -9,7 +9,10 @@ import {
   VentaDetalle,
   Pago,
   METODOS_PAGO,
+  cargarMetodosPago,
+  labelMetodoPago,
   type PagoCreate,
+  type MetodoPagoOption,
 } from '../services/ventaService';
 import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
@@ -91,6 +94,8 @@ function ModalDetalle({
   const [reciboPreview, setReciboPreview] = useState<string | null>(null);
   const [reciboVer, setReciboVer] = useState<{ id: number; mime: string } | null>(null);
   const [monedas, setMonedas] = useState<{ id: number; codigo: string; nombre: string; simbolo: string }[]>([]);
+  // Métodos de pago: cuentas reales (metodo_caja) con fallback al estático.
+  const [metodosPago, setMetodosPago] = useState<MetodoPagoOption[]>(METODOS_PAGO.map((m) => ({ ...m })));
 
   const cargar = useCallback(async () => {
     try {
@@ -109,19 +114,27 @@ function ModalDetalle({
     } catch {}
   }, []);
 
+  const cargarMetodos = useCallback(async () => {
+    try {
+      const metodos = await cargarMetodosPago();
+      if (metodos.length > 0) setMetodosPago(metodos);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     cargar();
     cargarMonedas();
-  }, [cargar, cargarMonedas]);
+    cargarMetodos();
+  }, [cargar, cargarMonedas, cargarMetodos]);
 
   // Cuando cambia el metodo de pago, auto-seleccionar la moneda correspondiente
   useEffect(() => {
     if (!monedas.length) return;
-    const meta = METODOS_PAGO.find(m => m.value === metodoPago);
+    const meta = metodosPago.find(m => m.value === metodoPago);
     if (!meta) return;
     const found = monedas.find(m => m.codigo === meta.moneda);
     if (found) setMonedaPagoId(found.id);
-  }, [metodoPago, monedas]);
+  }, [metodoPago, monedas, metodosPago]);
 
   // Si monedaPagoId coincide con la moneda de la venta, TRM no aplica
   const monedaVentaId = detalle?.moneda_id ?? null;
@@ -252,7 +265,7 @@ function ModalDetalle({
           ) : (
             <>
               {/* Resumen financiero */}
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-3">
                 <div className="bg-yeikar-tertiary/20 rounded-xl p-3 text-center">
                   <p className="text-xs text-yeikar-neutral/50 font-mono mb-1">
                     Total Factura
@@ -335,7 +348,15 @@ function ModalDetalle({
                       className="flex justify-between items-center text-sm bg-yeikar-tertiary/10 rounded-lg px-3 py-2"
                     >
                       <span className="font-medium text-yeikar-secondary">
-                        {d.producto?.nombre ?? `Producto #${d.producto_id}`}
+                        {d.tipo_item === 'INSUMO'
+                          ? d.material?.nombre ?? `Material #${d.material_id}`
+                          : d.producto?.nombre ?? `Producto #${d.producto_id}`}
+                        {d.tipo_item === 'INSUMO' && (
+                          <span className="ml-1.5 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Insumo</span>
+                        )}
+                        {d.tipo_item === 'REVENTA' && (
+                          <span className="ml-1.5 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">Reventa</span>
+                        )}
                       </span>
                       <span className="font-mono text-yeikar-neutral/70">
                         {d.cantidad} × {detalle.moneda?.simbolo}{Number(d.precio).toLocaleString('es-ES')}
@@ -360,7 +381,7 @@ function ModalDetalle({
                 ) : (
                   <div className="space-y-2">
                     {detalle.pagos.map((p: Pago) => {
-                      const metodoLabel = METODOS_PAGO.find((m) => m.value === p.metodo_pago)?.label ?? p.metodo_pago;
+                      const metodoLabel = labelMetodoPago(metodosPago, p.metodo_pago);
                       const esMultimoneda = p.tasa_cambio && p.tasa_cambio !== 1;
                       const pagoCodigo = p.moneda?.codigo ?? '?';
                       const ventaCodigo = detalle.moneda?.codigo ?? '?';
@@ -442,9 +463,9 @@ function ModalDetalle({
                             onChange={(e) => setMetodoPago(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
                           >
-                            {METODOS_PAGO.map((m) => (
+                            {metodosPago.map((m) => (
                               <option key={m.value} value={m.value}>
-                                {m.label}
+                                {m.label} · {m.moneda}
                               </option>
                             ))}
                           </select>
@@ -466,7 +487,7 @@ function ModalDetalle({
                       </div>
 
                       {/* Fila 2: Monto + TRM (condicional) */}
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
                         <div>
                           <div className="flex justify-between items-center mb-1">
                             <label className="text-xs font-bold text-yeikar-neutral/60 block">

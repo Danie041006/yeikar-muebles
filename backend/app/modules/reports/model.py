@@ -54,8 +54,19 @@ class MetodoCaja(Base):
     codigo = Column(String(50), nullable=False, unique=True)
     activo = Column(Boolean, default=True, nullable=False)
     orden = Column(Integer, default=1, nullable=False)
+    moneda_id = Column(BigInteger, ForeignKey("moneda.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
+
+    moneda = relationship("Moneda")
+
+    @property
+    def moneda_codigo(self):
+        return self.moneda.codigo if self.moneda else None
+
+    @property
+    def moneda_simbolo(self):
+        return self.moneda.simbolo if self.moneda else None
 
 
 class MovimientoCaja(Base):
@@ -68,6 +79,10 @@ class MovimientoCaja(Base):
     `pago_id` vincula el movimiento con el pago de venta que lo originó
     (se genera automáticamente al registrar un cobro). Permite limpiar el
     movimiento si el pago se elimina y evitar duplicados.
+
+    `transferencia_id` empareja las dos patas de una transferencia entre
+    cuentas (SALIDA en origen + ENTRADA en destino): una sola operación
+    contable que redistribuye saldo sin tocar el total del negocio.
     """
     __tablename__ = "movimiento_caja"
 
@@ -81,6 +96,7 @@ class MovimientoCaja(Base):
     moneda_id = Column(BigInteger, ForeignKey("moneda.id", ondelete="RESTRICT"), nullable=False, default=1)
     tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
     monto_en_moneda_base = Column(Numeric(15, 2), nullable=True)
+    transferencia_id = Column(BigInteger, nullable=True, index=True)
     referencia = Column(String(150), nullable=True)
     observaciones = Column(Text, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

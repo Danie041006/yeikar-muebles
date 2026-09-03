@@ -20,6 +20,9 @@ class Usuario(Base):
     id = Column(BigInteger, primary_key=True, index=True)
     empleado_id = Column(BigInteger, ForeignKey("empleado.id", ondelete="SET NULL"), nullable=True, index=True)
     nombre_usuario = Column(String(100), unique=True, nullable=False, index=True)
+    # Nombre visible (p. ej. "Carolina"): la UI saluda con esto, no con el
+    # nombre de usuario (que ahora puede ser una clave tipo Mistreshijos123).
+    nombre = Column(String(100), nullable=True)
     email = Column(String(150), unique=True, nullable=True)
     password_hash = Column(String, nullable=False)
     activo = Column(Boolean, default=True)

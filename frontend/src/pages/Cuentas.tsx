@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   cuentasService, ResumenCuenta, MovimientoCaja, Moneda,
-  MovimientoCreate, MetodoCaja,
+  MovimientoCreate, MetodoCaja, TransferenciaPayload,
 } from '../services/cuentasService';
 import {
   Button, Card, Badge, Spinner, EmptyState, StatCard, Modal, PageHeader,
@@ -38,6 +38,16 @@ const TIPO_TONE: Record<string, 'neutral' | 'green' | 'red' | 'amber'> = {
   AJUSTE: 'amber',
 };
 
+const emptyTransferForm = () => ({
+  cuenta_origen_id: 0,
+  cuenta_destino_id: 0,
+  monto: 0,
+  fecha: new Date().toISOString().split('T')[0],
+  tasa_cambio: '',
+  referencia: '',
+  observaciones: '',
+});
+
 export default function Cuentas() {
   const [resumen, setResumen] = useState<ResumenCuenta[]>([]);
   const [movimientos, setMovimientos] = useState<MovimientoCaja[]>([]);
@@ -52,6 +62,9 @@ export default function Cuentas() {
   const [showMovModal, setShowMovModal] = useState(false);
   const [editMov, setEditMov] = useState<MovimientoCaja | null>(null);
   const [movForm, setMovForm] = useState(emptyMovForm());
+
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferForm, setTransferForm] = useState(emptyTransferForm());
 
   const [filtroCuenta, setFiltroCuenta] = useState<number | ''>('');
   const [filtroTipo, setFiltroTipo] = useState('');
@@ -153,7 +166,10 @@ export default function Cuentas() {
         observaciones: mov.observaciones ?? '',
       });
     } else {
-      setMovForm(emptyMovForm(cuentaId, monedaCopId));
+      // Movimiento nuevo: la moneda arranca en la moneda propia de la cuenta.
+      const cuentaSel = resumen.find((r) => r.metodo_caja.id === cuentaId);
+      const monedaCuenta = cuentaSel?.metodo_caja.moneda_id || monedaCopId;
+      setMovForm(emptyMovForm(cuentaId, monedaCuenta));
     }
     setShowMovModal(true);
   };
@@ -195,6 +211,65 @@ export default function Cuentas() {
       setConfirmAccion(null);
     }
   };
+
+  // ─── Transferencias entre cuentas ──────────────────────────────────────
+  const saldoDe = (cuentaId: number, monedaId: number) => {
+    const r = resumen.find((x) => x.metodo_caja.id === cuentaId);
+    if (!r) return 0;
+    return Number(r.saldo_por_moneda.find((l) => l.moneda_id === monedaId)?.monto ?? 0);
+  };
+
+  const transferCuenta = (id: number) => resumen.find((r) => r.metodo_caja.id === id)?.metodo_caja;
+  const transferMonedaSalida = transferCuenta(transferForm.cuenta_origen_id)?.moneda_id || monedaCopId;
+  const transferMonedaDestino = transferCuenta(transferForm.cuenta_destino_id)?.moneda_id || monedaCopId;
+  const transferSaldoDisponible = saldoDe(transferForm.cuenta_origen_id, transferMonedaSalida);
+  const transferSaldoExcede = transferForm.monto > transferSaldoDisponible + 0.005;
+  const transferMultimoneda = transferMonedaSalida !== transferMonedaDestino;
+  const transferMontoValido = transferForm.monto > 0;
+
+  const abrirTransfer = () => {
+    setTransferForm(emptyTransferForm());
+    setShowTransferModal(true);
+  };
+
+  const guardarTransferencia = async () => {
+    if (!transferForm.cuenta_origen_id || !transferForm.cuenta_destino_id) {
+      setError('Selecciona la cuenta de origen y la de destino.');
+      return;
+    }
+    if (transferForm.cuenta_origen_id === transferForm.cuenta_destino_id) {
+      setError('La cuenta de origen y la de destino deben ser distintas.');
+      return;
+    }
+    if (!transferMontoValido) {
+      setError('El monto debe ser mayor a 0.');
+      return;
+    }
+    if (transferSaldoExcede) {
+      setError('La cuenta de origen no tiene saldo suficiente para ese monto.');
+      return;
+    }
+    const payload: TransferenciaPayload = {
+      cuenta_origen_id: transferForm.cuenta_origen_id,
+      cuenta_destino_id: transferForm.cuenta_destino_id,
+      monto: Number(transferForm.monto),
+      fecha: transferForm.fecha,
+      moneda_id: transferMonedaSalida,
+      tasa_cambio: transferForm.tasa_cambio ? Number(transferForm.tasa_cambio) : null,
+      referencia: transferForm.referencia.trim() || null,
+      observaciones: transferForm.observaciones.trim() || null,
+    };
+    try {
+      await cuentasService.transferir(payload);
+      setShowTransferModal(false);
+      cargarTodo();
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? 'Error al registrar la transferencia.');
+    }
+  };
+
+  const confirmMovEsTransferencia = confirmAccion?.tipo === 'movimiento'
+    && !!movimientos.find((m) => m.id === confirmAccion.id)?.transferencia_id;
 
   const renderAccionesMov = (m: MovimientoCaja) => (
     <>
@@ -270,12 +345,20 @@ export default function Cuentas() {
         title="Cuentas y Medios de Pago"
         subtitle={`${resumen.length} cuentas · ${movimientos.length} movimientos en el filtro`}
         actions={
-          <Button onClick={() => abrirCuenta()}>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-            </svg>
-            Nueva Cuenta
-          </Button>
+          <>
+            <Button variant="outline" onClick={abrirTransfer}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+              Transferir
+            </Button>
+            <Button onClick={() => abrirCuenta()}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+              </svg>
+              Nueva Cuenta
+            </Button>
+          </>
         }
       />
 
@@ -318,14 +401,18 @@ export default function Cuentas() {
             <div className="space-y-1">
               {r.saldo_por_moneda.length === 0 ? (
                 <p className="text-sm text-yeikar-neutral/40 italic">Sin movimientos</p>
-              ) : r.saldo_por_moneda.map((l) => (
-                <div key={l.moneda_id} className="flex justify-between text-sm">
-                  <span className="text-yeikar-neutral/50">{nombreMoneda(l.codigo)}</span>
-                  <span className="font-mono font-semibold">
-                    {l.simbolo} {fmt(Number(l.monto))}
-                  </span>
-                </div>
-              ))}
+              ) : r.saldo_por_moneda.map((l) => {
+                const label = r.metodo_caja.moneda_codigo || nombreMoneda(l.codigo);
+                const sym = r.metodo_caja.moneda_simbolo || l.simbolo;
+                return (
+                  <div key={l.moneda_id} className="flex justify-between text-sm">
+                    <span className="text-yeikar-neutral/50">{label}</span>
+                    <span className="font-mono font-semibold">
+                      {sym} {fmt(Number(l.monto))}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
             <div className="flex gap-2 mt-auto">
               <Button size="sm" className="flex-1" onClick={() => abrirMovimiento(r.metodo_caja.id)}>
@@ -358,7 +445,7 @@ export default function Cuentas() {
               className="w-52"
               options={[
                 { value: '', label: 'Todas las cuentas' },
-                ...resumen.map((r) => ({ value: r.metodo_caja.id, label: r.metodo_caja.nombre })),
+                ...resumen.map((r) => ({ value: r.metodo_caja.id, label: `${r.metodo_caja.nombre} · ${r.metodo_caja.moneda_codigo || '?'}` })),
               ]}
               placeholder="Todas las cuentas"
             />
@@ -461,10 +548,21 @@ export default function Cuentas() {
           <Field label="Cuenta" required>
             <SearchSelect
               value={movForm.metodo_caja_id}
-              onChange={(v) => setMovForm({ ...movForm, metodo_caja_id: Number(v) })}
+              onChange={(v) => {
+                const cuenta = resumen.find((r) => r.metodo_caja.id === Number(v));
+                setMovForm((prev) => ({
+                  ...prev,
+                  metodo_caja_id: Number(v),
+                  // La moneda del movimiento sigue a la moneda propia de la cuenta.
+                  moneda_id: cuenta?.metodo_caja.moneda_id || prev.moneda_id,
+                }));
+              }}
               options={[
                 { value: 0, label: 'Seleccione...' },
-                ...resumen.map((r) => ({ value: r.metodo_caja.id, label: r.metodo_caja.nombre })),
+                ...resumen.map((r) => ({
+                  value: r.metodo_caja.id,
+                  label: `${r.metodo_caja.nombre} · ${r.metodo_caja.moneda_codigo || '?'}${r.metodo_caja.activo ? '' : ' (inactiva)'}`,
+                })),
               ]}
               placeholder="Seleccione..."
             />
@@ -489,7 +587,7 @@ export default function Cuentas() {
               />
             </Field>
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-4">
             <Field label="Monto" required>
               <Input
                 type="number"
@@ -539,13 +637,123 @@ export default function Cuentas() {
         </div>
       </Modal>
 
+      {/* Modal transferencia */}
+      <Modal
+        open={showTransferModal}
+        onClose={() => setShowTransferModal(false)}
+        title="Transferir entre Cuentas"
+        subtitle="Sale de una cuenta y entra en la otra: el total del negocio no cambia"
+        size="lg"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowTransferModal(false)}>Cancelar</Button>
+            <Button onClick={guardarTransferencia}>Transferir</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Cuenta origen" required>
+              <SearchSelect
+                value={transferForm.cuenta_origen_id}
+                onChange={(v) => setTransferForm({ ...transferForm, cuenta_origen_id: Number(v) })}
+                options={[
+                  { value: 0, label: 'Seleccione...' },
+                  ...resumen.filter((r) => r.metodo_caja.activo).map((r) => ({
+                    value: r.metodo_caja.id,
+                    label: `${r.metodo_caja.nombre} · ${r.metodo_caja.moneda_codigo || '?'}`,
+                  })),
+                ]}
+                placeholder="De dónde sale el dinero..."
+              />
+            </Field>
+            <Field label="Cuenta destino" required>
+              <SearchSelect
+                value={transferForm.cuenta_destino_id}
+                onChange={(v) => setTransferForm({ ...transferForm, cuenta_destino_id: Number(v) })}
+                options={[
+                  { value: 0, label: 'Seleccione...' },
+                  ...resumen.filter((r) => r.metodo_caja.activo && r.metodo_caja.id !== transferForm.cuenta_origen_id).map((r) => ({
+                    value: r.metodo_caja.id,
+                    label: `${r.metodo_caja.nombre} · ${r.metodo_caja.moneda_codigo || '?'}`,
+                  })),
+                ]}
+                placeholder="A dónde entra el dinero..."
+              />
+            </Field>
+          </div>
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-4">
+            <Field label="Monto" required>
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={transferForm.monto || ''}
+                onChange={(e) => setTransferForm({ ...transferForm, monto: Number(e.target.value) })}
+              />
+            </Field>
+            <Field label="Fecha" required>
+              <Input
+                type="date"
+                value={transferForm.fecha}
+                onChange={(e) => setTransferForm({ ...transferForm, fecha: e.target.value })}
+              />
+            </Field>
+            {transferMonedaSalida !== monedaCopId ? (
+              <Field label="Tasa → COP">
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={transferForm.tasa_cambio}
+                  onChange={(e) => setTransferForm({ ...transferForm, tasa_cambio: e.target.value })}
+                  placeholder="TRM del día (auto)"
+                />
+              </Field>
+            ) : <div />}
+          </div>
+          {transferForm.cuenta_origen_id > 0 && (
+            <p className="text-sm text-yeikar-neutral/50">
+              Disponible en origen:{' '}
+              <span className={`font-mono font-semibold ${transferSaldoExcede ? 'text-red-600' : 'text-yeikar-primary-dark'}`}>
+                {transferCuenta(transferForm.cuenta_origen_id)?.moneda_simbolo || ''} {fmt(transferSaldoDisponible)}
+              </span>
+              {transferSaldoExcede && transferMontoValido && (
+                <span className="text-red-600 font-semibold"> · saldo insuficiente</span>
+              )}
+            </p>
+          )}
+          {transferMultimoneda && transferForm.cuenta_destino_id > 0 && (
+            <p className="text-sm text-yeikar-neutral/50">
+              Cuentas en monedas distintas: la cuenta destino recibe el equivalente convertido con la TRM registrada de su moneda.
+            </p>
+          )}
+          <Field label="Referencia">
+            <Input
+              value={transferForm.referencia}
+              onChange={(e) => setTransferForm({ ...transferForm, referencia: e.target.value })}
+              placeholder="Ej: consignación Banco → caja, arqueo de fin de día"
+            />
+          </Field>
+          <Field label="Observaciones">
+            <Textarea
+              rows={2}
+              value={transferForm.observaciones}
+              onChange={(e) => setTransferForm({ ...transferForm, observaciones: e.target.value })}
+            />
+          </Field>
+        </div>
+      </Modal>
+
       <ConfirmDialog
         open={confirmAccion !== null}
         title={confirmAccion?.tipo === 'cuenta' ? 'Eliminar cuenta' : 'Eliminar movimiento'}
         message={
           confirmAccion?.tipo === 'cuenta'
             ? `¿Eliminar la cuenta "${confirmAccion.nombre}"? Los movimientos asociados se conservan.`
-            : '¿Eliminar este movimiento?'
+            : confirmMovEsTransferencia
+              ? 'Este movimiento es la pata de una transferencia: se eliminarán ambas patas (la salida y la entrada).'
+              : '¿Eliminar este movimiento?'
         }
         confirmLabel="Eliminar"
         onConfirm={() => {

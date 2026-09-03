@@ -45,6 +45,28 @@ class UnidadMedidaResponse(UnidadMedidaBase):
         from_attributes = True
 
 # ------------------------------------------------------------
+# CategoriaInventario (desglose del inventario en la UI)
+# ------------------------------------------------------------
+class CategoriaInventarioBase(BaseModel):
+    nombre: str
+    tipo: str = "MATERIAL"  # MATERIAL | PRODUCTO
+    orden: Optional[int] = 0
+
+class CategoriaInventarioCreate(CategoriaInventarioBase):
+    pass
+
+class CategoriaInventarioUpdate(BaseModel):
+    nombre: Optional[str] = None
+    tipo: Optional[str] = None
+    orden: Optional[int] = None
+
+class CategoriaInventarioResponse(CategoriaInventarioBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+# ------------------------------------------------------------
 # TipoGasto
 # ------------------------------------------------------------
 class TipoGastoBase(BaseModel):

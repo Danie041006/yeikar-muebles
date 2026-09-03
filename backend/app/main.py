@@ -18,6 +18,7 @@ from app.modules.production.router import router as produccion_router
 from app.modules.sales.router import router as sales_router, pago_router as pagos_router
 from app.modules.facturacion.router import router as facturacion_router
 from app.modules.gastos.router import router as gastos_router
+from app.modules.cuentas_por_pagar.router import router as cuentas_por_pagar_router
 from app.modules.inventory.router import router as inventario_router
 from app.modules.purchases.router import router as compras_router
 from app.modules.reports.router import router as reportes_router
@@ -109,6 +110,7 @@ app.include_router(sales_router, prefix="/api/v1/venta", tags=["ventas"])
 app.include_router(pagos_router, prefix="/api/v1/pago", tags=["pagos"])
 app.include_router(facturacion_router, prefix="/api/v1/factura", tags=["facturación"])
 app.include_router(gastos_router, prefix="/api/v1/gasto", tags=["gastos"])
+app.include_router(cuentas_por_pagar_router, prefix="/api/v1", tags=["cuentas por pagar"])
 app.include_router(inventario_router, prefix="/api/v1", tags=["inventario"])
 app.include_router(compras_router, prefix="/api/v1", tags=["compras"])
 app.include_router(reportes_router, prefix="/api/v1", tags=["reportes"])

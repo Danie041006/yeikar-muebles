@@ -118,12 +118,12 @@ export default function MisDespachos() {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black font-headline text-yeikar-secondary tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-black font-headline text-yeikar-secondary tracking-tight">
             Mis Despachos
           </h1>
           <p className="text-yeikar-neutral/60 mt-1 text-sm font-body">
-            {user?.nombre_usuario
-              ? `Hola ${user.nombre_usuario}, estos son tus repartos asignados.`
+            {user?.nombre || user?.nombre_usuario
+              ? `Hola ${user?.nombre || user.nombre_usuario}, estos son tus repartos asignados.`
               : 'Tus repartos asignados para entregar.'}
           </p>
         </div>
@@ -216,10 +216,10 @@ export default function MisDespachos() {
                     {envio.pedido?.detalles?.map((det) => (
                       <div key={det.id} className="text-xs text-yeikar-secondary/85">
                         <div className="flex justify-between">
-                          <span className="font-medium">• {det.producto?.nombre || 'Producto'}</span>
+                          <span className="font-medium">• {det.tipo_item === 'INSUMO' ? det.material?.nombre || 'Insumo' : det.producto?.nombre || 'Producto'}</span>
                           <span className="font-mono font-bold">x{det.cantidad}</span>
                         </div>
-                        {(det.ancho || det.largo) && (
+                        {det.tipo_item !== 'INSUMO' && (det.ancho || det.largo) && (
                           <p className="pl-3 text-[11px] text-yeikar-neutral/50 font-mono">
                             {det.ancho && det.largo ? `${det.ancho}×${det.largo}m` : det.ancho ? `Ancho ${det.ancho}m` : `Largo ${det.largo}m`}
                             {det.color ? ` · ${det.color}` : ''}
@@ -327,7 +327,7 @@ export default function MisDespachos() {
 
       {failingEnvio && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-6 space-y-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-4 sm:p-6 space-y-4">
             <h3 className="text-xl font-headline font-black text-yeikar-secondary tracking-tight">
               Reportar Falla en Entrega #{failingEnvio.id}
             </h3>

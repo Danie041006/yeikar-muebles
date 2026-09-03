@@ -7,7 +7,6 @@ class ClientBase(BaseModel):
     cedula: Optional[str] = None
     telefono: str
     direccion: Optional[str] = None
-    email: Optional[str] = None
     ciudad: Optional[str] = None
     estado: Optional[str] = None
     observaciones: Optional[str] = None
@@ -21,7 +20,6 @@ class ClientUpdate(BaseModel):
     cedula: Optional[str] = None
     telefono: Optional[str] = None
     direccion: Optional[str] = None
-    email: Optional[str] = None
     ciudad: Optional[str] = None
     estado: Optional[str] = None
     observaciones: Optional[str] = None

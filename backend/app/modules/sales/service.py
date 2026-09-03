@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_
 from datetime import date, datetime
 from decimal import Decimal
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
@@ -126,22 +126,26 @@ def crear_venta_desde_pedido(
 
     # 5. Crear detalles de venta a partir de los detalles de pedido
     total = 0.0
-    # El costo de los detalles está en COP; si la venta es en otra moneda, se
-    # convierte con la TRM congelada para que la utilidad/margen sean correctos
-    # (mezclar costo COP con precio USD daba márgenes absurdos).
     factor_costo_a_moneda = 1.0
     if moneda_id and moneda_id != 1:
         trm = float(tasa_cambio or 1.0)
         if trm > 0:
             factor_costo_a_moneda = 1.0 / trm
+    detalles_venta: list = []
     for dp in pedido.detalles:
         subtotal = float(dp.cantidad) * float(dp.precio)
         total += subtotal
+        item_tipo = dp.tipo_item or "FABRICADO"
+        material_id = None
         costo_unit = float(dp.costo_unitario) if dp.costo_unitario is not None else None
-        if costo_unit is None:
-            # Fallback: costo de referencia del producto. Puede estar en la moneda
-            # del producto (p. ej. reventa comprada en USD), así que se normaliza
-            # a COP antes de aplicar el factor hacia la moneda de la venta.
+        if item_tipo == "INSUMO":
+            # Costo del material (siempre en COP)
+            material_id = dp.material_id
+            if costo_unit is None and material_id:
+                from app.modules.productos.model import Material
+                mat = db.query(Material).filter(Material.id == material_id).first()
+                costo_unit = float(mat.costo_base) if mat else 0.0
+        elif costo_unit is None:
             if dp.producto and dp.producto.precio_costo_base is not None:
                 costo_unit = productos_service.convertir_a_moneda_base(
                     db, dp.producto.moneda_id, float(dp.producto.precio_costo_base)
@@ -150,13 +154,13 @@ def crear_venta_desde_pedido(
                 costo_unit = 0.0
         costo_unit_moneda = costo_unit * factor_costo_a_moneda
         pct_ganancia = float(dp.porcentaje_ganancia) if dp.porcentaje_ganancia is not None else (
-            # Clamp: la columna es numeric(5,2) → máx 999.99. Un margen mayor no
-            # debe romper la factura con un 500 (mismo fix que en pedidos).
             min(999.99, round(((float(dp.precio) - costo_unit_moneda) / costo_unit_moneda) * 100, 2)) if costo_unit_moneda > 0 else 0.0
         )
         db_detalle = DetalleVenta(
             venta_id=db_venta.id,
             producto_id=dp.producto_id,
+            material_id=material_id,
+            tipo_item=item_tipo,
             cantidad=dp.cantidad,
             precio=dp.precio,
             costo_unitario=costo_unit,
@@ -165,12 +169,19 @@ def crear_venta_desde_pedido(
             descuento=0.0,
         )
         db.add(db_detalle)
+        detalles_venta.append(db_detalle)
 
     # 6. Actualizar el total de la venta
     db_venta.total = total
     db_venta.total_en_moneda_base = round(total * float(tasa_cambio), 2)
     # 6b. Descontar stock de producto terminado / reventa al facturar.
-    _descontar_stock_productos(db, pedido, db_venta, usuario)
+    costo_real_por_producto = _descontar_stock_productos(db, pedido, db_venta, usuario)
+    # 6b'. El costo de lo vendido de stock es el real del inventario, no el
+    # estimado de la cotización (utilidad fiel, sobre todo en piezas de
+    # exhibición fabricadas cuyo costo lo fijó la producción).
+    _aplicar_costo_real_a_detalles(db, detalles_venta, costo_real_por_producto, factor_costo_a_moneda)
+    # 6c. Descontar stock de insumos (materiales) al facturar.
+    _descontar_stock_materiales(db, pedido, db_venta, usuario)
     record_event(
         db,
         actor=usuario,
@@ -221,6 +232,9 @@ def eliminar_venta(db: Session, id_venta: int, usuario: Usuario | None = None):
             "No se puede eliminar una factura con pagos registrados. "
             "Anula o elimina los pagos asociados primero."
         )
+    # Devolver al inventario lo descontado al facturar (insumos y reventa)
+    # ANTES de borrar: la reversión busca los movimientos SALIDA de esta venta.
+    _revertir_stock_venta(db, db_venta)
     # La eliminacion en cascada eliminara detalle_venta (ondelete=CASCADE); pago
     # tiene ON DELETE RESTRICT, de modo que sin pagos asociados la BD falla de forma segura.
     record_event(
@@ -256,18 +270,18 @@ def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, us
     """
     if not db_pago.metodo_pago:
         return
+    from fastapi import HTTPException
     from app.modules.reports.model import MetodoCaja, MovimientoCaja
     cuenta = db.query(MetodoCaja).filter(MetodoCaja.codigo == db_pago.metodo_pago).first()
     if not cuenta:
-        ultimo_orden = db.query(func.coalesce(func.max(MetodoCaja.orden), 0)).scalar()
-        cuenta = MetodoCaja(
-            nombre=db_pago.metodo_pago.replace("_", " ").title(),
-            codigo=db_pago.metodo_pago,
-            activo=True,
-            orden=int(ultimo_orden) + 1,
+        # Hardening: el método de pago debe corresponder a una cuenta del
+        # catálogo (metodo_caja). Antes se creaba una cuenta fantasma con el
+        # código digitado, ensuciando el catálogo de cuentas.
+        raise HTTPException(
+            status_code=400,
+            detail=f"El método de pago '{db_pago.metodo_pago}' no corresponde a ninguna cuenta. "
+            "Verifica las cuentas en Cuentas y Medios de Pago.",
         )
-        db.add(cuenta)
-        db.flush()
     tasa_caja = round(float(db_pago.tasa_cambio or 1.0) * float(venta.tasa_cambio or 1.0), 6)
     if db_pago.moneda_id != venta.moneda_id and venta.moneda_id == 1:
         # Pago en moneda extranjera sobre factura COP: la caja registra el mismo
@@ -342,12 +356,12 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
     # 4. Validar metodo de pago valido y su coherencia con la moneda del pago.
     #    Un pago en USD no puede entrar a la caja de pesos: el arqueo físico
     #    jamás cuadraría. Métodos → moneda esperada.
-    metodos_validos = ['EFECTIVO_COP', 'EFECTIVO_USD', 'EFECTIVO_VES', 'BANCOLOMBIA', 'BANCARIBE', 'ZELLE']
+    metodos_validos = ['EFECTIVO_COP', 'EFECTIVO_USD', 'EFECTIVO_VES', 'BANCOLOMBIA', 'BANCARIBE', 'ZELLE', 'BINANCE']
     if esquema.metodo_pago not in metodos_validos:
         raise ValueError(f"Metodo de pago invalido. Debe ser uno de: {metodos_validos}")
     METODO_MONEDA = {
         "EFECTIVO_COP": 1, "BANCOLOMBIA": 1,
-        "EFECTIVO_USD": 2, "ZELLE": 2,
+        "EFECTIVO_USD": 2, "ZELLE": 2, "BINANCE": 2,
         "EFECTIVO_VES": 3, "BANCARIBE": 3,
     }
     moneda_esperada = METODO_MONEDA.get(esquema.metodo_pago)
@@ -484,24 +498,32 @@ def obtener_cuentas_por_cobrar(db: Session):
 # ------------------------------------------------------------
 # Descuento de stock de producto terminado / reventa al facturar
 # ------------------------------------------------------------
-def _descontar_stock_productos(db: Session, pedido: Pedido, db_venta: Venta, usuario: Usuario | None = None):
+def _descontar_stock_productos(
+    db: Session, pedido: Pedido, db_venta: Venta, usuario: Usuario | None = None
+) -> dict:
     """
     Al facturar un pedido, descuenta del inventario de productos de REVENTA
     (producto_inventario) las cantidades vendidas. Registra un movimiento SALIDA.
 
-    SOLO aplica a productos marcados como es_reventa (colchones, neveras,
-    electrodomésticos que la empresa compra para revender). Los muebles que
-    YEIKAR fabrica no llevan stock de producto terminado y NO se descuentan.
+    SOLO aplica a REVENTA. FABRICADO no tiene stock; INSUMO usa su propia función.
+
+    Devuelve {producto_id: costo_promedio} con el costo REAL con el que salió
+    cada producto del inventario (None si la fila no tenía costo).
     """
     from app.modules.productos.model import Producto
     from app.modules.inventory.model import ProductoInventario, MovimientoProductoInventario
 
+    costo_real_por_producto: dict = {}
     for dp in pedido.detalles:
         if not dp.producto_id:
             continue
+        if (dp.tipo_item or "FABRICADO") != "REVENTA":
+            continue
         producto = db.query(Producto).filter(Producto.id == dp.producto_id).first()
-        if not producto or not producto.es_reventa:
-            continue  # solo productos de reventa tienen stock que descontar
+        # Reventa (comprado para revender) y piezas de exhibición (fabricadas y
+        # en el showroom) se venden del stock: al facturar se descuenta.
+        if not producto or not (producto.es_reventa or producto.es_exhibicion):
+            continue
 
         filas = db.query(ProductoInventario).filter(
             ProductoInventario.producto_id == dp.producto_id
@@ -520,7 +542,6 @@ def _descontar_stock_productos(db: Session, pedido: Pedido, db_venta: Venta, usu
                 f"Disponible: {disponible}, requerido: {cantidad_a_vender}."
             )
 
-        # Descontar de la primera ubicación con suficiente stock (por fila).
         restante = cantidad_a_vender
         for fila in filas:
             if restante <= 0:
@@ -529,6 +550,8 @@ def _descontar_stock_productos(db: Session, pedido: Pedido, db_venta: Venta, usu
             if a_descontar <= 0:
                 continue
             fila.cantidad = (fila.cantidad or Decimal("0")) - a_descontar
+            if fila.costo_promedio is not None:
+                costo_real_por_producto[dp.producto_id] = fila.costo_promedio
             db.add(MovimientoProductoInventario(
                 producto_id=dp.producto_id,
                 ubicacion_id=fila.ubicacion_id,
@@ -540,3 +563,172 @@ def _descontar_stock_productos(db: Session, pedido: Pedido, db_venta: Venta, usu
                 observaciones=f"Descuento por factura Venta #{db_venta.id}",
             ))
             restante -= a_descontar
+
+    return costo_real_por_producto
+
+
+def _aplicar_costo_real_a_detalles(
+    db: Session,
+    detalles_venta: list,
+    costo_real_por_producto: dict,
+    factor_costo_a_moneda: float,
+) -> None:
+    """Los detalles vendidos de stock (REVENTA: reventa y piezas de exhibición)
+    reportan el costo REAL con el que salió el inventario (costo_promedio), no
+    el estimado de la cotización: la utilidad de la venta refleja lo que la
+    pieza costó de verdad.
+
+    `costo_real_por_producto` vive en la moneda del producto y `costo_unitario`
+    del detalle en la moneda base (COP): se convierte antes de asignar. Si no
+    hay tasa de cambio para el producto se conserva el costo estimado (mejor
+    aproximación que inventar una conversión)."""
+    from app.modules.productos.model import Producto
+    from app.modules.productos.service import convertir_a_moneda_base
+
+    for detalle in detalles_venta:
+        costo_real = costo_real_por_producto.get(detalle.producto_id)
+        if (detalle.tipo_item or "FABRICADO") != "REVENTA" or costo_real is None:
+            continue
+        producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
+        costo_base = convertir_a_moneda_base(
+            db, producto.moneda_id if producto else None, float(costo_real)
+        )
+        if costo_base is None:
+            continue
+        detalle.costo_unitario = costo_base
+        costo_en_moneda_venta = costo_base * factor_costo_a_moneda
+        detalle.utilidad = round(float(detalle.precio) - costo_en_moneda_venta, 2)
+        detalle.porcentaje_ganancia = (
+            min(999.99, round(detalle.utilidad / costo_en_moneda_venta * 100, 2))
+            if costo_en_moneda_venta > 0
+            else 0.0
+        )
+
+
+def _descontar_stock_materiales(db: Session, pedido: Pedido, db_venta: Venta, usuario: Usuario | None = None):
+    """
+    Al facturar un pedido, descuenta del inventario de MATERIALES los insumos
+    vendidos (tipo_item == INSUMO). Registra MovimientoInventario SALIDA.
+    Cantidades fraccionarias soportadas (ej. 0.75 lámina).
+    """
+    from app.modules.productos.model import Material
+    from app.modules.inventory.model import Inventario, MovimientoInventario
+
+    for dp in pedido.detalles:
+        if (dp.tipo_item or "FABRICADO") != "INSUMO":
+            continue
+        if not dp.material_id:
+            continue
+
+        material = db.query(Material).filter(Material.id == dp.material_id).first()
+        if not material:
+            raise ValueError(f"El material con id {dp.material_id} no existe.")
+
+        filas = db.query(Inventario).filter(
+            Inventario.material_id == dp.material_id
+        ).with_for_update().all()
+        if not filas:
+            raise ValueError(
+                f"El material '{material.nombre}' no tiene stock registrado en inventario."
+            )
+
+        cantidad_a_vender = Decimal(str(dp.cantidad))
+        disponible = sum(f.cantidad or Decimal("0") for f in filas)
+        if disponible < cantidad_a_vender:
+            raise ValueError(
+                f"Stock insuficiente del material '{material.nombre}'. "
+                f"Disponible: {disponible}, requerido: {cantidad_a_vender}."
+            )
+
+        restante = cantidad_a_vender
+        for fila in filas:
+            if restante <= 0:
+                break
+            a_descontar = min(restante, fila.cantidad or Decimal("0"))
+            if a_descontar <= 0:
+                continue
+            fila.cantidad = (fila.cantidad or Decimal("0")) - a_descontar
+            db.add(MovimientoInventario(
+                material_id=dp.material_id,
+                ubicacion_id=fila.ubicacion_id,
+                tipo="SALIDA",
+                cantidad=a_descontar,
+                costo_unitario=material.costo_base,
+                referencia_tipo="VENTA",
+                referencia_id=db_venta.id,
+                observaciones=f"Descuento por venta de insumo - Venta #{db_venta.id}",
+            ))
+            restante -= a_descontar
+
+
+def _revertir_stock_venta(db: Session, db_venta: Venta) -> None:
+    """
+    Al eliminar una venta, devuelve al inventario lo descontado al facturar:
+    insumos (tipo_item INSUMO → inventario de materiales) y productos de
+    REVENTA (producto_inventario).
+
+    Revierte cada movimiento SALIDA con referencia VENTA en su MISMA ubicación
+    y registra la ENTRADA correspondiente (kardex neto en cero). No toca
+    material.costo_base (una re-entrada por anulación no fija precio de costo).
+    FABRICADO no revierte nada: se consumió en producción.
+    """
+    from app.modules.inventory.model import (
+        Inventario,
+        MovimientoInventario,
+        ProductoInventario,
+        MovimientoProductoInventario,
+    )
+
+    salidas_material = db.query(MovimientoInventario).filter(
+        MovimientoInventario.referencia_tipo == "VENTA",
+        MovimientoInventario.referencia_id == db_venta.id,
+        MovimientoInventario.tipo == "SALIDA",
+    ).all()
+    for mov in salidas_material:
+        fila = db.query(Inventario).filter(
+            Inventario.material_id == mov.material_id,
+            Inventario.ubicacion_id == mov.ubicacion_id,
+        ).with_for_update().first()
+        if not fila:
+            raise ValueError(
+                f"No se puede revertir el stock del material #{mov.material_id}: "
+                "la fila de inventario ya no existe. Ajusta el inventario manualmente."
+            )
+        fila.cantidad = (fila.cantidad or Decimal("0")) + (mov.cantidad or Decimal("0"))
+        db.add(MovimientoInventario(
+            material_id=mov.material_id,
+            ubicacion_id=mov.ubicacion_id,
+            tipo="ENTRADA",
+            cantidad=mov.cantidad,
+            costo_unitario=mov.costo_unitario,
+            referencia_tipo="VENTA",
+            referencia_id=db_venta.id,
+            observaciones=f"Reversión por eliminación de Venta #{db_venta.id}",
+        ))
+
+    salidas_producto = db.query(MovimientoProductoInventario).filter(
+        MovimientoProductoInventario.referencia_tipo == "VENTA",
+        MovimientoProductoInventario.referencia_id == db_venta.id,
+        MovimientoProductoInventario.tipo == "SALIDA",
+    ).all()
+    for mov in salidas_producto:
+        fila = db.query(ProductoInventario).filter(
+            ProductoInventario.producto_id == mov.producto_id,
+            ProductoInventario.ubicacion_id == mov.ubicacion_id,
+        ).with_for_update().first()
+        if not fila:
+            raise ValueError(
+                f"No se puede revertir el stock del producto #{mov.producto_id}: "
+                "la fila de inventario ya no existe. Ajusta el inventario manualmente."
+            )
+        fila.cantidad = (fila.cantidad or Decimal("0")) + (mov.cantidad or Decimal("0"))
+        db.add(MovimientoProductoInventario(
+            producto_id=mov.producto_id,
+            ubicacion_id=mov.ubicacion_id,
+            tipo="ENTRADA",
+            cantidad=mov.cantidad,
+            costo_unitario=fila.costo_promedio,
+            referencia_tipo="VENTA",
+            referencia_id=db_venta.id,
+            observaciones=f"Reversión por eliminación de Venta #{db_venta.id}",
+        ))

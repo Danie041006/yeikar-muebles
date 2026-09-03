@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, QuoteDetail, Moneda } from '../services/cotizacionService';
 import { clienteService, Client } from '../services/clienteService';
 import { pedidoService } from '../services/pedidoService';
-import { ventaService, VentaDetalle, METODOS_PAGO } from '../services/ventaService';
+import { ventaService, VentaDetalle, METODOS_PAGO, cargarMetodosPago, labelMetodoPago, type MetodoPagoOption } from '../services/ventaService';
 import { formatCurrency } from '../utils/format';
 import { normalizarEstructuraCostos } from '../utils/estructuraCostos';
 import EstructuraCostos from '../components/EstructuraCostos';
@@ -13,15 +13,19 @@ import DocumentoCotizacion from '../components/Expediente/DocumentoCotizacion';
 
 import api from '../services/api';
 import { productosService } from '../services/productosService';
+import { inventarioService } from '../services/inventarioService';
+import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
-import { Package, Sparkles, RefreshCw, Ruler } from 'lucide-react';
+import { Package, Sparkles, Plus } from 'lucide-react';
 
 interface CotizacionItemForm {
   producto_id: string;
+  material_id: string;
+  tipo_item: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   cantidad: number;
   ancho: string;
   largo: string;
@@ -31,6 +35,8 @@ interface CotizacionItemForm {
   calcResult: CalculationResult | null;
   calcLoading: boolean;
   receta_personalizada?: any[] | null;
+  /** Costo real del insumo suelto (COP): compra + pasada, desde la última entrada. */
+  insumoCosto?: { costo_compra: number; pasada_unitaria: number; costo_real: number } | null;
 }
 
 // Ordena productos por tipo (id del catálogo) y nombre dentro de cada tipo,
@@ -69,6 +75,15 @@ export default function Cotizaciones() {
   const [isConvertOpen, setIsConvertOpen] = useState(false);
   const [selectedQuoteForConvert, setSelectedQuoteForConvert] = useState<Quote | null>(null);
 
+  // Bloquea el scroll del fondo mientras el editor paramétrico está abierto
+  // (mismo comportamiento que el Modal compartido; sin esto hay doble scroll).
+  useEffect(() => {
+    if (!isFormOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [isFormOpen]);
+
   // States for printing
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
   const [selectedQuoteForPrint, setSelectedQuoteForPrint] = useState<Quote | null>(null);
@@ -92,16 +107,32 @@ export default function Cotizaciones() {
   const [adelantoMonedaId, setAdelantoMonedaId] = useState<number>(1);
   const [adelantoTrm, setAdelantoTrm] = useState('');
   const [adelantoMetodo, setAdelantoMetodo] = useState('');
+  // Métodos de pago: cuentas reales (metodo_caja) con fallback al estático.
+  const [metodosPago, setMetodosPago] = useState<MetodoPagoOption[]>(METODOS_PAGO.map((m) => ({ ...m })));
 
   // Create/Edit Form state (multi-item)
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null);
   const [selectedClientId, setSelectedClientId] = useState('');
   const [observaciones, setObservaciones] = useState('');
-  const [items, setItems] = useState<CotizacionItemForm[]>([
-    { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
-  ]);
+  const [items, setItems] = useState<CotizacionItemForm[]>([]);
   const [isProductSelectorOpen, setIsProductSelectorOpen] = useState(false);
   const [productSelectorTargetIndex, setProductSelectorTargetIndex] = useState<number | null>(null);
+
+  // ── "Producto nuevo" desde la cotización (nombre + tipo + foto + precio) ──
+  const [showNuevoProductoModal, setShowNuevoProductoModal] = useState(false);
+  const [tiposProducto, setTiposProducto] = useState<{ id: number; nombre: string }[]>([]);
+  const [npForm, setNpForm] = useState({ nombre: '', tipo_producto_id: '', ancho: '', largo: '', precio: '', moneda_id: '1' });
+  const [fotoNp, setFotoNp] = useState<File | null>(null);
+  const [fotoNpPreview, setFotoNpPreview] = useState<string | null>(null);
+  const [savingNp, setSavingNp] = useState(false);
+  const npCameraRef = useRef<HTMLInputElement>(null);
+  const npGalleryRef = useRef<HTMLInputElement>(null);
+
+  // ── "Definir precio" para productos existentes sin precio ──
+  const [definirPrecioProd, setDefinirPrecioProd] = useState<Product | null>(null);
+  const [dpPrecio, setDpPrecio] = useState('');
+  const [dpMoneda, setDpMoneda] = useState('1');
+  const [savingDp, setSavingDp] = useState(false);
 
   // Modal de personalización de receta ad-hoc por renglón
   const [showPersonalizarModal, setShowPersonalizarModal] = useState(false);
@@ -175,16 +206,18 @@ export default function Cotizaciones() {
 
   const fetchInitialData = async () => {
     try {
-      const [cls, prds, mats, currs] = await Promise.all([
+      const [cls, prds, mats, currs, metodos] = await Promise.all([
         clienteService.getAll(),
         cotizacionService.getProducts(),
         productosService.getMateriales(),
         cotizacionService.fetchCurrencies(),
+        cargarMetodosPago().catch(() => [] as MetodoPagoOption[]),
       ]);
       setClients(cls);
       setProducts(ordenarProductosPorTipo(prds));
       setMateriales(mats);
       setCurrencies(currs);
+      if (metodos.length > 0) setMetodosPago(metodos);
     } catch (err) {
       console.error('Error fetching initial data:', err);
     }
@@ -267,15 +300,15 @@ export default function Cotizaciones() {
     });
 
     try {
-      const impuestoItem = imp !== undefined ? (Number(imp) || 7) : (items[index]?.impuesto ? Number(items[index].impuesto) : 7);
+      const impuestoItem = Number(imp ?? items[index]?.impuesto ?? 0) || 0;
       let res;
       if (customRecipe && customRecipe.length > 0) {
-        res = await cotizacionService.recalculateCustomRecipe(Number(g) || 40.0, customRecipe, impuestoItem);
+        res = await cotizacionService.recalculateCustomRecipe(Number(g) || 0, customRecipe, impuestoItem);
       } else {
         res = await cotizacionService.calculatePrice(Number(pId), {
           ancho: Number(w) || 1.0,
           largo: Number(l) || 1.0,
-          ganancia: Number(g) || 40.0,
+          ganancia: Number(g) || 0,
           impuesto: impuestoItem,
         });
       }
@@ -463,8 +496,8 @@ export default function Cotizaciones() {
       return;
     }
     const item = items[personalizarIndex];
-    const ganancia = item ? (Number(item.ganancia) || 40.0) : 40.0;
-    const impuesto = item ? (Number(item.impuesto) || 7.0) : 7.0;
+    const ganancia = Number(item?.ganancia) || 0;
+    const impuesto = Number(item?.impuesto) || 0;
     
     setModalPreviewLoading(true);
     const timer = setTimeout(async () => {
@@ -504,10 +537,10 @@ export default function Cotizaciones() {
     setModalPreviewCalc(null);
   };
 
-  const addItem = () => {
+  const addItemInsumo = () => {
     setItems((prev) => [
       ...prev,
-      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
+      { producto_id: '', material_id: '', tipo_item: 'INSUMO', cantidad: 1, ancho: '', largo: '', ganancia: '', impuesto: '0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
     ]);
   };
 
@@ -523,15 +556,17 @@ export default function Cotizaciones() {
   const handleSelectProductFromModal = (product: Product) => {
     if (productSelectorTargetIndex !== null && productSelectorTargetIndex >= 0) {
       updateItemField(productSelectorTargetIndex, 'producto_id', String(product.id));
+      updateItemField(productSelectorTargetIndex, 'tipo_item', esItemStock(product) ? 'REVENTA' : 'FABRICADO');
     } else {
-      // Agregar un nuevo renglón directamente con el producto elegido
       const newItem: CotizacionItemForm = {
         producto_id: String(product.id),
+        material_id: '',
+        tipo_item: esItemStock(product) ? 'REVENTA' : 'FABRICADO',
         cantidad: 1,
         ancho: String(product.ancho_base ?? 1),
         largo: String(product.largo_base ?? 1),
-        ganancia: '40.0',
-        impuesto: '7',
+        ganancia: '',
+        impuesto: '',
         observaciones: '',
         calcResult: null,
         calcLoading: false,
@@ -549,8 +584,11 @@ export default function Cotizaciones() {
   };
 
   const removeItem = (index: number) => {
-    if (items.length === 1) return;
-    setItems((prev) => prev.filter((_, i) => i !== index));
+    setItems((prev) => {
+      const next = prev.filter((_, i) => i !== index);
+      setDesgloseIndex((di) => (di >= next.length ? Math.max(0, next.length - 1) : di));
+      return next;
+    });
   };
 
   const handleOpenCreate = () => {
@@ -560,10 +598,164 @@ export default function Cotizaciones() {
     setSelectedMonedaId(1);
     setTasaCambio(1);
     setTasasDia({});
-    setItems([
-      { producto_id: '', cantidad: 1, ancho: '1.0', largo: '1.0', ganancia: '40.0', impuesto: '7', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
-    ]);
+    setItems([]);
     setIsFormOpen(true);
+  };
+
+  // ── Deep-link desde Exhibición (?pieza=ID): abre el formulario con la pieza
+  const [searchParams] = useSearchParams();
+  const piezaParam = searchParams.get('pieza');
+  const piezaDeepLinkDone = useRef(false);
+  useEffect(() => {
+    if (!piezaParam || piezaDeepLinkDone.current || !products.length) return;
+    piezaDeepLinkDone.current = true;
+    const resolverYPoner = async () => {
+      let prod = products.find((p) => p.id === Number(piezaParam));
+      if (!prod) {
+        // Fallback: la pieza pudo no venir en el listado (límite/orden).
+        try {
+          const { data } = await api.get<Product>(`/producto/${piezaParam}`);
+          prod = data;
+          setProducts((prev) => (prev.some((p) => p.id === data.id) ? prev : [...prev, data]));
+        } catch {
+          toast.error('No se encontró la pieza de exhibición.');
+          return;
+        }
+      }
+      if (!prod) return;
+      handleOpenCreate();
+      const nuevo: CotizacionItemForm = {
+        producto_id: String(prod.id),
+        material_id: '',
+        tipo_item: esItemStock(prod) ? 'REVENTA' : 'FABRICADO',
+        cantidad: 1,
+        ancho: String(prod.ancho_base ?? 1),
+        largo: String(prod.largo_base ?? 1),
+        ganancia: '',
+        impuesto: '',
+        observaciones: '',
+        calcResult: null,
+        calcLoading: false,
+        receta_personalizada: null,
+      };
+      setItems((prev) => {
+        const next = prev.length && prev[0].producto_id ? [...prev, nuevo] : [nuevo];
+        const nextIdx = next.length - 1;
+        calculateItemPrice(nextIdx, String(prod.id), nuevo.ancho, nuevo.largo, nuevo.ganancia, null, nuevo.impuesto);
+        return next;
+      });
+    };
+    resolverYPoner();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [piezaParam, products]);
+
+  // ── Producto nuevo desde la cotización ──
+  const abrirNuevoProducto = () => {
+    if (!tiposProducto.length) {
+      api.get<{ id: number; nombre: string }[]>('/catalogos/tipo-producto/')
+        .then(({ data }) => setTiposProducto(data))
+        .catch(() => setTiposProducto([]));
+    }
+    setNpForm({ nombre: '', tipo_producto_id: '', ancho: '', largo: '', precio: '', moneda_id: '1' });
+    setFotoNp(null);
+    setFotoNpPreview(null);
+    setShowNuevoProductoModal(true);
+  };
+
+  const handleNpFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (fotoNpPreview) URL.revokeObjectURL(fotoNpPreview);
+    setFotoNp(file);
+    setFotoNpPreview(file ? URL.createObjectURL(file) : null);
+    e.target.value = '';
+  };
+  const quitarNpFoto = () => {
+    if (fotoNpPreview) URL.revokeObjectURL(fotoNpPreview);
+    setFotoNp(null);
+    setFotoNpPreview(null);
+  };
+
+  const handleCrearProductoDesdeCotizacion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!npForm.nombre.trim() || !npForm.tipo_producto_id) {
+      setError('Indica el nombre y el tipo del producto.');
+      return;
+    }
+    const precio = parseFloat(npForm.precio || '0');
+    if (!(precio > 0)) {
+      setError('Indica el precio estimado de venta (lo cotizas tal cual).');
+      return;
+    }
+    setSavingNp(true);
+    try {
+      const creado = await productosService.crearProducto({
+        nombre: npForm.nombre.toUpperCase().trim(),
+        tipo_producto_id: Number(npForm.tipo_producto_id),
+        descripcion: 'Creado desde la cotización',
+        activo: true,
+        ancho_base: npForm.ancho ? parseFloat(npForm.ancho) : null,
+        largo_base: npForm.largo ? parseFloat(npForm.largo) : null,
+        stock_minimo: 8,
+        es_reventa: false,
+        moneda_id: Number(npForm.moneda_id) || 1,
+        // Solo precio de venta: el motor lo cotiza TAL CUAL (no le suma margen).
+        precio_costo_base: undefined,
+        precio_venta_base: precio,
+      });
+      if (fotoNp && creado.id) {
+        try { await subirAdjunto(fotoNp, TIPO_ADJUNTO.PRODUCTO, creado.id); } catch { /* la foto es opcional */ }
+      }
+      // Lo agrega al listado y lo auto-selecciona en el renglón objetivo
+      const creadoComoProducto = creado as Product;
+      setProducts((prev) => (prev.some((p) => p.id === creado.id) ? prev : [...prev, creadoComoProducto]));
+      setShowNuevoProductoModal(false);
+      quitarNpFoto();
+      handleSelectProductFromModal(creadoComoProducto);
+      toast.success(`Producto "${creado.nombre}" creado y agregado al renglón.`);
+    } catch (err: any) {
+      const detail = String(err?.response?.data?.detail || err?.message || '');
+      setError(detail.includes('permiso') ? 'No tienes permiso para crear productos. Pídelo a un administrador.' : detail || 'No se pudo crear el producto.');
+    } finally {
+      setSavingNp(false);
+    }
+  };
+
+  // ── Definir precio estimado de un producto existente sin precio ──
+  const abrirDefinirPrecio = (p: Product) => {
+    setDefinirPrecioProd(p);
+    setDpPrecio(String(p.precio_venta_base ?? ''));
+    setDpMoneda(String(p.moneda_id ?? 1));
+  };
+  const guardarDefinirPrecio = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!definirPrecioProd) return;
+    const precio = parseFloat(dpPrecio || '0');
+    if (!(precio > 0)) {
+      setError('El precio debe ser mayor a 0.');
+      return;
+    }
+    setSavingDp(true);
+    try {
+      await api.put(`/producto/${definirPrecioProd.id}`, {
+        precio_venta_base: precio,
+        moneda_id: Number(dpMoneda) || 1,
+      });
+      setProducts((prev) =>
+        prev.map((p) => (p.id === definirPrecioProd.id ? { ...p, precio_venta_base: precio, moneda_id: Number(dpMoneda) || 1 } : p)),
+      );
+      setDefinirPrecioProd(null);
+      // recalculcar el renglón que lo usa
+      const idx = items.findIndex((it) => Number(it.producto_id) === definirPrecioProd.id);
+      if (idx >= 0) {
+        const it = items[idx];
+        calculateItemPrice(idx, it.producto_id, it.ancho, it.largo, it.ganancia, it.receta_personalizada, it.impuesto);
+      }
+      toast.success('Precio estimado guardado. El renglón se recalculó.');
+    } catch (err: any) {
+      setError(String(err?.response?.data?.detail || err?.message || 'No se pudo guardar el precio.'));
+    } finally {
+      setSavingDp(false);
+    }
   };
 
   const handleSaveQuote = async (e: React.FormEvent) => {
@@ -573,31 +765,64 @@ export default function Cotizaciones() {
       return;
     }
 
-    const hasInvalidItem = items.some(item => !item.producto_id);
+    if (!items.length) {
+      setError('Agrega al menos un renglón con + Mueble, + Insumo o + Producto nuevo.');
+      return;
+    }
+
+    // INSUMO exige material_id; FABRICADO/REVENTA exigen producto_id.
+    const hasInvalidItem = items.some((item) =>
+      item.tipo_item === 'INSUMO' ? !item.material_id : !item.producto_id
+    );
     if (hasInvalidItem) {
-      setError('Por favor selecciona un producto para todos los renglones.');
+      setError('Por favor selecciona el producto o material de todos los renglones.');
       return;
     }
 
     // No permitir guardar cotizaciones sin precio real: si falta la tasa del
     // día de un producto en moneda extranjera, el precio convertido es inválido.
+    // Aplica también a insumos (el precio tecleado no puede ser 0).
     const itemSinPrecio = items.find((it) => {
-      if (!it.producto_id) return false;
       if (!it.calcResult) return true;
       const p = precioRenglonEnMoneda(it);
       return !(isFinite(p) && p > 0);
     });
     if (itemSinPrecio) {
-      setError(
-        'Hay un renglón sin precio calculado o sin tasa de cambio del día. Ingresa/confirmar la tasa en "Tasas del día" del formulario.',
-      );
+      if (itemSinPrecio.tipo_item === 'INSUMO') {
+        setError('Falta el precio de venta del insumo. Escríbelo manualmente en el renglón (debe ser mayor que 0).');
+      } else {
+        setError(
+          'Hay un renglón sin precio calculado o sin tasa de cambio del día. Ingresa/confirmar la tasa en "Tasas del día" del formulario.',
+        );
+      }
       return;
     }
 
     let globalTotal = 0;
     const detalles: QuoteDetail[] = items.map((item) => {
-      // Conversión ÚNICA: el cálculo viene en la moneda del producto (reventa)
-      // o en COP (fabricados); aquí queda en la moneda de la cotización.
+      if (item.tipo_item === 'INSUMO') {
+        // El material se lista en COP (moneda base); se convierte a la moneda
+        // de la cotización igual que cualquier otro renglón.
+        const r = item.calcResult;
+        const precioUnitCop = Number(r?.precio_venta) || 0;
+        const precioMoneda =
+          Math.round(convertirAPrecioCotizacion(precioUnitCop, r?.moneda_codigo || 'COP') * 100) / 100;
+        const subtotal = precioMoneda * item.cantidad;
+        globalTotal += subtotal;
+        return {
+          producto_id: null,
+          material_id: Number(item.material_id),
+          tipo_item: 'INSUMO',
+          cantidad: item.cantidad,
+          precio: precioMoneda,
+          observaciones: item.observaciones || null,
+          // Costo real en COP (compra + pasada) × cantidad: el backend lo
+          // divide por la cantidad al convertir a pedido para obtener el
+          // costo unitario real del renglón.
+          costo_materiales: item.insumoCosto ? item.insumoCosto.costo_real * item.cantidad : null,
+          costo_total: item.insumoCosto ? item.insumoCosto.costo_real * item.cantidad : null,
+        };
+      }
       const r = item.calcResult;
       const conv = (v: number) => {
         const c = convertirAPrecioCotizacion(Number(v), r?.moneda_codigo);
@@ -609,6 +834,7 @@ export default function Cotizaciones() {
 
       return {
         producto_id: Number(item.producto_id),
+        tipo_item: item.tipo_item || 'FABRICADO',
         cantidad: item.cantidad,
         precio: precioMoneda,
         ancho: Number(item.ancho) || 1.0,
@@ -624,6 +850,10 @@ export default function Cotizaciones() {
 
     // Auto-generate preview description in observaciones field
     const itemsDescription = items.map((item) => {
+      if (item.tipo_item === 'INSUMO') {
+        const mat = materiales.find((m) => m.id === Number(item.material_id));
+        return `${item.cantidad}x ${mat?.nombre || 'Insumo'}`;
+      }
       const selectedProd = products.find(p => p.id === Number(item.producto_id));
       return `${item.cantidad}x ${selectedProd?.nombre || 'Mueble'} (${item.ancho}x${item.largo}m)`;
     }).join(', ');
@@ -694,6 +924,10 @@ export default function Cotizaciones() {
   };
 
   const handleOpenConvert = (quote: Quote) => {
+    if (quote.pedido_id) {
+      toast.info(`Esta cotización ya fue convertida al pedido #${quote.pedido_id}.`);
+      return;
+    }
     setSelectedQuoteForConvert(quote);
     setDeliveryDate('');
     setAdelantoModo('pct');
@@ -804,8 +1038,13 @@ export default function Cotizaciones() {
 
       let convertDetails;
       if (selectedQuoteForConvert.detalles && selectedQuoteForConvert.detalles.length > 0) {
+        // Copiar los renglones EXACTOS de la cotización: el backend valida cada
+        // detalle contra la cotización por (tipo_item, producto_id, material_id).
+        // Sin tipo_item/material_id, los renglones INSUMO y REVENTA se rechazan.
         convertDetails = selectedQuoteForConvert.detalles.map((det) => ({
-          producto_id: det.producto_id,
+          producto_id: det.producto_id ?? undefined,
+          material_id: det.material_id ?? undefined,
+          tipo_item: det.tipo_item || 'FABRICADO',
           cantidad: det.cantidad,
           precio: det.precio,
           ancho: det.ancho ?? undefined,
@@ -839,7 +1078,7 @@ export default function Cotizaciones() {
         ];
       }
 
-      const metodoLabel = METODOS_PAGO.find((m) => m.value === adelantoMetodo)?.label;
+      const metodoLabel = labelMetodoPago(metodosPago, adelantoMetodo);
       const monedaPagoDifiere = adelantoMonedaId !== selectedQuoteForConvert.moneda_id;
       // TRM enviada al backend = '1 {pago} = X {cotización}' × tasa de la cotización (COP por cotización).
       const tasaVenta = Number(selectedQuoteForConvert.tasa_cambio) || 1;
@@ -857,7 +1096,7 @@ export default function Cotizaciones() {
         abonoActivo && monedaAdelantoSel
           ? ` Abono inicial registrado: ${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel.codigo)}${metodoLabel ? ` · ${metodoLabel}` : ''}.`
           : '';
-      toast.success(`¡Cotización convertida a pedido con éxito!${avisoAbono} Se creó la factura automáticamente.`);
+      toast.success(`¡Cotización convertida a pedido con éxito!${avisoAbono} El pedido entró directamente a producción y se creó la factura automáticamente.`);
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
@@ -870,10 +1109,15 @@ export default function Cotizaciones() {
   };
 
   // Calculations summaries
+  // Un producto es "de stock" (se vende del inventario, no se fabrica por
+  // pedido) si es reventa O pieza de exhibición (fabricada y en el showroom).
+  const esItemStock = (p?: { es_reventa?: boolean; es_exhibicion?: boolean } | null) =>
+    !!p && (!!p.es_reventa || !!p.es_exhibicion);
+
   // Un renglón es de reventa cuando su producto está marcado como tal: no tiene
   // receta ni dimensiones; su precio sale del precio de referencia (convertido).
   const esItemReventa = (item: { producto_id: string | number }) =>
-    products.find((p) => p.id === Number(item.producto_id))?.es_reventa === true;
+    esItemStock(products.find((p) => p.id === Number(item.producto_id)));
 
   // ── Conversión única al precio de cotización ─────────────────────────────
   // Fabricados: vienen en COP → comportamiento previo (dividir por la tasa si
@@ -962,7 +1206,15 @@ export default function Cotizaciones() {
     return acc + (isFinite(t) ? t * item.cantidad : 0);
   }, 0);
 
-  const quoteEstadoBadge = (estado: string) => (
+  const quoteEstadoBadge = (estado: string, q?: Quote) => {
+    if (q?.pedido_id) {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-xs font-bold font-headline inline-block whitespace-nowrap bg-emerald-600 text-white">
+          ✓ Convertida
+        </span>
+      );
+    }
+    return (
     <span
       className={`px-2.5 py-1 rounded-full text-xs font-bold font-headline inline-block whitespace-nowrap ${
         estado === 'APROBADA'
@@ -983,7 +1235,8 @@ export default function Cotizaciones() {
         : estado === 'VENCIDA' ? 'Vencida'
         : estado}
     </span>
-  );
+    );
+  };
 
   const quoteColumns: DataColumn<Quote>[] = [
     {
@@ -1043,7 +1296,7 @@ export default function Cotizaciones() {
     {
       key: 'estado',
       header: 'Estado',
-      render: (q) => quoteEstadoBadge(q.estado),
+      render: (q) => quoteEstadoBadge(q.estado, q),
       mobileHidden: true,
     },
   ];
@@ -1053,7 +1306,7 @@ export default function Cotizaciones() {
       {quote.estado === 'BORRADOR' && (
         <button
           onClick={() => handleUpdateStatus(quote, 'ENVIADA')}
-          className="text-xs bg-blue-550 text-blue-600 hover:underline font-bold py-1.5"
+          className="text-xs bg-blue-50 text-blue-600 hover:underline font-bold py-1.5"
           title="Enviar"
         >
           Enviar
@@ -1062,11 +1315,11 @@ export default function Cotizaciones() {
       {quote.estado === 'ENVIADA' && (
         <>
           <button
-            onClick={() => handleUpdateStatus(quote, 'APROBADA')}
-            className="text-xs text-green-600 hover:underline font-bold py-1.5"
-            title="Aprobar"
+            onClick={() => handleOpenConvert(quote)}
+            className="bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral px-2.5 py-1.5 rounded text-xs font-bold font-headline shadow-sm"
+            title="Confirmar la cotización y crear el pedido: entra directamente a producción"
           >
-            Aprobar
+            Pedido
           </button>
           <button
             onClick={() => handleUpdateStatus(quote, 'RECHAZADA')}
@@ -1077,12 +1330,21 @@ export default function Cotizaciones() {
           </button>
         </>
       )}
-      {quote.estado === 'APROBADA' && (
+      {quote.estado === 'APROBADA' && !quote.pedido_id && (
         <button
           onClick={() => handleOpenConvert(quote)}
           className="bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral px-2.5 py-1.5 rounded text-xs font-bold font-headline shadow-sm"
         >
-          Pedido
+          Pasar a Pedido
+        </button>
+      )}
+      {quote.pedido_id && (
+        <button
+          onClick={() => navigate(`/pedidos?pedido=${quote.pedido_id}`)}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded text-xs font-bold font-headline shadow-sm"
+          title={`Ver el pedido #${quote.pedido_id} generado de esta cotización`}
+        >
+          Ver pedido
         </button>
       )}
       <button
@@ -1191,9 +1453,9 @@ export default function Cotizaciones() {
         </div>
       )}
 
-      {/* Filtro por estado: activas por defecto, histórico bajo demanda */}
+      {/* Filtro por estado: activas por defecto, convertidas e histórico bajo demanda */}
       <div className="flex items-center gap-2 flex-wrap">
-        {[['ACTIVAS', 'Activas'], ['HISTORICAS', 'Rechazadas / Vencidas'], ['', 'Todas']].map(([valor, label]) => (
+        {[['ACTIVAS', 'Activas'], ['CONVERTIDAS', 'Convertidas'], ['HISTORICAS', 'Rechazadas / Vencidas'], ['', 'Todas']].map(([valor, label]) => (
           <button
             key={valor}
             onClick={() => setFiltroEstadoCot(valor)}
@@ -1216,10 +1478,12 @@ export default function Cotizaciones() {
           <div className="p-8 text-center text-yeikar-neutral/60">No hay cotizaciones registradas.</div>
         ) : (() => {
           const quotesVisibles = filtroEstadoCot === 'ACTIVAS'
-            ? quotes.filter((q) => ['BORRADOR', 'ENVIADA', 'APROBADA'].includes(q.estado))
-            : filtroEstadoCot === 'HISTORICAS'
-              ? quotes.filter((q) => ['RECHAZADA', 'VENCIDA'].includes(q.estado))
-              : quotes;
+            ? quotes.filter((q) => ['BORRADOR', 'ENVIADA', 'APROBADA'].includes(q.estado) && !q.pedido_id)
+            : filtroEstadoCot === 'CONVERTIDAS'
+              ? quotes.filter((q) => !!q.pedido_id)
+              : filtroEstadoCot === 'HISTORICAS'
+                ? quotes.filter((q) => ['RECHAZADA', 'VENCIDA'].includes(q.estado))
+                : quotes;
           if (quotesVisibles.length === 0) {
             return <div className="p-8 text-center text-yeikar-neutral/60">No hay cotizaciones en este filtro.</div>;
           }
@@ -1228,7 +1492,7 @@ export default function Cotizaciones() {
               columns={quoteColumns}
               rows={quotesVisibles}
               rowKey={(q) => q.id}
-              cardBadge={(q) => quoteEstadoBadge(q.estado)}
+              cardBadge={(q) => quoteEstadoBadge(q.estado, q)}
               tableActions={renderQuoteAcciones}
               cardActions={renderQuoteAcciones}
               darkHeader
@@ -1239,13 +1503,13 @@ export default function Cotizaciones() {
 
       {/* Quote Form Modal */}
       {isFormOpen && (
-        <div className="fixed inset-0 bg-yeikar-neutral/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-xl border border-yeikar-secondary-light/10 shadow-2xl w-full max-w-5xl overflow-hidden flex flex-col md:flex-row">
-            {/* Form Inputs */}
-            <form onSubmit={handleSaveQuote} className="p-6 space-y-4 flex-1 max-h-[85vh] overflow-y-auto">
-              <div className="bg-yeikar-neutral -mx-6 -mt-6 p-4 text-yeikar-tertiary flex items-center justify-between mb-4">
+        <div className="fixed inset-0 bg-yeikar-neutral/50 backdrop-blur-sm flex items-stretch sm:items-center justify-center sm:p-4 z-50">
+          <div className="bg-white rounded-none sm:rounded-xl border border-yeikar-secondary-light/10 shadow-2xl w-full max-w-5xl overflow-y-auto md:overflow-hidden flex flex-col md:flex-row max-h-[100dvh] sm:max-h-[90vh]">
+            {/* Form Inputs — ÚNICO contenedor de scroll en desktop */}
+            <form onSubmit={handleSaveQuote} className="p-4 sm:p-6 space-y-4 flex-1 min-w-0 md:max-h-[90vh] md:overflow-y-auto">
+              <div className="bg-yeikar-neutral -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 p-4 text-yeikar-tertiary flex items-center justify-between mb-4 sticky top-0 z-10">
                 <h3 className="font-headline font-bold text-lg text-yeikar-primary">
-                  {editingQuote ? 'Editar Cotización' : 'Nueva Cotización Paramétrica (Múltiples Muebles)'}
+                  {editingQuote ? 'Editar Cotización' : 'Nueva Cotización'}
                 </h3>
               </div>
 
@@ -1258,7 +1522,7 @@ export default function Cotizaciones() {
                   onChange={(v) => setSelectedClientId(String(v))}
                   options={clients.map((c) => ({
                     value: c.id,
-                    label: `${c.nombre} (${c.email || c.telefono})`,
+                    label: `${c.nombre} (${c.telefono})`,
                   }))}
                   placeholder="Selecciona un cliente..."
                 />
@@ -1357,35 +1621,164 @@ export default function Cotizaciones() {
                       title="Abrir catálogo para añadir un nuevo mueble"
                     >
                       <Package className="w-3.5 h-3.5" />
-                      <span>+ Añadir Mueble del Catálogo</span>
+                      <span>+ Mueble</span>
                     </button>
                     <button
                       type="button"
-                      onClick={addItem}
-                      className="bg-stone-100 text-stone-600 hover:text-stone-900 border border-stone-200 text-xs font-bold px-2.5 py-1.5 rounded-lg transition-all"
-                      title="Añadir renglón en blanco"
+                      onClick={addItemInsumo}
+                      className="bg-white text-emerald-700 border border-emerald-600 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-all flex items-center gap-1.5 shadow-sm"
+                      title="Añadir insumo de inventario (lámina, tela, etc.)"
                     >
-                      + Renglón vacío
+                      <Package className="w-3.5 h-3.5" />
+                      <span>+ Insumo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={abrirNuevoProducto}
+                      className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-md hover:shadow"
+                      title="Crear un producto nuevo (con foto y precio) y agregarlo al renglón"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>+ Producto nuevo</span>
                     </button>
                   </div>
                 </div>
 
                 <div className="space-y-4">
                   {items.map((item, index) => {
-                    const selectedProd = products.find((p) => p.id === Number(item.producto_id));
+                    const selectedProd = item.tipo_item !== 'INSUMO' ? products.find((p) => p.id === Number(item.producto_id)) : null;
+
+                    // ── INSUMO: card simplificado ──
+                    if (item.tipo_item === 'INSUMO') {
+                      // El precio del insumo se registra en COP (moneda del
+                      // material); el subtotal se muestra convertido a la
+                      // moneda de la cotización. El precio de VENTA es manual
+                      // (los insumos cambian de precio y se venden sueltos
+                      // esporádicamente); el costo real (compra + pasada) solo
+                      // sirve de referencia para calcular la utilidad.
+                      const precioUnitCop = Number(item.calcResult?.precio_venta) || 0;
+                      const precioUnitMoneda = precioRenglonEnMoneda(item);
+                      const subtotal = (isFinite(precioUnitMoneda) ? precioUnitMoneda : 0) * item.cantidad;
+                      const calcInsumo = (costoReal: number, precio: number): CalculationResult => ({
+                        costo_materiales: costoReal, costo_mano_obra: 0, costo_gastos_indirectos: 0,
+                        costo_total: costoReal, impuesto_porcentaje: 0, impuestos: 0,
+                        base_con_impuestos: precio, precio_sugerido: precio, precio_venta: precio,
+                        materiales_detalle: [],
+                        moneda_codigo: 'COP',
+                      });
+                      return (
+                        <div key={index} className="bg-white p-4 rounded-2xl border border-yeikar-secondary-light/15 border-l-4 border-l-emerald-500 relative space-y-3 shadow-sm">
+                          <div className="flex items-center justify-between border-b border-yeikar-secondary-light/10 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center font-mono">{index + 1}</span>
+                              <span className="text-xs font-bold font-headline text-stone-700 uppercase tracking-wider">Renglón {index + 1}</span>
+                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">Insumo</span>
+                            </div>
+                            <button type="button" onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700 text-xs font-bold hover:bg-red-50 px-2 py-0.5 rounded-md transition-colors">Eliminar</button>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                            <div className="sm:col-span-5">
+                              <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Material *</label>
+                              <SearchSelect
+                                value={item.material_id}
+                                onChange={(v) => {
+                                  const matId = Number(v);
+                                  updateItemField(index, 'material_id', String(v));
+                                  updateItemField(index, 'insumoCosto', null);
+                                  const mat = materiales.find((m) => m.id === matId);
+                                  if (mat) {
+                                    // Mientras llega el costo real, precargamos el
+                                    // costo de compra como referencia (sin pasada).
+                                    updateItemField(index, 'calcResult', calcInsumo(Number(mat.costo_base) || 0, 0));
+                                    inventarioService.getCostoUnitarioRealMaterial(mat.id)
+                                      .then((c) => {
+                                        setItems((prev) => {
+                                          // Si ya cambiaron de material, descartar.
+                                          if (prev[index]?.material_id !== String(mat.id)) return prev;
+                                          const newItems = [...prev];
+                                          newItems[index] = {
+                                            ...newItems[index],
+                                            insumoCosto: c,
+                                            calcResult: calcInsumo(c.costo_real, 0),
+                                          };
+                                          return newItems;
+                                        });
+                                      })
+                                      .catch(() => {
+                                        // fallback: se queda con el costo de compra sin pasada.
+                                      });
+                                  }
+                                }}
+                                options={materiales.filter(m => m.activo !== false).map((m) => ({
+                                  value: m.id,
+                                  label: `${m.nombre} (${m.unidad_medida?.abreviatura || 'und'}) — COP ${m.costo_base?.toLocaleString()}`,
+                                }))}
+                                placeholder="Buscar lámina, tela, tornillo..."
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Cantidad *</label>
+                              <input type="number" step="0.01" min="0.01" value={item.cantidad}
+                                onChange={(e) => {
+                                  // Solo cambia la cantidad: el precio UNITARIO
+                                  // no depende de ella (reconstruir calcResult
+                                  // aquí multiplicaba la cantidad dos veces).
+                                  const cant = parseFloat(e.target.value) || 1;
+                                  updateItemField(index, 'cantidad', cant);
+                                }}
+                                className="w-full p-2 border border-stone-200 rounded-lg bg-white text-sm font-mono focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
+                              />
+                            </div>
+                            <div className="sm:col-span-3">
+                              <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Precio de Venta (COP) *</label>
+                              <input type="number" step="0.01" min="0" value={precioUnitCop > 0 ? precioUnitCop : ''} placeholder="Escribe el precio de venta"
+                                onChange={(e) => {
+                                  const precio = parseFloat(e.target.value) || 0;
+                                  // El costo NO se pisa con el precio: la utilidad
+                                  // se calcula contra el costo real (compra+pasada).
+                                  const costoReal = item.insumoCosto?.costo_real ?? (Number(item.calcResult?.costo_total) || 0);
+                                  updateItemField(index, 'calcResult', calcInsumo(costoReal, precio));
+                                }}
+                                className="w-full p-2 border border-stone-200 rounded-lg bg-white text-sm font-mono focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
+                              />
+                            </div>
+                            <div className="sm:col-span-2 text-right">
+                              <span className="text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline">Subtotal</span>
+                              <div className="text-sm font-bold font-mono text-yeikar-secondary">{formatCurrency(subtotal, currencyCode)}</div>
+                            </div>
+                          </div>
+                          {item.insumoCosto && (
+                            <div className="text-[11px] text-emerald-900/80 bg-emerald-50/60 border border-emerald-100 rounded-lg px-3 py-1.5 flex flex-wrap gap-x-4 gap-y-0.5">
+                              <span>Compra: <b>{formatCurrency(item.insumoCosto.costo_compra, 'COP')}</b></span>
+                              <span>Pasada: <b>{formatCurrency(item.insumoCosto.pasada_unitaria, 'COP')}</b></span>
+                              <span>Costo real/und: <b>{formatCurrency(item.insumoCosto.costo_real, 'COP')}</b></span>
+                              <span className="text-emerald-700">→ El precio de venta se escribe manualmente</span>
+                            </div>
+                          )}
+                          <div>
+                            <input type="text" value={item.observaciones} placeholder="Observaciones (opcional)"
+                              onChange={(e) => updateItemField(index, 'observaciones', e.target.value)}
+                              className="w-full p-1.5 border border-stone-200 rounded-lg bg-white text-xs focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // ── FABRICADO / REVENTA ──
                     const basePrecio = Number(selectedProd?.precio_venta_base ?? selectedProd?.precio_costo_base ?? 0);
                     const monedaExtranjera = selectedProd?.moneda && selectedProd.moneda.codigo !== 'COP' ? selectedProd.moneda.codigo : null;
                     const baseMostrar = isFinite(basePrecio) && basePrecio > 0
                       ? (monedaExtranjera
-                        ? formatCurrency(basePrecio, monedaExtranjera)
-                        : formatCurrency(basePrecio / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode))
+                        ? `${formatCurrency(basePrecio, monedaExtranjera)} ${monedaExtranjera}`
+                        : `${formatCurrency(basePrecio / (selectedMonedaId === 1 ? 1 : tasaCambio), currencyCode)} ${currencyCode}`)
                       : null;
                     const firstPhoto = selectedProd?.fotos && selectedProd.fotos.length > 0 ? selectedProd.fotos[0] : null;
 
                     return (
-                      <div key={index} className="bg-stone-50/80 p-4 rounded-2xl border border-yeikar-secondary-light/15 relative space-y-3.5 shadow-xs">
+                      <div key={index} className="bg-white p-4 rounded-2xl border border-yeikar-secondary-light/15 relative space-y-3.5 shadow-sm">
                         {/* Row Header */}
-                        <div className="flex items-center justify-between border-b border-stone-200/60 pb-2">
+                        <div className="flex items-center justify-between border-b border-yeikar-secondary-light/10 pb-2">
                           <div className="flex items-center gap-2">
                             <span className="w-5 h-5 rounded-full bg-yeikar-secondary text-yeikar-tertiary text-[10px] font-bold flex items-center justify-center font-mono">
                               {index + 1}
@@ -1393,19 +1786,30 @@ export default function Cotizaciones() {
                             <span className="text-xs font-bold font-headline text-stone-700 uppercase tracking-wider">
                               Renglón {index + 1}
                             </span>
-                            {selectedProd && (
-                              <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-md ${
-                                selectedProd.es_reventa
-                                  ? 'bg-sky-100 text-sky-800'
-                                  : 'bg-amber-100 text-amber-900'
-                              }`}>
-                                {selectedProd.es_reventa ? 'Reventa' : 'Fabricado'}
+                            <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-yeikar-tertiary text-yeikar-secondary border border-yeikar-secondary-light/10">
+                                {esItemStock(selectedProd) ? 'De stock' : 'Fabricado'}
                               </span>
-                            )}
+                              {item.calcResult?.fuente_precio === 'estimado_sin_estructura' && (
+                                <span
+                                  className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-yeikar-primary/10 text-yeikar-primary-dark border border-yeikar-primary/25"
+                                  title="Precio ESTIMADO: este mueble aún no tiene estructura de costos. Cuando la tengas, el precio se recalcula solo."
+                                >
+                                  Precio estimado
+                                </span>
+                              )}
+                              {item.calcResult?.fuente_precio === 'sin_definir' && selectedProd && (
+                                <button
+                                  type="button"
+                                  onClick={() => abrirDefinirPrecio(selectedProd)}
+                                  className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
+                                  title="Sin estructura de costos NI precio estimado. Haz clic para definir el precio de venta y cotizarlo ahora."
+                                >
+                                  Sin precio — definir
+                                </button>
+                              )}
                           </div>
 
-                          {items.length > 1 && (
-                            <button
+                          <button
                               type="button"
                               onClick={() => removeItem(index)}
                               className="text-red-500 hover:text-red-700 text-xs font-bold font-headline hover:bg-red-50 px-2 py-0.5 rounded-md transition-colors"
@@ -1413,81 +1817,53 @@ export default function Cotizaciones() {
                             >
                               Eliminar
                             </button>
-                          )}
                         </div>
 
-                        {/* Product Selection Block */}
-                        {!selectedProd ? (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenProductSelector(index)}
-                            className="w-full py-4 px-4 border-2 border-dashed border-yeikar-primary/40 hover:border-yeikar-primary rounded-xl bg-white hover:bg-amber-50/30 transition-all flex items-center justify-center gap-3 text-yeikar-secondary group text-left cursor-pointer shadow-2xs"
-                          >
-                            <div className="w-9 h-9 rounded-xl bg-yeikar-primary/15 text-yeikar-secondary flex items-center justify-center group-hover:bg-yeikar-primary group-hover:text-yeikar-neutral transition-colors shrink-0">
-                              <Package className="w-5 h-5" />
-                            </div>
-                            <div className="flex-1">
-                              <div className="text-xs font-bold font-headline text-yeikar-neutral group-hover:text-yeikar-secondary transition-colors flex items-center gap-1.5">
-                                <span>Seleccionar Mueble / Modelo del Catálogo *</span>
-                                <span className="text-[10px] bg-yeikar-primary/20 text-yeikar-neutral px-1.5 py-0.5 rounded font-mono font-bold">
-                                  Abrir catálogo
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-stone-400 mt-0.5">
-                                Explorar fotos, medidas sugeridas, precios base de referencia y categorías
-                              </div>
-                            </div>
-                          </button>
-                        ) : (
-                          <div className="p-3 bg-white rounded-xl border border-yeikar-secondary-light/15 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                            <div className="flex items-center gap-3 min-w-0">
+                        {/* Product Summary (producto siempre seleccionado vía + Mueble / + Producto nuevo) */}
+                        {selectedProd ? (
+                          <div className="flex items-center justify-between gap-3 rounded-xl bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 px-3 py-2.5">
+                            <div className="flex items-center gap-2.5 min-w-0">
                               {firstPhoto ? (
-                                <div className="w-12 h-12 rounded-lg overflow-hidden border border-stone-200 shrink-0 bg-stone-100">
+                                <div className="w-10 h-10 rounded-lg overflow-hidden border border-stone-200 shrink-0 bg-stone-100">
                                   <AdjuntoImagen adjunto={firstPhoto} alt={selectedProd.nombre} className="w-full h-full object-cover" />
                                 </div>
                               ) : (
-                                <div className="w-12 h-12 rounded-lg bg-yeikar-tertiary/60 border border-yeikar-secondary-light/10 flex items-center justify-center text-yeikar-secondary/60 shrink-0">
-                                  <Package className="w-5 h-5" />
+                                <div className="w-10 h-10 rounded-lg bg-yeikar-tertiary/60 border border-yeikar-secondary-light/10 flex items-center justify-center text-yeikar-secondary/60 shrink-0">
+                                  <Package className="w-4 h-4" />
                                 </div>
                               )}
-
                               <div className="min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <h5 className="font-headline font-black text-sm text-yeikar-neutral truncate">
-                                    {selectedProd.nombre}
-                                  </h5>
-                                  {selectedProd.tipo_producto?.nombre && (
-                                    <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-md">
-                                      {selectedProd.tipo_producto.nombre}
-                                    </span>
-                                  )}
+                                <div className="font-headline font-bold text-sm text-yeikar-secondary truncate">
+                                  {selectedProd.nombre}
                                 </div>
-
-                                <div className="text-[11px] text-stone-500 font-mono mt-0.5 flex items-center gap-2.5 flex-wrap">
-                                  {selectedProd.codigo && (
-                                    <span>Cód: <strong className="text-stone-700">{selectedProd.codigo}</strong></span>
-                                  )}
-                                  {baseMostrar && (
-                                    <span>Ref: <strong className="text-stone-700">{baseMostrar} base</strong></span>
-                                  )}
-                                  {!selectedProd.es_reventa && (selectedProd.ancho_base || selectedProd.largo_base) && (
-                                    <span className="flex items-center gap-1">
-                                      <Ruler className="w-3 h-3 text-yeikar-primary" />
-                                      Base: {Number(selectedProd.ancho_base || 1).toFixed(2)}m × {Number(selectedProd.largo_base || 1).toFixed(2)}m
-                                    </span>
-                                  )}
+                                <div className="text-[11px] text-stone-500 font-mono truncate">
+                                  {[selectedProd.tipo_producto?.nombre, baseMostrar, !esItemStock(selectedProd) && (selectedProd.ancho_base || selectedProd.largo_base) ? `Base ${Number(selectedProd.ancho_base || 1).toFixed(2)}m × ${Number(selectedProd.largo_base || 1).toFixed(2)}m` : null]
+                                    .filter(Boolean)
+                                    .join(' · ') || '—'}
                                 </div>
                               </div>
                             </div>
-
                             <button
                               type="button"
                               onClick={() => handleOpenProductSelector(index)}
-                              className="px-3 py-1.5 bg-stone-100 hover:bg-yeikar-primary/20 text-stone-700 hover:text-yeikar-neutral border border-stone-200 rounded-lg text-xs font-bold font-headline transition-all flex items-center gap-1.5 self-start sm:self-center shrink-0"
-                              title="Cambiar mueble seleccionado"
+                              className="text-xs font-bold text-yeikar-primary hover:underline shrink-0 whitespace-nowrap"
+                              title="Cambiar el producto seleccionado"
                             >
-                              <RefreshCw className="w-3 h-3" />
-                              <span>Cambiar Modelo</span>
+                              Cambiar
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-stone-300 px-3 py-2.5 text-stone-500">
+                            <span className="text-xs font-body">
+                              Producto no disponible
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenProductSelector(index)}
+                              className="text-xs font-bold text-yeikar-primary hover:underline shrink-0 whitespace-nowrap"
+                              title="Seleccionar otro producto del catálogo"
+                            >
+                              Cambiar
                             </button>
                           </div>
                         )}
@@ -1538,8 +1914,8 @@ export default function Cotizaciones() {
                           ) : (
                             <div className="col-span-2 flex items-end">
                               <div className="w-full space-y-1">
-                                <span className="block text-[10px] text-sky-800 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-2 w-full font-medium">
-                                  Reventa comercial (precio de lista)
+                                <span className="block text-[10px] text-yeikar-secondary bg-yeikar-tertiary border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-2 w-full font-medium">
+                                  Reventa comercial {baseMostrar ? `· Costo ref: ${baseMostrar}` : ''}
                                 </span>
                                 {!item.calcResult && item.producto_id && (
                                   <span className="block text-[10px] font-bold text-amber-700">
@@ -1564,7 +1940,7 @@ export default function Cotizaciones() {
                         </div>
 
                         {/* Secondary row: Taxes, Observations, Recipe Structure, Subtotal */}
-                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center pt-1 border-t border-stone-150">
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center pt-1 border-t border-yeikar-secondary-light/10">
                           <div className="sm:col-span-2">
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1" title="Impuestos adicionales sobre el costo">
                               % Impuestos
@@ -1597,10 +1973,10 @@ export default function Cotizaciones() {
                                 <button
                                   type="button"
                                   onClick={() => handleOpenPersonalizarReceta(index)}
-                                  className="w-full bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 px-2 py-2 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 leading-none"
+                                  className="w-full bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-primary-dark border border-yeikar-primary/30 px-2 py-2 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 leading-none"
                                   title="Personalizar materiales e insumos de la receta para esta cotización"
                                 >
-                                  <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <Sparkles className="w-3.5 h-3.5 text-yeikar-primary-dark shrink-0" />
                                   <span>Receta</span>
                                 </button>
                                 {item.receta_personalizada && (
@@ -1638,6 +2014,22 @@ export default function Cotizaciones() {
                       </div>
                     );
                   })}
+
+                  {items.length === 0 && (
+                    <div className="rounded-2xl border-2 border-dashed border-yeikar-secondary-light/25 bg-yeikar-tertiary/30 px-6 py-10 text-center">
+                      <div className="w-12 h-12 rounded-2xl bg-yeikar-primary/15 text-yeikar-secondary flex items-center justify-center mx-auto mb-3">
+                        <Package className="w-6 h-6" />
+                      </div>
+                      <h5 className="font-headline font-bold text-sm text-yeikar-secondary mb-1">
+                        No hay productos aún
+                      </h5>
+                      <p className="text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
+                        Usá los botones de arriba para armar la cotización:{' '}
+                        <b>+ Mueble</b> (catálogo), <b>+ Insumo</b> (material suelto) o{' '}
+                        <b>+ Producto nuevo</b> (crear y cotizar al instante).
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1671,8 +2063,9 @@ export default function Cotizaciones() {
               </div>
             </form>
 
-            {/* Calculations Breakdown */}
-            <div className="w-full md:w-80 bg-yeikar-neutral text-yeikar-tertiary p-6 flex flex-col justify-between border-t md:border-t-0 md:border-l border-yeikar-secondary/20 overflow-y-auto max-h-[85vh]">
+            {/* Calculations Breakdown — en móvil queda dentro del scroll del modal;
+                en desktop es columna propia con su propio scroll acotado */}
+            <div className="w-full md:w-80 bg-yeikar-neutral text-yeikar-tertiary p-4 sm:p-6 flex flex-col justify-between border-t md:border-t-0 md:border-l border-yeikar-secondary/20 shrink-0 md:max-h-[90vh] md:overflow-y-auto">
               <div className="space-y-6">
                 <div>
                   <h4 className="font-headline font-bold text-sm text-yeikar-primary tracking-wider uppercase mb-3">
@@ -1703,9 +2096,13 @@ export default function Cotizaciones() {
                     >
                       {items.map((item, idx) => {
                         const prod = products.find(p => p.id === Number(item.producto_id));
+                        const mat = item.tipo_item === 'INSUMO'
+                          ? materiales.find(m => m.id === Number(item.material_id))
+                          : null;
+                        const label = mat?.nombre || prod?.nombre || 'Renglón';
                         return (
                           <option key={idx} value={idx} className="bg-yeikar-neutral text-yeikar-tertiary">
-                            Renglón {idx + 1}: {prod?.nombre || 'Mueble'} ({item.ancho}x{item.largo}m)
+                            Renglón {idx + 1}: {label}{item.tipo_item !== 'INSUMO' ? ` (${item.ancho}x${item.largo}m)` : ' (Insumo)'}
                           </option>
                         );
                       })}
@@ -1714,6 +2111,7 @@ export default function Cotizaciones() {
                 )}
 
                 {/* Desglose Detallado de Secciones de ese Renglón */}
+                {items[desgloseIndex] && (
                 <div className="border-t border-yeikar-secondary-light/10 pt-3 space-y-3">
                   <h5 className="text-[10px] font-bold text-yeikar-primary uppercase tracking-widest">
                     {esItemReventa(items[desgloseIndex]) ? 'Detalle de Reventa' : `Desglose de Secciones (Renglón ${desgloseIndex + 1})`}
@@ -1774,6 +2172,7 @@ export default function Cotizaciones() {
                     </p>
                   )}
                 </div>
+                )}
               </div>
 
               <div className="border-t border-yeikar-secondary/40 pt-4 mt-6">
@@ -1801,7 +2200,8 @@ export default function Cotizaciones() {
             <div className="p-6 space-y-4">
               <p className="text-sm text-yeikar-neutral/80 font-body">
                 Vas a generar un nuevo pedido para <strong>{selectedQuoteForConvert?.cliente?.nombre}</strong>.
-                La factura se creará automáticamente en la moneda de la cotización.
+                El pedido entrará directamente a producción y la factura se creará automáticamente
+                en la moneda de la cotización.
               </p>
 
               {/* Info de la cotización (bloqueada) */}
@@ -1920,7 +2320,7 @@ export default function Cotizaciones() {
                     onChange={(e) => {
                       const valor = e.target.value;
                       setAdelantoMetodo(valor);
-                      const meta = METODOS_PAGO.find((m) => m.value === valor);
+                      const meta = metodosPago.find((m) => m.value === valor);
                       if (meta) {
                         const mon = currencies.find((c) => c.codigo === meta.moneda);
                         if (mon) setAdelantoMonedaId(mon.id);
@@ -1929,9 +2329,9 @@ export default function Cotizaciones() {
                     className="flex-1 min-w-32 p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
                   >
                     <option value="">Método de pago</option>
-                    {METODOS_PAGO.map((m) => (
+                    {metodosPago.map((m) => (
                       <option key={m.value} value={m.value}>
-                        {m.label}
+                        {m.label} · {m.moneda}
                       </option>
                     ))}
                   </select>
@@ -1992,10 +2392,10 @@ export default function Cotizaciones() {
                     {!monedasIguales && tasaAbonoValida
                       ? ` · 1 ${monedaAdelantoSel?.codigo} = ${tasaPagoPorQuote.toLocaleString('es-ES')} ${quoteMoneda?.codigo}`
                       : ''}
-                    {adelantoMetodo ? ` · ${METODOS_PAGO.find((m) => m.value === adelantoMetodo)?.label}` : ''} — se registra como primer pago.
+                    {adelantoMetodo ? ` · ${labelMetodoPago(metodosPago, adelantoMetodo)}` : ''} — se registra como primer pago.
                   </>
                 ) : (
-                  'Sin abono inicial — la factura quedará PENDIENTE.'
+                  'Sin abono inicial.'
                 )}
               </div>
 
@@ -2128,11 +2528,19 @@ export default function Cotizaciones() {
                       tasa_cambio: selectedQuoteForPrint.tasa_cambio,
                       total_estimado: selectedQuoteForPrint.total_estimado,
                       cliente: selectedQuoteForPrint.cliente,
-                      detalles: selectedQuoteForPrint.detalles?.map((d) => ({
-                        ...d,
-                        producto_nombre: products.find((p) => p.id === d.producto_id)?.nombre ?? `Prod #${d.producto_id}`,
-                        foto: products.find((p) => p.id === d.producto_id)?.fotos?.[0]?.url ?? null,
-                      })) ?? [],
+                      detalles: selectedQuoteForPrint.detalles?.map((d) => {
+                        // INSUMO: el nombre sale del material, no del catálogo
+                        // de productos (producto_id es null en esos renglones).
+                        const prod = products.find((p) => p.id === d.producto_id);
+                        const mat = d.tipo_item === 'INSUMO'
+                          ? materiales.find((m) => m.id === d.material_id)
+                          : null;
+                        return {
+                          ...d,
+                          producto_nombre: prod?.nombre ?? mat?.nombre ?? `Prod #${d.producto_id ?? d.material_id ?? '?'}`,
+                          foto: prod?.fotos?.[0]?.url ?? null,
+                        };
+                      }) ?? [],
                     }}
                     rif={printCompanyRif}
                     direccion={printCompanyAddress}
@@ -2249,7 +2657,7 @@ export default function Cotizaciones() {
                                 min="0"
                                 value={sec.politica?.pct_gastos_seccion ?? 10}
                                 onChange={(e) => handleUpdateSeccionPolitica(secIdx, 'pct_gastos_seccion', e.target.value)}
-                                className="w-full p-1.5 border border-amber-250 bg-white rounded-lg text-xs font-mono"
+                                className="w-full p-1.5 border border-amber-200 bg-white rounded-lg text-xs font-mono"
                               />
                             </div>
                             <div>
@@ -2260,7 +2668,7 @@ export default function Cotizaciones() {
                                 min="0"
                                 value={sec.politica?.pct_trabajadores ?? 8}
                                 onChange={(e) => handleUpdateSeccionPolitica(secIdx, 'pct_trabajadores', e.target.value)}
-                                className="w-full p-1.5 border border-amber-250 bg-white rounded-lg text-xs font-mono"
+                                className="w-full p-1.5 border border-amber-200 bg-white rounded-lg text-xs font-mono"
                               />
                             </div>
                           </div>
@@ -2324,7 +2732,7 @@ export default function Cotizaciones() {
                                   <button
                                     type="button"
                                     onClick={() => handleRemoveInsumo(secIdx, elIdx)}
-                                    className="absolute top-1 right-2 text-stone-400 hover:text-red-650 text-xs"
+                                    className="absolute top-1 right-2 text-stone-400 hover:text-red-700 text-xs"
                                     title="Quitar"
                                   >
                                     ×
@@ -2424,7 +2832,7 @@ export default function Cotizaciones() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {showAddMaterialDropdown && addMaterialSeccionIndex !== null && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-2xl shadow-2xl border border-stone-150 max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-stone-200 max-w-md w-full p-4 sm:p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h4 className="font-headline font-bold text-sm text-yeikar-secondary">Buscar Material en Inventario</h4>
               <button
@@ -2440,7 +2848,7 @@ export default function Cotizaciones() {
               placeholder="Buscar madera, tela, tornillos..."
               value={addMaterialSearch}
               onChange={(e) => setAddMaterialSearch(e.target.value)}
-              className="w-full p-2 border border-stone-250 rounded-lg focus:ring-2 focus:ring-yeikar-primary text-xs"
+              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary text-xs"
               autoFocus
             />
             <div className="max-h-[220px] overflow-y-auto divide-y divide-stone-100 pr-1 text-xs">
@@ -2470,7 +2878,7 @@ export default function Cotizaciones() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {showAddCostModal && addCostSeccionIndex !== null && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-2xl shadow-2xl border border-stone-150 max-w-sm w-full p-6 space-y-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-stone-200 max-w-sm w-full p-4 sm:p-6 space-y-4">
             <div>
               <h4 className="font-headline font-bold text-sm text-yeikar-secondary">Agregar Costo de Producción</h4>
             </div>
@@ -2483,7 +2891,7 @@ export default function Cotizaciones() {
                   placeholder="Ej: PREPARADO, PINTURA"
                   value={addCostForm.nombre}
                   onChange={(e) => setAddCostForm({ ...addCostForm, nombre: e.target.value })}
-                  className="w-full p-2 border border-stone-250 rounded-lg text-xs"
+                  className="w-full p-2 border border-stone-200 rounded-lg text-xs"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -2496,7 +2904,7 @@ export default function Cotizaciones() {
                     placeholder="0.00"
                     value={addCostForm.costo_base}
                     onChange={(e) => setAddCostForm({ ...addCostForm, costo_base: e.target.value })}
-                    className="w-full p-2 border border-stone-250 rounded-lg text-xs font-mono"
+                    className="w-full p-2 border border-stone-200 rounded-lg text-xs font-mono"
                   />
                 </div>
                 <div>
@@ -2507,7 +2915,7 @@ export default function Cotizaciones() {
                     placeholder="5"
                     value={addCostForm.porcentaje}
                     onChange={(e) => setAddCostForm({ ...addCostForm, porcentaje: e.target.value })}
-                    className="w-full p-2 border border-stone-250 rounded-lg text-xs font-mono"
+                    className="w-full p-2 border border-stone-200 rounded-lg text-xs font-mono"
                   />
                 </div>
               </div>
@@ -2556,6 +2964,133 @@ export default function Cotizaciones() {
             : 'Catálogo de Modelos y Muebles'
         }
       />
+
+      {/* Modal Producto Nuevo (crear desde la cotización) */}
+      {showNuevoProductoModal && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10">
+            <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5 shrink-0">
+              <h3 className="font-headline font-black text-lg">Producto Nuevo</h3>
+              <p className="text-xs text-white/70">Se crea en el catálogo y se agrega al renglón. Puedes cotizarlo hoy con su precio; la estructura de costos se completa después.</p>
+            </div>
+            <form onSubmit={handleCrearProductoDesdeCotizacion} className="p-6 space-y-4 font-body overflow-y-auto">
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre del producto *</label>
+                <input type="text" required placeholder="Ej. MESA DE COMEDOR 6 PUESTOS" value={npForm.nombre} onChange={(e) => setNpForm((f) => ({ ...f, nombre: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase" />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Tipo de producto *</label>
+                <SearchSelect
+                  value={npForm.tipo_producto_id}
+                  onChange={(v) => setNpForm((f) => ({ ...f, tipo_producto_id: String(v) }))}
+                  options={tiposProducto.map((t) => ({ value: t.id, label: t.nombre }))}
+                  placeholder="Seleccionar tipo..."
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Ancho base (m) <span className="text-yeikar-neutral/40 font-normal">opcional</span></label>
+                  <input type="number" step="0.01" min="0" placeholder="1.60" value={npForm.ancho} onChange={(e) => setNpForm((f) => ({ ...f, ancho: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Largo base (m) <span className="text-yeikar-neutral/40 font-normal">opcional</span></label>
+                  <input type="number" step="0.01" min="0" placeholder="1.90" value={npForm.largo} onChange={(e) => setNpForm((f) => ({ ...f, largo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio estimado de venta *</label>
+                  <input type="number" min="0" step="0.01" required placeholder="Ej. 950000" value={npForm.precio} onChange={(e) => setNpForm((f) => ({ ...f, precio: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda del precio</label>
+                  <SearchSelect
+                    value={npForm.moneda_id}
+                    onChange={(v) => setNpForm((f) => ({ ...f, moneda_id: String(v) }))}
+                    options={currencies.map((c) => ({ value: c.id, label: c.codigo }))}
+                    placeholder="Moneda..."
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-yeikar-neutral/50">
+                El cotizador detecta la moneda sola: si no es COP, te pedirá la tasa del día al guardar.
+              </p>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de referencia <span className="text-yeikar-neutral/40 font-normal">(opcional · se comprime sola)</span></label>
+                <div className="flex items-center gap-3">
+                  {fotoNpPreview ? (
+                    <img src={fotoNpPreview} alt="Vista previa" className="w-16 h-16 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+                  ) : (
+                    <span className="w-16 h-16 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 text-[10px] font-bold">SIN FOTO</span>
+                  )}
+                  <div className="flex flex-col gap-2 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => npCameraRef.current?.click()}
+                      className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors"
+                    >
+                      Tomar foto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => npGalleryRef.current?.click()}
+                      className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors"
+                    >
+                      Desde galería
+                    </button>
+                  </div>
+                  <input ref={npCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleNpFoto} />
+                  <input ref={npGalleryRef} type="file" accept="image/*" className="hidden" onChange={handleNpFoto} />
+                </div>
+                {fotoNp && (
+                  <button type="button" onClick={quitarNpFoto} className="mt-1.5 text-[10px] font-bold text-red-600 hover:underline">Quitar foto</button>
+                )}
+              </div>
+              <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                <button type="button" onClick={() => setShowNuevoProductoModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
+                <button type="submit" disabled={savingNp} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingNp ? 'Creando...' : 'Crear y agregar'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Definir Precio (producto existente sin precio) */}
+      {definirPrecioProd && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10">
+            <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
+              <h3 className="font-headline font-black text-lg">Definir Precio</h3>
+              <p className="text-xs text-white/70">Le pones precio estimado de venta a este producto y el renglón se recalcula.</p>
+            </div>
+            <form onSubmit={guardarDefinirPrecio} className="p-6 space-y-4 font-body">
+              <div className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/10 rounded-xl px-4 py-3">
+                <p className="text-xs text-yeikar-neutral/50">Producto</p>
+                <p className="font-headline font-black text-yeikar-secondary text-sm mt-0.5">{definirPrecioProd.nombre}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio estimado de venta *</label>
+                  <input type="number" min="0" step="0.01" required value={dpPrecio} onChange={(e) => setDpPrecio(e.target.value)} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda</label>
+                  <SearchSelect
+                    value={dpMoneda}
+                    onChange={(v) => setDpMoneda(String(v))}
+                    options={currencies.map((c) => ({ value: c.id, label: c.codigo }))}
+                    placeholder="Moneda..."
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                <button type="button" onClick={() => setDefinirPrecioProd(null)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
+                <button type="submit" disabled={savingDp} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingDp ? 'Guardando...' : 'Guardar y recalcular'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmDeleteId !== null}

@@ -1,9 +1,9 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
 from typing import List, Optional
 from app.modules.clients.schemas import ClientResponse
 from app.modules.catalogos.schemas import MonedaResponse
-from app.modules.productos.schemas import ProductoResponse
+from app.modules.productos.schemas import ProductoResponse, MaterialResponse
 from app.modules.adjuntos.schemas import AdjuntoInfo
 
 # ------------------------------------------------------------
@@ -15,15 +15,31 @@ class DetalleVentaBase(BaseModel):
 
 class DetalleVentaCreate(DetalleVentaBase):
     venta_id: int
-    producto_id: int
+    producto_id: Optional[int] = None
+    material_id: Optional[int] = None
+    tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO)$")
     costo_unitario: Optional[float] = None
     porcentaje_ganancia: Optional[float] = None
     descuento: Optional[float] = 0.0
 
+    @model_validator(mode="after")
+    def _validate_item(self):
+        if self.tipo_item == "INSUMO":
+            if not self.material_id:
+                raise ValueError("material_id es requerido para tipo_item INSUMO")
+            if self.producto_id:
+                raise ValueError("producto_id no debe enviarse para tipo_item INSUMO")
+        else:
+            if not self.producto_id:
+                raise ValueError("producto_id es requerido para tipo_item FABRICADO/REVENTA")
+        return self
+
 class DetalleVentaResponse(DetalleVentaBase):
     id: int
     venta_id: int
-    producto_id: int
+    producto_id: Optional[int] = None
+    material_id: Optional[int] = None
+    tipo_item: str = "FABRICADO"
     costo_unitario: Optional[float] = None
     porcentaje_ganancia: Optional[float] = None
     utilidad: Optional[float] = None
@@ -31,6 +47,7 @@ class DetalleVentaResponse(DetalleVentaBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     producto: Optional[ProductoResponse] = None
+    material: Optional[MaterialResponse] = None
 
     class Config:
         from_attributes = True

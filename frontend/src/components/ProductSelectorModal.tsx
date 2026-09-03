@@ -67,17 +67,18 @@ export default function ProductSelectorModal({
     };
   }, [products]);
 
-  // Format reference base price for display
-  const getProductDisplayPrice = (p: Product) => {
+  // Format reference base price for display (incluye el código de moneda para
+  // que el usuario sepa en qué moneda está el precio mostrado).
+  const getProductDisplayPrice = (p: Product): { text: string; code: string } | null => {
     const basePrecio = Number(p.precio_venta_base ?? p.precio_costo_base ?? 0);
     if (!isFinite(basePrecio) || basePrecio <= 0) return null;
 
     const monedaExtranjera = p.moneda && p.moneda.codigo !== 'COP' ? p.moneda.codigo : null;
     if (monedaExtranjera) {
-      return formatCurrency(basePrecio, monedaExtranjera);
+      return { text: formatCurrency(basePrecio, monedaExtranjera), code: monedaExtranjera };
     }
     const divisor = selectedMonedaId === 1 ? 1 : (tasaCambio > 0 ? tasaCambio : 1);
-    return formatCurrency(basePrecio / divisor, currencyCode);
+    return { text: formatCurrency(basePrecio / divisor, currencyCode), code: currencyCode };
   };
 
   // Filter products based on search and category
@@ -122,7 +123,7 @@ export default function ProductSelectorModal({
       onClose={onClose}
       size="5xl"
       title={
-        <div className="flex items-center justify-between gap-3 w-full pr-6">
+        <div className="flex items-center justify-between gap-3 w-full pr-4 sm:pr-6">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-yeikar-primary/20 text-yeikar-neutral flex items-center justify-center border border-yeikar-primary/30">
               <Package className="w-5 h-5 text-yeikar-secondary" />
@@ -139,7 +140,7 @@ export default function ProductSelectorModal({
         </div>
       }
     >
-      <div className="flex flex-col h-full max-h-[75vh] -m-6">
+      <div className="flex flex-col h-full -m-4 sm:-m-6">
         {/* Top Control Bar: Search + Category Filters + View Mode */}
         <div className="p-5 bg-gradient-to-b from-yeikar-tertiary/60 to-white border-b border-yeikar-secondary-light/15 space-y-3.5">
           {/* Search bar & View switch */}
@@ -197,7 +198,7 @@ export default function ProductSelectorModal({
           </div>
 
           {/* Indices / Categories Horizontal Bar */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-stone-200">
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 flex items-center gap-1 shrink-0 font-headline">
               <Tag className="w-3 h-3 text-yeikar-primary" /> Filtro:
             </span>
@@ -271,25 +272,27 @@ export default function ProductSelectorModal({
               <p className="text-xs text-stone-500 max-w-sm mx-auto mt-1">
                 No hay productos que coincidan con &ldquo;{searchTerm}&rdquo; en la categoría seleccionada.
               </p>
-              {(searchTerm || selectedCategory !== 'TODOS') && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSelectedCategory('TODOS');
-                  }}
-                  className="mt-4 px-4 py-1.5 bg-white border border-stone-200 rounded-lg text-xs font-bold text-yeikar-secondary hover:bg-stone-50 transition-colors shadow-sm"
-                >
-                  Limpiar filtros
-                </button>
-              )}
+              <div className="flex items-center justify-center gap-2 mt-4">
+                {(searchTerm || selectedCategory !== 'TODOS') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setSelectedCategory('TODOS');
+                    }}
+                    className="px-4 py-2 bg-white border border-stone-200 rounded-xl text-xs font-bold text-yeikar-secondary hover:bg-stone-50 transition-colors shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yeikar-primary/60"
+                  >
+                    Limpiar filtros
+                  </button>
+                )}
+              </div>
             </div>
           ) : viewMode === 'grid' ? (
             /* Cuadrícula Visual */
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
               {filteredProducts.map((p) => {
                 const isSelected = currentSelectedIdNum === p.id;
-                const priceFormatted = getProductDisplayPrice(p);
+                const priceInfo = getProductDisplayPrice(p);
                 const firstPhoto = p.fotos && p.fotos.length > 0 ? p.fotos[0] : null;
                 const catName = p.tipo_producto?.nombre || p.categoria || 'Sin categoría';
 
@@ -373,9 +376,10 @@ export default function ProductSelectorModal({
                       <div>
                         <span className="block text-[9px] uppercase font-bold text-stone-400">
                           {p.es_reventa ? 'Precio Ref.' : 'Precio Base'}
+                          {priceInfo?.code ? ` · ${priceInfo.code}` : ''}
                         </span>
                         <span className="font-mono text-xs font-black text-yeikar-secondary">
-                          {priceFormatted || '—'}
+                          {priceInfo?.text || '—'}
                         </span>
                       </div>
 
@@ -424,7 +428,7 @@ export default function ProductSelectorModal({
                 <tbody className="divide-y divide-stone-100">
                   {filteredProducts.map((p) => {
                     const isSelected = currentSelectedIdNum === p.id;
-                    const priceFormatted = getProductDisplayPrice(p);
+                    const priceInfo = getProductDisplayPrice(p);
                     const catName = p.tipo_producto?.nombre || p.categoria || 'Sin clasificar';
 
                     return (
@@ -469,7 +473,16 @@ export default function ProductSelectorModal({
                           )}
                         </td>
                         <td className="py-3 px-4 text-right font-mono font-bold text-yeikar-secondary">
-                          {priceFormatted || '—'}
+                          {priceInfo ? (
+                            <>
+                              {priceInfo.text}
+                              <span className="block text-[9px] font-bold text-stone-400 uppercase">
+                                {priceInfo.code}
+                              </span>
+                            </>
+                          ) : (
+                            '—'
+                          )}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <button
@@ -498,9 +511,11 @@ export default function ProductSelectorModal({
 
         {/* Footer info & Dismiss */}
         <div className="p-4 bg-white border-t border-yeikar-secondary-light/15 flex items-center justify-between text-xs text-stone-500">
-          <div className="font-medium">
-            Mostrando <span className="font-bold text-yeikar-neutral">{filteredProducts.length}</span> de{' '}
-            <span className="font-bold text-yeikar-neutral">{products.length}</span> muebles en catálogo
+          <div className="flex items-center gap-3">
+            <span className="font-medium">
+              Mostrando <span className="font-bold text-yeikar-neutral">{filteredProducts.length}</span> de{' '}
+              <span className="font-bold text-yeikar-neutral">{products.length}</span> muebles en catálogo
+            </span>
           </div>
           <button
             type="button"

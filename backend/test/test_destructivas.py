@@ -140,7 +140,7 @@ def test_mass_assignment_usuario_no_escalona_rol(client, db, cleaner):
 
 def test_put_pedido_estado_ilegal_rechazado(client, cleaner):
     """PUT genérico de pedido no debe saltar la máquina de estados
-    (COTIZADO → TERMINADO sin producción)."""
+    (PRODUCCION → TERMINADO sin producción completada)."""
     cli = crear_cliente(client, cleaner)
     prod = crear_producto(client, cleaner)
     cot = crear_cotizacion(client, cleaner, cli["id"], prod["id"], 100_000)

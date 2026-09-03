@@ -9,7 +9,6 @@ def _snapshot(client: model.Client) -> dict:
     return {
         "nombre": client.nombre,
         "telefono": client.telefono,
-        "email": client.email,
         "direccion": client.direccion,
         "ciudad": client.ciudad,
     }
@@ -28,9 +27,6 @@ def get_client(
         query = filtrar_registros_propios(query, model.Client.creado_por_id, usuario)
     return query.first()
 
-def get_client_by_email(db: Session, email: str):
-    return db.query(model.Client).filter(model.Client.email == email).first()
-
 def get_clients(
     db: Session, 
     skip: int = 0, 
@@ -46,7 +42,6 @@ def get_clients(
         query = query.filter(
             or_(
                 model.Client.nombre.ilike(f"%{search}%"),
-                model.Client.email.ilike(f"%{search}%"),
                 model.Client.telefono.ilike(f"%{search}%")
             )
         )
@@ -54,12 +49,6 @@ def get_clients(
     return query.order_by(model.Client.id.desc()).offset(skip).limit(limit).all()
 
 def create_client(db: Session, client: schemas.ClientCreate, usuario: Usuario | None = None):
-    # Verificar si el email ya existe (si se proporcionó)
-    if client.email:
-        existing = get_client_by_email(db, client.email)
-        if existing:
-            raise ValueError(f"Ya existe un cliente con el email {client.email}")
-    
     datos = client.model_dump()
     if usuario is not None:
         datos["creado_por_id"] = usuario.id

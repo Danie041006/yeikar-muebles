@@ -10,6 +10,8 @@ from typing import Optional, List
 from app.modules.inventory import model, schemas
 from app.modules.productos.model import Material, Producto
 from app.modules.catalogos.model import Ubicacion
+from app.modules.proveedores.model import Proveedor
+from app.modules.clients.model import Client
 
 MONEDA_BASE_ID = 1  # COP
 
@@ -122,7 +124,8 @@ def obtener_inventario(
     Opcionalmente filtra por material y/o ubicación.
     """
     query = db.query(model.Inventario).options(
-        joinedload(model.Inventario.material),
+        joinedload(model.Inventario.material).joinedload(Material.unidad_medida),
+        joinedload(model.Inventario.material).joinedload(Material.categoria_inventario),
         joinedload(model.Inventario.ubicacion)
     )
     if material_id:
@@ -139,6 +142,11 @@ def obtener_inventario(
             ubicacion_id=inv.ubicacion_id,
             ubicacion_nombre=inv.ubicacion.nombre,
             cantidad=inv.cantidad,
+            material_largo_cm=inv.material.largo_cm,
+            material_ancho_cm=inv.material.ancho_cm,
+            material_unidad=inv.material.unidad_medida.abreviatura if inv.material.unidad_medida else None,
+            categoria_inventario_id=inv.material.categoria_inventario_id,
+            categoria_inventario_nombre=inv.material.categoria_inventario.nombre if inv.material.categoria_inventario else None,
             created_at=inv.created_at,
             updated_at=inv.updated_at
         )
@@ -163,6 +171,12 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     """
     if movimiento.cantidad <= 0:
         raise ValueError("La cantidad debe ser positiva")
+
+    # El CHECK de la BD solo conoce 'DANO' (sin Ñ): normalizamos antes de
+    # persistir para que el tipo "DAÑO" de la UI no termine en un 409 falso
+    # de "conflicto simultáneo".
+    if movimiento.tipo == "DAÑO":
+        movimiento.tipo = "DANO"
 
     # Obtener o crear el registro de inventario para ese material y ubicación.
     # FOR UPDATE bloquea la fila para que dos SALIDAS concurrentes no lean el
@@ -201,7 +215,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             material = db.query(Material).filter(Material.id == movimiento.material_id).first()
             if material:
                 material.costo_base = Decimal(str(movimiento.costo_unitario))
-    elif movimiento.tipo in ("SALIDA", "DAÑO"):
+    elif movimiento.tipo in ("SALIDA", "DAÑO", "DANO"):
         if inventario.cantidad < movimiento.cantidad:
             raise ValueError(f"Stock insuficiente. Disponible: {inventario.cantidad}")
         inventario.cantidad -= movimiento.cantidad
@@ -213,12 +227,22 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         raise ValueError(f"Tipo de movimiento inválido: {movimiento.tipo}")
 
     # Crear el registro de movimiento
+    proveedor_id = getattr(movimiento, "proveedor_id", None)
+    cliente_id = getattr(movimiento, "cliente_id", None)
+    if proveedor_id is not None and not db.query(Proveedor).filter(Proveedor.id == proveedor_id).first():
+        raise ValueError(f"El proveedor #{proveedor_id} no existe.")
+    if cliente_id is not None and not db.query(Client).filter(Client.id == cliente_id).first():
+        raise ValueError(f"El cliente #{cliente_id} no existe.")
+
     db_mov = model.MovimientoInventario(
         material_id=movimiento.material_id,
         ubicacion_id=movimiento.ubicacion_id,
         tipo=movimiento.tipo,
         cantidad=movimiento.cantidad,
         costo_unitario=movimiento.costo_unitario,
+        llevada=getattr(movimiento, "llevada", None),
+        proveedor_id=proveedor_id,
+        cliente_id=cliente_id,
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
@@ -252,6 +276,52 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
         )
+
+    # ── "La llevada" (flete/aduana): gasto aparte, misma cuenta ────────────
+    # Además del dinero de la compra, pagan el flete para que el insumo pase.
+    # Opcional: solo si la ENTRADA se pagó desde una cuenta y hay llevada > 0.
+    llevada = getattr(movimiento, "llevada", None)
+    if (
+        movimiento.tipo == "ENTRADA"
+        and getattr(movimiento, "pagado_desde_metodo_caja_id", None)
+        and llevada is not None
+        and Decimal(str(llevada)) > 0
+    ):
+        mat_ll = db.query(Material).filter(Material.id == movimiento.material_id).first()
+        _gasto_compra_contado(
+            db,
+            tipo_gasto_nombre="FLETE / LLEVADA DE INSUMO",
+            descripcion=f"Llevada (flete/aduana) de {mat_ll.nombre if mat_ll else 'insumo'} x{movimiento.cantidad}",
+            total_ref=Decimal(str(llevada)).quantize(Decimal("0.01")),
+            ref_moneda_id=MONEDA_BASE_ID,
+            metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
+            moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
+            tasa_pago=getattr(movimiento, "tasa_pago", None),
+)
+    # ── "Fiar": ENTRADA sin pagar → cuenta por pagar (compra + pasada) ─────
+    # El usuario se lleva el insumo hoy y queda debiendo al proveedor. La
+    # deuda nace solo con el flag explícito; sin él (crédito histórico) no se
+    # registra nada, igual que antes.
+    fiar = getattr(movimiento, "fiar", False)
+    if movimiento.tipo == "ENTRADA" and fiar:
+        if getattr(movimiento, "pagado_desde_metodo_caja_id", None):
+            raise ValueError("Elige entre pagar de una cuenta o fiar, no ambos.")
+        if not proveedor_id:
+            raise ValueError("Para fiar debes indicar el proveedor (proveedor_id).")
+        if movimiento.costo_unitario is None or Decimal(str(movimiento.costo_unitario)) <= 0:
+            raise ValueError("Para fiar debes indicar el costo unitario del insumo.")
+        from app.modules.cuentas_por_pagar.service import crear_cuenta_desde_entrada
+        crear_cuenta_desde_entrada(
+            db,
+            proveedor_id=proveedor_id,
+            material_nombre=material.nombre,
+            cantidad=movimiento.cantidad,
+            costo_unitario=movimiento.costo_unitario or Decimal("0.0"),
+            llevada=llevada or Decimal("0.0"),
+            fecha=datetime.utcnow().date(),
+            movimiento_id=db_mov.id,
+            usuario=usuario,
+        )
     return db_mov
 
 
@@ -263,9 +333,61 @@ def obtener_movimientos_por_material(
     """
     Retorna el historial de movimientos (kardex) de un material.
     """
-    return db.query(model.MovimientoInventario).filter(
+    movs = db.query(model.MovimientoInventario).options(
+        joinedload(model.MovimientoInventario.proveedor),
+        joinedload(model.MovimientoInventario.cliente),
+    ).filter(
         model.MovimientoInventario.material_id == material_id
     ).order_by(model.MovimientoInventario.fecha.desc()).limit(limit).all()
+    for m in movs:
+        m.proveedor_nombre = m.proveedor.nombre if m.proveedor else None
+        m.cliente_nombre = m.cliente.nombre if m.cliente else None
+    return movs
+
+
+def costo_unitario_real_material(db: Session, material_id: int) -> dict:
+    """
+    Costo real por unidad de un material = costo de compra + "la pasada"
+    (llevada/flete) prorrateada sobre las unidades de la última entrada.
+
+    La llevada se registra como monto TOTAL del flete en la entrada; para el
+    costo unitario real se reparte entre lo comprado en esa entrada:
+        pasada_unitaria = llevada / cantidad_entrada
+        costo_real       = costo_unitario + pasada_unitaria
+
+    Si el material nunca tuvo entrada con costo (o la entrada no tuvo llevada),
+    se usa `material.costo_base` como costo de compra y pasada = 0.
+    """
+    material = db.query(Material).filter(Material.id == material_id).first()
+    if not material:
+        raise ValueError("El material no existe.")
+
+    costo_compra = float(material.costo_base or 0)
+    pasada_unitaria = 0.0
+
+    ultima_entrada = db.query(model.MovimientoInventario).filter(
+        model.MovimientoInventario.material_id == material_id,
+        model.MovimientoInventario.tipo == "ENTRADA",
+        model.MovimientoInventario.costo_unitario.isnot(None),
+    ).order_by(
+        model.MovimientoInventario.fecha.desc(),
+        model.MovimientoInventario.id.desc(),
+    ).first()
+
+    if ultima_entrada is not None:
+        costo_compra = float(ultima_entrada.costo_unitario)
+        cantidad = ultima_entrada.cantidad
+        llevada = ultima_entrada.llevada
+        if llevada is not None and Decimal(str(llevada)) > 0 and cantidad and Decimal(str(cantidad)) > 0:
+            pasada_unitaria = float(Decimal(str(llevada)) / Decimal(str(cantidad)))
+
+    costo_real = round(costo_compra + pasada_unitaria, 2)
+    return {
+        "material_id": material_id,
+        "costo_compra": round(costo_compra, 2),
+        "pasada_unitaria": round(pasada_unitaria, 2),
+        "costo_real": costo_real,
+    }
 
 
 def obtener_alertas_stock(
@@ -421,7 +543,13 @@ def registrar_movimiento_producto(
         # rige desde ya para nuevas cotizaciones/pedidos.
         if movimiento.costo_unitario is not None:
             inv.costo_promedio = Decimal(str(movimiento.costo_unitario))
-    elif movimiento.tipo in ("SALIDA", "DAÑO"):
+            # El costo de referencia del producto solo lo actualiza la compra
+            # de REVENTA (su costo ES el de la última compra). Un fabricado
+            # toma su costo de la receta/producción: una entrada manual
+            # (p. ej. carga de piezas de exhibición) no debe pisarlo.
+            if producto.es_reventa:
+                producto.precio_costo_base = Decimal(str(movimiento.costo_unitario))
+    elif movimiento.tipo in ("SALIDA", "DAÑO", "DANO"):
         if inv.cantidad < movimiento.cantidad:
             raise ValueError(f"Stock insuficiente. Disponible: {inv.cantidad}")
         inv.cantidad -= movimiento.cantidad
@@ -432,12 +560,22 @@ def registrar_movimiento_producto(
     else:
         raise ValueError(f"Tipo de movimiento inválido: {movimiento.tipo}")
 
+    proveedor_id = getattr(movimiento, "proveedor_id", None)
+    cliente_id = getattr(movimiento, "cliente_id", None)
+    if proveedor_id is not None and not db.query(Proveedor).filter(Proveedor.id == proveedor_id).first():
+        raise ValueError(f"El proveedor #{proveedor_id} no existe.")
+    if cliente_id is not None and not db.query(Client).filter(Client.id == cliente_id).first():
+        raise ValueError(f"El cliente #{cliente_id} no existe.")
+
     db_mov = model.MovimientoProductoInventario(
         producto_id=movimiento.producto_id,
         ubicacion_id=movimiento.ubicacion_id,
         tipo=movimiento.tipo,
         cantidad=movimiento.cantidad,
         costo_unitario=movimiento.costo_unitario,
+        llevada=getattr(movimiento, "llevada", None),
+        proveedor_id=proveedor_id,
+        cliente_id=cliente_id,
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
@@ -470,6 +608,27 @@ def registrar_movimiento_producto(
             usuario=usuario,
         )
 
+    # ── "La llevada" (flete/aduana) de productos de reventa ───────────────
+    # Misma mecánica que la compra: gasto aparte desde la misma cuenta.
+    llevada = getattr(movimiento, "llevada", None)
+    if (
+        movimiento.tipo == "ENTRADA"
+        and movimiento.pagado_desde_metodo_caja_id
+        and llevada is not None
+        and Decimal(str(llevada)) > 0
+    ):
+        _gasto_compra_contado(
+            db,
+            tipo_gasto_nombre="FLETE / LLEVADA REVENTA",
+            descripcion=f"Llevada (flete/aduana) de reventa — {producto.nombre} x{movimiento.cantidad}",
+            total_ref=Decimal(str(llevada)).quantize(Decimal("0.01")),
+            ref_moneda_id=producto.moneda_id or 1,
+            metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
+            moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
+            tasa_pago=getattr(movimiento, "tasa_pago", None),
+            usuario=usuario,
+        )
+
     db.flush()
     db.refresh(db_mov)
     return db_mov
@@ -481,9 +640,16 @@ def obtener_movimientos_producto(
     limit: int = 100,
 ) -> List[model.MovimientoProductoInventario]:
     """Historial (kardex) de movimientos de un producto."""
-    return db.query(model.MovimientoProductoInventario).filter(
+    movs = db.query(model.MovimientoProductoInventario).options(
+        joinedload(model.MovimientoProductoInventario.proveedor),
+        joinedload(model.MovimientoProductoInventario.cliente),
+    ).filter(
         model.MovimientoProductoInventario.producto_id == producto_id
     ).order_by(model.MovimientoProductoInventario.fecha.desc()).limit(limit).all()
+    for m in movs:
+        m.proveedor_nombre = m.proveedor.nombre if m.proveedor else None
+        m.cliente_nombre = m.cliente.nombre if m.cliente else None
+    return movs
 
 
 def obtener_alertas_stock_productos(
@@ -516,3 +682,93 @@ def obtener_alertas_stock_productos(
             ))
 
     return alertas
+
+
+# =========================================================================
+# Sobrantes de láminas (retazos de materiales laminares)
+# =========================================================================
+
+def _sobrante_a_response(s: model.SobranteLamina) -> schemas.SobranteLaminaResponse:
+    return schemas.SobranteLaminaResponse(
+        id=s.id,
+        material_id=s.material_id,
+        material_nombre=s.material.nombre if s.material else None,
+        material_largo_cm=s.material.largo_cm if s.material else None,
+        material_ancho_cm=s.material.ancho_cm if s.material else None,
+        ubicacion_id=s.ubicacion_id,
+        ubicacion_nombre=s.ubicacion.nombre if s.ubicacion else None,
+        largo_cm=s.largo_cm,
+        ancho_cm=s.ancho_cm,
+        area_cm2=s.area_cm2,
+        estado=s.estado,
+        consumo_origen_id=s.consumo_origen_id,
+        consumo_origen_tipo=s.consumo_origen_tipo,
+        observaciones=s.observaciones,
+        created_at=s.created_at,
+        updated_at=s.updated_at,
+    )
+
+
+def obtener_sobrantes(
+    db: Session,
+    material_id: Optional[int] = None,
+    estado: Optional[str] = None,
+    ubicacion_id: Optional[int] = None,
+) -> List[schemas.SobranteLaminaResponse]:
+    query = db.query(model.SobranteLamina).options(
+        joinedload(model.SobranteLamina.material).joinedload(Material.unidad_medida),
+        joinedload(model.SobranteLamina.ubicacion),
+    )
+    if material_id:
+        query = query.filter(model.SobranteLamina.material_id == material_id)
+    if estado:
+        query = query.filter(model.SobranteLamina.estado == estado.upper())
+    if ubicacion_id:
+        query = query.filter(model.SobranteLamina.ubicacion_id == ubicacion_id)
+    return [_sobrante_a_response(s) for s in query.order_by(model.SobranteLamina.id.desc()).all()]
+
+
+def crear_sobrante(db: Session, datos: schemas.SobranteLaminaCreate) -> schemas.SobranteLaminaResponse:
+    material = db.query(Material).filter(Material.id == datos.material_id).first()
+    if not material:
+        raise ValueError(f"El material #{datos.material_id} no existe.")
+    s = model.SobranteLamina(
+        material_id=datos.material_id,
+        ubicacion_id=datos.ubicacion_id,
+        largo_cm=datos.largo_cm,
+        ancho_cm=datos.ancho_cm,
+        estado="DISPONIBLE",
+        observaciones=datos.observaciones or "Registro manual de sobrante",
+    )
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return _sobrante_a_response(s)
+
+
+def actualizar_sobrante(db: Session, sobrante_id: int, datos: schemas.SobranteLaminaUpdate) -> schemas.SobranteLaminaResponse:
+    s = db.query(model.SobranteLamina).filter(model.SobranteLamina.id == sobrante_id).first()
+    if not s:
+        raise ValueError("El sobrante no existe.")
+    if datos.largo_cm is not None:
+        s.largo_cm = datos.largo_cm
+    if datos.ancho_cm is not None:
+        s.ancho_cm = datos.ancho_cm
+    if datos.estado is not None:
+        s.estado = datos.estado
+    if datos.ubicacion_id is not None:
+        s.ubicacion_id = datos.ubicacion_id
+    if datos.observaciones is not None:
+        s.observaciones = datos.observaciones
+    db.commit()
+    db.refresh(s)
+    return _sobrante_a_response(s)
+
+
+def eliminar_sobrante(db: Session, sobrante_id: int) -> bool:
+    s = db.query(model.SobranteLamina).filter(model.SobranteLamina.id == sobrante_id).first()
+    if not s:
+        return False
+    db.delete(s)
+    db.commit()
+    return True

@@ -89,6 +89,33 @@ def post_movimiento_cuenta(
     return service.crear_movimiento_caja(db, esquema, usuario_id=current_user.id)
 
 
+# ------------------------------------------------------------
+# Transferencias entre cuentas
+# ------------------------------------------------------------
+@router.post("/transferencia", response_model=schemas.TransferenciaResponse, status_code=201)
+def post_transferencia(
+    esquema: schemas.TransferenciaCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    try:
+        return service.crear_transferencia(db, esquema, usuario_id=current_user.id)
+    except service.SaldoInsuficienteError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/transferencias", response_model=List[schemas.TransferenciaResponse])
+def get_transferencias(
+    fecha_desde: Optional[date] = Query(None),
+    fecha_hasta: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    return service.listar_transferencias(db, fecha_desde, fecha_hasta)
+
+
 @router.put("/movimiento/{movimiento_id}", response_model=schemas.MovimientoCajaResponse)
 def put_movimiento_cuenta(
     movimiento_id: int,

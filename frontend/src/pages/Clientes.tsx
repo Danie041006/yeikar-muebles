@@ -15,7 +15,7 @@ import {
   type DataColumn,
 } from '../components/ui';
 import { clienteService, Client, ClientCreate } from '../services/clienteService';
-import { Plus, Users, Mail, Phone, Pencil, Trash2, MapPin } from 'lucide-react';
+import { Plus, Users, Phone, Pencil, Trash2, MapPin } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 export default function Clientes() {
@@ -38,7 +38,6 @@ export default function Clientes() {
     nombre: '',
     cedula: '',
     telefono: '',
-    email: '',
     direccion: '',
     ciudad: '',
     estado: '',
@@ -78,7 +77,6 @@ export default function Clientes() {
       nombre: '',
       cedula: '',
       telefono: '',
-      email: '',
       direccion: '',
       ciudad: '',
       estado: '',
@@ -93,7 +91,6 @@ export default function Clientes() {
       nombre: client.nombre,
       cedula: client.cedula || '',
       telefono: client.telefono || '',
-      email: client.email || '',
       direccion: client.direccion || '',
       ciudad: client.ciudad || '',
       estado: client.estado || '',
@@ -119,7 +116,6 @@ export default function Clientes() {
       nombre: formData.nombre.trim(),
       cedula: formData.cedula?.trim() || null,
       telefono: formData.telefono.trim(),
-      email: formData.email?.trim() || null,
       direccion: formData.direccion?.trim() || null,
       ciudad: formData.ciudad?.trim() || null,
       estado: formData.estado?.trim() || null,
@@ -192,12 +188,6 @@ export default function Clientes() {
       header: 'Contacto',
       render: (c) => (
         <div className="space-y-1.5">
-          {c.email && (
-            <div className="flex items-center gap-2 text-slate-600">
-              <Mail className="w-3.5 h-3.5 text-amber-800 shrink-0" />
-              <span className="text-xs">{c.email}</span>
-            </div>
-          )}
           {c.telefono && (
             <div className="flex items-center gap-2 text-slate-600">
               <Phone className="w-3.5 h-3.5 text-amber-800 shrink-0" />
@@ -262,7 +252,7 @@ export default function Clientes() {
         <SearchInput
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar por nombre, email o teléfono..."
+          placeholder="Buscar por nombre o teléfono..."
           className="w-full sm:w-96"
         />
       </div>
@@ -369,15 +359,6 @@ export default function Clientes() {
               />
             </Field>
           </div>
-
-          <Field label="Correo Electrónico">
-            <Input
-              type="email"
-              name="email"
-              value={formData.email ?? ''}
-              onChange={handleInputChange}
-            />
-          </Field>
 
           <Field label="Dirección">
             <Input

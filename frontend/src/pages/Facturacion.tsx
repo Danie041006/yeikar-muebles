@@ -328,6 +328,11 @@ function ModalEmitirFactura({
 }
 
 // ─── Modal: Detalle de factura + PDF ──────────────────────────────────────────
+// Nombre visible de una línea facturada: la descripción copiada del pedido
+// cubre insumos (nombre del material); los fallbacks distinguen insumo/producto.
+const nombreLineaFactura = (d: DetalleFactura): string =>
+  d.descripcion ?? d.producto?.nombre ?? (d.material_id ? `Insumo #${d.material_id}` : `Producto #${d.producto_id ?? '?'}`);
+
 function ModalDetalleFactura({
   facturaId,
   onClose,
@@ -442,7 +447,7 @@ function ModalDetalleFactura({
             <Spinner />
           ) : (
             <>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-3">
                 <div className="bg-yeikar-tertiary/20 rounded-xl p-3 text-center">
                   <p className="text-xs text-yeikar-neutral/50 font-mono mb-1">Total USD</p>
                   <p className="font-headline font-bold text-yeikar-secondary">${fmtEs(Number(factura.total_usd))}</p>
@@ -471,7 +476,7 @@ function ModalDetalleFactura({
                 <div className="space-y-2">
                   {factura.detalles.map((d: DetalleFactura) => (
                     <div key={d.id} className="flex justify-between items-center text-sm bg-yeikar-tertiary/10 rounded-lg px-3 py-2">
-                      <span className="font-medium text-yeikar-secondary">{d.descripcion ?? d.producto?.nombre ?? `Producto #${d.producto_id}`}</span>
+                      <span className="font-medium text-yeikar-secondary">{nombreLineaFactura(d)}</span>
                       <span className="font-mono text-yeikar-neutral/70">
                         {d.cantidad} × ${Number(d.precio_usd).toLocaleString('es-ES')} USD
                         <span className="ml-2 text-[10px] font-bold text-yeikar-neutral/40">
@@ -499,7 +504,7 @@ function ModalDetalleFactura({
                   tasaBs={tasa}
                   lineas={factura.detalles.map((d) => ({
                     key: d.id,
-                    descripcion: d.descripcion ?? d.producto?.nombre ?? `Producto #${d.producto_id}`,
+                    descripcion: nombreLineaFactura(d),
                     foto: d.producto?.fotos?.[0]?.url ?? null,
                     cantidad: Number(d.cantidad),
                     precioBs: Number(d.precio_usd) * tasa,
@@ -660,7 +665,7 @@ export default function Facturacion() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black font-headline text-yeikar-neutral tracking-tight">Facturación</h1>
+          <h1 className="text-2xl sm:text-3xl font-black font-headline text-yeikar-neutral tracking-tight">Facturación</h1>
           <p className="text-yeikar-neutral/60 mt-1 text-sm">
             Emite facturas fiscales de pedidos, con el monto en USD que decidas por producto.
           </p>

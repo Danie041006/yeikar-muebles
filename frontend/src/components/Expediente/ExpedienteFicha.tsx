@@ -4,6 +4,22 @@ import { accionVerbo } from '../../utils/auditoria';
 import BadgeEstado from '../BadgeEstado';
 import AdjuntoImagen from '../AdjuntoImagen';
 import DocumentoCotizacion from './DocumentoCotizacion';
+import DocumentoFactura from './DocumentoFactura';
+import DocumentoGuiaDespacho from './DocumentoGuiaDespacho';
+import VisorDocumento from './VisorDocumento';
+import {
+  FileText,
+  ShoppingCart,
+  Hammer,
+  DollarSign,
+  Receipt,
+  Truck,
+  ShieldCheck,
+  TrendingDown,
+  Phone,
+  MapPin,
+  Navigation,
+} from 'lucide-react';
 import {
   AuditoriaExp,
   ConsumoExp,
@@ -67,13 +83,13 @@ const tablaTd = 'px-3 py-1.5 text-xs font-mono text-yeikar-secondary whitespace-
 function SeccionCotizacion({ cot }: { cot?: CotizacionExp | null }) {
   if (!cot) {
     return (
-      <CardSeccion titulo="Cotización" icono={<span>📋</span>}>
+      <CardSeccion titulo="Cotización" icono={<FileText className="w-4 h-4 text-white" />}>
         <p className="text-xs text-yeikar-neutral/50 italic">Sin cotización vinculada.</p>
       </CardSeccion>
     );
   }
   return (
-    <CardSeccion titulo={`Cotización #${cot.id}`} icono={<span>📋</span>} estado={cot.estado} dominio="cotizacion">
+    <CardSeccion titulo={`Cotización #${cot.id}`} icono={<FileText className="w-4 h-4 text-white" />} estado={cot.estado} dominio="cotizacion">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <Fila k="Fecha" v={fmtFecha(cot.fecha)} />
         <Fila k="Registrada por" v={cot.creado_por} />
@@ -118,7 +134,7 @@ function SeccionPedido({ exp }: { exp: Expediente }) {
   const ped = exp.pedido;
   if (!ped) return null;
   return (
-    <CardSeccion titulo={`Pedido #${ped.id}`} icono={<span>🛒</span>} estado={ped.estado} dominio="pedido">
+    <CardSeccion titulo={`Pedido #${ped.id}`} icono={<ShoppingCart className="w-4 h-4 text-white" />} estado={ped.estado} dominio="pedido">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <Fila k="Fecha" v={fmtFecha(ped.fecha)} />
         <Fila k="Entregado por" v={ped.creado_por} />
@@ -240,13 +256,13 @@ function SeccionProduccion({ detalles }: { detalles: Expediente['detalles_pedido
   const conProduccion = detalles.filter((d) => d.produccion);
   if (conProduccion.length === 0) {
     return (
-      <CardSeccion titulo="Producción" icono={<span>🔨</span>}>
+      <CardSeccion titulo="Producción" icono={<Hammer className="w-4 h-4 text-white" />}>
         <p className="text-xs text-yeikar-neutral/50 italic">Sin órdenes de producción para este pedido.</p>
       </CardSeccion>
     );
   }
   return (
-    <CardSeccion titulo="Producción" icono={<span>🔨</span>}>
+    <CardSeccion titulo="Producción" icono={<Hammer className="w-4 h-4 text-white" />}>
       <div className="space-y-6">
         {conProduccion.map((d) => {
           const p = d.produccion!;
@@ -327,14 +343,14 @@ function PagoRow({ pago }: { pago: PagoExp }) {
 function SeccionVenta({ venta }: { venta?: VentaExp | null }) {
   if (!venta) {
     return (
-      <CardSeccion titulo="Venta y cobros" icono={<span>💰</span>}>
+      <CardSeccion titulo="Venta y cobros" icono={<DollarSign className="w-4 h-4 text-white" />}>
         <p className="text-xs text-yeikar-neutral/50 italic">Este pedido aún no tiene venta/factura de cobro.</p>
       </CardSeccion>
     );
   }
   const pct = venta.total > 0 ? Math.min(100, (venta.total_pagado / venta.total) * 100) : 0;
   return (
-    <CardSeccion titulo={`Venta #${venta.id} y cobros`} icono={<span>💰</span>} estado={venta.estado} dominio="venta">
+    <CardSeccion titulo={`Venta #${venta.id} y cobros`} icono={<DollarSign className="w-4 h-4 text-white" />} estado={venta.estado} dominio="venta">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <Fila k="Total" v={dinero(venta.total, venta.moneda)} mono />
         <Fila k="Pagado" v={dinero(venta.total_pagado, venta.moneda)} mono />
@@ -363,7 +379,7 @@ function SeccionVenta({ venta }: { venta?: VentaExp | null }) {
 function SeccionGastos({ gastos }: { gastos: GastoExp[] }) {
   const total = gastos.reduce((acc, g) => acc + Number(g.monto_en_moneda_base || 0), 0);
   return (
-    <CardSeccion titulo={`Egresos del pedido (${gastos.length})`} icono={<span>📤</span>}>
+    <CardSeccion titulo={`Egresos del pedido (${gastos.length})`} icono={<TrendingDown className="w-4 h-4 text-white" />}>
       {gastos.length === 0 ? (
         <p className="text-xs text-yeikar-neutral/50 italic">Sin egresos registrados para este pedido.</p>
       ) : (
@@ -402,28 +418,35 @@ function SeccionGastos({ gastos }: { gastos: GastoExp[] }) {
 // ─────────────────────────────────────────────────────────────────────────
 // Facturas fiscales
 // ─────────────────────────────────────────────────────────────────────────
-function SeccionFacturas({ facturas, entrada }: { facturas: FacturaExp[]; entrada?: Expediente['factura_entrada'] }) {
+function SeccionFacturas({ facturas, cliente, entrada }: { facturas: FacturaExp[]; cliente?: Expediente['cliente']; entrada?: Expediente['factura_entrada'] }) {
   const lista = entrada ? facturas.filter((f) => f.id === entrada.id) : facturas;
-  return (
-    <CardSeccion titulo={`Facturas fiscales (${facturas.length})`} icono={<span>🧾</span>}>
-      {facturas.length === 0 ? (
+  if (facturas.length === 0) {
+    return (
+      <CardSeccion titulo="Facturas fiscales" icono={<Receipt className="w-4 h-4 text-white" />}>
         <p className="text-xs text-yeikar-neutral/50 italic">Sin facturas fiscales emitidas.</p>
-      ) : (
-        <div className="space-y-2">
-          {(lista.length ? lista : facturas).map((f) => (
-            <div key={f.id} className="rounded-xl border border-yeikar-secondary-light/15 p-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
+      </CardSeccion>
+    );
+  }
+  return (
+    <CardSeccion titulo={`Facturas fiscales (${facturas.length})`} icono={<Receipt className="w-4 h-4 text-white" />}>
+      <div className="space-y-4">
+        {(lista.length ? lista : facturas).map((f) => (
+          <div key={f.id}>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+              <div className="flex items-center gap-2">
                 <p className="font-headline font-bold text-sm text-yeikar-secondary">Factura #{f.id}</p>
-                <p className="text-[11px] text-yeikar-neutral/55 font-mono">
-                  {fmtFecha(f.fecha_emision)} · ${f.total_usd} USD · {f.total_bs.toLocaleString('es-VE')} Bs
-                  {f.tasa_usd_ves ? ` · 1 USD = ${f.tasa_usd_ves} Bs` : ''} · emitida por {f.creado_por || '—'}
-                </p>
+                <BadgeEstado dominio="factura" estado={f.estado} />
               </div>
-              <BadgeEstado dominio="factura" estado={f.estado} />
+              <p className="text-[11px] text-yeikar-neutral/55 font-mono">
+                {fmtFecha(f.fecha_emision)} · {f.creado_por || '—'}
+              </p>
             </div>
-          ))}
-        </div>
-      )}
+            <VisorDocumento titulo={`Factura #${f.id}`} documentoId={`factura-${f.id}`}>
+              <DocumentoFactura factura={f} cliente={cliente} />
+            </VisorDocumento>
+          </div>
+        ))}
+      </div>
     </CardSeccion>
   );
 }
@@ -431,35 +454,54 @@ function SeccionFacturas({ facturas, entrada }: { facturas: FacturaExp[]; entrad
 // ─────────────────────────────────────────────────────────────────────────
 // Despacho
 // ─────────────────────────────────────────────────────────────────────────
-function SeccionEnvio({ envio, entrada }: { envio?: EnvioExp | null; entrada?: Expediente['envio_entrada'] }) {
+function SeccionEnvio({ envio, cliente, detalles_pedido, venta, entrada }: {
+  envio?: EnvioExp | null;
+  cliente?: Expediente['cliente'];
+  detalles_pedido?: Expediente['detalles_pedido'];
+  venta?: Expediente['venta'];
+  entrada?: Expediente['envio_entrada'];
+}) {
   const e = envio || (entrada ? { ...entrada, id: entrada.id, estado: entrada.estado } : null);
   if (!e) {
     return (
-      <CardSeccion titulo="Despacho" icono={<span>🚚</span>}>
+      <CardSeccion titulo="Despacho" icono={<Truck className="w-4 h-4 text-white" />}>
         <p className="text-xs text-yeikar-neutral/50 italic">Este pedido aún no tiene despacho asignado.</p>
       </CardSeccion>
     );
   }
   return (
-    <CardSeccion titulo={`Despacho${e.guia_despacho ? ` · Guía ${e.guia_despacho}` : ''}`} icono={<span>🚚</span>} estado={e.estado} dominio="envio">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <CardSeccion titulo={`Despacho${e.guia_despacho ? ` · Guía ${e.guia_despacho}` : ''}`} icono={<Truck className="w-4 h-4 text-white" />} estado={e.estado} dominio="envio">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <Fila k="Chofer" v={e.chofer} />
         <Fila k="Asignado por" v={e.asignado_por} />
         <Fila k="Salida" v={fmtFechaHora(e.fecha_salida)} />
         <Fila k="Entrega" v={fmtFechaHora(e.fecha_entrega)} />
       </div>
       {e.direccion_entrega && (
-        <p className="mt-2 text-xs text-yeikar-neutral/60 bg-yeikar-tertiary/30 rounded-lg px-3 py-2">
-          📍 {e.direccion_entrega}
+        <p className="mb-4 text-xs text-yeikar-neutral/60 bg-yeikar-tertiary/30 rounded-lg px-3 py-2 flex items-center gap-1.5">
+          <MapPin className="w-3.5 h-3.5 text-yeikar-secondary shrink-0" />
+          {e.direccion_entrega}
         </p>
       )}
       {e.ubicaciones && e.ubicaciones.length > 0 && (
-        <p className="mt-2 text-[11px] text-yeikar-neutral/50 font-mono">
-          🛰 {e.ubicaciones.length} actualizaciones de ubicación registradas durante el recorrido.
+        <p className="mb-4 text-[11px] text-yeikar-neutral/50 font-mono flex items-center gap-1.5">
+          <Navigation className="w-3.5 h-3.5 text-yeikar-secondary shrink-0" />
+          {e.ubicaciones.length} actualizaciones de ubicación registradas durante el recorrido.
         </p>
       )}
       {e.observaciones && (
-        <p className="mt-2 text-[11px] text-yeikar-neutral/55 italic">{e.observaciones}</p>
+        <p className="mb-4 text-[11px] text-yeikar-neutral/55 italic">{e.observaciones}</p>
+      )}
+      {/* Documento de la Guía de Despacho */}
+      {envio && envio.guia_despacho && (
+        <VisorDocumento titulo={`Guía de Despacho #${envio.guia_despacho || envio.id}`} documentoId={`guia-${envio.id}`}>
+          <DocumentoGuiaDespacho
+            envio={envio}
+            cliente={cliente}
+            detalles_pedido={detalles_pedido}
+            venta={venta}
+          />
+        </VisorDocumento>
       )}
     </CardSeccion>
   );
@@ -482,7 +524,7 @@ function SeccionAuditoria({ eventos }: { eventos: AuditoriaExp[] }) {
     factura: 'Factura',
   };
   return (
-    <CardSeccion titulo={`Auditoría (${eventos.length} eventos)`} icono={<span>🕵️</span>}>
+    <CardSeccion titulo={`Auditoría (${eventos.length} eventos)`} icono={<ShieldCheck className="w-4 h-4 text-white" />}>
       <ol className="space-y-2">
         {eventos.map((ev, i) => (
           <li key={i} className="flex gap-2 text-[11px]">
@@ -506,92 +548,147 @@ function SeccionAuditoria({ eventos }: { eventos: AuditoriaExp[] }) {
 // ─────────────────────────────────────────────────────────────────────────
 // Ficha completa
 // ─────────────────────────────────────────────────────────────────────────
-export default function ExpedienteFicha({ ficha }: { ficha: Expediente }) {
+export default function ExpedienteFicha({
+  ficha,
+  modoLibro = 'todos',
+}: {
+  ficha: Expediente;
+  modoLibro?: 'cotizaciones' | 'pedidos' | 'facturas' | 'envios' | 'clientes' | 'todos';
+}) {
   const cliente = ficha.cliente;
 
   const rif = localStorage.getItem('print_company_rif') || 'J-50146039-3';
   const direccion = localStorage.getItem('print_company_address') || 'AV. INTERCOMUNAL CON CALLE 16 LOCAL Nro 15-205, BARRIO SIMÓN BOLÍVAR, UREÑA, TÁCHIRA';
-  const telefono = localStorage.getItem('print_company_phone') || '+58 412-1234567';
+  const telefono = localStorage.getItem('print_company_phone') || '+58 414-7221234';
 
   return (
-    <div className="space-y-4">
-      {/* Encabezado del cliente */}
-      <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light rounded-2xl p-5 text-white shadow-sm">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-white/50">Expediente</p>
-        <h2 className="font-headline font-black text-xl mt-0.5">{cliente?.nombre || 'Cliente'}</h2>
+    <div className="space-y-5">
+      {/* Resumen de cabecera */}
+      <div className="bg-gradient-to-r from-yeikar-secondary via-yeikar-secondary-light to-yeikar-neutral rounded-2xl p-5 text-white shadow-sm">
+        <p className="font-mono text-[10px] uppercase tracking-widest text-white/50">
+          {modoLibro === 'cotizaciones'
+            ? 'Libro de Cotizaciones'
+            : modoLibro === 'pedidos'
+            ? 'Libro de Órdenes de Pedido'
+            : modoLibro === 'facturas'
+            ? 'Libro de Facturas'
+            : modoLibro === 'envios'
+            ? 'Libro de Guías de Despacho'
+            : 'Ficha de Expediente'}
+        </p>
+        <h2 className="font-headline font-black text-xl mt-0.5">{cliente?.nombre || 'Cliente sin nombre'}</h2>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-white/70 font-mono">
           {cliente?.cedula && <span>C.I.: {cliente.cedula}</span>}
           {cliente?.telefono && <span>📞 {cliente.telefono}</span>}
           {cliente?.ciudad && <span>📍 {cliente.ciudad}</span>}
-          {ficha.cotizacion && <span>Cotización #{ficha.cotizacion.id}</span>}
-          {ficha.pedido && <span>Pedido #{ficha.pedido.id}</span>}
-          {ficha.venta && <span>Venta #{ficha.venta.id}</span>}
-          {ficha.envio && <span>Envío #{ficha.envio.id}</span>}
+          {ficha.cotizacion && modoLibro === 'cotizaciones' && <span>Cotización #{ficha.cotizacion.id}</span>}
+          {ficha.pedido && modoLibro === 'pedidos' && <span>Pedido #{ficha.pedido.id}</span>}
+          {ficha.envio && modoLibro === 'envios' && <span>Envío #{ficha.envio.id}</span>}
         </div>
       </div>
 
-      {ficha.cotizacion && (
-        <SeccionCotizacion cot={ficha.cotizacion} />
+      {/* Modo Libro Cotizaciones */}
+      {modoLibro === 'cotizaciones' && (
+        <>
+          {ficha.cotizacion && <SeccionCotizacion cot={ficha.cotizacion} />}
+          {ficha.cotizacion && (
+            <VisorDocumento titulo={`Cotización #${ficha.cotizacion.id}`} documentoId={`cotizacion-${ficha.cotizacion.id}`}>
+              <DocumentoCotizacion
+                className="min-w-[816px]"
+                cotizacion={{
+                  id: ficha.cotizacion.id,
+                  fecha: ficha.cotizacion.fecha,
+                  moneda_codigo: ficha.cotizacion.moneda,
+                  tasa_cambio: ficha.cotizacion.tasa_cambio,
+                  total_estimado: ficha.cotizacion.total_estimado,
+                  cliente,
+                  detalles: ficha.cotizacion.detalles.map((d) => ({
+                    producto_id: d.producto_id,
+                    material_id: d.material_id,
+                    tipo_item: d.tipo_item,
+                    producto_nombre: d.producto_nombre,
+                    cantidad: d.cantidad,
+                    precio: d.precio,
+                    ancho: d.dimensiones?.ancho,
+                    largo: d.dimensiones?.largo,
+                    observaciones: d.observaciones,
+                    foto: d.fotos?.[0]?.url ?? null,
+                  })),
+                }}
+                rif={rif}
+                direccion={direccion}
+                telefono={telefono}
+              />
+            </VisorDocumento>
+          )}
+        </>
       )}
 
-      {/* Documento de la cotización visible de una (solo lectura, sin descarga) */}
-      {ficha.cotizacion && (
-        <div className="bg-stone-100 border border-yeikar-secondary-light/10 rounded-2xl p-4 overflow-x-auto">
-          <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-yeikar-neutral/45 mb-3 flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-            </svg>
-            Documento tal como se imprime
-            <span className="text-yeikar-neutral/35 font-normal">· solo lectura</span>
-          </p>
-          <DocumentoCotizacion
-            className="min-w-[816px]"
-            cotizacion={{
-              id: ficha.cotizacion.id,
-              fecha: ficha.cotizacion.fecha,
-              moneda_codigo: ficha.cotizacion.moneda,
-              tasa_cambio: ficha.cotizacion.tasa_cambio,
-              total_estimado: ficha.cotizacion.total_estimado,
-              cliente,
-              detalles: ficha.cotizacion.detalles.map((d) => ({
-                producto_id: d.producto_id,
-                producto_nombre: d.producto_nombre,
-                cantidad: d.cantidad,
-                precio: d.precio,
-                ancho: d.dimensiones?.ancho,
-                largo: d.dimensiones?.largo,
-                observaciones: d.observaciones,
-                foto: d.fotos?.[0]?.url ?? null,
-              })),
-            }}
-            rif={rif}
-            direccion={direccion}
-            telefono={telefono}
-            venta={ficha.venta ? {
-              total_pagado: ficha.venta.total_pagado,
-              saldo_pendiente: ficha.venta.saldo_pendiente,
-              pagos: ficha.venta.pagos.map((p) => ({
-                id: p.id,
-                fecha: p.fecha,
-                metodo_pago: p.metodo_pago,
-                referencia: p.referencia,
-                monto: p.monto,
-                moneda: { codigo: p.moneda, simbolo: p.moneda === 'VES' ? 'Bs' : p.moneda === 'EUR' ? '€' : '$' },
-                monto_en_moneda_base: p.monto_en_moneda_base,
-                tasa_cambio: p.tasa_cambio,
-              })),
-            } : undefined}
-          />
-        </div>
+      {/* Modo Libro Pedidos */}
+      {modoLibro === 'pedidos' && (
+        <>
+          <SeccionPedido exp={ficha} />
+          <SeccionProduccion detalles={ficha.detalles_pedido} />
+        </>
       )}
-      <SeccionPedido exp={ficha} />
-      <SeccionProduccion detalles={ficha.detalles_pedido} />
-      <SeccionVenta venta={ficha.venta} />
-      <SeccionGastos gastos={ficha.gastos} />
-      <SeccionFacturas facturas={ficha.facturas} entrada={ficha.factura_entrada} />
-      <SeccionEnvio envio={ficha.envio} entrada={ficha.envio_entrada} />
-      <SeccionAuditoria eventos={ficha.auditoria} />
+
+      {/* Modo Libro Facturas */}
+      {modoLibro === 'facturas' && (
+        <SeccionFacturas facturas={ficha.facturas} cliente={cliente} entrada={ficha.factura_entrada} />
+      )}
+
+      {/* Modo Libro Envíos */}
+      {modoLibro === 'envios' && (
+        <SeccionEnvio envio={ficha.envio} cliente={cliente} detalles_pedido={ficha.detalles_pedido} venta={ficha.venta} entrada={ficha.envio_entrada} />
+      )}
+
+      {/* Modo Todos: expediente completo multi-etapa */}
+      {modoLibro === 'todos' && (
+        <>
+          {ficha.cotizacion && <SeccionCotizacion cot={ficha.cotizacion} />}
+          {ficha.cotizacion && (
+            <div className="bg-stone-100 border border-yeikar-secondary-light/10 rounded-2xl p-4 overflow-x-auto">
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-yeikar-neutral/45 mb-3 flex items-center gap-2">
+                Documento Cotización
+                <span className="text-yeikar-neutral/35 font-normal">· solo lectura</span>
+              </p>
+              <DocumentoCotizacion
+                className="min-w-[816px]"
+                cotizacion={{
+                  id: ficha.cotizacion.id,
+                  fecha: ficha.cotizacion.fecha,
+                  moneda_codigo: ficha.cotizacion.moneda,
+                  tasa_cambio: ficha.cotizacion.tasa_cambio,
+                  total_estimado: ficha.cotizacion.total_estimado,
+                  cliente,
+                  detalles: ficha.cotizacion.detalles.map((d) => ({
+                    producto_id: d.producto_id,
+                    material_id: d.material_id,
+                    tipo_item: d.tipo_item,
+                    producto_nombre: d.producto_nombre,
+                    cantidad: d.cantidad,
+                    precio: d.precio,
+                    ancho: d.dimensiones?.ancho,
+                    largo: d.dimensiones?.largo,
+                    observaciones: d.observaciones,
+                    foto: d.fotos?.[0]?.url ?? null,
+                  })),
+                }}
+                rif={rif}
+                direccion={direccion}
+                telefono={telefono}
+              />
+            </div>
+          )}
+          <SeccionPedido exp={ficha} />
+          <SeccionProduccion detalles={ficha.detalles_pedido} />
+          <SeccionVenta venta={ficha.venta} />
+          <SeccionGastos gastos={ficha.gastos} />
+          <SeccionFacturas facturas={ficha.facturas} cliente={cliente} entrada={ficha.factura_entrada} />
+          <SeccionEnvio envio={ficha.envio} cliente={cliente} detalles_pedido={ficha.detalles_pedido} venta={ficha.venta} entrada={ficha.envio_entrada} />
+          <SeccionAuditoria eventos={ficha.auditoria} />
+        </>
+      )}
     </div>
   );
 }

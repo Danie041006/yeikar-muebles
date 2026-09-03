@@ -9,6 +9,7 @@ from app.modules.productos.model import Producto
 from app.modules.sales.model import Pago
 from app.modules.gastos.model import Gasto
 from app.modules.purchases.model import Compra
+from app.modules.production.model import ProductoCrudoInventario
 
 try:  # Soporte opcional para HEIC (fotos de iPhone). Si no está instalado, se
     # rechaza el formato con un mensaje claro.
@@ -31,17 +32,18 @@ MAX_RAW_BYTES = 15 * 1024 * 1024  # 15 MB crudos por subida
 #    que el texto se lea nítido sin que el archivo pese.
 _CONFIG_IMAGEN = {
     "PRODUCTO": {"formato": "WEBP", "mime": "image/webp", "max_lado": 1024, "calidad": 80},
+    "CRUDO": {"formato": "WEBP", "mime": "image/webp", "max_lado": 1024, "calidad": 80},
     "PAGO": {"formato": "JPEG", "mime": "image/jpeg", "max_lado": 2000, "calidad": 85},
     "GASTO": {"formato": "JPEG", "mime": "image/jpeg", "max_lado": 2000, "calidad": 85},
     "COMPRA": {"formato": "JPEG", "mime": "image/jpeg", "max_lado": 2000, "calidad": 85},
 }
 
 # Entidades que aceptan adjuntos (para validar entidad_tipo).
-ENTIDADES_VALIDAS = ("PRODUCTO", "PAGO", "GASTO", "COMPRA")
+ENTIDADES_VALIDAS = ("PRODUCTO", "CRUDO", "PAGO", "GASTO", "COMPRA")
 
 # Tipos que pueden servirse públicamente (fotos de catálogo que salen en el PDF
 # de la cotización). Los comprobantes NUNCA se exponen sin autenticación.
-TIPOS_PUBLICOS = ("PRODUCTO",)
+TIPOS_PUBLICOS = ("PRODUCTO", "CRUDO")
 
 
 def procesar_imagen(contenido: bytes, entidad_tipo: str):
@@ -76,6 +78,8 @@ def validar_entidad(db: Session, entidad_tipo: str, entidad_id: int) -> None:
         raise HTTPException(status_code=400, detail=f"Tipo de entidad inválido: {entidad_tipo}")
     if entidad_tipo == "PRODUCTO":
         existe = db.query(Producto).filter_by(id=entidad_id).first()
+    elif entidad_tipo == "CRUDO":
+        existe = db.query(ProductoCrudoInventario).filter_by(id=entidad_id).first()
     elif entidad_tipo == "PAGO":
         existe = db.query(Pago).filter_by(id=entidad_id).first()
     elif entidad_tipo == "GASTO":
@@ -133,6 +137,30 @@ def adjuntos_info(db: Session, entidad_tipo: str, entidad_id: int) -> list[Adjun
     """Información de los adjuntos de una entidad (sin los bytes)."""
     publico = entidad_tipo in TIPOS_PUBLICOS
     return [_info(a, publico) for a in listar_adjuntos(db, entidad_tipo, entidad_id)]
+
+
+def adjuntos_info_batch(
+    db: Session, entidad_tipo: str, entidad_ids: list[int]
+) -> dict[int, list[AdjuntoInfo]]:
+    """Información de adjuntos de MUCHAS entidades en UNA sola query (mismo
+    orden que adjuntos_info: id descendente). Evita el N+1 al serializar
+    listados (ej. fotos de cada producto en GET /producto/)."""
+    if not entidad_ids:
+        return {}
+    publico = entidad_tipo in TIPOS_PUBLICOS
+    filas = (
+        db.query(model.Adjunto)
+        .filter(
+            model.Adjunto.entidad_tipo == entidad_tipo,
+            model.Adjunto.entidad_id.in_(entidad_ids),
+        )
+        .order_by(model.Adjunto.id.desc())
+        .all()
+    )
+    por_entidad: dict[int, list[AdjuntoInfo]] = {}
+    for a in filas:
+        por_entidad.setdefault(a.entidad_id, []).append(_info(a, publico))
+    return por_entidad
 
 
 def obtener_adjunto(db: Session, id_adjunto: int) -> model.Adjunto | None:

@@ -122,10 +122,10 @@ export default function ResponsiveDataTable<T>({
                 <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-4">
                   <div className="min-w-0">
                     {primary && (
-                      <div className="truncate font-headline font-bold text-yeikar-secondary">{primary.render(row)}</div>
+                      <div className="break-words font-headline font-bold text-yeikar-secondary">{primary.render(row)}</div>
                     )}
                     {secondary && (
-                      <div className="mt-0.5 truncate text-xs text-yeikar-neutral/55">{secondary.render(row)}</div>
+                      <div className="mt-0.5 break-words text-xs text-yeikar-neutral/55">{secondary.render(row)}</div>
                     )}
                   </div>
                   {cardBadge && <div className="shrink-0">{cardBadge(row)}</div>}

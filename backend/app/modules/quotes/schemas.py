@@ -1,11 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
 from typing import Optional, List, Any
 from app.modules.clients.schemas import ClientResponse
 from app.modules.catalogos.schemas import MonedaResponse
+from app.modules.productos.schemas import MaterialResponse
 
 class DetalleCotizacionBase(BaseModel):
-    producto_id: int
+    producto_id: Optional[int] = None
+    material_id: Optional[int] = None
+    tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO)$")
     cantidad: float = Field(gt=0)
     precio: float = Field(ge=0)
     alto: Optional[float] = Field(None, ge=0)
@@ -19,11 +22,26 @@ class DetalleCotizacionBase(BaseModel):
     receta_personalizada: Optional[Any] = None
 
 class DetalleCotizacionCreate(DetalleCotizacionBase):
-    pass
+    @model_validator(mode="after")
+    def _validate_item(self):
+        # La validación de integridad vive SOLO en el Create: el Response
+        # también debe poder serializar cotizaciones 100% personalizadas
+        # (producto_id NULL, p. ej. guardadas desde el Cotizador IA sin
+        # producto base), que la BD sí permite.
+        if self.tipo_item == "INSUMO":
+            if not self.material_id:
+                raise ValueError("material_id es requerido para tipo_item INSUMO")
+            if self.producto_id:
+                raise ValueError("producto_id no debe enviarse para tipo_item INSUMO")
+        else:
+            if not self.producto_id:
+                raise ValueError("producto_id es requerido para tipo_item FABRICADO/REVENTA")
+        return self
 
 class DetalleCotizacionResponse(DetalleCotizacionBase):
     id: int
     cotizacion_id: int
+    material: Optional[MaterialResponse] = None
 
     class Config:
         from_attributes = True
@@ -62,6 +80,11 @@ class CotizacionResponse(CotizacionBase):
     cliente: Optional[ClientResponse] = None
     moneda: Optional[MonedaResponse] = None
     detalles: List[DetalleCotizacionResponse] = []
+    # Atributos anotados por el servicio (no son columnas): si la cotización ya
+    # fue convertida a pedido, aquí viene el id/estado del pedido para que la UI
+    # la distinga y no ofrezca convertirla otra vez.
+    pedido_id: Optional[int] = None
+    pedido_estado: Optional[str] = None
 
     class Config:
         from_attributes = True

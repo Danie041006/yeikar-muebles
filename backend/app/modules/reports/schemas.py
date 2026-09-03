@@ -94,6 +94,7 @@ class MetodoCajaBase(BaseModel):
     codigo: str
     activo: bool = True
     orden: int = 1
+    moneda_id: Optional[int] = None
 
 class MetodoCajaCreate(MetodoCajaBase):
     pass
@@ -102,9 +103,12 @@ class MetodoCajaUpdate(BaseModel):
     nombre: Optional[str] = None
     activo: Optional[bool] = None
     orden: Optional[int] = None
+    moneda_id: Optional[int] = None
 
 class MetodoCajaResponse(MetodoCajaBase):
     id: int
+    moneda_codigo: Optional[str] = None
+    moneda_simbolo: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -147,10 +151,49 @@ class MovimientoCajaResponse(MovimientoCajaBase):
     id: int
     usuario_id: Optional[int] = None
     monto_en_moneda_base: Optional[Decimal] = None
+    transferencia_id: Optional[int] = None
     created_at: Optional[datetime] = None
     metodo_caja: Optional[MetodoCajaResponse] = None
     moneda: Optional["MonedaResponse"] = None
     usuario: Optional[ResponsableResponse] = None
+
+
+# ------------------------------------------------------------
+# Transferencias entre cuentas de caja
+# ------------------------------------------------------------
+class TransferenciaCreate(BaseModel):
+    cuenta_origen_id: int
+    cuenta_destino_id: int
+    monto: Decimal = Field(..., gt=0)
+    fecha: Optional[date] = None
+    # Moneda en que sale el dinero. Default: la moneda propia de la cuenta
+    # origen (o COP si la cuenta no tiene moneda asignada).
+    moneda_id: Optional[int] = None
+    # Tasa moneda de salida → COP. Opcional: si se omite se usa la TRM
+    # registrada a la fecha; si se indica, no puede desviarse más de 50%.
+    tasa_cambio: Optional[Decimal] = Field(None, gt=0)
+    referencia: Optional[str] = None
+    observaciones: Optional[str] = None
+
+
+class TransferenciaResponse(BaseModel):
+    """Una transferencia con sus dos patas (SALIDA en origen, ENTRADA en destino)."""
+    transferencia_id: int
+    fecha: date
+    monto_salida: Decimal
+    monto_entrada: Decimal
+    moneda_salida_codigo: str
+    moneda_entrada_codigo: str
+    tasa_cambio: Decimal
+    saldo_disponible_origen: Decimal = Decimal("0.0")
+    referencia: Optional[str] = None
+    observaciones: Optional[str] = None
+    pata_salida: MovimientoCajaResponse
+    pata_entrada: MovimientoCajaResponse
+
+
+class ListTransferenciasResponse(BaseModel):
+    transferencias: List[TransferenciaResponse] = []
 
 class ResumenCuentaResponse(BaseModel):
     """Saldo de una cuenta, por moneda (monto en su propia moneda).

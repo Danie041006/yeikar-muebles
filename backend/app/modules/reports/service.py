@@ -15,6 +15,9 @@ from app.modules.purchases.model import Compra, DetalleCompra
 from app.modules.inventory.model import Inventario
 from app.modules.reports import schemas, model
 from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+from app.modules.tasas_cambio.model import TasaCambio
+from app.modules.auditoria.service import record_event
+from app.modules.users.model import Usuario
 
 def obtener_pnl(db: Session, mes: str) -> schemas.PnLResponse:
     try:
@@ -620,7 +623,15 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
         def _texto_productos(origen) -> str:
             partes = []
             for det in origen:
-                nombre = det.producto.nombre if (det.producto and det.producto.nombre) else f"Producto #{det.producto_id}"
+                # FABRICADO/REVENTA → producto; INSUMO (producto_id NULL) → material.
+                if det.producto and det.producto.nombre:
+                    nombre = det.producto.nombre
+                elif getattr(det, "material", None) and det.material.nombre:
+                    nombre = det.material.nombre
+                elif det.producto_id:
+                    nombre = f"Producto #{det.producto_id}"
+                else:
+                    nombre = f"Material #{det.material_id}"
                 partes.append(f"{nombre} x{det.cantidad}")
             return ", ".join(partes) if partes else "—"
 
@@ -780,21 +791,22 @@ def listar_metodos_caja(db: Session) -> List[model.MetodoCaja]:
     return db.query(model.MetodoCaja).order_by(model.MetodoCaja.orden, model.MetodoCaja.id).all()
 
 def crear_metodo_caja(db: Session, esquema: schemas.MetodoCajaCreate) -> model.MetodoCaja:
-    obj = model.MetodoCaja(**esquema.model_dump())
+    CODIGO_MONEDA = {"EFECTIVO_USD": 2, "ZELLE": 2, "BINANCE": 2, "EFECTIVO_VES": 3, "BANCARIBE": 3}
+    moneda_id = esquema.moneda_id or CODIGO_MONEDA.get(esquema.codigo, 1)
+    obj = model.MetodoCaja(**esquema.model_dump(), moneda_id=moneda_id)
     db.add(obj)
     db.flush()
-    # Por defecto, toda cuenta nueva abre con un millón (COP) de saldo inicial.
     from app.core.caja import registrar_movimiento_caja
     registrar_movimiento_caja(
         db,
         metodo_caja_id=obj.id,
         tipo="APERTURA",
-        monto=1_000_000.0,
-        moneda_id=1,
+        monto=1_000_000.0 if moneda_id == 1 else 0.0,
+        moneda_id=moneda_id,
         tasa_cambio=1.0,
         fecha=date.today(),
         referencia="Saldo inicial por defecto",
-        observaciones="Apertura por defecto: 1.000.000 COP",
+        observaciones=f"Apertura por defecto: {1_000_000 if moneda_id == 1 else 0} {'COP' if moneda_id == 1 else 'USD'}",
     )
     db.commit()
     db.refresh(obj)
@@ -869,9 +881,298 @@ def eliminar_movimiento_caja(db: Session, movimiento_id: int) -> bool:
     obj = db.query(model.MovimientoCaja).filter(model.MovimientoCaja.id == movimiento_id).first()
     if not obj:
         return False
-    db.delete(obj)
+    # Una transferencia es UNA operación con dos patas: borrar una borra ambas
+    # (dejar una sola pata fabricaría dinero o lo haría desaparecer del libro).
+    if obj.transferencia_id:
+        db.query(model.MovimientoCaja).filter(
+            model.MovimientoCaja.transferencia_id == obj.transferencia_id
+        ).delete(synchronize_session=False)
+    else:
+        db.delete(obj)
     db.commit()
     return True
+
+
+# ------------------------------------------------------------
+# Transferencias entre cuentas de caja
+# ------------------------------------------------------------
+class SaldoInsuficienteError(ValueError):
+    """La cuenta origen no tiene saldo suficiente para la transferencia."""
+
+
+def _saldo_cuenta_a_fecha(db: Session, metodo_caja_id: int, moneda_id: int, hasta: date) -> Decimal:
+    """Saldo disponible de una cuenta EN UNA MONEDA hasta la fecha (inclusive):
+    APERTURA/ENTRADA suman, SALIDA resta, AJUSTE suma/resta según el signo."""
+    movs = (
+        db.query(model.MovimientoCaja)
+        .filter(
+            model.MovimientoCaja.metodo_caja_id == metodo_caja_id,
+            model.MovimientoCaja.moneda_id == moneda_id,
+            model.MovimientoCaja.fecha <= hasta,
+        )
+        .all()
+    )
+    saldo = Decimal("0.0")
+    for m in movs:
+        signo = Decimal("-1") if m.tipo == "SALIDA" else Decimal("1")
+        saldo += signo * Decimal(str(m.monto))
+    return saldo
+
+
+def _tasa_registrada_a_cop(db: Session, moneda_id: int, fecha: date) -> Optional[Decimal]:
+    """Última tasa moneda → COP registrada a la fecha (o la más próxima si no
+    hay exacta). None si no existe ninguna: a diferencia del cobro de ventas,
+    aquí NO se asume 1.0 (1 USD = 1 COP fabricaría o destruiría dinero)."""
+    tasa = db.query(TasaCambio).filter(
+        TasaCambio.moneda_origen_id == moneda_id,
+        TasaCambio.moneda_destino_id == 1,
+        TasaCambio.fecha <= fecha,
+    ).order_by(TasaCambio.fecha.desc()).first()
+    if not tasa:
+        tasa = db.query(TasaCambio).filter(
+            TasaCambio.moneda_origen_id == moneda_id,
+            TasaCambio.moneda_destino_id == 1,
+        ).order_by(TasaCambio.fecha.asc()).first()
+    return Decimal(str(tasa.valor)) if tasa and Decimal(str(tasa.valor)) > 0 else None
+
+
+def _tasa_transferencia_salida(db: Session, moneda_salida_id: int, tasa_indicada: Optional[Decimal], fecha: date) -> Decimal:
+    """Resuelve y valida la tasa de la pata de salida (moneda → COP).
+
+    - Moneda COP: tasa 1.0 fija.
+    - Sin tasa indicada: usa la TRM registrada (obligatoria: si no hay, error).
+    - Con tasa indicada: rechazada si se desvía más de 50% de la registrada
+      (anti TRM inventada, mismo criterio que los pagos de venta).
+    """
+    if moneda_salida_id in (None, 1):
+        return Decimal("1.0")
+    registrada = _tasa_registrada_a_cop(db, moneda_salida_id, fecha)
+    if tasa_indicada is None:
+        if registrada is None:
+            raise ValueError(
+                f"No hay tasa de cambio registrada para la moneda {moneda_salida_id}. "
+                "Indica la tasa (moneda → COP) al transferir."
+            )
+        return registrada
+    tasa = Decimal(str(tasa_indicada))
+    if tasa <= 0:
+        raise ValueError("La tasa de cambio debe ser mayor que cero.")
+    if registrada and abs(tasa - registrada) / registrada > Decimal("0.5"):
+        raise ValueError(
+            f"La tasa indicada ({tasa}) difiere más de 50% de la tasa registrada "
+            f"({registrada}). Usa la TRM real del día."
+        )
+    return tasa
+
+
+def _mov_caja_response(m: model.MovimientoCaja) -> schemas.MovimientoCajaResponse:
+    return schemas.MovimientoCajaResponse(
+        metodo_caja_id=m.metodo_caja_id,
+        fecha=m.fecha,
+        tipo=m.tipo,
+        monto=m.monto,
+        moneda_id=m.moneda_id,
+        tasa_cambio=m.tasa_cambio,
+        referencia=m.referencia,
+        observaciones=m.observaciones,
+        id=m.id,
+        usuario_id=m.usuario_id,
+        monto_en_moneda_base=m.monto_en_moneda_base,
+        transferencia_id=m.transferencia_id,
+        created_at=m.created_at,
+        metodo_caja=schemas.MetodoCajaResponse(
+            id=m.metodo_caja.id, nombre=m.metodo_caja.nombre, codigo=m.metodo_caja.codigo,
+            activo=m.metodo_caja.activo, orden=m.metodo_caja.orden, moneda_id=m.metodo_caja.moneda_id,
+            moneda_codigo=m.metodo_caja.moneda_codigo, moneda_simbolo=m.metodo_caja.moneda_simbolo,
+        ) if m.metodo_caja else None,
+        moneda=schemas.MonedaResponse(
+            id=m.moneda.id, codigo=m.moneda.codigo, nombre=m.moneda.nombre, simbolo=m.moneda.simbolo,
+        ) if m.moneda else None,
+        usuario=schemas.ResponsableResponse(
+            id=m.usuario.id, nombre_usuario=m.usuario.nombre_usuario, email=m.usuario.email,
+        ) if m.usuario else None,
+    )
+
+
+def _transferencia_response(db: Session, salida: model.MovimientoCaja) -> schemas.TransferenciaResponse:
+    destino_id = salida.transferencia_id
+    entrada = (
+        db.query(model.MovimientoCaja)
+        .filter(model.MovimientoCaja.transferencia_id == destino_id, model.MovimientoCaja.id != salida.id)
+        .first()
+    )
+    if entrada is None:
+        raise ValueError("La transferencia está incompleta (falta la pata de entrada).")
+    return schemas.TransferenciaResponse(
+        transferencia_id=destino_id,
+        fecha=salida.fecha,
+        monto_salida=salida.monto,
+        monto_entrada=entrada.monto,
+        moneda_salida_codigo=salida.moneda.codigo if salida.moneda else "?",
+        moneda_entrada_codigo=entrada.moneda.codigo if entrada.moneda else "?",
+        tasa_cambio=salida.tasa_cambio,
+        saldo_disponible_origen=_saldo_cuenta_a_fecha(
+            db, salida.metodo_caja_id, salida.moneda_id, salida.fecha
+        ),
+        referencia=salida.referencia,
+        observaciones=salida.observaciones,
+        pata_salida=_mov_caja_response(salida),
+        pata_entrada=_mov_caja_response(entrada),
+    )
+
+
+def crear_transferencia(
+    db: Session,
+    esquema: schemas.TransferenciaCreate,
+    usuario_id: Optional[int] = None,
+) -> schemas.TransferenciaResponse:
+    """Mueve dinero entre dos cuentas de caja como UNA operación contable de
+    dos patas: SALIDA en origen + ENTRADA en destino, emparejadas por
+    `transferencia_id`. El saldo total del negocio no cambia.
+
+    - Valida cuentas distintas, activas y saldo disponible en origen.
+    - Multimoneda (p. ej. EFECTIVO_USD → BANCOLOMBIA): la pata de destino
+      lleva el monto convertido con la TRM de su moneda (del catálogo).
+    """
+    fecha = esquema.fecha or date.today()
+    monto = Decimal(str(esquema.monto))
+
+    origen = db.query(model.MetodoCaja).filter(model.MetodoCaja.id == esquema.cuenta_origen_id).first()
+    destino = db.query(model.MetodoCaja).filter(model.MetodoCaja.id == esquema.cuenta_destino_id).first()
+    if not origen:
+        raise ValueError("La cuenta de origen no existe.")
+    if not destino:
+        raise ValueError("La cuenta de destino no existe.")
+    if origen.id == destino.id:
+        raise ValueError("La cuenta de origen y la de destino deben ser distintas.")
+    if not origen.activo or not destino.activo:
+        raise ValueError("Ambas cuentas deben estar activas.")
+
+    moneda_salida = esquema.moneda_id or origen.moneda_id or 1
+    moneda_entrada = destino.moneda_id or moneda_salida
+
+    # Tasa de la pata de salida (moneda que sale → COP) y monto en base.
+    tasa_salida = _tasa_transferencia_salida(db, moneda_salida, esquema.tasa_cambio, fecha)
+    base_salida = round(monto * tasa_salida, 2)
+
+    # Pata de entrada: misma moneda (1:1) o convertida con la TRM de destino.
+    if moneda_entrada == moneda_salida:
+        tasa_entrada = tasa_salida
+        monto_entrada = monto
+    else:
+        if moneda_entrada == 1:
+            tasa_entrada = Decimal("1.0")
+        else:
+            tasa_entrada = _tasa_registrada_a_cop(db, moneda_entrada, fecha)
+            if tasa_entrada is None:
+                raise ValueError(
+                    f"La cuenta destino opera en la moneda {moneda_entrada} y no hay "
+                    "tasa de cambio registrada para ella. Regístrala primero."
+                )
+        monto_entrada = (base_salida / tasa_entrada).quantize(Decimal("0.01"), rounding="ROUND_HALF_UP")
+        if monto_entrada <= 0:
+            raise ValueError("El monto convertido a la moneda de destino queda en 0. Revisa la tasa.")
+
+    # Saldo disponible en origen (en la moneda que sale) hasta la fecha.
+    saldo_disponible = _saldo_cuenta_a_fecha(db, origen.id, moneda_salida, fecha)
+    if monto > saldo_disponible + Decimal("0.005"):
+        raise SaldoInsuficienteError(
+            f"Saldo insuficiente en '{origen.nombre}': disponible {saldo_disponible:,.2f}, "
+            f"solicitado {monto:,.2f}."
+        )
+
+    # Pata 1: SALIDA en origen. Su id hace de transferencia_id de la operación.
+    salida = model.MovimientoCaja(
+        metodo_caja_id=origen.id,
+        usuario_id=usuario_id,
+        fecha=fecha,
+        tipo="SALIDA",
+        monto=monto,
+        moneda_id=moneda_salida,
+        tasa_cambio=tasa_salida,
+        monto_en_moneda_base=base_salida,
+        referencia=(esquema.referencia or f"Transferencia a {destino.nombre}")[:150],
+        observaciones=esquema.observaciones,
+    )
+    db.add(salida)
+    db.flush()
+
+    salida.transferencia_id = salida.id
+    salida.referencia = f"Transferencia #T{salida.id} a {destino.nombre}"[:150]
+
+    # Pata 2: ENTRADA en destino (misma transacción).
+    entrada = model.MovimientoCaja(
+        metodo_caja_id=destino.id,
+        usuario_id=usuario_id,
+        transferencia_id=salida.id,
+        fecha=fecha,
+        tipo="ENTRADA",
+        monto=monto_entrada,
+        moneda_id=moneda_entrada,
+        tasa_cambio=tasa_entrada,
+        monto_en_moneda_base=round(monto_entrada * tasa_entrada, 2),
+        referencia=f"Transferencia #T{salida.id} de {origen.nombre}"[:150],
+        observaciones=esquema.observaciones,
+    )
+    db.add(entrada)
+    db.flush()
+
+    record_event(
+        db,
+        actor=db.query(Usuario).filter(Usuario.id == usuario_id).first() if usuario_id else None,
+        action="CREATE",
+        entity_type="transferencia_caja",
+        entity_id=salida.id,
+        after={
+            "cuenta_origen_id": origen.id,
+            "cuenta_destino_id": destino.id,
+            "monto": float(monto),
+            "moneda_salida_id": moneda_salida,
+            "monto_entrada": float(monto_entrada),
+            "moneda_entrada_id": moneda_entrada,
+        },
+    )
+    db.commit()
+    db.refresh(salida)
+    db.refresh(entrada)
+    return _transferencia_response(db, salida)
+
+
+def listar_transferencias(
+    db: Session,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+) -> List[schemas.TransferenciaResponse]:
+    """Transferencias (patas emparejadas) en un rango de fechas, más recientes primero."""
+    query = (
+        db.query(model.MovimientoCaja)
+        .options(
+            sa_orm.joinedload(model.MovimientoCaja.metodo_caja),
+            sa_orm.joinedload(model.MovimientoCaja.moneda),
+            sa_orm.joinedload(model.MovimientoCaja.usuario),
+        )
+        .filter(model.MovimientoCaja.transferencia_id.isnot(None))
+    )
+    if fecha_desde:
+        query = query.filter(model.MovimientoCaja.fecha >= fecha_desde)
+    if fecha_hasta:
+        query = query.filter(model.MovimientoCaja.fecha <= fecha_hasta)
+    patas = query.order_by(model.MovimientoCaja.fecha.desc(), model.MovimientoCaja.id.desc()).all()
+
+    respuestas: List[schemas.TransferenciaResponse] = []
+    vistos: set = set()
+    for pata in patas:
+        tid = pata.transferencia_id
+        if tid in vistos:
+            continue
+        vistos.add(tid)
+        salida = pata if pata.tipo == "SALIDA" else next(
+            (p for p in patas if p.transferencia_id == tid and p.tipo == "SALIDA"), None
+        )
+        if salida is None:
+            continue
+        respuestas.append(_transferencia_response(db, salida))
+    return respuestas
 
 
 def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
@@ -910,6 +1211,8 @@ def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
         return "Nómina semanal", quien
     if ref.startswith("Compra #"):
         return "Compra", quien
+    if ref.startswith("Transferencia #"):
+        return "Transferencia entre cuentas", quien
     return ref or "Movimiento", quien
 
 
@@ -961,22 +1264,27 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
         montocop = cop(m)
         val_cuenta = final_por_cuenta.get(m.metodo_caja_id, Decimal("0"))
         final_por_cuenta[m.metodo_caja_id] = val_cuenta + signo(m) * montocop
+        # Las patas de una transferencia NO son ingreso ni egreso del negocio:
+        # solo redistribuyen saldo entre cuentas. Se listan, pero no suman a
+        # los totales del día (igual que los "Gasto #", que vienen de la tabla).
+        es_transferencia = m.transferencia_id is not None
         if m.tipo == "SALIDA":
             # Los egresos con cuenta se listan desde la TABLA GASTO (más abajo)
             # para no duplicarlos: su movimiento de caja sale por referencia.
             es_salida_de_gasto = bool((m.referencia or "").startswith("Gasto #"))
             if not es_salida_de_gasto:
-                total_egresos_cop += montocop
-                meta = por_moneda.setdefault(
-                    m.moneda_id,
-                    {"moneda_id": m.moneda_id,
-                     "codigo": m.moneda.codigo if m.moneda else "?",
-                     "simbolo": m.moneda.simbolo if m.moneda else "?",
-                     "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
-                     "monto_cop": Decimal("0.0")},
-                )
-                meta["monto_egresos"] += Decimal(str(m.monto))
-                meta["monto_cop"] += montocop
+                if not es_transferencia:
+                    total_egresos_cop += montocop
+                    meta = por_moneda.setdefault(
+                        m.moneda_id,
+                        {"moneda_id": m.moneda_id,
+                         "codigo": m.moneda.codigo if m.moneda else "?",
+                         "simbolo": m.moneda.simbolo if m.moneda else "?",
+                         "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
+                         "monto_cop": Decimal("0.0")},
+                    )
+                    meta["monto_egresos"] += Decimal(str(m.monto))
+                    meta["monto_cop"] += montocop
                 concepto, quien = _concepto_movimiento(db, m)
                 movimientos.append(
                     schemas.MovimientoDiarioResponse(
@@ -993,17 +1301,18 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
                     )
                 )
         else:
-            total_ingresos_cop += montocop
-            meta = por_moneda.setdefault(
-                m.moneda_id,
-                {"moneda_id": m.moneda_id,
-                 "codigo": m.moneda.codigo if m.moneda else "?",
-                 "simbolo": m.moneda.simbolo if m.moneda else "?",
-                 "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
-                 "monto_cop": Decimal("0.0")},
-            )
-            meta["monto_ingresos"] += Decimal(str(m.monto))
-            meta["monto_cop"] += montocop
+            if not es_transferencia:
+                total_ingresos_cop += montocop
+                meta = por_moneda.setdefault(
+                    m.moneda_id,
+                    {"moneda_id": m.moneda_id,
+                     "codigo": m.moneda.codigo if m.moneda else "?",
+                     "simbolo": m.moneda.simbolo if m.moneda else "?",
+                     "monto_ingresos": Decimal("0.0"), "monto_egresos": Decimal("0.0"),
+                     "monto_cop": Decimal("0.0")},
+                )
+                meta["monto_ingresos"] += Decimal(str(m.monto))
+                meta["monto_cop"] += montocop
 
             concepto, quien = _concepto_movimiento(db, m)
             movimientos.append(
@@ -1069,6 +1378,15 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
             concepto = g.tipo_gasto.nombre if g.tipo_gasto else "Egreso"
             if g.area and g.area.nombre:
                 concepto += f" · {g.area.nombre}"
+            desc = (g.descripcion or "").strip()
+            if desc:
+                if concepto.upper().startswith("NÓMINA"):
+                    partes = desc.split("—")
+                    if len(partes) > 1:
+                        nombre_empleado = partes[-1].strip()
+                        concepto += f" — {nombre_empleado}"
+                else:
+                    concepto += f" — {desc}"
             movimientos.append(
                 schemas.MovimientoDiarioResponse(
                     id=g.id,
@@ -1115,7 +1433,14 @@ def resumen_cuentas(db: Session) -> List[dict]:
     y en COP) y total en COP. Usa la misma convención que _saldo_caja_en_cop:
     SALIDA resta; APERTURA/ENTRADA/AJUSTE suman (AJUSTE puede ser negativo).
     """
-    metodos = listar_metodos_caja(db)
+    from sqlalchemy import orm as sa_orm
+
+    metodos = (
+        db.query(model.MetodoCaja)
+        .options(sa_orm.joinedload(model.MetodoCaja.moneda))
+        .order_by(model.MetodoCaja.orden, model.MetodoCaja.id)
+        .all()
+    )
     movs = (
         db.query(model.MovimientoCaja)
         .options(sa_orm.joinedload(model.MovimientoCaja.moneda))
@@ -1129,6 +1454,12 @@ def resumen_cuentas(db: Session) -> List[dict]:
 
     resumen: List[schemas.ResumenCuentaResponse] = []
     for mc in metodos:
+        mc_resp = schemas.MetodoCajaResponse(
+            id=mc.id, nombre=mc.nombre, codigo=mc.codigo, activo=mc.activo,
+            orden=mc.orden, moneda_id=mc.moneda_id,
+            moneda_codigo=mc.moneda.codigo if mc.moneda else None,
+            moneda_simbolo=mc.moneda.simbolo if mc.moneda else None,
+        )
         lineas: List[schemas.LineaSaldoMoneda] = []
         for m in movs:
             if m.metodo_caja_id != mc.id:
@@ -1143,7 +1474,7 @@ def resumen_cuentas(db: Session) -> List[dict]:
                 )
                 lineas.append(linea)
             linea.monto += signo * Decimal(str(m.monto))
-        resumen.append(schemas.ResumenCuentaResponse(metodo_caja=mc, saldo_por_moneda=lineas))
+        resumen.append(schemas.ResumenCuentaResponse(metodo_caja=mc_resp, saldo_por_moneda=lineas))
     return resumen
 
 

@@ -400,7 +400,10 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
 
     detalle = DetalleCotizacion(
         cotizacion_id=cotizacion.id,
-        producto_id=payload.producto_base_id or 1,
+        # producto_id es NULLABLE en la tabla: sin producto base (cotización
+        # 100% personalizada) no se fuerza un id inventado (antes `or 1`
+        # reventaba con FK si el producto 1 no existía).
+        producto_id=payload.producto_base_id,
         cantidad=D("1"),
         precio=precio_con_iva,
         ancho=D(str(payload.nuevo_ancho)),

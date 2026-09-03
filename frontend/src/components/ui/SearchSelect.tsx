@@ -34,6 +34,8 @@ interface SearchSelectProps {
   emptyText?: string;
   disabled?: boolean;
   className?: string;
+  /** Renderizado custom del label de cada opción (dropdown + trigger). */
+  renderLabel?: (option: SearchSelectOption) => React.ReactNode;
 }
 
 export default function SearchSelect({
@@ -45,6 +47,7 @@ export default function SearchSelect({
   emptyText = 'Sin resultados',
   disabled = false,
   className = '',
+  renderLabel,
 }: SearchSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -195,7 +198,7 @@ export default function SearchSelect({
         aria-expanded={open}
         className={`input flex items-center justify-between gap-2 text-left pr-9 disabled:opacity-50 disabled:cursor-not-allowed ${selected ? '' : 'text-yeikar-neutral/40'}`}
       >
-        <span className="truncate">{selected ? selected.label : placeholder}</span>
+        <span className="truncate">{selected ? (renderLabel ? renderLabel(selected) : selected.label) : placeholder}</span>
         <Search className="h-4 w-4 shrink-0 pointer-events-none text-yeikar-primary-dark/60" />
       </button>
 
@@ -249,7 +252,7 @@ export default function SearchSelect({
                     isSelected ? 'font-bold text-yeikar-primary-dark' : 'text-yeikar-neutral/90'
                   }`}
                 >
-                  <span className="truncate">{opt.label}</span>
+                  <span className="truncate">{renderLabel ? renderLabel(opt) : opt.label}</span>
                   {isSelected && <Check className="h-4 w-4 shrink-0" />}
                 </button>
               );

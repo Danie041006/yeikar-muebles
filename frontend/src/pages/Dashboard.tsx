@@ -9,7 +9,6 @@ import {
   AlertTriangle,
   DollarSign,
   TrendingUp,
-  Sparkles,
   Clock,
   ArrowUpRight,
   CheckCircle2,
@@ -165,7 +164,6 @@ export default function Dashboard() {
   });
 
   const quickActions = [
-    { label: 'Nueva Cotización IA', href: '/cotizaciones-ia', icon: Sparkles, primary: true, module: 'cotizaciones_ia' },
     { label: 'Nueva Cotización', href: '/cotizaciones', icon: ArrowUpRight, primary: false, module: 'cotizaciones' },
     { label: 'Taller de Producción', href: '/produccion', icon: Hammer, primary: false, module: 'produccion' },
     { label: 'Inventario', href: '/inventario', icon: Package, primary: false, module: 'inventario' },
@@ -215,28 +213,19 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       {/* Header Banner */}
-      <div className="relative flex flex-wrap items-center justify-between gap-6 overflow-hidden rounded-2xl border border-yeikar-primary/20 bg-gradient-to-br from-yeikar-neutral via-yeikar-secondary to-yeikar-neutral-dark p-7 text-white shadow-lift sm:p-9">
+      <div className="relative flex flex-wrap items-center justify-between gap-6 overflow-hidden rounded-2xl border border-yeikar-primary/20 bg-gradient-to-br from-yeikar-neutral via-yeikar-secondary to-yeikar-neutral-dark p-5 text-white shadow-lift sm:p-9">
         <div className="pointer-events-none absolute -right-16 -top-28 h-80 w-80 rounded-full border border-yeikar-primary/15" />
         <div className="pointer-events-none absolute -right-4 -top-16 h-56 w-56 rounded-full border border-yeikar-primary/10" />
         <div className="relative z-10 space-y-1">
            <p className="eyebrow text-yeikar-primary-light">
             {today}
           </p>
-           <h1 className="text-3xl font-black font-headline tracking-[-0.04em] text-white sm:text-4xl">
-            Hola, <span className="text-yeikar-primary">{user?.nombre_usuario || 'Admin'}</span>
+           <h1 className="text-2xl font-black font-headline tracking-[-0.04em] text-white sm:text-4xl">
+            Hola, <span className="text-yeikar-primary">{user?.nombre || user?.nombre_usuario || 'Admin'}</span>
           </h1>
            <p className="max-w-xl text-sm leading-relaxed text-white/55">
-            Resumen ejecutivo del ERP. Supervisa la fabricación, presupuestos y salud financiera de la mueblería.
+            Supervisa la fabricación, presupuestos y estado de la mueblería.
           </p>
-        </div>
-        <div className="relative z-10 flex items-center gap-3">
-          {hasModulo('cotizaciones_ia') && (
-            <Link to="/cotizaciones-ia">
-              <Button variant="primary" icon={<Sparkles className="w-4 h-4" />}>
-                Cotizar con IA
-              </Button>
-            </Link>
-          )}
         </div>
       </div>
 

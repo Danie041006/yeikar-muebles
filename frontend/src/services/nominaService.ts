@@ -201,6 +201,7 @@ export interface PiezaSemana {
   precio_unitario: number | null;
   total: number | null;
   fecha_fin?: string | null;
+  listo_nomina?: boolean;
 }
 
 export interface ManoObraSemana {
@@ -220,7 +221,7 @@ export interface EmpleadoSemana {
   piezas_sin_precio: number;
   total_destajo: number;
   aguinaldo_estimado: number;
-  mano_obra: ManoObraSemana;
+  mano_obra?: ManoObraSemana;
 }
 
 export interface ResumenSemanal {

@@ -48,13 +48,20 @@ class Factura(Base):
 
 
 class DetalleFactura(Base):
-    """Línea de la factura: cantidad del pedido (fija) + precio en USD decidido por la dueña."""
+    """Línea de la factura: cantidad del pedido (fija) + precio en USD decidido por la dueña.
+
+    `tipo_item` replica el discriminador de pedido/venta: FABRICADO/REVENTA
+    apuntan a `producto_id`; INSUMO apunta a `material_id` (insumo vendido
+    suelto, sin producto asociado).
+    """
 
     __tablename__ = "detalle_factura"
 
     id = Column(BigInteger, primary_key=True, index=True)
     factura_id = Column(BigInteger, ForeignKey("factura.id", ondelete="CASCADE"), nullable=False)
-    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=False)
+    tipo_item = Column(String(20), nullable=False, default="FABRICADO")  # FABRICADO, REVENTA, INSUMO
+    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=True)
+    material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
     descripcion = Column(String(250), nullable=True)
     cantidad = Column(Numeric(10, 2), nullable=False)
     precio_usd = Column(Numeric(15, 2), nullable=False)
@@ -65,6 +72,7 @@ class DetalleFactura(Base):
 
     factura = relationship("Factura", back_populates="detalles")
     producto = relationship("Producto")
+    material = relationship("Material")
 
 
 class TasaImpuesto(Base):

@@ -6,6 +6,9 @@ export interface MetodoCaja {
   codigo: string;
   activo: boolean;
   orden: number;
+  moneda_id?: number | null;
+  moneda_codigo?: string | null;
+  moneda_simbolo?: string | null;
 }
 
 export interface Responsable {
@@ -24,6 +27,7 @@ export interface MovimientoCaja {
   moneda_id: number;
   tasa_cambio: number;
   monto_en_moneda_base: number;
+  transferencia_id?: number | null;
   referencia?: string | null;
   observaciones?: string | null;
   metodo_caja?: MetodoCaja | null;
@@ -62,9 +66,45 @@ export interface MovimientoCreate {
   observaciones?: string | null;
 }
 
+export interface TransferenciaPayload {
+  cuenta_origen_id: number;
+  cuenta_destino_id: number;
+  monto: number;
+  fecha?: string;
+  moneda_id?: number | null;
+  tasa_cambio?: number | null;
+  referencia?: string | null;
+  observaciones?: string | null;
+}
+
+export interface Transferencia {
+  transferencia_id: number;
+  fecha: string;
+  monto_salida: number;
+  monto_entrada: number;
+  moneda_salida_codigo: string;
+  moneda_entrada_codigo: string;
+  tasa_cambio: number;
+  saldo_disponible_origen: number;
+  referencia?: string | null;
+  observaciones?: string | null;
+  pata_salida: MovimientoCaja;
+  pata_entrada: MovimientoCaja;
+}
+
 export const cuentasService = {
   getMonedas: async (): Promise<Moneda[]> => {
     const res = await api.get<Moneda[]>('/catalogos/moneda/');
+    return res.data;
+  },
+
+  // Transferencias entre cuentas (dos patas: SALIDA en origen + ENTRADA en destino)
+  transferir: async (data: TransferenciaPayload): Promise<Transferencia> => {
+    const res = await api.post<Transferencia>('/cuenta/transferencia', data);
+    return res.data;
+  },
+  getTransferencias: async (params?: { fecha_desde?: string; fecha_hasta?: string }): Promise<Transferencia[]> => {
+    const res = await api.get<Transferencia[]>('/cuenta/transferencias', { params });
     return res.data;
   },
 

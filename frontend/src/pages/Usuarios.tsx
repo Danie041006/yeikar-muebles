@@ -14,6 +14,7 @@ interface Role {
 interface User {
   id: number;
   nombre_usuario: string;
+  nombre?: string | null;
   email: string | null;
   activo: boolean;
   ultimo_acceso: string | null;
@@ -122,6 +123,7 @@ export default function Usuarios() {
   // Create User modal and form state
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [newUsername, setNewUsername] = useState('');
+  const [newNombre, setNewNombre] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [createLoading, setCreateLoading] = useState(false);
@@ -227,6 +229,7 @@ export default function Usuarios() {
     try {
       const response = await authApi.post<User>('/users', {
         nombre_usuario: newUsername,
+        nombre: newNombre || null,
         email: newEmail || null,
         password: newPassword,
       });
@@ -234,6 +237,7 @@ export default function Usuarios() {
       setSuccess(`Usuario "${newUsername}" creado con éxito.`);
       setIsCreateOpen(false);
       setNewUsername('');
+      setNewNombre('');
       setNewEmail('');
       setNewPassword('');
     } catch (err: any) {
@@ -401,9 +405,18 @@ export default function Usuarios() {
       render: (u) => (
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-yeikar-secondary/10 flex items-center justify-center font-bold text-yeikar-secondary border border-yeikar-secondary/10 font-headline text-sm">
-            {u.nombre_usuario.substring(0, 2).toUpperCase()}
+            {(u.nombre || u.nombre_usuario).substring(0, 2).toUpperCase()}
           </div>
-          <span className="font-bold text-yeikar-secondary font-headline">{u.nombre_usuario}</span>
+          <div className="min-w-0">
+            <div className="font-bold text-yeikar-secondary font-headline truncate">
+              {u.nombre_usuario}
+            </div>
+            {u.nombre && (
+              <div className="text-[10px] text-yeikar-neutral/50 font-mono truncate">
+                {u.nombre}
+              </div>
+            )}
+          </div>
         </div>
       ),
       mobilePrimary: true,
@@ -666,6 +679,20 @@ export default function Usuarios() {
                   onChange={(e) => setNewUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
                   placeholder="ej. pedro.gonzalez"
                   className="w-full px-3 py-2 border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-yeikar-tertiary/20 text-sm font-mono"
+                />
+              </div>
+
+              {/* Nombre visible */}
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-yeikar-secondary uppercase tracking-wider block">
+                  Nombre visible
+                </label>
+                <input
+                  type="text"
+                  value={newNombre}
+                  onChange={(e) => setNewNombre(e.target.value)}
+                  placeholder="ej. Carolina (se muestra en los saludos)"
+                  className="w-full px-3 py-2 border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-yeikar-tertiary/20 text-sm"
                 />
               </div>
 

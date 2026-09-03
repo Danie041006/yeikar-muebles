@@ -11,7 +11,6 @@ class Client(Base):
     cedula = Column(String(30), nullable=True)
     telefono = Column(String(50), nullable=False)
     direccion = Column(Text)
-    email = Column(String(120))
     ciudad = Column(String(100))
     estado = Column(String(100))
     observaciones = Column(Text)

@@ -43,7 +43,7 @@ class Venta(Base):
         return self.creador.nombre_usuario if self.creador else None
 
 
-from app.modules.productos.model import Producto
+from app.modules.productos.model import Producto, Material
 
 
 class DetalleVenta(Base):
@@ -51,7 +51,9 @@ class DetalleVenta(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     venta_id = Column(BigInteger, ForeignKey("venta.id", ondelete="CASCADE"), nullable=False)
-    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=False)
+    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=True)
+    material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
+    tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO
     cantidad = Column(Numeric(10, 2), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
     # Snapshot de costos al momento de facturar (para Control Interno de Ingresos)
@@ -66,6 +68,7 @@ class DetalleVenta(Base):
 
     venta = relationship("Venta", back_populates="detalles")
     producto = relationship("Producto")
+    material = relationship("Material")
 
 
 class Pago(Base):
@@ -82,7 +85,7 @@ class Pago(Base):
     # Monto equivalente en la moneda base (moneda de la venta) ya convertido.
     # Es el valor que realmente se descuenta del saldo pendiente.
     monto_en_moneda_base = Column(Numeric(15, 2), nullable=False)
-    # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE
+    # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE | BINANCE
     metodo_pago = Column(String(50), nullable=False)
     referencia = Column(String(150), nullable=True)
     observaciones = Column(Text, nullable=True)

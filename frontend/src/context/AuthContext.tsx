@@ -10,6 +10,7 @@ export interface UsuarioMe {
   id: number;
   empleado_id?: number | null;
   nombre_usuario: string;
+  nombre?: string | null;
   email: string | null;
   activo: boolean;
   roles: { id: number; nombre: string; descripcion?: string | null; activo?: boolean }[];

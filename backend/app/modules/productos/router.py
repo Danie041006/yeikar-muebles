@@ -11,6 +11,7 @@ from app.modules.users.deps import es_admin_user, require_module
 from app.modules.productos import schemas, service
 from app.modules.productos import cost_service
 from app.modules.productos import estructura_import
+from app.modules.adjuntos import service as adjuntos_service
 from app.modules.productos.model import ProductoMaterial
 
 router = APIRouter(dependencies=[Depends(require_module("productos"))])
@@ -32,28 +33,21 @@ def listar_productos(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),
     buscar: Optional[str] = Query(None, description="Buscar por nombre, codigo o descripcion"),
+    es_reventa: Optional[bool] = Query(None, description="Filtrar solo productos de reventa"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    productos = service.obtener_productos(db, salto=salto, limite=limite, buscar=buscar)
-    # Precio base de referencia: si el producto no tiene precio_venta_base guardado,
-    # se calcula con la receta paramétrica a sus dimensiones base (con ganancia por defecto).
-    for prod in productos:
-        if prod.precio_venta_base is None and prod.precio_costo_base is None:
-            try:
-                resultado = cost_service.calcular_costo_producto(
-                    db=db,
-                    producto_id=prod.id,
-                    nuevo_ancho=Decimal(str(prod.ancho_base or 1)),
-                    nuevo_largo=Decimal(str(prod.largo_base or 1)),
-                    ganancia_porcentaje=Decimal("40"),
-                    iva_porcentaje=Decimal("0"),
-                )
-                if resultado.get("precio_venta"):
-                    prod.precio_venta_base = resultado["precio_venta"]
-                    prod.precio_costo_base = resultado.get("costo_total")
-            except ValueError:
-                pass
+    # Precios SIEMPRE desde lo persistido (se calculan al crear/editar el
+    # producto o con POST /producto/recalcular-precios). El recálculo oculto
+    # aquí ejecutaba el motor de costeo 60+ veces POR CARGA del listado.
+    productos = service.obtener_productos(db, salto=salto, limite=limite, buscar=buscar, es_reventa=es_reventa)
+    # Fotos de toda la página en UNA query (evita el N+1 al serializar).
+    if productos:
+        fotos_por_producto = adjuntos_service.adjuntos_info_batch(
+            db, "PRODUCTO", [p.id for p in productos]
+        )
+        for p in productos:
+            p.__dict__["_fotos_cache"] = fotos_por_producto.get(p.id, [])
     return productos
 
 @router.get("/producto/{id_producto}", response_model=schemas.ProductoResponse)
@@ -110,6 +104,47 @@ def listar_materiales(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     return service.obtener_materiales(db, salto=salto, limite=limite, buscar=buscar)
+
+
+# ------------------------------------------------------------
+# Duplicados del catálogo y fusión de materiales
+# (ANTES de GET /{id_material}: si no, "/duplicados" matchea como id)
+# ------------------------------------------------------------
+
+@material_router.get("/duplicados", response_model=list, tags=["catalogo"])
+def listar_materiales_duplicados(
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Grupos de materiales con el mismo nombre (normalizado), con stock y
+    referencias de cada uno, para decidir cuál sobrevive en una fusión."""
+    return service.detectar_duplicados(db)
+
+
+@material_router.post("/fusionar", tags=["catalogo"])
+def fusionar_materiales(
+    datos: schemas.MaterialFusionIn,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Fusiona dos materiales del catálogo en UNO (solo Dueño/Administrador).
+
+    Mueve el stock (sumando por ubicación), el kardex, las recetas, consumos,
+    compras, ventas, cotizaciones y sinónimos al material destino y elimina el
+    origen. Irreversible."""
+    if not es_admin_user(usuario_actual):
+        raise HTTPException(status_code=403, detail="Solo Dueño/Administrador pueden fusionar materiales.")
+    try:
+        return service.fusionar_material(
+            db,
+            datos.material_origen_id,
+            datos.material_destino_id,
+            costo_base=datos.costo_base,
+            usuario=usuario_actual,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @material_router.get("/{id_material}", response_model=schemas.MaterialResponse)
 def ver_material(
@@ -265,6 +300,7 @@ def importar_estructura_texto(
         "nombre_sugerido": estructura.get("nombre_sugerido"),
         "totales_excel": {k: float(v) for k, v in estructura["totales"].items()},
         "resumen": resumen,
+        "estructura": estructura_import.estructura_para_preview(db, estructura),
         "referencias_descartadas": estructura["referencias_descartadas"][:20],
         "advertencias": advertencias_tipo,
     }
@@ -502,6 +538,52 @@ def eliminar_elemento_seccion(
     db.delete(elemento)
     db.commit()
     return None
+
+
+@router.put("/elemento/{elemento_id}", response_model=schemas.ElementoSeccionResponse, tags=["receta-secciones"])
+def actualizar_elemento_seccion(
+    elemento_id: int,
+    esquema: schemas.ElementoSeccionUpdate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Edita un insumo de sección: asociarlo al catálogo de inventario (resuelve
+    PENDIENTE/AMBIGUO), cantidad, precio, etc."""
+    elemento = db.query(model.ElementoSeccion).filter(model.ElementoSeccion.id == elemento_id).first()
+    if not elemento:
+        raise HTTPException(status_code=404, detail="Elemento no encontrado")
+
+    datos = esquema.model_dump(exclude_unset=True)
+    registrar_sinonimo = datos.pop("registrar_sinonimo", False)
+
+    if "material_id_normalizado" in datos:
+        material_id = datos["material_id_normalizado"]
+        if material_id is not None:
+            material = db.query(model.Material).filter(model.Material.id == material_id).first()
+            if not material:
+                raise HTTPException(status_code=400, detail="Material no encontrado")
+            elemento.material_id_normalizado = material.id
+            elemento.estado_resolucion = "MAPEADO"
+        else:
+            elemento.material_id_normalizado = None
+            elemento.estado_resolucion = "PENDIENTE"
+
+    for campo in ("nombre_insumo_original", "cantidad", "unidad_medida", "precio_unitario", "observaciones"):
+        if campo in datos:
+            setattr(elemento, campo, datos[campo])
+
+    if registrar_sinonimo and elemento.material_id_normalizado is not None:
+        sinonimo = elemento.nombre_insumo_original
+        if sinonimo and not db.query(model.MaterialSinonimo).filter(
+                model.MaterialSinonimo.sinonimo == sinonimo).first():
+            db.add(model.MaterialSinonimo(
+                material_id=elemento.material_id_normalizado,
+                sinonimo=sinonimo,
+            ))
+
+    db.commit()
+    db.refresh(elemento)
+    return elemento
 
 
 

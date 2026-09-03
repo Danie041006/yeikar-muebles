@@ -59,6 +59,20 @@ def ver_orden(
         raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
     return db_obj
 
+@router.get("/orden/{id}/costos-en-vivo")
+def costos_en_vivo(
+    id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Desglose de costos EN VIVO de la orden (vista estilo Excel por sección):
+    insumos + producción (con recargo) + gastos de sección. Se usa durante la
+    producción, mientras se registran consumos y mano de obra."""
+    data = service.costos_en_vivo_orden(db, id, usuario_actual)
+    if not data:
+        raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
+    return data
+
 @router.put("/orden/{id}", response_model=schemas.OrdenProduccionResponse)
 def actualizar_orden(
     id: int,
@@ -354,6 +368,20 @@ def listar_consumos_por_orden(
 ):
     return service.obtener_consumos_por_orden(db, orden_id, usuario_actual)
 
+@router.put("/consumo/{id}/confirmar", response_model=schemas.ConsumoMaterialResponse)
+def confirmar_consumo(
+    id: int,
+    esquema: schemas.ConsumoConfirmarCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Confirma el uso real de una lámina pedida completa: los cortes que
+    salieron de las láminas. Recalcula el costo, ajusta láminas y sobrante."""
+    try:
+        return service.confirmar_consumo_material(db, id, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
 @router.delete("/consumo/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_consumo(
     id: int,
@@ -465,6 +493,23 @@ def referencia_receta(
     return data
 
 
+@router.put("/mano-obra/{id}/listo-nomina", response_model=schemas.ManoObraResponse)
+def alternar_listo_nomina(
+    id: int,
+    listo: bool = True,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Marca si un trabajo parcial de mano de obra está terminado y listo para incluirse en nómina."""
+    try:
+        db_mano = service.alternar_listo_nomina_mano_obra(db, id, listo, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not db_mano:
+        raise HTTPException(status_code=404, detail="Mano de obra no encontrada")
+    return db_mano
+
+
 @router.put("/mano-obra/{id}/pagar", response_model=schemas.ManoObraResponse)
 def marcar_mano_obra_pagada(
     id: int,
@@ -472,7 +517,9 @@ def marcar_mano_obra_pagada(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    """Marca un registro de mano de obra como pagado (crea el egreso en Gastos)."""
+    """Marca la mano de obra como pagada (crea/revierte su egreso en Gastos).
+    Es el endpoint que usa el frontend (produccionService.marcarManoObraPagada);
+    sin él, el botón "Marcar pagada" daba 404."""
     try:
         db_mano = service.marcar_mano_obra_pagada(db, id, pagado, usuario_actual)
     except ValueError as e:
@@ -515,3 +562,184 @@ def ver_costo(
     if not db_obj:
         raise HTTPException(status_code=404, detail="Costo de produccion no encontrado para esta orden")
     return db_obj
+
+
+# ------------------------------------------------------------
+# Endpoints de Productos en Crudo (ítem libre: catálogo + stock)
+# ------------------------------------------------------------
+@router.get("/crudo/", response_model=List[schemas.CrudoResponse])
+def listar_crudo(
+    activo: Optional[bool] = Query(None, description="Filtrar por activo"),
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    return service.listar_crudos(db, activo=activo, usuario=usuario_actual)
+
+
+@router.get("/crudo/{crudo_id}", response_model=schemas.CrudoResponse)
+def ver_crudo(
+    crudo_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    db_obj = service.obtener_crudo(db, crudo_id, usuario_actual)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Producto en crudo no encontrado")
+    return db_obj
+
+
+@router.post("/crudo/", response_model=schemas.CrudoResponse, status_code=status.HTTP_201_CREATED)
+def alta_crudo(
+    esquema: schemas.CrudoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Crea un ítem de inventario en crudo (nombre libre). La foto de referencia
+    se sube aparte como adjunto de tipo CRUDO."""
+    try:
+        return service.crear_crudo(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ------------------------------------------------------------
+# Producción de Crudos (segunda producción, separada del kanban)
+# ------------------------------------------------------------
+@router.get("/crudo-produccion/", response_model=List[schemas.ProduccionCrudoResponse])
+def listar_producciones_crudo(
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    return service.listar_producciones_crudo(db, usuario_actual)
+
+
+@router.get("/crudo-produccion/{produccion_id}", response_model=schemas.ProduccionCrudoResponse)
+def ver_produccion_crudo(
+    produccion_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    pc = service.obtener_produccion_crudo(db, produccion_id, usuario_actual)
+    if not pc:
+        raise HTTPException(status_code=404, detail="Producción de crudo no encontrada")
+    return pc
+
+
+@router.post("/crudo-produccion/", response_model=schemas.ProduccionCrudoResponse, status_code=status.HTTP_201_CREATED)
+def crear_produccion_crudo(
+    esquema: schemas.ProduccionCrudoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        return service.crear_produccion_crudo(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/crudo-produccion/{produccion_id}/consumo/", response_model=schemas.CrudoConsumoResponse, status_code=status.HTTP_201_CREATED)
+def registrar_consumo_crudo(
+    produccion_id: int,
+    esquema: schemas.CrudoConsumoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Registra un consumo de material en una producción de crudo. Descuenta stock
+    de material y genera el gasto, con quién lo pidió y quién lo registró."""
+    try:
+        return service.registrar_consumo_crudo(db, produccion_id, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/crudo-produccion/{produccion_id}/estado", response_model=schemas.ProduccionCrudoResponse)
+def cambiar_estado_produccion_crudo(
+    produccion_id: int,
+    esquema: schemas.ProduccionCrudoEstadoUpdate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Al marcar como COMPLETADA suma stock al ítem en crudo y materializa el
+    egreso de la mano de obra sin pagar (costo de producción que va a nómina)."""
+    try:
+        return service.cambiar_estado_produccion_crudo(db, produccion_id, esquema.estado, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ------------------------------------------------------------
+# Mano de obra en producción de crudo
+# ------------------------------------------------------------
+@router.post("/crudo-produccion/{produccion_id}/mano-obra/", response_model=schemas.ProduccionCrudoManoObraResponse, status_code=status.HTTP_201_CREATED)
+def registrar_mano_obra_crudo(
+    produccion_id: int,
+    esquema: schemas.ProduccionCrudoManoObraCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Registra quién hizo el trabajo y cuánto cuesta en una producción de crudo.
+    El egreso se materializa al finalizar la producción (COMPLETADA)."""
+    try:
+        return service.crear_mano_obra_crudo(db, produccion_id, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/crudo-produccion/mano-obra/{mano_obra_id}", response_model=schemas.ProduccionCrudoManoObraResponse)
+def actualizar_mano_obra_crudo(
+    mano_obra_id: int,
+    esquema: schemas.ProduccionCrudoManoObraUpdate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        return service.actualizar_mano_obra_crudo(db, mano_obra_id, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/crudo-produccion/mano-obra/{mano_obra_id}/listo-nomina", response_model=schemas.ProduccionCrudoManoObraResponse)
+def alternar_listo_nomina_mano_obra_crudo(
+    mano_obra_id: int,
+    listo: bool = True,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        return service.alternar_listo_nomina_mano_obra_crudo(db, mano_obra_id, listo, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/crudo-produccion/mano-obra/{mano_obra_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_mano_obra_crudo(
+    mano_obra_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        exito = service.eliminar_mano_obra_crudo(db, mano_obra_id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not exito:
+        raise HTTPException(status_code=404, detail="Mano de obra de crudo no encontrada")
+    return None
+
+
+# ------------------------------------------------------------
+# Asignar crudo a un detalle de pedido (solo descuenta stock + trazabilidad)
+# ------------------------------------------------------------
+@router.post("/crudo/{crudo_id}/asignar/{detalle_pedido_id}", response_model=schemas.CrudoUsoResponse, status_code=status.HTTP_201_CREATED)
+def asignar_crudo(
+    crudo_id: int,
+    detalle_pedido_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Asigna una pieza de crudo a un detalle de pedido: descuenta stock del ítem
+    en crudo. No marca etapas ni descuenta materiales; el usuario cierra las
+    etapas manualmente en el kanban normal."""
+    try:
+        return service.asignar_crudo_a_detalle(db, crudo_id, detalle_pedido_id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

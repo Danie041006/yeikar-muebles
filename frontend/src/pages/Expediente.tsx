@@ -17,11 +17,11 @@ import { formatCurrency } from '../utils/format';
 type Tab = 'cotizaciones' | 'pedidos' | 'facturas' | 'clientes' | 'envios';
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'cotizaciones', label: 'Cotizaciones' },
-  { id: 'pedidos', label: 'Pedidos' },
-  { id: 'facturas', label: 'Facturas' },
-  { id: 'clientes', label: 'Clientes' },
-  { id: 'envios', label: 'Despachos' },
+  { id: 'cotizaciones', label: 'Libro de Cotizaciones' },
+  { id: 'pedidos', label: 'Libro de Pedidos' },
+  { id: 'facturas', label: 'Libro de Facturas' },
+  { id: 'clientes', label: 'Libro de Clientes' },
+  { id: 'envios', label: 'Libro de Guías de Despacho' },
 ];
 
 const fmtD = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-CO') : '—');
@@ -128,8 +128,8 @@ export default function Expediente() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Expediente"
-        subtitle="Historial completo de cada negocio: cotización, pedido, producción, cobros, factura y despacho."
+        title="Libros de Control y Registro"
+        subtitle="Consulta independiente por libro: Cotizaciones, Pedidos, Clientes, Facturas  y Guías de Despacho."
         icon={<FolderOpen className="h-6 w-6 text-yeikar-primary" />}
       />
 
@@ -216,7 +216,7 @@ export default function Expediente() {
                         <span className="font-mono text-[10px] text-yeikar-neutral/45">#{c.id}</span>
                       </div>
                       <p className="text-[11px] font-mono text-yeikar-neutral/55 mt-1">
-                        {[c.cedula && `C.I. ${c.cedula}`, c.telefono && `📞 ${c.telefono}`, c.ciudad].filter(Boolean).join(' · ') || '—'}
+                        {[c.cedula && `C.I. ${c.cedula}`, c.telefono && `Tel: ${c.telefono}`, c.ciudad].filter(Boolean).join(' · ') || '—'}
                       </p>
                     </button>
                   </li>
@@ -246,17 +246,17 @@ export default function Expediente() {
           {loadingFicha ? (
             <div className="flex flex-col items-center justify-center py-24 text-yeikar-neutral/50 gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-yeikar-primary" />
-              <p className="text-sm font-mono">Armando el expediente...</p>
+              <p className="text-sm font-mono">Cargando documento del libro...</p>
             </div>
           ) : ficha ? (
-            <ExpedienteFicha ficha={ficha} />
+            <ExpedienteFicha ficha={ficha} modoLibro={tab} />
           ) : resumenCliente ? (
             <ResumenCliente resumen={resumenCliente} onAbrirPedido={(id) => abrirFicha('pedidos', id)} />
           ) : (
             <div className="bg-white border border-dashed border-yeikar-secondary-light/15 rounded-3xl p-14 text-center text-yeikar-neutral/40">
               <FolderOpen className="w-12 h-12 mx-auto text-yeikar-neutral/20 mb-3" />
-              <p className="font-semibold text-sm">Selecciona un documento de la izquierda</p>
-              <p className="text-xs mt-1">Aquí verás su expediente completo.</p>
+              <p className="font-semibold text-sm">Selecciona un registro del libro a la izquierda</p>
+              <p className="text-xs mt-1">Verás únicamente su documento o ficha correspondiente.</p>
             </div>
           )}
         </div>
@@ -278,8 +278,8 @@ function ResumenCliente({ resumen, onAbrirPedido }: { resumen: ClienteResumen; o
         <h2 className="font-headline font-black text-xl mt-0.5">{c.nombre}</h2>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-white/70 font-mono">
           {c.cedula && <span>C.I.: {c.cedula}</span>}
-          {c.telefono && <span>📞 {c.telefono}</span>}
-          {c.ciudad && <span>📍 {c.ciudad}</span>}
+          {c.telefono && <span>Tel: {c.telefono}</span>}
+          {c.ciudad && <span>Ciudad: {c.ciudad}</span>}
           {c.fecha_registro && <span>Cliente desde {fmtD(c.fecha_registro)}</span>}
         </div>
       </div>

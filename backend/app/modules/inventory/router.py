@@ -67,6 +67,23 @@ def movimientos_por_material(
     return movimientos
 
 
+@router.get("/material/{material_id}/costo-unitario-real")
+def costo_unitario_real_material(
+    material_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """
+    Costo real por unidad de un material: compra + "la pasada" (llevada/flete)
+    prorrateada sobre las unidades de la última entrada. Útil para vender
+    insumos sueltos sabiendo cuánto costó realmente cada unidad.
+    """
+    try:
+        return service.costo_unitario_real_material(db, material_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 # =========================================================================
 # Inventario de PRODUCTOS (terminados / de reventa)
 # =========================================================================
@@ -123,3 +140,111 @@ def movimientos_producto(
 ):
     """Historial (kardex) de movimientos de un producto."""
     return service.obtener_movimientos_producto(db, producto_id, limit)
+
+
+# =========================================================================
+# Sobrantes de láminas (retazos de materiales laminares)
+# =========================================================================
+
+@router.get("/sobrantes", response_model=List[schemas.SobranteLaminaResponse])
+def listar_sobrantes(
+    material_id: Optional[int] = Query(None),
+    estado: Optional[str] = Query(None, description="DISPONIBLE | CONSUMIDO | DESECHADO"),
+    ubicacion_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """Lista los retazos (sobrantes) de materiales laminares."""
+    return service.obtener_sobrantes(db, material_id, estado, ubicacion_id)
+
+
+@router.post("/sobrantes", response_model=schemas.SobranteLaminaResponse, status_code=201)
+def crear_sobrante(
+    datos: schemas.SobranteLaminaCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """Registra a mano un retazo (ej. pedazos que ya existen en el taller)."""
+    try:
+        return service.crear_sobrante(db, datos)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/sobrantes/{sobrante_id}", response_model=schemas.SobranteLaminaResponse)
+def actualizar_sobrante(
+    sobrante_id: int,
+    datos: schemas.SobranteLaminaUpdate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """Edita medidas/estado de un sobrante (ej. marcarlo DESECHADO)."""
+    try:
+        s = service.actualizar_sobrante(db, sobrante_id, datos)
+        if not s:
+            raise HTTPException(status_code=404, detail="El sobrante no existe.")
+        return s
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/sobrantes/{sobrante_id}", status_code=204)
+def eliminar_sobrante(
+    sobrante_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    ok = service.eliminar_sobrante(db, sobrante_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="El sobrante no existe.")
+    return None
+
+
+# =========================================================================
+# Categorías de inventario (desglose en la UI)
+# =========================================================================
+
+@router.get("/categorias", response_model=List[dict])
+def listar_categorias(
+    tipo: Optional[str] = Query(None, description="MATERIAL | PRODUCTO"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    from app.modules.catalogos.model import CategoriaInventario
+    query = db.query(CategoriaInventario).filter(CategoriaInventario.activo == True)
+    if tipo:
+        query = query.filter(CategoriaInventario.tipo == tipo.upper())
+    cats = query.order_by(CategoriaInventario.orden, CategoriaInventario.nombre).all()
+    return [
+        {"id": c.id, "nombre": c.nombre, "tipo": c.tipo, "orden": c.orden}
+        for c in cats
+    ]
+
+
+@router.post("/categorias", status_code=201)
+def crear_categoria(
+    datos: dict,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    from app.modules.catalogos.model import CategoriaInventario
+    nombre = (datos.get("nombre") or "").strip()
+    tipo = (datos.get("tipo") or "MATERIAL").upper()
+    if not nombre:
+        raise HTTPException(status_code=400, detail="El nombre es obligatorio.")
+    if tipo not in ("MATERIAL", "PRODUCTO"):
+        raise HTTPException(status_code=400, detail="El tipo debe ser MATERIAL o PRODUCTO.")
+    existe = db.query(CategoriaInventario).filter(
+        CategoriaInventario.nombre == nombre, CategoriaInventario.tipo == tipo
+    ).first()
+    if existe:
+        raise HTTPException(status_code=409, detail="Ya existe esa categoría.")
+    cat = CategoriaInventario(
+        nombre=nombre,
+        tipo=tipo,
+        orden=int(datos.get("orden") or 0),
+    )
+    db.add(cat)
+    db.commit()
+    db.refresh(cat)
+    return {"id": cat.id, "nombre": cat.nombre, "tipo": cat.tipo, "orden": cat.orden}

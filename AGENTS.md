@@ -86,12 +86,18 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 
 ## Production order flow
 
-1. Pedido created → DetallePedido with dimensions (ancho, largo) and product
-2. `POST /produccion/orden/desde-pedido/{detalle_id}` creates `OrdenProduccion` (estado=PENDIENTE)
+1. Quote converted → `Pedido` nace DIRECTAMENTE en `PRODUCCION` (sin paso intermedio COTIZADO/APROBADO) y se auto-crea la orden por cada línea FABRICADO (`OrdenProduccion` estado=PENDIENTE)
+2. `POST /produccion/orden/desde-pedido/{detalle_id}` devuelve la orden existente (idempotente)
 3. First etapa changes orden to EN_PRODUCCION
 4. Etapas are tracked per area (Ebanistería → Tapicería → Pintura → etc.)
 5. Completing all etapas: supervisor presses "Finalizar" which sets estado=FINALIZADA, auto-calculates costs
 6. When all órdenes for a pedido are FINALIZADA, pedido → TERMINADO and envio auto-created
+
+### Piezas de exhibición (showroom)
+
+- `OrdenProduccion.tipo` (PEDIDO | EXHIBICION | STOCK) define el DESTINO de lo fabricado; `es_stock` queda como alias heredado de "sin pedido". El servicio deriva el tipo y rechaza un `tipo` explícito que contradiga el destino
+- Las órdenes EXHIBICION usan el MISMO Kanban/etapas que las de pedido; al finalizar NO generan envío: hacen ENTRADA automática en la ubicación EXHIBICIÓN con el costo real, convertido a la moneda del producto (`costo_promedio` siempre vive en la moneda del producto)
+- Se venden de stock como si fueran REVENTA (línea tipo_item=REVENTA, pedido nace APROBADO sin producción); al facturar `DetalleVenta.costo_unitario` se sobrescribe con el costo real del inventario (no el estimado de la cotización)
 
 ## Testing
 

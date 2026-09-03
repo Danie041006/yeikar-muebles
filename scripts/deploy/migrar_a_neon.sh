@@ -8,6 +8,11 @@
 # Ejemplo de cadena Neon (proyecto → Dashboard → Connection string, modo POOLED):
 #   postgresql://usuario:password@ep-xxxx-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require
 #
+# ⚠️ Tras el restore, verifica las consultas SIN calificar (ej. `FROM usuario`)
+# vía la conexión DIRECTA (misma URL sin "-pooler"): el pooler de Neon no
+# soporta `options` de startup y puede conservar un search_path vacío que
+# pg_dump deja en las sesiones (los datos están bien; es solo el search_path).
+#
 # Qué hace:
 #   1. pg_dump local (incluye TODO: usuarios, roles, estructuras, fotos bytea)
 #   2. pg_restore en Neon (--clean --if-exists: se puede re-ejecutar)

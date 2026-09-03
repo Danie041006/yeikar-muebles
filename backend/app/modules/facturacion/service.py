@@ -126,7 +126,10 @@ def pedidos_facturables(db: Session, usuario: Usuario | None = None):
         for dp in pedido.detalles:
             lineas.append({
                 "detalle_pedido_id": dp.id,
-                "nombre": dp.producto.nombre if dp.producto else f"Producto #{dp.producto_id}",
+                "nombre": (
+                    dp.producto.nombre if dp.producto
+                    else (dp.material.nombre if dp.material else None)
+                ) or f"Producto #{dp.producto_id}",
                 "cantidad": float(dp.cantidad),
                 "precio_referencia": float(dp.precio),
                 "moneda_codigo": moneda_codigo,
@@ -241,10 +244,17 @@ def crear_factura_desde_pedido(db: Session, esquema: FacturaCreate, commit: bool
     db.flush()
 
     for dp, linea, subtotal_usd in lineas:
+        # La línea copia el tipo del pedido: FABRICADO/REVENTA → producto;
+        # INSUMO → material vendido suelto (producto_id es NULL).
         db.add(DetalleFactura(
             factura_id=db_factura.id,
+            tipo_item=dp.tipo_item or "FABRICADO",
             producto_id=dp.producto_id,
-            descripcion=dp.producto.nombre if dp.producto else None,
+            material_id=dp.material_id,
+            descripcion=(
+                dp.producto.nombre if dp.producto
+                else (dp.material.nombre if dp.material else None)
+            ),
             cantidad=float(dp.cantidad),
             precio_usd=linea.precio_usd,
             subtotal_usd=subtotal_usd,

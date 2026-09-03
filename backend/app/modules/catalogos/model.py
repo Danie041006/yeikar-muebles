@@ -20,6 +20,23 @@ class UnidadMedida(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
+class CategoriaInventario(Base):
+    """Categoría para desglosar el inventario en la UI.
+
+    tipo = MATERIAL → agrupa insumos (LÁMINAS MDF, ESPUMA, PINTURA, ...)
+    tipo = PRODUCTO → agrupa productos de reventa (COLCHONES, ELECTRODOMÉSTICOS, ...)
+    """
+    __tablename__ = "categoria_inventario"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    nombre = Column(String(100), nullable=False)
+    tipo = Column(String(20), nullable=False, default="MATERIAL")  # MATERIAL | PRODUCTO
+    orden = Column(Integer, nullable=False, default=0)
+    activo = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+
 class TipoGasto(Base):
     __tablename__ = "tipo_gasto"
 

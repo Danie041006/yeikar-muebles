@@ -90,6 +90,10 @@ ORDEN_LIMPIEZA = [
     "etapa_asignado_adicional",
     "etapa_produccion",
     "costo_produccion",
+    "produccion_crudo_uso",
+    "produccion_crudo_consumo",
+    "produccion_crudo",
+    "producto_crudo_inventario",
     "orden_produccion",
     "envio",
     "detalle_pedido",
@@ -103,9 +107,12 @@ ORDEN_LIMPIEZA = [
     "nomina_detalle",
     "nomina_concepto_vario",
     "nomina",
+    "sobrante_lamina",
     "producto_material",
     "movimiento_inventario",
     "inventario",
+    "movimiento_producto_inventario",
+    "producto_inventario",
     "precio_produccion",
     "producto",
     "material",
@@ -115,7 +122,10 @@ ORDEN_LIMPIEZA = [
     "proveedor",
     "empleado",
     "usuario_rol",
+    "rol_modulo",
+    "rol",
     "usuario",
+    "metodo_caja",
 ]
 
 
@@ -134,12 +144,14 @@ class Cleaner:
             self.registrar(tabla, id)
 
     def registrar_gastos_like(self, db, descripcion_like: str):
-        """Registra gastos (p.ej. los generados automáticamente por consumo)."""
+        """Registra gastos (p.ej. los generados automáticamente por consumo).
+        Busca en descripcion Y en observaciones: los marcadores
+        '[consumo {id}]' / '[mano_obra {id}]' viven en observaciones."""
         if "gasto" not in self._ids:
             self._ids["gasto"] = set()
         from sqlalchemy import text
         rows = db.execute(
-            text("SELECT id FROM gasto WHERE descripcion LIKE :pat"),
+            text("SELECT id FROM gasto WHERE descripcion LIKE :pat OR observaciones LIKE :pat"),
             {"pat": f"%{descripcion_like}%"},
         ).fetchall()
         for (gid,) in rows:
@@ -171,6 +183,15 @@ class Cleaner:
                 continue
             ids_str = ",".join(str(i) for i in ids)
             try:
+                # La conversión de cotización a pedido auto-genera las órdenes
+                # de producción de las líneas FABRICADO (PENDIENTE). Si el test
+                # no las registró (p.ej. porque no creó etapas), su FK
+                # NO ACTION bloquearía el borrado del detalle → limpiarlas aquí.
+                if tabla == "detalle_pedido":
+                    db.execute(text(
+                        f"DELETE FROM orden_produccion WHERE detalle_pedido_id IN ({ids_str})"
+                    ))
+                    db.commit()
                 db.execute(text(f"DELETE FROM {tabla} WHERE id IN ({ids_str})"))
                 db.commit()
             except Exception as e:  # noqa: BLE001 — un fallo no debe romper el resto

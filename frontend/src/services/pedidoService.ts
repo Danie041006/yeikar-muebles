@@ -5,7 +5,9 @@ import { Product } from './cotizacionService';
 export interface OrderDetail {
   id: number;
   pedido_id: number;
-  producto_id: number;
+  producto_id?: number | null;
+  material_id?: number | null;
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   cantidad: number;
   precio: number;
   alto?: number;
@@ -16,6 +18,7 @@ export interface OrderDetail {
   descripcion_especifica?: string;
   observaciones?: string;
   producto?: Product;
+  material?: { id: number; nombre: string; costo_base: number; unidad_medida?: { abreviatura: string } };
 }
 
 export interface Order {
@@ -39,7 +42,9 @@ export interface OrderUpdate {
 }
 
 export interface ConvertDetail {
-  producto_id: number;
+  producto_id?: number | null;
+  material_id?: number | null;
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   cantidad: number;
   precio: number;
   alto?: number;

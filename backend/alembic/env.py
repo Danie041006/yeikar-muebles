@@ -30,6 +30,7 @@ import app.modules.auditoria.model   # noqa: F401
 import app.modules.costos_produccion.model  # noqa: F401
 import app.modules.nomina.model  # noqa: F401
 import app.modules.adjuntos.model  # noqa: F401
+import app.modules.cuentas_por_pagar.model  # noqa: F401
 
 from alembic import context
 

@@ -80,16 +80,51 @@ ALIAS_MATERIAL = {
 
 
 def dec(v):
+    """Convierte una celda a Decimal interpretando los DOS formatos que
+    conviven en las hojas del taller:
+
+      - US/Excel estándar: coma = miles, punto = decimal  → "163,800.00"
+      - Latino (colombiano): punto = miles, coma = decimal → "163.800,00"
+      - Planos: "9450", "140.00", "0,5", "3.2"
+
+    Reglas:
+      1. Con AMBOS separadores, el ÚLTIMO de la cadena es el decimal y el
+         otro se elimina (es de miles): "163,800.00" → 163800.00.
+      2. Con UN solo separador:
+         - grupo final de exactamente 3 dígitos y parte entera de 1-3
+           dígitos (≠ "0") → MILES, convención colombiana de dinero
+           ("3.200" → 3200, "10,000" → 10000);
+         - cualquier otro caso → DECIMAL ("140.00", "0,5", "3.2",
+           "3240.000" — parte entera de 4+ dígitos se lee como decimal).
+    """
     if v is None:
         return None
     if isinstance(v, (int, float)):
         return Decimal(str(v))
-    t = str(v).replace(",", ".").strip()
-    m = re.search(r"\d+(?:\.\d+)?", t)
+    # Primer token numérico EN SITIO (no une números separados por texto:
+    # "50*80" → 50; "$ 163,800.00" → 163,800.00).
+    m = re.search(r"-?\d[\d.,]*", str(v))
     if not m:
         return None
+    t = m.group(0).rstrip(".,")
+    tiene_coma = "," in t
+    tiene_punto = "." in t
+    if tiene_coma and tiene_punto:
+        if t.rfind(",") > t.rfind("."):
+            t = t.replace(".", "").replace(",", ".")   # 163.800,00 → 163800.00
+        else:
+            t = t.replace(",", "")                     # 163,800.00 → 163800.00
+    elif tiene_coma or tiene_punto:
+        sep = "," if tiene_coma else "."
+        partes = t.split(sep)
+        if len(partes) > 2:
+            t = t.replace(sep, "")                     # 2.051.090 → 2051090
+        elif len(partes) == 2 and len(partes[1]) == 3 and 1 <= len(partes[0]) <= 3 and partes[0] != "0":
+            t = t.replace(sep, "")                     # 3.200 / 10,000 → miles
+        else:
+            t = t.replace(sep, ".")                    # 140.00 / 0,5 / 3.2 → decimal
     try:
-        return Decimal(m.group(0))
+        return Decimal(t)
     except InvalidOperation:
         return None
 
@@ -236,6 +271,13 @@ def clasificar_fila(vals):
                 break
         return ("nombre_producto", {"valor": valor})
 
+    # Fila de gastos de sección ("gastos de Ebanisteria e 10%", con o sin el
+    # monto ya calculado en la fila). Siempre es un % de la sección, jamás un
+    # insumo: se detecta ANTES del branch de costo de producción para que el
+    # monto pegado no la convierta en una línea de costo duplicada.
+    pct_gastos_fila = _porcentaje_en_texto(c1)
+    if "GASTOS" in c1_up and pct_gastos_fila is not None:
+        return ("gastos", {"porcentaje": pct_gastos_fila})
     if "GASTOS" in c1_up and not tiene_nums:
         return ("gastos", {"porcentaje": _primero_numero(c1)})
 
@@ -417,13 +459,68 @@ def subtotal_insumos(sec) -> Decimal:
     return sum((i["total"] for i in sec["insumos"]), Decimal("0"))
 
 
+def estructura_para_preview(db: Session, estructura: dict) -> list:
+    """Estructura lista para pintarse como el Excel: secciones con sus filas de
+    insumo (con el resultado del matching contra el inventario), mano de obra y
+    gastos, subtotales y totales declarados."""
+    def q2(v: Decimal) -> Decimal:
+        return Decimal(v).quantize(Decimal("0.01"))
+
+    visual = []
+    for sec in estructura["secciones"]:
+        insumos = []
+        for i in sec["insumos"]:
+            res = resolver_material(db, i["nombre"])
+            insumos.append({
+                "nombre": i["nombre"],
+                "cantidad": float(i["cantidad"]),
+                "unidad": i["unidad"],
+                "precio_unitario": float(i["precio_unitario"]),
+                "total": float(i["total"]),
+                "estado": res["estado"],
+                "material_id": res["material"].id if res["material"] else None,
+                "material_nombre": res["material"].nombre if res["material"] else None,
+                "candidatos": [{"id": c.id, "nombre": c.nombre} for c in res["candidatos"][:8]],
+            })
+        costos = []
+        for c in sec["costos"]:
+            pct = c.get("porcentaje")
+            total = q2(c["base"] * (Decimal("1") + (pct or Decimal("0")) / Decimal("100")))
+            costos.append({
+                "nombre": c["nombre"],
+                "porcentaje": float(pct) if pct else None,
+                "base": float(q2(c["base"])),
+                "total": float(total),
+                "es_fabricacion": bool(c.get("es_fabricacion")),
+            })
+        ins_sub = subtotal_insumos(sec).quantize(Decimal("0.01"))
+        cp_sub = subtotal_costos_prod(sec).quantize(Decimal("0.01"))
+        sub = ins_sub + cp_sub
+        pct_g = sec.get("pct_gastos")
+        gasto = (sub * (pct_g or Decimal("0")) / Decimal("100")).quantize(Decimal("0.01"))
+        visual.append({
+            "nombre": sec["nombre"],
+            "pct_gastos": float(pct_g) if pct_g is not None else None,
+            "gasto_declarado": float(sec["total_declarado_seccion"]) if sec.get("total_declarado_seccion") else None,
+            "insumos": insumos,
+            "costos_produccion": costos,
+            "subtotal_insumos": float(ins_sub),
+            "subtotal_costos": float(cp_sub),
+            "gasto": float(gasto),
+            "total": float((sub + gasto).quantize(Decimal("0.01"))),
+        })
+    return visual
+
+
 def subtotal_costos_prod(sec) -> Decimal:
     total = Decimal("0")
     for c in sec["costos"]:
         aporte = c["base"]
         if c.get("porcentaje"):
             aporte += c["base"] * c["porcentaje"] / Decimal("100")
-        total += aporte
+        # Centavos exactos por línea: la reconstrucción base×(1+pct%) puede
+        # dejar 0.0015 de drift y el total debe cuadrar con el Excel.
+        total += aporte.quantize(Decimal("0.01"))
     return total
 
 
@@ -477,32 +574,96 @@ def resumen_calculo(estructura: dict, ganancia_pct: float = 40.0, impuesto_pct: 
 # ---------------------------------------------------------------------------
 # Material / tipo / persistencia
 # ---------------------------------------------------------------------------
-def matchear_material(db: Session, nombre_raw: str):
-    """Exacto → sinónimo → contiene → fuzzy ≥0.82. None si nada (queda PENDIENTE)."""
+def resolver_material(db: Session, nombre_raw: str) -> dict:
+    """Intenta asociar un insumo del Excel con el catálogo de inventario.
+
+    Devuelve {"estado": "MAPEADO"|"AMBIGUO"|"PENDIENTE", "material": Material|None,
+    "candidatos": [Material]}.
+
+    Cascada (solo el paso exacto considera inactivos; el resto prefiere activos):
+      1. Nombre exacto            → 1: MAPEADO · N: AMBIGUO (duplicados del catálogo)
+      2. Sinónimo exacto          → 1: MAPEADO · N: AMBIGUO
+      3. Nombre contiene (ILIKE)  → 1: MAPEADO · N: AMBIGUO
+      4. Fuzzy (prefijo 6, ratio ≥ 0.82) → mejor único: MAPEADO · nada: PENDIENTE
+    """
+    from sqlalchemy.orm import joinedload
+
     norm = normalizar_material(nombre_raw)
+    vacio = {"estado": "PENDIENTE", "material": None, "candidatos": []}
     if not norm:
-        return None
-    m = db.query(model.Material).filter(func.upper(func.trim(model.Material.nombre)) == norm).first()
-    if m:
-        return m
-    sin = db.query(model.MaterialSinonimo).filter(
-        func.upper(model.MaterialSinonimo.sinonimo) == norm
-    ).first()
-    if sin:
-        return db.query(model.Material).filter(model.Material.id == sin.material_id).first()
-    contiene = db.query(model.Material).filter(model.Material.nombre.ilike(f"%{norm}%")).first() \
-        or db.query(model.Material).filter(model.Material.nombre.ilike(f"{norm[:12]}%")).first()
-    if contiene:
-        return contiene
+        return vacio
+
+    # 1. Exacto (incluye inactivos: mapear a un material existente es honesto)
+    exactos = (
+        db.query(model.Material)
+        .options(joinedload(model.Material.unidad_medida))
+        .filter(func.upper(func.trim(model.Material.nombre)) == norm)
+        .all()
+    )
+    if len(exactos) == 1:
+        return {"estado": "MAPEADO", "material": exactos[0], "candidatos": exactos}
+    if len(exactos) > 1:
+        return {"estado": "AMBIGUO", "material": None, "candidatos": exactos}
+
+    # 2. Sinónimos
+    sin_sinonimos = (
+        db.query(model.MaterialSinonimo)
+        .filter(func.upper(model.MaterialSinonimo.sinonimo) == norm)
+        .all()
+    )
+    if sin_sinonimos:
+        mats = [
+            db.query(model.Material)
+            .options(joinedload(model.Material.unidad_medida))
+            .filter(model.Material.id == s.material_id)
+            .first()
+            for s in sin_sinonimos
+        ]
+        mats = [m for m in mats if m]
+        unicos = {m.id: m for m in mats}
+        if len(unicos) == 1:
+            return {"estado": "MAPEADO", "material": mats[0], "candidatos": mats}
+        if len(unicos) > 1:
+            return {"estado": "AMBIGUO", "material": None, "candidatos": list(unicos.values())}
+
+    # 3. Contiene (solo activos)
+    contiene = (
+        db.query(model.Material)
+        .options(joinedload(model.Material.unidad_medida))
+        .filter(model.Material.activo == True, model.Material.nombre.ilike(f"%{norm}%"))
+        .all()
+    )
+    if len(contiene) == 1:
+        return {"estado": "MAPEADO", "material": contiene[0], "candidatos": contiene}
+    if len(contiene) > 1:
+        return {"estado": "AMBIGUO", "material": None, "candidatos": contiene}
+
+    # 4. Fuzzy por prefijo
+    candidatos = (
+        db.query(model.Material)
+        .options(joinedload(model.Material.unidad_medida))
+        .filter(
+            model.Material.activo == True,
+            func.left(model.Material.nombre, 6) == norm[:6],
+        ).all()
+        if len(norm) >= 6 else []
+    )
     mejor, mejor_score = None, 0.0
-    candidatos = db.query(model.Material).filter(
-        func.left(model.Material.nombre, 6) == norm[:6]
-    ).all() if len(norm) >= 6 else []
+    empate = False
     for cand in candidatos:
         score = SequenceMatcher(None, norm, cand.nombre.upper().strip()).ratio()
         if score > mejor_score:
-            mejor, mejor_score = cand, score
-    return mejor if mejor_score >= 0.82 else None
+            mejor, mejor_score, empate = cand, score, False
+        elif score == mejor_score:
+            empate = True
+    if mejor and mejor_score >= 0.82 and not empate:
+        return {"estado": "MAPEADO", "material": mejor, "candidatos": [mejor]}
+    return vacio
+
+
+def matchear_material(db: Session, nombre_raw: str):
+    """Compatibilidad: devuelve el Material asociado o None (sin distinguir AMBIGUO)."""
+    return resolver_material(db, nombre_raw)["material"]
 
 
 def resolver_tipo(db: Session, tipo_producto_id: Optional[int], nuevo_tipo: Optional[str],
@@ -581,16 +742,25 @@ def crear_producto_desde_estructura(
             ))
 
         for i in sec["insumos"]:
-            material = matchear_material(db, i["nombre"])
+            resolucion = resolver_material(db, i["nombre"])
+            material = resolucion["material"]
+            observaciones_el = i.get("observaciones") or ""
+            if resolucion["estado"] == "AMBIGUO":
+                nombres = " | ".join(c.nombre for c in resolucion["candidatos"][:6])
+                observaciones_el = (
+                    f"AMBIGUO — elige el material correcto. Candidatos: {nombres}"
+                    + (f" · {observaciones_el}" if observaciones_el else "")
+                )
             db.add(model.ElementoSeccion(
                 seccion_id=seccion.id,
                 nombre_insumo_original=i["nombre"],
                 material_id_normalizado=material.id if material else None,
-                estado_resolucion="MAPEADO" if material else "PENDIENTE",
+                estado_resolucion=resolucion["estado"],
                 cantidad=i["cantidad"],
                 unidad_medida=i["unidad"],
                 precio_unitario=i["precio_unitario"],
                 costo_subtotal=i["total"],
+                observaciones=observaciones_el or None,
             ))
 
     record_event(

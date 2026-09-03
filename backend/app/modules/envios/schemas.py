@@ -56,12 +56,22 @@ class ProductoRepartoResponse(BaseModel):
     nombre: Optional[str] = None
 
 
+class MaterialRepartoResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    nombre: Optional[str] = None
+
+
 class DetallePedidoRepartoResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     pedido_id: int
-    producto_id: int
+    # INSUMO vendido suelto: producto_id NULL, material_id presente.
+    producto_id: Optional[int] = None
+    material_id: Optional[int] = None
+    tipo_item: Optional[str] = None
     cantidad: float
     alto: Optional[float] = None
     ancho: Optional[float] = None
@@ -70,6 +80,7 @@ class DetallePedidoRepartoResponse(BaseModel):
     acabado: Optional[str] = None
     observaciones: Optional[str] = None
     producto: Optional[ProductoRepartoResponse] = None
+    material: Optional[MaterialRepartoResponse] = None
 
 
 class PedidoRepartoResponse(BaseModel):

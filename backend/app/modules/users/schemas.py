@@ -4,6 +4,7 @@ from typing import Optional
 
 class UsuarioBase(BaseModel):
     nombre_usuario: str
+    nombre: Optional[str] = None   # Nombre visible (saludos en la UI)
     email: Optional[EmailStr] = None   # EmailStr valida formato
 
 class UsuarioCreate(UsuarioBase):

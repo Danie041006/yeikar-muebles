@@ -1,9 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { productosService, Product, ProductoMaterial, TipoProducto, SeccionProducto } from '../services/productosService';
+import { productosService, Product, ProductoMaterial, TipoProducto, SeccionProducto, ElementoSeccion, GrupoDuplicados } from '../services/productosService';
 import api from '../services/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect, Modal } from '../components/ui';
-import { Hammer, Package, Sparkles, Layers, Search, Plus, RefreshCw, Copy, Pencil, Trash2, Tag, ChevronRight, LayoutGrid, X, FileSpreadsheet } from 'lucide-react';
+import { Package, Search, Plus, Copy, Pencil, Trash2, X, FileSpreadsheet, MoreHorizontal } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import EstructuraCostos from '../components/EstructuraCostos';
@@ -15,6 +15,9 @@ interface Material {
   id: number;
   nombre: string;
   costo_base: number;
+  largo_cm?: number | null;
+  ancho_cm?: number | null;
+  categoria_inventario_id?: number | null;
   unidad_medida?: { nombre: string; abreviatura: string };
 }
 
@@ -48,6 +51,7 @@ const ESCALA_LABELS: Record<string, { label: string; color: string }> = {
   ESPACIADO: { label: 'Espaciado', color: 'bg-amber-100 text-amber-700' },
   POR_RANGO: { label: 'Por Rango', color: 'bg-orange-100 text-orange-700' },
   FORMULA:   { label: 'Fórmula',  color: 'bg-green-100 text-green-700' },
+  CORTE:     { label: 'Corte',    color: 'bg-amber-100 text-amber-800' },
 };
 
 const fmt = (n: number) =>
@@ -87,9 +91,8 @@ export default function Productos() {
   const [precioSimulado, setPrecioSimulado] = useState<PrecioSimulado | null>(null);
   const [estructura, setEstructura] = useState<EstructuraCostosData | null>(null);
   const [simLoading, setSimLoading] = useState(false);
-  const [showRecalcular, setShowRecalcular] = useState(false);
-  const [recPropuesta, setRecPropuesta] = useState<any[] | null>(null);
-  const [recAplicando, setRecAplicando] = useState(false);
+  // Menú de acciones del header (importar estructura / materiales duplicados)
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
 
   // Section modal
   const [showSectionModal, setShowSectionModal] = useState(false);
@@ -113,6 +116,19 @@ export default function Productos() {
     observaciones: '',
     precio_unitario: null as number | null,
   });
+
+  // Resolver insumos PENDIENTE/AMBIGUO (asociar a material del inventario)
+  const [elementoAsociar, setElementoAsociar] = useState<ElementoSeccion | null>(null);
+  const [asociarMaterialId, setAsociarMaterialId] = useState('');
+  const [asociarSinonimo, setAsociarSinonimo] = useState(true);
+  const [asociando, setAsociando] = useState(false);
+
+  // Fusionar materiales duplicados del catálogo (solo Dueño/Admin)
+  const [showDuplicadosModal, setShowDuplicadosModal] = useState(false);
+  const [duplicados, setDuplicados] = useState<GrupoDuplicados[]>([]);
+  const [loadingDuplicados, setLoadingDuplicados] = useState(false);
+  const [sobrevivienteElegido, setSobrevivienteElegido] = useState<Record<string, number>>({});
+  const [fusionando, setFusionando] = useState(false);
 
   // Costo de producción modal
   const [showCostoProduccionModal, setShowCostoProduccionModal] = useState(false);
@@ -141,9 +157,15 @@ export default function Productos() {
     codigo: '',
     tipo_producto_id: '',
     descripcion: '',
-    ancho_base: '1.60',
-    largo_base: '1.90',
+    // Dimensiones base OPCIONALES: nulas por defecto (el motor asume 1.60×1.90
+    // al calcular mientras no se definan).
+    ancho_base: '',
+    largo_base: '',
     alto_base: '',
+    // Precio ESTIMADO de venta: se le da al cliente mientras el mueble no
+    // tenga estructura de costos. Cuando exista, el precio se recalcula.
+    precio_venta_base: '',
+    precio_costo_base: '',
   });
   const [fotoArchivo, setFotoArchivo] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
@@ -169,6 +191,8 @@ export default function Productos() {
     tipo_escala: 'FIJO' as ProductoMaterial['tipo_escala'],
     distancia_pauta_cm: '',
     tornillos_por_pieza: '',
+    ancho_corte_cm: '',
+    largo_corte_cm: '',
     formula_personalizada: '',
     rangos: [] as { max: string; cantidad: string }[],
     es_fijo_override: false,
@@ -183,6 +207,8 @@ export default function Productos() {
     tipo_escala: 'FIJO',
     distancia_pauta_cm: '',
     tornillos_por_pieza: '',
+    ancho_corte_cm: '',
+    largo_corte_cm: '',
     formula_personalizada: '',
     rangos: [],
     es_fijo_override: false,
@@ -204,6 +230,8 @@ export default function Productos() {
       tipo_escala: item.tipo_escala,
       distancia_pauta_cm: item.distancia_pauta_cm != null ? String(item.distancia_pauta_cm) : '',
       tornillos_por_pieza: item.tornillos_por_pieza != null ? String(item.tornillos_por_pieza) : '',
+      ancho_corte_cm: item.ancho_corte_cm != null ? String(item.ancho_corte_cm) : '',
+      largo_corte_cm: item.largo_corte_cm != null ? String(item.largo_corte_cm) : '',
       formula_personalizada: item.formula_personalizada || '',
       rangos: (item.rangos || []).map((r) => ({ max: String(r.max), cantidad: String(r.cantidad) })),
       es_fijo_override: !!item.es_fijo_override,
@@ -218,7 +246,7 @@ export default function Productos() {
     try {
       setLoading(true);
       const [prodData, tiposData, matData] = await Promise.all([
-        productosService.getProductos(),
+        productosService.getProductos(undefined, { limite: 1000 }),
         api.get<TipoProducto[]>('/catalogos/tipo-producto/'),
         api.get<Material[]>('/material/?limite=1000'),
       ]);
@@ -255,32 +283,6 @@ export default function Productos() {
     }
   }, []);
 
-
-  const verRecalcular = async () => {
-    setRecAplicando(true);
-    try {
-      const res = await api.post('/producto/recalcular-precios', { aplicar: false });
-      setRecPropuesta(res.data);
-      setShowRecalcular(true);
-    } catch {
-      toast.error('No se pudo generar la vista previa de precios.');
-    } finally {
-      setRecAplicando(false);
-    }
-  };
-
-  const aplicarRecalcular = async () => {
-    setRecAplicando(true);
-    try {
-      const res = await api.post('/producto/recalcular-precios', { aplicar: true });
-      setRecPropuesta(res.data);
-      toast.success('Precios recalculados. Revisa los que quedaron en revisión.');
-      setRecAplicando(false);
-    } catch {
-      setRecAplicando(false);
-      toast.error('No se pudieron aplicar los precios.');
-    }
-  };
 
   const handleSimularPrecio = async () => {
     if (!selectedProduct) return;
@@ -343,6 +345,10 @@ export default function Productos() {
       ancho_base: productForm.ancho_base ? parseFloat(productForm.ancho_base) : undefined,
       largo_base: productForm.largo_base ? parseFloat(productForm.largo_base) : undefined,
       alto_base: productForm.alto_base ? parseFloat(productForm.alto_base) : undefined,
+      // Precio ESTIMADO de venta (y costo opcional) para cotizar mientras el
+      // mueble no tenga estructura de costos.
+      precio_venta_base: productForm.precio_venta_base ? parseFloat(productForm.precio_venta_base) : null,
+      precio_costo_base: productForm.precio_costo_base ? parseFloat(productForm.precio_costo_base) : null,
     };
     try {
       let productoId: number;
@@ -429,12 +435,19 @@ export default function Productos() {
   const handleRecipeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProduct || !recipeForm.material_id || !recipeForm.cantidad_base) return;
+    const esCorte = recipeForm.tipo_escala === 'CORTE';
+    if (esCorte && (!recipeForm.ancho_corte_cm || !recipeForm.largo_corte_cm)) {
+      toast.error('Indica las medidas del corte (ancho × largo en cm).');
+      return;
+    }
     const body = {
       material_id: parseInt(recipeForm.material_id),
       cantidad_base: parseFloat(recipeForm.cantidad_base),
       tipo_escala: recipeForm.tipo_escala,
       distancia_pauta_cm: recipeForm.distancia_pauta_cm ? parseFloat(recipeForm.distancia_pauta_cm) : undefined,
       tornillos_por_pieza: recipeForm.tornillos_por_pieza ? parseInt(recipeForm.tornillos_por_pieza) : undefined,
+      ancho_corte_cm: esCorte && recipeForm.ancho_corte_cm ? parseFloat(recipeForm.ancho_corte_cm) : null,
+      largo_corte_cm: esCorte && recipeForm.largo_corte_cm ? parseFloat(recipeForm.largo_corte_cm) : null,
       formula_personalizada: recipeForm.formula_personalizada || undefined,
       rangos: recipeForm.rangos.length > 0
         ? recipeForm.rangos
@@ -565,6 +578,76 @@ export default function Productos() {
     } catch (error) {
       console.error('Error deleting element:', error);
       toast.error('Error al eliminar el insumo');
+    }
+  };
+
+  // Asociar un insumo PENDIENTE/AMBIGUO a un material del inventario
+  const handleAsociarElemento = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!elementoAsociar || !asociarMaterialId) return;
+    setAsociando(true);
+    try {
+      await productosService.actualizarElementoSeccion(elementoAsociar.id, {
+        material_id_normalizado: parseInt(asociarMaterialId),
+        registrar_sinonimo: asociarSinonimo,
+      });
+      toast.success(
+        asociarSinonimo
+          ? 'Insumo asociado. El texto quedó como sinónimo: los próximos imports lo matchearán solo.'
+          : 'Insumo asociado al inventario.'
+      );
+      setElementoAsociar(null);
+      if (selectedProduct) handleOpenRecipe(selectedProduct);
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Error al asociar el insumo.');
+    } finally {
+      setAsociando(false);
+    }
+  };
+
+  // ---- Duplicados del catálogo: cargar y fusionar ----
+  const abrirDuplicados = async () => {
+    setShowDuplicadosModal(true);
+    setLoadingDuplicados(true);
+    try {
+      const data = await productosService.getMaterialesDuplicados();
+      setDuplicados(data);
+      // Pre-seleccionar el de mayor stock como sobreviviente de cada grupo
+      const pre: Record<string, number> = {};
+      data.forEach((g) => {
+        const mejor = [...g.items].sort((a, b) => (b.stock - a.stock) || (b.activo ? 1 : 0) - (a.activo ? 1 : 0))[0];
+        if (mejor) pre[g.nombre] = mejor.id;
+      });
+      setSobrevivienteElegido(pre);
+    } catch (error) {
+      toast.error('Error al cargar los duplicados.');
+    } finally {
+      setLoadingDuplicados(false);
+    }
+  };
+
+  const handleFusionarGrupo = async (grupo: GrupoDuplicados) => {
+    const sobrevive = sobrevivienteElegido[grupo.nombre];
+    if (!sobrevive) { toast.error('Elige cuál material sobrevive.'); return; }
+    const otros = grupo.items.filter(i => i.id !== sobrevive);
+    const stockMovido = otros.reduce((s, i) => s + i.stock, 0);
+    const totalRefs = otros.reduce((s, i) => s + Object.values(i.referencias || {}).reduce((a, b) => a + b, 0), 0);
+    if (!window.confirm(
+      `Fusionar ${otros.length} material(es) en "${grupo.items.find(i => i.id === sobrevive)?.nombre}".\n\n` +
+      `Se moverán: stock (${stockMovido.toLocaleString('es-ES')}) y ${totalRefs} referencia(s) (recetas, kardex, consumos...).\n` +
+      `Esta acción NO se puede deshacer. ¿Continuar?`
+    )) return;
+    setFusionando(true);
+    try {
+      for (const o of otros) {
+        await productosService.fusionarMateriales(o.id, sobrevive);
+      }
+      toast.success(`Fusionados ${otros.length} material(es) en "${grupo.items.find(i => i.id === sobrevive)?.nombre}".`);
+      await abrirDuplicados();
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Error al fusionar.');
+    } finally {
+      setFusionando(false);
     }
   };
 
@@ -737,19 +820,6 @@ export default function Productos() {
               <Package className="w-8 h-8" />
             </div>
           )}
-
-          {/* Badges sobre la foto */}
-          <div className="absolute bottom-2 left-2 flex items-center gap-1 flex-wrap">
-            <span
-              className={`text-[9px] font-black font-headline uppercase tracking-wider px-2 py-0.5 rounded-md shadow-xs ${
-                p.es_reventa
-                  ? 'bg-sky-600 text-white'
-                  : 'bg-amber-600 text-white'
-              }`}
-            >
-              {p.es_reventa ? 'Reventa' : 'Fabricado'}
-            </span>
-          </div>
         </div>
 
         {/* Type / Subcategory badge */}
@@ -766,11 +836,11 @@ export default function Productos() {
           {p.nombre}
         </h3>
 
-        {/* Dimensions (muebles fabricados) o badge Reventa */}
+        {/* Dimensiones (muebles fabricados) o precio (reventa) */}
         <div className="mt-2.5 flex items-center gap-2 flex-wrap">
           {p.es_reventa ? (
             <>
-              <span className="bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded-lg text-[10px] font-black font-headline uppercase tracking-wider">
+              <span className="bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/10 px-2 py-0.5 rounded-lg text-[10px] font-black font-headline uppercase tracking-wider">
                 Reventa{p.moneda && p.moneda.codigo !== 'COP' ? ` · ${p.moneda.codigo}` : ''}
               </span>
               {p.precio_venta_base != null && Number(p.precio_venta_base) > 0 && (
@@ -779,15 +849,15 @@ export default function Productos() {
                 </span>
               )}
             </>
-          ) : (
+          ) : p.ancho_base != null || p.largo_base != null ? (
             <div className="flex items-center gap-1 bg-yeikar-tertiary/40 px-2 py-0.5 rounded-lg text-[11px] font-mono font-bold text-yeikar-secondary">
               <svg className="w-3 h-3 text-yeikar-neutral/50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
               </svg>
-              {p.ancho_base}m × {p.largo_base}m
+              {p.ancho_base ?? '—'}m × {p.largo_base ?? '—'}m
               {p.alto_base ? ` × ${p.alto_base}m` : ''}
             </div>
-          )}
+          ) : null}
         </div>
 
         {p.descripcion && (
@@ -810,17 +880,17 @@ export default function Productos() {
         </button>
         <button
           onClick={() => {
-            setProductForm({ id: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo_producto_id: String(p.tipo_producto_id), descripcion: p.descripcion || '', ancho_base: String(p.ancho_base ?? ''), largo_base: String(p.largo_base ?? ''), alto_base: p.alto_base ? String(p.alto_base) : '' });
+            setProductForm({ id: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo_producto_id: String(p.tipo_producto_id), descripcion: p.descripcion || '', ancho_base: String(p.ancho_base ?? ''), largo_base: String(p.largo_base ?? ''), alto_base: p.alto_base ? String(p.alto_base) : '', precio_venta_base: p.precio_venta_base != null ? String(p.precio_venta_base) : '', precio_costo_base: p.precio_costo_base != null ? String(p.precio_costo_base) : '' });
             setShowProductModal(true);
           }}
-          className="flex-1 flex items-center justify-center gap-1 bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-secondary px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
+          className="flex-1 flex items-center justify-center gap-1 bg-yeikar-tertiary/60 hover:bg-yeikar-tertiary text-yeikar-secondary px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
         >
           <Pencil className="w-3 h-3" />
           <span>Editar</span>
         </button>
         <button
           onClick={() => handleDeleteProduct(p.id)}
-          className="flex items-center justify-center bg-red-50 hover:bg-red-100 text-red-500 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
+          className="flex items-center justify-center bg-yeikar-tertiary/60 hover:bg-red-50 hover:text-red-600 text-yeikar-neutral/60 px-2 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
           title="Eliminar producto"
         >
           <Trash2 className="w-3.5 h-3.5" />
@@ -902,7 +972,7 @@ export default function Productos() {
       {/* ── Header ── */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black font-headline text-yeikar-secondary tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-black font-headline text-yeikar-secondary tracking-tight">
             Catálogo de Productos
           </h1>
           <p className="text-yeikar-neutral/60 mt-1 text-sm font-body">
@@ -933,16 +1003,8 @@ export default function Productos() {
           </div>
 
           <button
-            onClick={abrirImportModal}
-            className="bg-white hover:bg-yeikar-tertiary/60 text-yeikar-secondary border border-yeikar-secondary-light/20 px-4 py-2.5 rounded-xl font-bold font-headline shadow-sm transition-all flex items-center gap-2 text-sm whitespace-nowrap"
-            title="Pega las filas de una hoja de Excel con la estructura de costos"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-yeikar-primary-dark" />
-            Importar estructura
-          </button>
-          <button
             onClick={() => {
-              setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '1.60', largo_base: '1.90', alto_base: '' });
+              setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '', largo_base: '', alto_base: '', precio_venta_base: '', precio_costo_base: '' });
               setShowProductModal(true);
             }}
             className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm whitespace-nowrap"
@@ -950,84 +1012,104 @@ export default function Productos() {
             <Plus className="w-4 h-4" />
             Nuevo Mueble
           </button>
-          {esAdmin && (
+
+          {/* Acciones secundarias en un menú ⋯ discreto */}
+          <div className="relative">
             <button
-              onClick={verRecalcular}
-              className="border border-yeikar-secondary-light/20 text-yeikar-secondary px-4 py-2.5 rounded-xl font-bold font-headline hover:bg-yeikar-tertiary transition-all text-sm whitespace-nowrap flex items-center gap-1.5"
-              title="Recalcula los precios base de los productos con receta cuando cambian los insumos (vista previa)"
+              onClick={() => setHeaderMenuOpen((v) => !v)}
+              className="flex items-center justify-center w-10 h-10 rounded-xl border border-yeikar-secondary-light/20 text-yeikar-neutral/60 hover:bg-yeikar-tertiary hover:text-yeikar-secondary transition-colors"
+              aria-label="Más acciones"
+              title="Más acciones"
             >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Recalcular precios</span>
+              <MoreHorizontal className="w-5 h-5" />
             </button>
-          )}
+            {headerMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setHeaderMenuOpen(false)} />
+                <div className="absolute right-0 mt-2 z-20 w-64 bg-white border border-yeikar-secondary-light/15 rounded-xl shadow-lg py-1.5">
+                  <button
+                    onClick={() => {
+                      setHeaderMenuOpen(false);
+                      abrirImportModal();
+                    }}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-bold text-yeikar-secondary hover:bg-yeikar-tertiary transition-colors text-left"
+                    title="Pega las filas de una hoja de Excel con la estructura de costos"
+                  >
+                    <FileSpreadsheet className="w-4 h-4 text-yeikar-primary-dark" />
+                    Importar estructura
+                  </button>
+                  {esAdmin && (
+                    <button
+                      onClick={() => {
+                        setHeaderMenuOpen(false);
+                        abrirDuplicados();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-bold text-yeikar-secondary hover:bg-yeikar-tertiary transition-colors text-left"
+                      title="Detecta materiales repetidos en el catálogo y fusiónalos (mueve stock, recetas e historial)"
+                    >
+                      <Copy className="w-4 h-4" />
+                      Materiales duplicados
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Barra de Navegación por Origen y Subcategorías ── */}
-      <div className="bg-white rounded-2xl border border-yeikar-secondary-light/15 p-4 shadow-xs space-y-3.5">
-        {/* Nivel 1: Origen (Todos / Fabricados / Revendidos) */}
+      {/* ── Filtros: origen y categoría, en un solo estilo neutral ── */}
+      <div className="bg-white rounded-2xl border border-yeikar-secondary-light/15 p-4 shadow-xs space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap border-b border-stone-100 pb-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] uppercase font-bold text-stone-400 font-headline tracking-wider mr-1 flex items-center gap-1">
-              <Layers className="w-3.5 h-3.5 text-yeikar-primary" /> Origen:
-            </span>
-
             <button
               type="button"
               onClick={() => {
                 setTipoOrigenFiltro('TODOS');
                 setSubcategoriaFiltro('TODAS');
               }}
-              className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border flex items-center gap-2 ${
+              className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border ${
                 tipoOrigenFiltro === 'TODOS'
                   ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary shadow-sm'
-                  : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+                  : 'bg-white text-stone-600 border-stone-200 hover:bg-yeikar-tertiary'
               }`}
             >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Todos los Muebles</span>
-              <span className="font-mono text-[10px] bg-white/20 px-1.5 py-0.5 rounded-full">
-                {productos.length}
-              </span>
+              Todos <span className="font-mono text-[10px] opacity-70">({productos.length})</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setTipoOrigenFiltro('FABRICADOS');
-                setSubcategoriaFiltro('TODAS');
-              }}
-              className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border flex items-center gap-2 ${
-                tipoOrigenFiltro === 'FABRICADOS'
-                  ? 'bg-amber-600 text-white border-amber-600 shadow-sm'
-                  : 'bg-amber-50/70 text-amber-900 border-amber-200/80 hover:bg-amber-100/60'
-              }`}
-            >
-              <Hammer className="w-3.5 h-3.5" />
-              <span>Fabricados (Taller)</span>
-              <span className="font-mono text-[10px] bg-amber-950/20 px-1.5 py-0.5 rounded-full font-bold">
-                {totalFabricados}
-              </span>
-            </button>
+            {totalFabricados > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTipoOrigenFiltro('FABRICADOS');
+                  setSubcategoriaFiltro('TODAS');
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border ${
+                  tipoOrigenFiltro === 'FABRICADOS'
+                    ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary shadow-sm'
+                    : 'bg-white text-stone-600 border-stone-200 hover:bg-yeikar-tertiary'
+                }`}
+              >
+                Fabricados <span className="font-mono text-[10px] opacity-70">({totalFabricados})</span>
+              </button>
+            )}
 
-            <button
-              type="button"
-              onClick={() => {
-                setTipoOrigenFiltro('REVENTA');
-                setSubcategoriaFiltro('TODAS');
-              }}
-              className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border flex items-center gap-2 ${
-                tipoOrigenFiltro === 'REVENTA'
-                  ? 'bg-sky-700 text-white border-sky-700 shadow-sm'
-                  : 'bg-sky-50/70 text-sky-900 border-sky-200/80 hover:bg-sky-100/60'
-              }`}
-            >
-              <Package className="w-3.5 h-3.5" />
-              <span>Revendidos (Comerciales)</span>
-              <span className="font-mono text-[10px] bg-sky-950/20 px-1.5 py-0.5 rounded-full font-bold">
-                {totalReventa}
-              </span>
-            </button>
+            {totalReventa > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTipoOrigenFiltro('REVENTA');
+                  setSubcategoriaFiltro('TODAS');
+                }}
+                className={`px-4 py-2 rounded-xl text-xs font-black font-headline transition-all border ${
+                  tipoOrigenFiltro === 'REVENTA'
+                    ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary shadow-sm'
+                    : 'bg-white text-stone-600 border-stone-200 hover:bg-yeikar-tertiary'
+                }`}
+              >
+                Revendidos <span className="font-mono text-[10px] opacity-70">({totalReventa})</span>
+              </button>
+            )}
           </div>
 
           <div className="text-xs text-stone-500 font-medium">
@@ -1035,20 +1117,16 @@ export default function Productos() {
           </div>
         </div>
 
-        {/* Nivel 2: Subcategorías (Camas, Sillones, Comedores, Armarios, etc.) */}
-        {subcategoriasDisponibles.length > 0 && (
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-stone-200">
-            <span className="text-[11px] uppercase font-bold text-stone-400 font-headline tracking-wider shrink-0 mr-1 flex items-center gap-1">
-              <Tag className="w-3 h-3 text-yeikar-primary" /> Categorías:
-            </span>
-
+        {/* Categorías: solo si hay más de una (con una sola no aporta nada) */}
+        {subcategoriasDisponibles.length > 1 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
             <button
               type="button"
               onClick={() => setSubcategoriaFiltro('TODAS')}
               className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 border ${
                 subcategoriaFiltro === 'TODAS'
-                  ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary shadow-xs'
-                  : 'bg-stone-50 text-stone-600 border-stone-200 hover:bg-stone-100'
+                  ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary shadow-xs'
+                  : 'bg-white text-stone-600 border-stone-200 hover:bg-yeikar-tertiary'
               }`}
             >
               Todas ({subcategoriasDisponibles.reduce((acc, c) => acc + c.count, 0)})
@@ -1061,8 +1139,8 @@ export default function Productos() {
                 onClick={() => setSubcategoriaFiltro(cat.nombre)}
                 className={`px-3 py-1 rounded-lg text-xs font-bold transition-all shrink-0 border flex items-center gap-1.5 ${
                   subcategoriaFiltro === cat.nombre
-                    ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary shadow-xs'
-                    : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-yeikar-primary/40 hover:bg-stone-100'
+                    ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary shadow-xs'
+                    : 'bg-white text-stone-700 border-stone-200 hover:bg-yeikar-tertiary'
                 }`}
               >
                 <span>{cat.nombre}</span>
@@ -1120,15 +1198,6 @@ export default function Productos() {
                         {grupo.items.length} {grupo.items.length === 1 ? 'modelo' : 'modelos'}
                       </span>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setSubcategoriaFiltro(grupo.categoria)}
-                      className="text-xs font-bold text-yeikar-primary hover:text-yeikar-secondary transition-colors flex items-center gap-1"
-                    >
-                      <span>Ver solo esta categoría</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
                   </div>
 
                   {/* Cuadrícula de tarjetas del grupo */}
@@ -1142,23 +1211,15 @@ export default function Productos() {
             /* ── Vista Cuadrícula para una sola Categoría / Búsqueda Filtrada ── */
             <div className="space-y-4">
               {subcategoriaFiltro !== 'TODAS' && (
-                <div className="flex items-center justify-between bg-amber-50/60 border border-amber-200/60 rounded-xl p-3">
+                <div className="flex items-center justify-between bg-white border border-yeikar-secondary-light/10 rounded-xl p-3">
                   <div className="flex items-center gap-2">
-                    <Tag className="w-4 h-4 text-yeikar-secondary" />
                     <span className="font-headline font-black text-sm text-yeikar-secondary">
                       Categoría: {subcategoriaFiltro}
                     </span>
-                    <span className="text-xs font-mono font-bold bg-amber-200/60 text-amber-900 px-2 py-0.5 rounded-full">
+                    <span className="text-xs font-mono font-bold bg-yeikar-tertiary/60 text-yeikar-secondary px-2 py-0.5 rounded-full">
                       {filteredProducts.length} modelos
                     </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSubcategoriaFiltro('TODAS')}
-                    className="text-xs font-bold text-stone-600 hover:text-yeikar-secondary underline"
-                  >
-                    Ver todas las categorías
-                  </button>
                 </div>
               )}
 
@@ -1181,8 +1242,14 @@ export default function Productos() {
                   {selectedProduct.nombre}
                 </h2>
                 <p className="text-white/60 text-xs font-mono mt-1">
-                  Base: {selectedProduct.ancho_base}m × {selectedProduct.largo_base}m
-                  {selectedProduct.alto_base ? ` × ${selectedProduct.alto_base}m` : ''}
+                  {(selectedProduct.ancho_base != null || selectedProduct.largo_base != null) ? (
+                    <>Base: {selectedProduct.ancho_base ?? '—'}m × {selectedProduct.largo_base ?? '—'}m
+                    {selectedProduct.alto_base ? ` × ${selectedProduct.alto_base}m` : ''}</>
+                  ) : selectedProduct.alto_base ? (
+                    <>Alto: {selectedProduct.alto_base}m</>
+                  ) : (
+                    'Sin medidas base'
+                  )}
                 </p>
               </div>
 
@@ -1232,22 +1299,54 @@ export default function Productos() {
                 ) : secciones.length > 0 ? (
                   <div className="space-y-4 max-h-[500px] overflow-y-auto pr-1">
                     {secciones.map((sec) => (
-                      <div key={sec.id} className="border border-yeikar-secondary-light/15 rounded-xl overflow-hidden bg-white shadow-sm">
-                        {/* Header de la Sección */}
-                        <div className="bg-yeikar-secondary/5 border-b border-yeikar-secondary-light/10 px-4 py-2.5 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-yeikar-primary"></span>
-                            <span className="font-headline font-black text-xs text-yeikar-secondary uppercase tracking-wider">
-                              SECCIÓN: {sec.nombre}
+                      <div key={sec.id} className="rounded-xl overflow-hidden border border-slate-300/70 bg-white">
+                        {/* Banda amarilla de sección — igual que la hoja del Excel */}
+                        <div className="bg-yellow-200 px-3 py-1.5 flex items-center justify-between gap-2">
+                          <span className="font-headline font-black uppercase text-[11px] tracking-wide text-yeikar-secondary">
+                            SECCION: {sec.nombre}
+                            <span className="ml-2 normal-case font-mono font-bold text-[10px] text-yeikar-secondary/60">
+                              {sec.elementos.length} insumo{sec.elementos.length === 1 ? '' : 's'}
                             </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[10px] font-bold font-mono bg-yeikar-secondary/10 text-yeikar-secondary px-2 py-0.5 rounded-full">
-                              {sec.elementos.length} insumos
-                            </span>
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {sec.politica && sec.politica.pct_gastos_seccion > 0 && (
+                              <span className="font-mono font-bold text-[10px] bg-yellow-100/90 text-yeikar-secondary px-1.5 py-0.5 rounded">
+                                +{sec.politica.pct_gastos_seccion}% Gastos
+                              </span>
+                            )}
+                            {sec.politica && sec.politica.pct_trabajadores != null && sec.politica.pct_trabajadores > 0 && (
+                              <span className="font-mono font-bold text-[10px] bg-yellow-100/90 text-yeikar-secondary px-1.5 py-0.5 rounded">
+                                +{sec.politica.pct_trabajadores}% Trab.
+                              </span>
+                            )}
+                            {sec.politica && sec.politica.costo_fabricacion != null && sec.politica.costo_fabricacion > 0 && (
+                              <span className="font-mono font-bold text-[10px] bg-yellow-100/90 text-yeikar-secondary px-1.5 py-0.5 rounded">
+                                $ Fab: {fmt(sec.politica.costo_fabricacion)}
+                              </span>
+                            )}
+                            {sec.politica && !sec.politica.pct_gastos_seccion && !sec.politica.pct_trabajadores && !sec.politica.costo_fabricacion && (
+                              <span className="text-[10px] italic text-yeikar-secondary/50">Sin política</span>
+                            )}
+                            <button
+                              onClick={() => {
+                                setEditingPoliticaSeccionId(sec.id);
+                                setPoliticaForm({
+                                  pct_gastos_seccion: sec.politica?.pct_gastos_seccion?.toString() ?? '',
+                                  pct_trabajadores: sec.politica?.pct_trabajadores?.toString() ?? '',
+                                  costo_fabricacion: sec.politica?.costo_fabricacion?.toString() ?? '',
+                                });
+                                setShowEditPoliticaModal(true);
+                              }}
+                              className="p-1 rounded-lg hover:bg-yellow-300/70 text-yeikar-secondary/70 transition-colors"
+                              title="Editar política de sección"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                              </svg>
+                            </button>
                             <button
                               onClick={() => handleDeleteSection(sec.id)}
-                              className="p-1 hover:bg-red-50 hover:text-red-600 text-yeikar-neutral/40 rounded-lg transition-colors"
+                              className="p-1 rounded-lg hover:bg-red-200/70 hover:text-red-700 text-yeikar-secondary/50 transition-colors"
                               title={`Eliminar sección ${sec.nombre}`}
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1257,56 +1356,12 @@ export default function Productos() {
                           </div>
                         </div>
 
-                        {/* Política de la Sección */}
-                        {sec.politica && (
-                          <div className="bg-amber-50/70 border-b border-amber-100 px-4 py-2">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                {sec.politica.pct_gastos_seccion > 0 && (
-                                  <span className="font-mono font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded text-[10px]">
-                                    +{sec.politica.pct_gastos_seccion}% Gastos
-                                  </span>
-                                )}
-                                {sec.politica.pct_trabajadores != null && sec.politica.pct_trabajadores > 0 && (
-                                  <span className="font-mono font-bold text-amber-700 bg-amber-100/70 px-2 py-0.5 rounded text-[10px]">
-                                    +{sec.politica.pct_trabajadores}% Trab.
-                                  </span>
-                                )}
-                                {sec.politica.costo_fabricacion != null && sec.politica.costo_fabricacion > 0 && (
-                                  <span className="font-mono font-bold text-amber-700 bg-amber-100/70 px-2 py-0.5 rounded text-[10px]">
-                                    $ Fab: {fmt(sec.politica.costo_fabricacion)}
-                                  </span>
-                                )}
-                                {!sec.politica.pct_gastos_seccion && !sec.politica.pct_trabajadores && !sec.politica.costo_fabricacion && (
-                                  <span className="text-[10px] text-amber-700/60 italic">Sin política configurada</span>
-                                )}
-                              </div>
-                              <button
-                                onClick={() => {
-                                  setEditingPoliticaSeccionId(sec.id);
-                                  setPoliticaForm({
-                                    pct_gastos_seccion: sec.politica?.pct_gastos_seccion?.toString() ?? '',
-                                    pct_trabajadores: sec.politica?.pct_trabajadores?.toString() ?? '',
-                                    costo_fabricacion: sec.politica?.costo_fabricacion?.toString() ?? '',
-                                  });
-                                  setShowEditPoliticaModal(true);
-                                }}
-                                className="p-1 rounded-lg hover:bg-amber-200/60 text-amber-600 transition-colors shrink-0"
-                                title="Editar política de sección"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                </svg>
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-
-                        {/* Costos de Producción de la Sección */}
-                        <div className="border-b border-gray-100 px-4 py-2 space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold text-yeikar-neutral/40 uppercase tracking-wider">Costos de Producción</span>
+                        {/* Acciones de la sección */}
+                        <div className="bg-slate-50 border-b border-slate-200 px-3 py-1 flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-yeikar-neutral/40">
+                            Insumos · Mano de obra · Gastos
+                          </span>
+                          <div className="flex items-center gap-1">
                             <button
                               onClick={() => {
                                 setCostoProduccionSectionId(sec.id);
@@ -1314,50 +1369,10 @@ export default function Productos() {
                                 setCostoProduccionForm({ nombre: '', porcentaje: '', costo_base: '' });
                                 setShowCostoProduccionModal(true);
                               }}
-                              className="text-[10px] font-bold text-yeikar-primary hover:bg-yeikar-primary/10 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
+                              className="text-[10px] font-bold text-yeikar-primary hover:bg-yeikar-primary/10 px-2 py-1 rounded-lg transition-colors"
                             >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                              </svg>
-                              Agregar
+                              + Costo
                             </button>
-                          </div>
-                          {sec.costos_produccion && sec.costos_produccion.length > 0 ? (
-                            <div className="divide-y divide-amber-100">
-                              {sec.costos_produccion.map((cp) => (
-                                <div key={cp.id} className="flex items-center justify-between text-[11px] py-1 first:pt-0 last:pb-0 hover:bg-amber-50/50 rounded px-1 -mx-1 transition-colors group">
-                                  <div className="flex-1 min-w-0 pr-2">
-                                    <span className="font-semibold text-amber-900 truncate block">{cp.nombre}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <span className="font-mono font-bold text-amber-800 bg-amber-100/70 px-1.5 py-0.5 rounded text-[10px]">
-                                      {fmt(cp.costo_base)} {cp.porcentaje ? `(+${cp.porcentaje}%)` : ''}
-                                    </span>
-                                    <span className="font-mono text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">
-                                      {fmt(cp.costo_base * (1 + (cp.porcentaje || 0) / 100))}
-                                    </span>
-                                    <button
-                                      onClick={() => handleDeleteCostoProduccion(cp.id)}
-                                      className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-500 text-yeikar-neutral/30 transition-all"
-                                      title="Eliminar costo de producción"
-                                    >
-                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                      </svg>
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-[10px] text-yeikar-neutral/40 italic">Sin costos de producción registrados.</p>
-                          )}
-                        </div>
-
-                         {/* Insumos Físicos de la Sección */}
-                        <div className="p-3 space-y-1.5">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-[10px] font-bold text-yeikar-neutral/40 uppercase tracking-wider">Insumos</span>
                             <button
                               onClick={() => {
                                 setElementSectionId(sec.id);
@@ -1365,61 +1380,114 @@ export default function Productos() {
                                 setElementForm({ nombre_insumo_original: '', material_id_normalizado: null, cantidad: '1', unidad_medida: '', observaciones: '', precio_unitario: null });
                                 setShowElementModal(true);
                               }}
-                              className="text-[10px] font-bold text-yeikar-primary hover:bg-yeikar-primary/10 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
+                              className="text-[10px] font-bold text-yeikar-primary hover:bg-yeikar-primary/10 px-2 py-1 rounded-lg transition-colors"
                             >
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                              </svg>
-                              Agregar insumo
+                              + Insumo
                             </button>
                           </div>
-                          <div className="divide-y divide-gray-100">
-                          {sec.elementos.length === 0 ? (
-                            <p className="text-[11px] text-yeikar-neutral/40 italic py-1">Sin insumos registrados en esta sección.</p>
-                          ) : (
-                            sec.elementos.map((el) => (
-                              <div key={el.id} className="flex items-center justify-between text-xs pt-1.5 first:pt-0 pb-1 px-1 hover:bg-yeikar-tertiary/20 rounded transition-colors group">
-                                <div className="min-w-0 flex-1 pr-2">
-                                  <span className="font-semibold text-yeikar-secondary truncate block">
-                                    • {el.nombre_insumo_original}
-                                  </span>
-                                  {el.observaciones && (
-                                    <span className="text-[10px] text-yeikar-neutral/50 block truncate">{el.observaciones}</span>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <span className="font-mono font-bold text-yeikar-secondary bg-gray-100 px-2 py-0.5 rounded text-[11px]">
-                                    {el.cantidad} {el.unidad_medida || ''}
-                                  </span>
-                                  {el.precio_unitario ? (
-                                    <span className="font-mono text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">
-                                      {fmt(el.cantidad * el.precio_unitario)}
+                        </div>
+
+                        {/* Tabla estilo Excel */}
+                        <table className="w-full border-collapse text-xs">
+                          <tbody>
+                            <tr className="bg-slate-100 font-bold text-[10px] uppercase text-yeikar-secondary">
+                              <td className="border border-slate-300 px-2 py-1 text-center">MATERIA PRIMA</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-16">CANTIDAD</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-32">UNIDAD DE MEDIDA</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-28">V/UNIT</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-36">PRECIO TOTAL</td>
+                            </tr>
+                            {(sec.costos_produccion || []).length === 0 && sec.elementos.length === 0 && (
+                              <tr>
+                                <td colSpan={5} className="border border-slate-300 px-2 py-2 text-[11px] italic text-yeikar-neutral/40 text-center">
+                                  Sin insumos ni costos de producción en esta sección.
+                                </td>
+                              </tr>
+                            )}
+
+
+                            {/* Mano de obra / costos de producción (filas Excel) */}
+                            {(sec.costos_produccion || []).map((cp) => (
+                              <tr key={cp.id} className="bg-amber-50/40 group">
+                                <td className="border border-slate-300 px-2 py-1 italic font-semibold text-yeikar-secondary">
+                                  {cp.nombre}{cp.porcentaje ? ` *${cp.porcentaje}%` : ''}
+                                </td>
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono font-semibold text-yeikar-secondary">
+                                  {fmt(cp.costo_base * (1 + (cp.porcentaje || 0) / 100))}
+                                  <button
+                                    onClick={() => handleDeleteCostoProduccion(cp.id)}
+                                    className="ml-2 align-middle opacity-0 group-hover:opacity-100 hover:text-red-500 text-yeikar-neutral/30 transition-all"
+                                    title="Eliminar costo de producción"
+                                  >
+                                    ×
+                                  </button>
+                                </td>
+                              </tr>
+                             ))}
+
+                             {/* Insumos (filas Excel) */}
+                             {sec.elementos.map((el) => (
+                              <tr key={el.id} className="group hover:bg-yeikar-tertiary/30">
+                                <td className="border border-slate-300 px-2 py-1">
+                                  <span className="font-semibold text-yeikar-secondary">{el.nombre_insumo_original}</span>
+                                  {el.estado_resolucion === 'MAPEADO' ? (
+                                    <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 align-middle" title="Asociado al inventario">
+                                      ✓
                                     </span>
-                                  ) : null}
+                                  ) : (
+                                    <button
+                                      onClick={() => { setElementoAsociar(el); setAsociarMaterialId(''); setAsociarSinonimo(true); }}
+                                      className={`ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded border align-middle hover:bg-amber-100 transition-colors ${
+                                        el.estado_resolucion === 'AMBIGUO'
+                                          ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                                      }`}
+                                      title="Asociar este insumo a un material del inventario"
+                                    >
+                                      {el.estado_resolucion === 'AMBIGUO' ? '⚑ Ambiguo — asociar' : '⚠ Sin asociar'}
+                                    </button>
+                                  )}
+                                  {el.observaciones && (
+                                    <span className="ml-2 text-[10px] text-yeikar-neutral/40 italic">{el.observaciones}</span>
+                                  )}
+                                </td>
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono">{el.cantidad}</td>
+                                <td className="border border-slate-300 px-2 py-1 text-[10px] text-yeikar-neutral/60 uppercase">{el.unidad_medida || ''}</td>
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono">
+                                  {el.precio_unitario ? fmt(el.precio_unitario) : ''}
+                                </td>
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono font-semibold text-yeikar-secondary">
+                                  {el.precio_unitario ? fmt(el.cantidad * el.precio_unitario) : '—'}
                                   <button
                                     onClick={() => handleDeleteElement(el.id)}
-                                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-500 text-yeikar-neutral/30 transition-all"
+                                    className="ml-2 align-middle opacity-0 group-hover:opacity-100 hover:text-red-500 text-yeikar-neutral/30 transition-all"
                                     title="Eliminar insumo"
                                   >
-                                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
+                                    ×
                                   </button>
-                                </div>
-                              </div>
-                            ))
-                          )}
-                          </div>
-                        </div>
-                        {/* Total por Sección */}
-                        {sec.elementos.some(el => el.precio_unitario) && (
-                          <div className="border-t border-gray-100 px-4 py-1.5 flex justify-end items-center gap-2 text-[11px]">
-                            <span className="text-yeikar-neutral/50 font-bold">Total insumos:</span>
-                            <span className="font-mono font-black text-yeikar-secondary bg-yeikar-secondary/5 px-2.5 py-0.5 rounded-lg">
-                              {fmt(sec.elementos.reduce((sum, el) => sum + (el.cantidad * (el.precio_unitario || 0)), 0))}
-                            </span>
-                          </div>
-                        )}
+                                </td>
+                              </tr>
+                             ))}
+                             {/* TOTAL de la sección — banda naranja como el Excel */}
+                             {((sec.costos_produccion || []).length > 0 || sec.elementos.some(el => el.precio_unitario)) && (
+                              <tr className="bg-orange-200 font-black">
+                                <td className="border border-slate-300 px-2 py-1 uppercase text-[10px]">Total {sec.nombre}</td>
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono">
+                                  {fmt(
+                                    sec.elementos.reduce((sum, el) => sum + el.cantidad * (el.precio_unitario || 0), 0) +
+                                    (sec.costos_produccion || []).reduce((sum, cp) => sum + cp.costo_base * (1 + (cp.porcentaje || 0) / 100), 0)
+                                  )}
+                                </td>
+                              </tr>
+                             )}
+                          </tbody>
+                        </table>
                       </div>
                     ))}
                   </div>
@@ -1431,7 +1499,13 @@ export default function Productos() {
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                     {receta.map((item) => {
                       const mat = materiales.find(m => m.id === item.material_id);
-                      const subtotal = (item.cantidad_base || 0) * (mat?.costo_base || item.material?.costo_base || 0);
+                      const esCorte = item.tipo_escala === 'CORTE';
+                      const costoUnitario = esCorte && item.ancho_corte_cm && item.largo_corte_cm
+                        ? (mat?.costo_base || item.material?.costo_base || 0)
+                          * (item.ancho_corte_cm * item.largo_corte_cm)
+                          / (((mat?.largo_cm ?? item.material?.largo_cm) || 1) * ((mat?.ancho_cm ?? item.material?.ancho_cm) || 1))
+                        : (mat?.costo_base || item.material?.costo_base || 0);
+                      const subtotal = (item.cantidad_base || 0) * costoUnitario;
                       const escala = ESCALA_LABELS[item.tipo_escala] || { label: item.tipo_escala, color: 'bg-gray-100 text-gray-500' };
                       return (
                         <div
@@ -1448,7 +1522,7 @@ export default function Productos() {
                               </span>
                             </div>
                             <div className="flex items-center gap-3 mt-0.5 text-[11px] font-mono text-yeikar-neutral/55">
-                              <span>×{item.cantidad_base}</span>
+                              <span>×{item.cantidad_base}{esCorte && item.ancho_corte_cm && item.largo_corte_cm ? ` corte(s) de ${item.ancho_corte_cm}×${item.largo_corte_cm} cm` : ''}</span>
                               {subtotal > 0 && <span className="text-yeikar-secondary font-bold">≈ {fmt(subtotal)}</span>}
                               {item.seccion && (
                                 <span className="bg-yeikar-secondary/10 text-yeikar-secondary px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0">
@@ -1616,7 +1690,7 @@ export default function Productos() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {showProductModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-lg w-full p-6 space-y-5">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-lg w-full p-4 sm:p-6 space-y-5">
             <div>
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">
                 {productForm.id ? 'Editar Mueble' : 'Registrar Nuevo Mueble '}
@@ -1664,21 +1738,20 @@ export default function Productos() {
               {!(productForm.id && productos.find((p) => p.id === productForm.id)?.es_reventa) && (
                 <div>
                   <label className="block text-xs font-bold text-yeikar-neutral/55 mb-2">
-                    Dimensiones Base (referencia para escalar la receta)
+                    Dimensiones Base <span className="text-yeikar-neutral/40 font-normal">(opcional — para escalar la receta paramétrica)</span>
                   </label>
                   <div className="grid grid-cols-3 gap-3">
                     {[
-                      { label: 'Ancho (m)', key: 'ancho_base', req: true },
-                      { label: 'Largo (m)', key: 'largo_base', req: true },
-                      { label: 'Alto (m)', key: 'alto_base', req: false },
-                    ].map(({ label, key, req }) => (
+                      { label: 'Ancho (m)', key: 'ancho_base' },
+                      { label: 'Largo (m)', key: 'largo_base' },
+                      { label: 'Alto (m)', key: 'alto_base' },
+                    ].map(({ label, key }) => (
                       <div key={key}>
-                        <label className="block text-[10px] text-yeikar-neutral/40 mb-1">{label}{req ? ' *' : ''}</label>
+                        <label className="block text-[10px] text-yeikar-neutral/40 mb-1">{label}</label>
                         <input
                           type="number"
                           step="0.01"
-                          required={req}
-                          placeholder={req ? '0.00' : 'Opc.'}
+                          placeholder="Opc."
                           value={productForm[key as keyof typeof productForm] as string}
                           onChange={(e) => setProductForm({ ...productForm, [key]: e.target.value })}
                           className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
@@ -1686,6 +1759,46 @@ export default function Productos() {
                       </div>
                     ))}
                   </div>
+                 </div>
+               )}
+
+              {/* Precio ESTIMADO de venta (mientras no haya estructura de costos) */}
+              {!(productForm.id && productos.find((p) => p.id === productForm.id)?.es_reventa) && (
+                <div className="bg-yeikar-primary/5 border border-yeikar-primary/20 rounded-xl p-3 space-y-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                        Precio de venta estimado <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        placeholder="Ej: 2.500.000"
+                        value={productForm.precio_venta_base}
+                        onChange={(e) => setProductForm({ ...productForm, precio_venta_base: e.target.value })}
+                        className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">
+                        Costo estimado <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1000"
+                        placeholder="Si lo conoces a él en vez del precio"
+                        value={productForm.precio_costo_base}
+                        onChange={(e) => setProductForm({ ...productForm, precio_costo_base: e.target.value })}
+                        className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-yeikar-neutral/50">
+                    Se usa para <b>cotizar de una vez</b> mientras el mueble no tenga estructura de costos.
+                    Cuando la estructura exista, el precio se <b>recalcula solo</b> con ella y este estimado queda de referencia.
+                  </p>
                 </div>
               )}
 
@@ -1770,7 +1883,7 @@ export default function Productos() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {showRecipeModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
             <div>
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">
                 {recipeForm.id ? 'Editar Material' : 'Agregar Material a Receta'}
@@ -1873,11 +1986,43 @@ export default function Productos() {
                     <option value="ESPACIADO">ESPACIADO — cada X cm</option>
                     <option value="POR_RANGO">POR RANGO — saltos discretos</option>
                     <option value="FORMULA">FÓRMULA — expresión personalizada</option>
+                    <option value="CORTE">CORTE — cortes de lámina (ancho × alto)</option>
                   </select>
                 </div>
               </div>
 
               {/* Extra fields based on scale type */}
+              {recipeForm.tipo_escala === 'CORTE' && (
+                <div className="bg-yeikar-tertiary/40 p-3 rounded-xl border border-yeikar-secondary-light/10 space-y-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-yeikar-neutral/50 mb-1">Ancho del corte (cm)</label>
+                      <input type="number" step="0.01" min="0" placeholder="Ej. 80" value={recipeForm.ancho_corte_cm} onChange={(e) => setRecipeForm({ ...recipeForm, ancho_corte_cm: e.target.value })} className="w-full bg-white border border-yeikar-secondary-light/15 rounded-lg p-2 text-sm font-mono focus:outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-yeikar-neutral/50 mb-1">Largo del corte (cm)</label>
+                      <input type="number" step="0.01" min="0" placeholder="Ej. 130" value={recipeForm.largo_corte_cm} onChange={(e) => setRecipeForm({ ...recipeForm, largo_corte_cm: e.target.value })} className="w-full bg-white border border-yeikar-secondary-light/15 rounded-lg p-2 text-sm font-mono focus:outline-none" />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-yeikar-neutral/50">
+                    La cantidad base es el <b>número de cortes</b> de ese tamaño. El costo se calcula proporcional
+                    al área del corte sobre la lámina completa y escala con las medidas del pedido.
+                    {(() => {
+                      const mat = materiales.find(m => String(m.id) === recipeForm.material_id);
+                      if (!mat || !recipeForm.ancho_corte_cm || !recipeForm.largo_corte_cm || !mat.largo_cm || !mat.ancho_cm) return null;
+                      const lc = parseFloat(recipeForm.largo_corte_cm), ac = parseFloat(recipeForm.ancho_corte_cm);
+                      const L = parseFloat(String(mat.largo_cm)), A = parseFloat(String(mat.ancho_cm));
+                      const fit = Math.max(
+                        (lc > 0 && ac > 0) ? Math.floor(L / lc) * Math.floor(A / ac) : 0,
+                        (ac > 0 && lc > 0) ? Math.floor(L / ac) * Math.floor(A / lc) : 0,
+                      );
+                      return fit > 0
+                        ? <span className="block mt-1 font-bold text-yeikar-secondary">En una lámina de {L}×{A} cm caben <b>{fit} corte(s)</b>.</span>
+                        : <span className="block mt-1 font-bold text-red-600">El corte no cabe en la lámina de {L}×{A} cm.</span>;
+                    })()}
+                  </p>
+                </div>
+              )}
               {recipeForm.tipo_escala === 'ESPACIADO' && (
                 <div className="grid grid-cols-2 gap-3 bg-amber-50/50 p-3 rounded-xl border border-amber-100">
                   <div>
@@ -1987,7 +2132,7 @@ export default function Productos() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {showSectionModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
             <div>
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">
                 Crear Nueva Sección / Área
@@ -2071,7 +2216,7 @@ export default function Productos() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {showElementModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
             <div>
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">
                 Agregar Insumo a Sección
@@ -2250,7 +2395,7 @@ export default function Productos() {
       {/* ═══════════════════════════════════════════════════════════ */}
       {showEditPoliticaModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-6 space-y-5">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-4 sm:p-6 space-y-5">
             <div>
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">Editar Política de Sección</h3>
               <p className="text-xs text-yeikar-neutral/50 mt-1">Ajusta los porcentajes que afectan el costo total.</p>
@@ -2327,7 +2472,7 @@ export default function Productos() {
       {showCostoProduccionModal && (
 
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-6 space-y-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-4 sm:p-6 space-y-4">
             <div>
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">
                 {editingCostoProduccionId ? 'Editar' : 'Agregar'} Costo de Producción
@@ -2397,77 +2542,6 @@ export default function Productos() {
         }}
         onCancel={() => setConfirmState(null)}
       />
-
-      {/* Modal: recálculo de precios (vista previa antes → después) */}
-      <Modal
-        open={showRecalcular}
-        onClose={() => setShowRecalcular(false)}
-        title="Recalcular precios"
-        subtitle="Al subir un insumo, los productos con receta actualizan su precio base automáticamente (sin inflar). Aquí ves antes → después."
-        size="4xl"
-        footer={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowRecalcular(false)}
-              className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors"
-            >
-              Cerrar
-            </button>
-            <button
-              onClick={aplicarRecalcular}
-              disabled={recAplicando}
-              className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2 rounded-xl text-sm font-bold shadow-sm transition-all"
-            >
-              {recAplicando ? 'Aplicando...' : 'Aplicar cambios'}
-            </button>
-          </div>
-        }
-      >
-        {recPropuesta === null ? (
-          <p className="text-sm text-yeikar-neutral/50">Generando vista previa...</p>
-        ) : recPropuesta.length === 0 ? (
-          <p className="text-sm text-yeikar-neutral/50">No hay productos con receta para recalcular.</p>
-        ) : (
-          <div className="overflow-x-auto max-h-96">
-            <table className="w-full text-left border-collapse text-sm">
-              <thead className="bg-yeikar-tertiary/30 text-yeikar-secondary text-[11px] uppercase tracking-wider">
-                <tr>
-                  <th className="px-3 py-2">Producto</th>
-                  <th className="px-3 py-2 text-right">Costo actual</th>
-                  <th className="px-3 py-2 text-right">Costo nuevo</th>
-                  <th className="px-3 py-2 text-right">Precio actual</th>
-                  <th className="px-3 py-2 text-right">Precio nuevo</th>
-                  <th className="px-3 py-2 text-center">Estado</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-yeikar-secondary-light/10">
-                {recPropuesta.map((p) => (
-                  <tr key={p.producto_id} className={p.requiere_revision ? 'bg-amber-50' : ''}>
-                    <td className="px-3 py-2 font-medium text-yeikar-secondary">{p.producto_nombre}</td>
-                    <td className="px-3 py-2 text-right font-mono">{p.costo_anterior != null ? fmt(p.costo_anterior) : '—'}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmt(p.costo_nuevo)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{p.precio_anterior != null ? fmt(p.precio_anterior) : '—'}</td>
-                    <td className="px-3 py-2 text-right font-mono font-bold">{fmt(p.precio_nuevo)}</td>
-                    <td className="px-3 py-2 text-center">
-                      {p.requiere_revision ? (
-                        <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
-                          Revisar ({Math.round(Math.abs(p.pct_cambio))}%)
-                        </span>
-                      ) : p.pct_cambio != null && Math.abs(p.pct_cambio) > 0.01 ? (
-                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${p.pct_cambio > 0 ? 'text-green-700 bg-green-100' : 'text-slate-600 bg-slate-100'}`}>
-                          {p.pct_cambio > 0 ? '+' : ''}{p.pct_cambio.toFixed(1)}%
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-yeikar-neutral/40">Sin cambio</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Modal>
       {/* ── Modal: Importar estructura de costos desde Excel (copy-paste) ── */}
       <Modal
         open={showImportModal}
@@ -2508,9 +2582,97 @@ export default function Productos() {
                 </div>
               )}
 
+              {/* 2 · La hoja interpretada, con la MISMA vista del Excel y el
+                  matching contra el inventario fila por fila */}
+              {(importPreview.estructura ?? []).length > 0 && (
+                <div>
+                  <p className="text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
+                    2 · Tu hoja interpretada — <span className="text-emerald-700">✓ asociado al inventario</span> · <span className="text-amber-700">⚑ ambiguo (elige después)</span> · <span className="text-slate-500">sin asociar</span>
+                  </p>
+                  <div className="border border-yeikar-secondary-light/15 rounded-xl overflow-auto max-h-[26rem] bg-white">
+                    <table className="w-full border-collapse text-xs">
+                      <tbody>
+                        <tr>
+                          <td colSpan={5} className="border border-slate-300 px-3 py-1.5 font-bold">
+                            NOMBRE DEL PRODUCTO:&nbsp;&nbsp;
+                            <span className="font-headline font-black">{importNombre || importPreview.nombre_sugerido || '—'}</span>
+                          </td>
+                        </tr>
+                        {(importPreview.estructura as any[]).map((sec) => (
+                          <React.Fragment key={sec.nombre}>
+                            <tr>
+                              <td colSpan={5} className="border border-slate-300 bg-yellow-200 px-3 py-1 font-headline font-black uppercase text-[11px] tracking-wide text-yeikar-secondary">
+                                SECCION {sec.nombre}
+                                {sec.pct_gastos != null && (
+                                  <span className="float-right font-mono normal-case font-bold">
+                                    gastos {sec.pct_gastos}% → {formatCurrency(sec.gasto, 'COP')}
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                            <tr className="bg-slate-100 font-bold text-[10px] uppercase text-yeikar-secondary">
+                              <td className="border border-slate-300 px-2 py-1 text-center">MATERIA PRIMA</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-16">CANTIDAD</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-32">UNIDAD DE MEDIDA</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-28">V/UNIT</td>
+                              <td className="border border-slate-300 px-2 py-1 text-center w-36">PRECIO TOTAL</td>
+                            </tr>
+                            {(sec.insumos as any[]).map((i, idx) => (
+                              <tr key={`i${idx}`} className="hover:bg-yeikar-tertiary/30">
+                                <td className="border border-slate-300 px-2 py-1">
+                                  <span className="font-semibold text-yeikar-secondary">{i.nombre}</span>
+                                  {i.estado === 'MAPEADO' && (
+                                    <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200" title="Asociado al inventario">
+                                      ✓ {i.material_nombre}
+                                    </span>
+                                  )}
+                                  {i.estado === 'AMBIGUO' && (
+                                    <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title={`Candidatos: ${(i.candidatos || []).map((c: any) => c.nombre).join(' | ')}`}>
+                                      ⚑ Ambiguo ({(i.candidatos || []).length}) — elige después
+                                    </span>
+                                  )}
+                                  {i.estado === 'PENDIENTE' && (
+                                    <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200" title="No se encontró en el inventario; puedes asociarlo luego">
+                                      Sin asociar
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono">{i.cantidad}</td>
+                                <td className="border border-slate-300 px-2 py-1 text-[10px] text-yeikar-neutral/60">{i.unidad}</td>
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono">{formatCurrency(i.precio_unitario, 'COP')}</td>
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono">{formatCurrency(i.total, 'COP')}</td>
+                              </tr>
+                            ))}
+                            {(sec.costos_produccion as any[]).map((c, idx) => (
+                              <tr key={`c${idx}`} className="bg-amber-50/60">
+                                <td className="border border-slate-300 px-2 py-1 italic font-semibold">
+                                  {c.nombre}{c.porcentaje ? ` *${c.porcentaje}%` : ''}
+                                </td>
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300" />
+                                <td className="border border-slate-300 px-2 py-1 text-right font-mono">{formatCurrency(c.total, 'COP')}</td>
+                              </tr>
+                            ))}
+                            <tr className="bg-orange-200 font-black">
+                              <td colSpan={4} className="border border-slate-300 px-2 py-1 uppercase text-[11px]">Total {sec.nombre}</td>
+                              <td className="border border-slate-300 px-2 py-1 text-right font-mono">{formatCurrency(sec.total, 'COP')}</td>
+                            </tr>
+                          </React.Fragment>
+                        ))}
+                        <tr className="bg-orange-300 font-black">
+                          <td colSpan={4} className="border border-slate-300 px-3 py-1.5 uppercase text-[11px]">TOTAL PRODUCCIÓN</td>
+                          <td className="border border-slate-300 px-3 py-1.5 text-right font-mono">{formatCurrency(importPreview.resumen?.costo_produccion, 'COP')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <p className="text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
-                  2 · Revisa los totales (así se calcula el precio)
+                  3 · Revisa los totales (así se calcula el precio)
                 </p>
                 <div className="border border-yeikar-secondary-light/15 rounded-xl overflow-hidden">
                   <table className="w-full text-xs">
@@ -2644,6 +2806,142 @@ export default function Productos() {
           >
             {importando ? 'Creando…' : 'Crear producto'}
           </button>
+        </div>
+      </Modal>
+
+      {/* ── Modal: asociar insumo PENDIENTE/AMBIGUO al inventario ── */}
+      <Modal
+        open={!!elementoAsociar}
+        onClose={() => setElementoAsociar(null)}
+        title="Asociar insumo al inventario"
+        subtitle={elementoAsociar?.nombre_insumo_original}
+        size="md"
+      >
+        <form onSubmit={handleAsociarElemento} className="space-y-4">
+          <div>
+            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/50 mb-1">
+              Material del inventario *
+            </label>
+            <SearchSelect
+              value={asociarMaterialId || null}
+              onChange={(v) => setAsociarMaterialId(String(v))}
+              options={materiales.map((m) => ({
+                value: m.id,
+                label: `${m.nombre} — ${formatCurrency(m.costo_base, 'COP')}`,
+              }))}
+              placeholder="Buscar material..."
+            />
+          </div>
+          <label className="flex items-start gap-2 text-xs text-yeikar-neutral/70 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={asociarSinonimo}
+              onChange={(e) => setAsociarSinonimo(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Guardar "{elementoAsociar?.nombre_insumo_original}" como <b>sinónimo</b> de este material:
+              los próximos imports de Excel lo asociarán automáticamente.
+            </span>
+          </label>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setElementoAsociar(null)}
+              className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={asociando || !asociarMaterialId}
+              className="px-5 py-2 bg-yeikar-primary text-yeikar-neutral font-bold rounded-xl shadow-md hover:bg-yeikar-primary-light transition-all text-sm font-headline disabled:opacity-50"
+            >
+              {asociando ? 'Asociando…' : 'Asociar'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* ── Modal: materiales duplicados y fusión ── */}
+      <Modal
+        open={showDuplicadosModal}
+        onClose={() => setShowDuplicadosModal(false)}
+        title="Materiales duplicados"
+        subtitle="Mismo nombre en el catálogo. Elige cuál sobrevive: se mueven el stock, las recetas, el kardex y los sinónimos al elegido."
+        size="4xl"
+      >
+        <div className="space-y-4">
+          {loadingDuplicados ? (
+            <p className="text-xs text-yeikar-neutral/50 py-6 text-center">Buscando duplicados…</p>
+          ) : duplicados.length === 0 ? (
+            <p className="text-xs text-yeikar-neutral/50 py-6 text-center">
+              No hay materiales duplicados. Catálogo limpio. ✓
+            </p>
+          ) : (
+            duplicados.map((g) => (
+              <div key={g.nombre} className="border border-amber-200 rounded-xl overflow-hidden">
+                <div className="bg-amber-50 px-4 py-2 flex items-center justify-between">
+                  <span className="font-headline font-black text-sm text-amber-800">{g.nombre}</span>
+                  <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                    {g.total} copias
+                  </span>
+                </div>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-yeikar-tertiary/40 text-[10px] uppercase text-yeikar-neutral/50">
+                      <th className="px-3 py-1.5 text-left">Sobrevive</th>
+                      <th className="px-2 py-1.5 text-left">ID</th>
+                      <th className="px-2 py-1.5 text-right">Stock</th>
+                      <th className="px-2 py-1.5 text-right">Costo</th>
+                      <th className="px-2 py-1.5 text-left">Estado</th>
+                      <th className="px-3 py-1.5 text-left">Referencias</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {g.items.map((item) => (
+                      <tr key={item.id} className={sobrevivienteElegido[g.nombre] === item.id ? 'bg-emerald-50' : ''}>
+                        <td className="px-3 py-1.5">
+                          <input
+                            type="radio"
+                            name={`sobrevive-${g.nombre}`}
+                            checked={sobrevivienteElegido[g.nombre] === item.id}
+                            onChange={() => setSobrevivienteElegido(p => ({ ...p, [g.nombre]: item.id }))}
+                          />
+                        </td>
+                        <td className="px-2 py-1.5 font-mono text-yeikar-neutral/50">#{item.id}</td>
+                        <td className="px-2 py-1.5 text-right font-mono font-bold">{item.stock.toLocaleString('es-ES')}</td>
+                        <td className="px-2 py-1.5 text-right font-mono">{formatCurrency(item.costo_base, 'COP')}</td>
+                        <td className="px-2 py-1.5">
+                          {item.activo ? (
+                            <span className="text-[10px] font-bold text-emerald-700">Activo</span>
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400">Inactivo</span>
+                          )}
+                          {item.largo_cm != null && item.ancho_cm != null && (
+                            <span className="ml-1 text-[10px] font-mono text-yeikar-neutral/40">{item.largo_cm}×{item.ancho_cm}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-[10px] text-yeikar-neutral/60">
+                          {Object.entries(item.referencias || {}).map(([tabla, n]) => `${tabla}: ${n}`).join(' · ') || 'Sin referencias'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="px-4 py-2 bg-white flex justify-end">
+                  <button
+                    type="button"
+                    disabled={fusionando || !sobrevivienteElegido[g.nombre] || g.items.length < 2}
+                    onClick={() => handleFusionarGrupo(g)}
+                    className="px-4 py-1.5 bg-yeikar-secondary text-yeikar-tertiary rounded-lg text-xs font-bold font-headline hover:bg-yeikar-secondary-light transition-colors disabled:opacity-50"
+                  >
+                    {fusionando ? 'Fusionando…' : `Fusionar ${g.items.length - 1} en el elegido`}
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </Modal>
     </div>

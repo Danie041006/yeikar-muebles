@@ -11,7 +11,10 @@ Flujo de negocio YEIKAR:
 
 TRANSICIONES_PEDIDO = {
     "COTIZADO": {"APROBADO", "CANCELADO"},
-    "APROBADO": {"PRODUCCION", "CANCELADO"},
+    # APROBADO → TERMINADO: atajo válido SOLO para pedidos sin líneas a
+    # fabricar (reventa/insumos/exhibición). El servicio lo valida: con
+    # fabricables debe pasar por PRODUCCION.
+    "APROBADO": {"PRODUCCION", "TERMINADO", "CANCELADO"},
     "PRODUCCION": {"PAUSADO", "TERMINADO", "CANCELADO"},
     "PAUSADO": {"PRODUCCION", "CANCELADO"},
     "TERMINADO": {"ENTREGADO"},

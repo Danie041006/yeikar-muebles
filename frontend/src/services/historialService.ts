@@ -15,14 +15,15 @@ export interface ClienteExp {
   cedula?: string | null;
   telefono?: string | null;
   direccion?: string | null;
-  email?: string | null;
   ciudad?: string | null;
   estado?: string | null;
   fecha_registro?: string | null;
 }
 
 export interface DetalleCotizacionExp {
-  producto_id: number;
+  producto_id?: number | null;
+  material_id?: number | null;
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   producto_nombre?: string | null;
   cantidad: number;
   precio: number;
@@ -122,6 +123,8 @@ export interface ProduccionExp {
 export interface DetallePedidoExp {
   id: number;
   producto_id?: number | null;
+  material_id?: number | null;
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   producto_nombre?: string | null;
   cantidad: number;
   precio: number;
@@ -168,6 +171,9 @@ export interface VentaExp {
   total_pagado: number;
   saldo_pendiente: number;
   detalles: {
+    producto_id?: number | null;
+    material_id?: number | null;
+    tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
     producto_nombre?: string | null;
     cantidad: number;
     precio: number;
@@ -203,6 +209,9 @@ export interface FacturaExp {
   creado_por?: string | null;
   observaciones?: string | null;
   detalles?: {
+    producto_id?: number | null;
+    material_id?: number | null;
+    tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
     producto_nombre?: string | null;
     descripcion?: string | null;
     cantidad: number;

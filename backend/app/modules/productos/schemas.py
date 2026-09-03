@@ -1,7 +1,7 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from app.modules.catalogos.schemas import TipoProductoResponse, UnidadMedidaResponse, MonedaResponse
+from app.modules.catalogos.schemas import TipoProductoResponse, UnidadMedidaResponse, MonedaResponse, CategoriaInventarioResponse
 from app.modules.adjuntos.schemas import AdjuntoInfo
 
 # ------------------------------------------------------------
@@ -13,14 +13,21 @@ class ProductoBase(BaseModel):
     tipo_producto_id: int
     descripcion: Optional[str] = None
     activo: Optional[bool] = True
-    ancho_base: Optional[float] = 1.60
-    largo_base: Optional[float] = 1.90
+    # Dimensiones base OPCIONALES (null si aún no se conocen; el motor de
+    # costos asume 1.60×1.90 al calcular cuando faltan)
+    ancho_base: Optional[float] = None
+    largo_base: Optional[float] = None
     alto_base: Optional[float] = None
     stock_minimo: Optional[float] = 8.0
     es_reventa: Optional[bool] = False
+    # Pieza de exhibición: se fabrica, vive en el stock del showroom y su venta
+    # descuenta ese stock al facturar (tratada como reventa en la venta).
+    es_exhibicion: Optional[bool] = False
     # Moneda de los precios de referencia (COP=1 por defecto). Los productos de
     # reventa suelen crearse en USD.
     moneda_id: Optional[int] = 1
+    # Categoría para el desglose del inventario (COLCHONES, ELECTRODOMÉSTICOS...)
+    categoria_inventario_id: Optional[int] = None
 
 class ProductoCreate(ProductoBase):
     # Precios de referencia en la moneda declarada (moneda_id).
@@ -38,6 +45,8 @@ class ProductoUpdate(BaseModel):
     alto_base: Optional[float] = None
     stock_minimo: Optional[float] = None
     es_reventa: Optional[bool] = None
+    es_exhibicion: Optional[bool] = None
+    categoria_inventario_id: Optional[int] = None
     moneda_id: Optional[int] = None
     precio_costo_base: Optional[float] = None
     precio_venta_base: Optional[float] = None
@@ -55,6 +64,7 @@ class ProductoResponse(ProductoBase):
         from_attributes = True
     updated_at: Optional[datetime] = None
     tipo_producto: Optional[TipoProductoResponse] = None
+    categoria_inventario: Optional[CategoriaInventarioResponse] = None
 
     class Config:
         from_attributes = True
@@ -62,12 +72,37 @@ class ProductoResponse(ProductoBase):
 # ------------------------------------------------------------
 # Material (DEFINIR ANTES de ProductoMaterialResponse)
 # ------------------------------------------------------------
+DEPARTAMENTOS_VALIDOS = {
+    "EBANISTERIA",
+    "PREPARACION",
+    "PINTURA",
+    "TAPICERIA",
+    "VIDRIERIA",
+    "TERMINACION",
+}
+
 class MaterialBase(BaseModel):
     nombre: str
     unidad_medida_id: int
     costo_base: Optional[float] = Field(0.0, ge=0)
     activo: Optional[bool] = True
     stock_minimo: Optional[float] = Field(8.0, ge=0)
+    # Dimensiones de la lámina completa en cm (solo materiales laminares)
+    largo_cm: Optional[float] = Field(None, gt=0)
+    ancho_cm: Optional[float] = Field(None, gt=0)
+    categoria_inventario_id: Optional[int] = None
+    # Departamento del taller (NULL = transversal/general). Tendido → EBANISTERIA.
+    departamento: Optional[str] = None
+
+    @field_validator("departamento")
+    @classmethod
+    def _validar_departamento(cls, v):
+        if v is None:
+            return v
+        v = v.strip().upper()
+        if v not in DEPARTAMENTOS_VALIDOS:
+            raise ValueError(f"Departamento inválido: {v}")
+        return v
 
 class MaterialCreate(MaterialBase):
     pass
@@ -78,6 +113,20 @@ class MaterialUpdate(BaseModel):
     costo_base: Optional[float] = Field(None, ge=0)
     activo: Optional[bool] = None
     stock_minimo: Optional[float] = Field(None, ge=0)
+    largo_cm: Optional[float] = Field(None, gt=0)
+    ancho_cm: Optional[float] = Field(None, gt=0)
+    categoria_inventario_id: Optional[int] = None
+    departamento: Optional[str] = None
+
+    @field_validator("departamento")
+    @classmethod
+    def _validar_departamento(cls, v):
+        if v is None:
+            return v
+        v = v.strip().upper()
+        if v not in DEPARTAMENTOS_VALIDOS:
+            raise ValueError(f"Departamento inválido: {v}")
+        return v
 
 class MaterialResponse(MaterialBase):
     id: int
@@ -88,16 +137,30 @@ class MaterialResponse(MaterialBase):
     class Config:
         from_attributes = True
 
+    @property
+    def es_laminar(self) -> bool:
+        return self.largo_cm is not None and self.ancho_cm is not None
+
+
+class MaterialFusionIn(BaseModel):
+    material_origen_id: int
+    material_destino_id: int
+    # Opcional: costo que queda en el material sobreviviente tras la fusión.
+    costo_base: Optional[float] = Field(None, ge=0)
+
 # ------------------------------------------------------------
 # ProductoMaterial (receta paramétrica) - AHORA SÍ PUEDE USAR MaterialResponse
 # ------------------------------------------------------------
 class ProductoMaterialBase(BaseModel):
     material_id: int
     cantidad_base: float = Field(gt=0)
-    tipo_escala: str  # FIJO | LINEAL | AREA | ESPACIADO | POR_RANGO | FORMULA
+    tipo_escala: str  # FIJO | LINEAL | AREA | ESPACIADO | POR_RANGO | FORMULA | CORTE
     seccion: str = "EBANISTERIA"
     distancia_pauta_cm: Optional[float] = Field(None, ge=0)
     tornillos_por_pieza: Optional[int] = Field(None, ge=0)
+    # Solo para CORTE (materiales laminares): medidas del corte en cm
+    ancho_corte_cm: Optional[float] = Field(None, gt=0)
+    largo_corte_cm: Optional[float] = Field(None, gt=0)
     condicion_activacion: Optional[Dict[str, Any]] = None
     rangos: Optional[List[Dict[str, Any]]] = None
     formula_personalizada: Optional[str] = None
@@ -114,6 +177,8 @@ class ProductoMaterialUpdate(BaseModel):
     seccion: Optional[str] = None
     distancia_pauta_cm: Optional[float] = Field(None, ge=0)
     tornillos_por_pieza: Optional[int] = Field(None, ge=0)
+    ancho_corte_cm: Optional[float] = Field(None, gt=0)
+    largo_corte_cm: Optional[float] = Field(None, gt=0)
     condicion_activacion: Optional[Dict[str, Any]] = None
     rangos: Optional[List[Dict[str, Any]]] = None
     formula_personalizada: Optional[str] = None
@@ -134,6 +199,22 @@ class ProductoMaterialResponse(ProductoMaterialBase):
 # ------------------------------------------------------------
 # Esquemas para Recetas por Secciones (Jerárquicas)
 # ------------------------------------------------------------
+class ElementoSeccionUpdate(BaseModel):
+    """Asociar/editar un insumo de sección (resuelve PENDIENTE/AMBIGUO).
+
+    - material_id_normalizado → MAPEADO (o PENDIENTE si se envía null).
+    - registrar_sinonimo=True → guarda nombre_insumo_original como sinónimo
+      del material para que el próximo import matchee exacto.
+    """
+    nombre_insumo_original: Optional[str] = Field(None, min_length=2)
+    material_id_normalizado: Optional[int] = None
+    cantidad: Optional[float] = Field(None, gt=0)
+    unidad_medida: Optional[str] = None
+    precio_unitario: Optional[float] = Field(None, ge=0)
+    observaciones: Optional[str] = None
+    registrar_sinonimo: Optional[bool] = False
+
+
 class PoliticaSeccionBase(BaseModel):
     mano_obra_base: float = 0.0
     pct_liquidacion_mo: float = 5.0

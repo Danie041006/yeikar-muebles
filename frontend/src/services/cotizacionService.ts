@@ -21,6 +21,8 @@ export interface Product {
   moneda_id?: number | null;
   moneda?: Moneda | null;
   es_reventa?: boolean;
+  /** Pieza de exhibición: se vende del stock del showroom (tratada como reventa). */
+  es_exhibicion?: boolean;
   tipo_producto_id?: number;
   tipo_producto?: { nombre: string } | null;
   alto_base: number | null;
@@ -34,7 +36,9 @@ export interface Product {
 export interface QuoteDetail {
   id?: number;
   cotizacion_id?: number;
-  producto_id: number;
+  producto_id?: number | null;
+  material_id?: number | null;
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
   cantidad: number;
   precio: number;
   alto?: number | null;
@@ -66,6 +70,9 @@ export interface Quote {
   cliente?: Client;
   moneda?: Moneda;
   detalles: QuoteDetail[];
+  /** Si la cotización ya fue convertida a pedido: id y estado del pedido. */
+  pedido_id?: number | null;
+  pedido_estado?: string | null;
 }
 
 export interface QuoteCreate {
@@ -102,6 +109,9 @@ export interface CalculationResult {
     costo_total?: number;
   }>;
   desglose_por_seccion?: any;
+  // Fuente del precio: "estructura_de_costos" | "estimado_sin_estructura" |
+  // "sin_definir" (mueble sin estructura ni precio estimado → sale en 0).
+  fuente_precio?: string;
   // Estructura de costos (para la vista estilo Excel)
   costo_produccion?: number;
   ganancia_porcentaje?: number;
@@ -152,7 +162,9 @@ export const cotizacionService = {
   // Products list
   getProducts: async (search?: string): Promise<Product[]> => {
     const response = await api.get<Product[]>('/producto/', {
-      params: search ? { buscar: search } : {},
+      // limite=1000: el default del backend (100, ordenado por id) dejaba
+      // fuera los productos más nuevos (ej. piezas de exhibición).
+      params: { buscar: search, limite: 1000 },
     });
     return response.data;
   },

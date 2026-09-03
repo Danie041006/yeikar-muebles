@@ -11,6 +11,7 @@ import {
   Field, Input, Modal, ConfirmDialog, SearchSelect,
   ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
+import DocumentoNomina from '../components/Expediente/DocumentoNomina';
 
 function fmt(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -70,6 +71,10 @@ export default function Nomina() {
   const [entregandoId, setEntregandoId] = useState<number | null>(null);
   const [cuentaAguinaldo, setCuentaAguinaldo] = useState<number | null>(null);
   const [pagandoAguinaldoId, setPagandoAguinaldoId] = useState<number | null>(null);
+
+  // PDF generation
+  const [nominaPdf, setNominaPdf] = useState<NominaData | null>(null);
+  const [generandoPdf, setGenerandoPdf] = useState(false);
 
   const toast = useToast();
 
@@ -325,58 +330,113 @@ export default function Nomina() {
     return Array.from(grupos.values());
   })() : [];
 
-  // ---------------- Impresión estilo Excel ----------------
-  const imprimir = (n: NominaData) => {
-    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const fila = (l: { descripcion: string; cliente_nombre?: string | null; cantidad: number; precio_unitario: number; total: number }) =>
-      `<tr><td class="c">${l.cantidad}</td><td>${esc(l.descripcion)}</td><td>${esc(l.cliente_nombre || '')}</td><td class="r">${fmtCOP(Number(l.precio_unitario))}</td><td class="r">${fmtCOP(Number(l.total))}</td></tr>`;
-    const cab = `<div class="cab">COMERCIALIZADORA YEIKAR<br/>NOMINA DEL ${n.periodo_desde} AL ${n.periodo_hasta}</div>`;
-    const bloques = n.detalles.map((d) => `
-      <div class="bloque">
-        <h3>${esc(d.empleado_nombre)}</h3>
-        <table>
-          <tr><th>CANT.</th><th>DESCRIPCION</th><th>CLIENTE</th><th>PRECIO UNI</th><th>TOTAL</th></tr>
-          ${d.lineas.map(fila).join('')}
-        </table>
-        <div class="tot">
-          <span>TOTAL DE PRODUCCION</span><span class="r">${fmtCOP(Number(d.total_produccion))}</span>
-        </div>
-        ${Number(d.bono_aguinaldo) > 0 ? `<div class="tot"><span>BONO AGUINALDO ACUMULADO</span><span class="r">${fmtCOP(Number(d.bono_aguinaldo))}</span></div>` : ''}
-        <div class="tot nomina"><span>NOMINA</span><span class="r">${fmtCOP(Number(d.monto_a_pagar))}</span></div>
-        <div class="firmas"><span>ENTREGA __________________</span><span>RECIBE __________________</span></div>
-      </div>`).join('');
-    const varios = n.conceptos_varios.length ? `
-      <div class="bloque">
-        <h3>VARIOS</h3>
-        ${n.conceptos_varios.map((c) => `<div class="tot"><span>${esc(c.descripcion)}</span><span class="r">${fmtCOP(Number(c.monto))}</span></div>`).join('')}
-      </div>` : '';
-    const resumen = n.detalles.map((d) => `<tr><td>${esc(d.cargo_nombre || '')}</td><td>${esc(d.empleado_nombre)}</td><td class="r">${fmtCOP(Number(d.monto_a_pagar))}</td></tr>`).join('');
-    const html = `<html><head><title>Nómina ${n.periodo_desde}</title>
-      <style>
-        body { font-family: 'Courier New', monospace; color: #000; padding: 20px; }
-        .cab { text-align: center; font-weight: bold; font-size: 16px; margin-bottom: 18px; }
-        .bloque { border: 1px solid #000; padding: 12px; margin-bottom: 16px; page-break-inside: avoid; }
-        h3 { margin: 0 0 6px; font-size: 14px; }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        th { border-bottom: 1px solid #000; text-align: left; padding: 3px 6px; }
-        td { padding: 3px 6px; }
-        .r { text-align: right; } .c { text-align: center; }
-        .tot { display: flex; justify-content: space-between; margin-top: 6px; font-weight: bold; }
-        .nomina { border-top: 1px solid #000; padding-top: 6px; font-size: 14px; }
-        .firmas { display: flex; justify-content: space-between; margin-top: 14px; }
-      </style></head><body>
-      ${cab}${bloques}${varios}
-      <div class="bloque"><h3>RESUMEN TRABAJADOR</h3>
-        <table><tr><th>CARGO</th><th>TRABAJADOR</th><th class="r">MONTO</th></tr>${resumen}</table>
-        <div class="tot nomina"><span>TOTAL NOMINA</span><span class="r">${fmtCOP(Number(n.total_nomina))}</span></div>
-      </div>
-      </body></html>`;
-    const w = window.open('', '_blank');
-    if (!w) return;
-    w.document.write(html);
-    w.document.close();
-    w.focus();
-    w.print();
+  // ---------------- Descargar PDF de nómina ----------------
+  const imprimir = async (n: NominaData) => {
+    setNominaPdf(n);
+    setGenerandoPdf(true);
+    try {
+      // Esperar a que React renderice el componente
+      await new Promise((r) => setTimeout(r, 200));
+      const element = document.getElementById('nomina-pdf-container');
+      if (!element) return;
+
+      const { default: html2canvas } = await import('html2canvas');
+      const { jsPDF } = await import('jspdf');
+      const { esperarImagenesCargadas } = await import('../utils/pdfImagenes');
+      await esperarImagenesCargadas(element);
+
+      const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
+      const pdfW = pdf.internal.pageSize.getWidth();
+      const pdfH = pdf.internal.pageSize.getHeight();
+
+      // Margen superior e inferior (10mm = 1cm) y laterales (10mm)
+      const marginMm = 10;
+      const printableW = pdfW - marginMm * 2;
+      const printableH = pdfH - marginMm * 2;
+      const pxPerMm = canvas.width / printableW;
+      const pageHpx = Math.floor(printableH * pxPerMm);
+
+      // Obtener posiciones relativas de cada ticket/bloque (data-pdf-item)
+      const containerRect = element.getBoundingClientRect();
+      const scaleDomToCanvas = canvas.height / containerRect.height;
+      const itemElements = Array.from(element.querySelectorAll('[data-pdf-item="true"]'));
+
+      const itemsBounds = itemElements.map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          top: (r.top - containerRect.top) * scaleDomToCanvas,
+          bottom: (r.bottom - containerRect.top) * scaleDomToCanvas,
+          height: r.height * scaleDomToCanvas,
+        };
+      });
+
+      // Calcular cortes de página inteligentes sin romper ningún ticket por la mitad
+      const pageBreakpoints: number[] = [0];
+      let currentBreak = 0;
+
+      while (currentBreak < canvas.height) {
+        const maxCandidate = currentBreak + pageHpx;
+        if (maxCandidate >= canvas.height) {
+          pageBreakpoints.push(canvas.height);
+          break;
+        }
+
+        // Buscar el mejor punto de corte antes de maxCandidate
+        let bestCut = maxCandidate;
+        const overlappingItem = itemsBounds.find(
+          (b) => b.top < maxCandidate && b.bottom > maxCandidate && b.top > currentBreak
+        );
+
+        if (overlappingItem) {
+          // Si el elemento cabe en una página completa, cortar justo antes de él
+          if (overlappingItem.height <= pageHpx) {
+            bestCut = overlappingItem.top;
+          }
+        }
+
+        // Seguridad para evitar bucle infinito
+        if (bestCut <= currentBreak) {
+          bestCut = currentBreak + pageHpx;
+        }
+
+        pageBreakpoints.push(bestCut);
+        currentBreak = bestCut;
+      }
+
+      // Generar páginas del PDF con los cortes calculados y margen de 10mm arriba y a los lados
+      for (let i = 0; i < pageBreakpoints.length - 1; i++) {
+        const startY = pageBreakpoints[i];
+        const endY = pageBreakpoints[i + 1];
+        const sliceH = endY - startY;
+        if (sliceH <= 0) continue;
+
+        const sc = document.createElement('canvas');
+        sc.width = canvas.width;
+        sc.height = sliceH;
+        const ctx = sc.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(canvas, 0, startY, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+        }
+
+        if (i > 0) pdf.addPage('letter', 'portrait');
+        pdf.addImage(
+          sc.toDataURL('image/jpeg', 0.98),
+          'JPEG',
+          marginMm,
+          marginMm,
+          printableW,
+          (sliceH / canvas.width) * printableW
+        );
+      }
+
+      pdf.save(`Nomina_${n.periodo_desde}_${n.periodo_hasta}.pdf`);
+    } catch {
+      toast.error('No se pudo generar el PDF de la nómina.');
+    } finally {
+      setGenerandoPdf(false);
+      setNominaPdf(null);
+    }
   };
 
   const columns: DataColumn<NominaData>[] = [
@@ -585,7 +645,9 @@ export default function Nomina() {
                       {e.cargo && <span className="ml-1.5 text-xs font-normal text-yeikar-neutral/50">{e.cargo}</span>}
                     </p>
                     <div className="flex items-center gap-1.5">
-                      <Badge tone={e.tipo_pago === 'DESTAJO' ? 'blue' : 'neutral'}>{e.tipo_pago || '—'}</Badge>
+                      <Badge tone={e.tipo_pago === 'DESTAJO' ? 'blue' : 'neutral'}>
+                        {e.tipo_pago === 'DESTAJO' ? 'Producción' : e.tipo_pago || '—'}
+                      </Badge>
                       {!e.en_nomina && <Badge tone="red">fuera de nómina</Badge>}
                     </div>
                   </div>
@@ -609,12 +671,20 @@ export default function Nomina() {
                             <td className="py-1 pr-2 text-yeikar-neutral/70">{pz.cliente ?? '—'}</td>
                             <td className="py-1 text-right font-mono">{pz.cantidad}</td>
                             <td className="py-1 text-right font-mono">
-                              {pz.precio_unitario != null ? fmtCOP(pz.precio_unitario) : (
-                                <span className="text-red-600 font-bold">SIN PRECIO</span>
+                              {pz.precio_unitario != null ? (
+                                <span className={pz.listo_nomina === false ? 'line-through text-stone-400' : ''}>
+                                  {fmtCOP(pz.precio_unitario)}
+                                </span>
+                              ) : (
+                                <span className="text-stone-400 italic">Por asignar</span>
                               )}
                             </td>
                             <td className="py-1 text-right font-mono font-semibold">
-                              {pz.total != null ? fmtCOP(pz.total) : '—'}
+                              {pz.total != null ? (
+                                <span className={pz.listo_nomina === false ? 'line-through text-stone-400' : ''}>
+                                  {fmtCOP(pz.total)}
+                                </span>
+                              ) : '—'}
                             </td>
                           </tr>
                         ))}
@@ -622,26 +692,12 @@ export default function Nomina() {
                     </table>
                   )}
                   <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
-                    <span>Total destajo: <b className="font-mono">{fmtCOP(e.total_destajo)}</b></span>
-                    {e.piezas_sin_precio > 0 && (
-                      <span className="text-red-600 font-bold">{e.piezas_sin_precio} pieza(s) SIN PRECIO en el tarifario</span>
-                    )}
-                    <span>Aguinaldo estimado: <b className="font-mono">{fmtCOP(e.aguinaldo_estimado)}</b></span>
-                    {e.mano_obra.total > 0 && (
-                      <span>Mano de obra: <b className="font-mono">{fmtCOP(e.mano_obra.total)}</b>
-                        {' '}({fmtCOP(e.mano_obra.pagado)} pagada / {fmtCOP(e.mano_obra.pendiente)} pendiente)
-                      </span>
+                    <span>Total producción a cobrar: <b className="font-mono text-emerald-700">{fmtCOP(e.total_destajo)}</b></span>
+                    <span>Aguinaldo acumulable: <b className="font-mono text-amber-800">{fmtCOP(e.aguinaldo_estimado)}</b></span>
+                    {e.piezas.some((p) => p.listo_nomina === false) && (
+                      <span className="text-stone-500 italic">(Algunas tareas están marcadas como pendientes)</span>
                     )}
                   </div>
-                  {e.mano_obra.lineas.length > 0 && (
-                    <ul className="text-[11px] text-yeikar-neutral/60 space-y-0.5 pl-3 list-disc">
-                      {e.mano_obra.lineas.map((l, i) => (
-                        <li key={i}>
-                          MO {l.descripcion} — {fmtCOP(l.monto)} {l.pagado ? '(pagada)' : '(pendiente)'}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
                 </div>
               ))}
             </div>
@@ -723,7 +779,7 @@ export default function Nomina() {
                     <SearchSelect
                       value={cuentaMasiva ?? 0}
                       onChange={(v) => setCuentaMasiva(Number(v))}
-                      options={cuentas.map((c) => ({ value: c.metodo_caja.id, label: c.metodo_caja.nombre }))}
+                      options={cuentas.map((c) => ({ value: c.metodo_caja.id, label: `${c.metodo_caja.nombre} · ${c.metodo_caja.moneda_codigo || '?'}` }))}
                       placeholder="Seleccionar..."
                     />
                   </div>
@@ -739,7 +795,9 @@ export default function Nomina() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="font-headline font-black text-yeikar-secondary">{d.empleado_nombre}</span>
-                    <Badge tone={d.tipo_pago === 'DESTAJO' ? 'purple' : 'neutral'}>{d.tipo_pago}</Badge>
+                    <Badge tone={d.tipo_pago === 'DESTAJO' ? 'purple' : 'neutral'}>
+                      {d.tipo_pago === 'DESTAJO' ? 'Producción' : d.tipo_pago}
+                    </Badge>
                     {d.cargo_nombre && <span className="text-xs text-yeikar-neutral/40">{d.cargo_nombre}</span>}
                   </div>
                   <div className="flex items-center gap-3">
@@ -750,7 +808,7 @@ export default function Nomina() {
                       <SearchSelect
                         value={d.metodo_caja_id || 0}
                         onChange={(v) => cambiarCuenta(d, Number(v))}
-                        options={cuentas.map((c) => ({ value: c.metodo_caja.id, label: c.metodo_caja.nombre }))}
+                        options={cuentas.map((c) => ({ value: c.metodo_caja.id, label: `${c.metodo_caja.nombre} · ${c.metodo_caja.moneda_codigo || '?'}` }))}
                         placeholder="Seleccione cuenta..."
                       />
                     </div>
@@ -902,7 +960,7 @@ export default function Nomina() {
                       <SearchSelect
                         value={cuentaAguinaldo || 0}
                         onChange={(v) => setCuentaAguinaldo(Number(v))}
-                        options={cuentas.map((c) => ({ value: c.metodo_caja.id, label: c.metodo_caja.nombre }))}
+                        options={cuentas.map((c) => ({ value: c.metodo_caja.id, label: `${c.metodo_caja.nombre} · ${c.metodo_caja.moneda_codigo || '?'}` }))}
                         placeholder="Seleccione cuenta..."
                       />
                     </div>
@@ -982,6 +1040,13 @@ export default function Nomina() {
         onConfirm={anular}
         onCancel={() => setConfirmAnular(false)}
       />
+
+      {/* ── Hidden PDF render container ── */}
+      {nominaPdf && (
+        <div className="fixed -left-[9999px] top-0 z-[-1]">
+          <DocumentoNomina nomina={nominaPdf} containerId="nomina-pdf-container" />
+        </div>
+      )}
     </div>
   );
 }

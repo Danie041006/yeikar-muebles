@@ -150,7 +150,9 @@ export default function Empleados() {
       header: 'Tipo',
       render: (e) =>
         e.en_nomina ? (
-          <Badge tone={e.tipo_pago === 'FIJO' ? 'gold' : 'purple'}>{e.tipo_pago || '-'}</Badge>
+          <Badge tone={e.tipo_pago === 'FIJO' ? 'gold' : 'purple'}>
+            {e.tipo_pago === 'DESTAJO' ? 'Producción' : e.tipo_pago === 'FIJO' ? 'FIJO' : e.tipo_pago || '-'}
+          </Badge>
         ) : (
           <span className="text-yeikar-neutral/30">—</span>
         ),
@@ -294,7 +296,7 @@ export default function Empleados() {
                   value={form.tipo_pago}
                   onChange={(v) => setForm({ ...form, tipo_pago: String(v) })}
                   options={[
-                    { value: 'DESTAJO', label: 'Destajo (cobra su producción)' },
+                    { value: 'DESTAJO', label: 'Producción' },
                     { value: 'FIJO', label: 'Fijo (sueldo semanal)' },
                   ]}
                   placeholder="Seleccione tipo..."

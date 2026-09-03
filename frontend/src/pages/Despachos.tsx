@@ -248,7 +248,7 @@ export default function Despachos() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black font-headline text-yeikar-secondary tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-black font-headline text-yeikar-secondary tracking-tight">
             Envíos y Despachos
           </h1>
           <p className="text-yeikar-neutral/60 mt-1 text-sm font-body">
@@ -336,7 +336,7 @@ export default function Despachos() {
                   <div className="space-y-1">
                     {envio.pedido?.detalles?.map((det: OrderDetail) => (
                       <div key={det.id} className="text-xs text-yeikar-secondary/85 flex justify-between">
-                        <span>• {det.producto?.nombre || 'Producto'}</span>
+                        <span>• {det.tipo_item === 'INSUMO' ? det.material?.nombre || 'Insumo' : det.producto?.nombre || 'Producto'}</span>
                         <span className="font-mono font-bold">x{det.cantidad}</span>
                       </div>
                     ))}
@@ -445,7 +445,7 @@ export default function Despachos() {
       {/* Assign Driver Modal */}
       {assigningEnvio && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-6 space-y-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
             <h3 className="text-xl font-headline font-black text-yeikar-secondary tracking-tight">
               Asignar Envío para Pedido #{assigningEnvio.pedido_id}
             </h3>
@@ -516,7 +516,7 @@ export default function Despachos() {
       {/* Falla Modal */}
       {failingEnvio && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-6 space-y-4">
+          <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-sm w-full p-4 sm:p-6 space-y-4">
             <h3 className="text-xl font-headline font-black text-yeikar-secondary tracking-tight">
               Reportar Falla en Entrega #{failingEnvio.id}
             </h3>
@@ -555,7 +555,7 @@ export default function Despachos() {
       {/* ── Modal previo: Tasa Bs + Forma de Pago + Placas (antes de generar Guía PDF) ── */}
       {showGuiaModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-white rounded-3xl shadow-2xl border border-yeikar-secondary-light/10 max-w-md w-full p-6 space-y-5">
+          <div className="bg-white rounded-3xl shadow-2xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-5">
             <div>
               <h3 className="text-lg font-headline font-black text-yeikar-secondary tracking-tight">
                 Configurar Guía de Despacho PDF
@@ -756,11 +756,19 @@ export default function Despachos() {
                       </thead>
                       <tbody className="divide-y divide-stone-200">
                         {selectedEnvioForGuia.pedido?.detalles?.map((det: OrderDetail, i: number) => {
-                          // Buscar precio en la venta
-                          const detVenta = venta?.detalles?.find(dv => dv.producto_id === det.producto_id);
+                          // Buscar precio en la venta: INSUMO se empareja por
+                          // material_id; producto, por producto_id (nunca null==null).
+                          const detVenta = venta?.detalles?.find(dv =>
+                            det.tipo_item === 'INSUMO'
+                              ? dv.material_id != null && dv.material_id === det.material_id
+                              : dv.producto_id != null && dv.producto_id === det.producto_id
+                          );
                           const precio = detVenta ? Number(detVenta.precio) : 0;
                           const monto = precio * det.cantidad;
                           const foto = det.producto?.fotos?.[0]?.url ?? null;
+                          const nombreDet = det.tipo_item === 'INSUMO'
+                            ? det.material?.nombre || 'Insumo'
+                            : det.producto?.nombre || 'Mueble Yeikar';
                           return (
                             <tr key={det.id || i} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                               <td className="px-2 py-1.5 text-center font-mono font-bold border-r border-stone-200">{det.cantidad}</td>
@@ -774,8 +782,8 @@ export default function Despachos() {
                                     />
                                   )}
                                   <span>
-                                    {det.producto?.nombre || 'Mueble Yeikar'}
-                                    {det.ancho && det.largo ? <span className="font-normal text-stone-500"> ({det.ancho}×{det.largo}m)</span> : ''}
+                                    {nombreDet}
+                                    {det.tipo_item !== 'INSUMO' && det.ancho && det.largo ? <span className="font-normal text-stone-500"> ({det.ancho}×{det.largo}m)</span> : ''}
                                   </span>
                                 </div>
                                 {det.observaciones && <span className="block text-[7.5px] text-stone-400 font-normal italic">{det.observaciones}</span>}

@@ -21,11 +21,13 @@ export interface Product {
   tipo_producto_id: number;
   descripcion?: string;
   activo?: boolean;
-  ancho_base?: number;
-  largo_base?: number;
-  alto_base?: number;
+  ancho_base?: number | null;
+  largo_base?: number | null;
+  alto_base?: number | null;
   stock_minimo?: number;
   es_reventa?: boolean;
+  /** Pieza de exhibición: se fabrica, vive en el showroom y se vende de stock. */
+  es_exhibicion?: boolean;
   /** Moneda de los precios de referencia (COP=1). Los reventa suelen ser USD. */
   moneda_id?: number | null;
   moneda?: MonedaInfo | null;
@@ -43,6 +45,13 @@ export interface Material {
   unidad_medida_id: number;
   costo_base: number;
   activo?: boolean;
+  // Dimensiones de la lámina completa en cm (solo materiales laminares)
+  largo_cm?: number | null;
+  ancho_cm?: number | null;
+  categoria_inventario_id?: number | null;
+  // Departamento del taller (EBANISTERIA | PREPARACION | PINTURA | TAPICERIA |
+  // VIDRIERIA | TERMINACION). NULL = transversal/general. Tendido → EBANISTERIA.
+  departamento?: string | null;
   unidad_medida?: {
     id: number;
     nombre: string;
@@ -60,10 +69,13 @@ export interface ProductoMaterial {
   producto_id: number;
   material_id: number;
   cantidad_base: number;
-  tipo_escala: 'FIJO' | 'LINEAL' | 'AREA' | 'ESPACIADO' | 'POR_RANGO' | 'FORMULA';
+  tipo_escala: 'FIJO' | 'LINEAL' | 'AREA' | 'ESPACIADO' | 'POR_RANGO' | 'FORMULA' | 'CORTE';
   seccion?: string;
   distancia_pauta_cm?: number;
   tornillos_por_pieza?: number;
+  // Solo para CORTE (materiales laminares): medidas del corte en cm
+  ancho_corte_cm?: number | null;
+  largo_corte_cm?: number | null;
   condicion_activacion?: any;
   rangos?: RangoEscala[];
   formula_personalizada?: string;
@@ -73,6 +85,8 @@ export interface ProductoMaterial {
     id: number;
     nombre: string;
     costo_base: number;
+    largo_cm?: number | null;
+    ancho_cm?: number | null;
     unidad_medida?: {
       nombre: string;
       abreviatura: string;
@@ -122,11 +136,30 @@ export interface CostoProduccionSeccion {
   costo_base: number;
 }
 
+export interface MaterialDuplicadoInfo {
+  id: number;
+  nombre: string;
+  costo_base: number;
+  activo: boolean;
+  largo_cm?: number | null;
+  ancho_cm?: number | null;
+  stock: number;
+  referencias: Record<string, number>;
+}
+
+export interface GrupoDuplicados {
+  nombre: string;
+  total: number;
+  items: MaterialDuplicadoInfo[];
+}
+
 export const productosService = {
-  getProductos: async (search?: string): Promise<Product[]> => {
-    const response = await api.get<Product[]>('/producto/', {
-      params: search ? { buscar: search } : {},
-    });
+  getProductos: async (search?: string, options?: { es_reventa?: boolean; limite?: number }): Promise<Product[]> => {
+    const params: Record<string, unknown> = {};
+    if (search) params.buscar = search;
+    if (options?.es_reventa !== undefined) params.es_reventa = options.es_reventa;
+    if (options?.limite !== undefined) params.limite = options.limite;
+    const response = await api.get<Product[]>('/producto/', { params });
     return response.data;
   },
 
@@ -214,6 +247,33 @@ export const productosService = {
 
   eliminarElementoSeccion: async (elementoId: number): Promise<void> => {
     await api.delete(`/elemento/${elementoId}`);
+  },
+
+  actualizarElementoSeccion: async (elementoId: number, datos: {
+    material_id_normalizado?: number | null;
+    cantidad?: number;
+    unidad_medida?: string;
+    precio_unitario?: number | null;
+    observaciones?: string;
+    registrar_sinonimo?: boolean;
+  }): Promise<ElementoSeccion> => {
+    const response = await api.put<ElementoSeccion>(`/elemento/${elementoId}`, datos);
+    return response.data;
+  },
+
+  // ---- Duplicados del catálogo y fusión (solo Dueño/Admin) ----
+  getMaterialesDuplicados: async (): Promise<GrupoDuplicados[]> => {
+    const response = await api.get<GrupoDuplicados[]>('/material/duplicados');
+    return response.data;
+  },
+
+  fusionarMateriales: async (materialOrigenId: number, materialDestinoId: number, costoBase?: number): Promise<unknown> => {
+    const response = await api.post('/material/fusionar', {
+      material_origen_id: materialOrigenId,
+      material_destino_id: materialDestinoId,
+      costo_base: costoBase,
+    });
+    return response.data;
   },
 
   // Costos de producción por sección

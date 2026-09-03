@@ -6,6 +6,10 @@
       "destination": "https://yeikar-api.vercel.app/api/:path*"
     },
     {
+      "source": "/api/:path*/",
+      "destination": "https://yeikar-api.vercel.app/api/:path*/"
+    },
+    {
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }

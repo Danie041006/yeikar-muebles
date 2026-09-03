@@ -52,6 +52,17 @@ def _nombre_usuario(u):
     return u.nombre_usuario if u else None
 
 
+def _nombre_item(det):
+    """Nombre visible de un renglón: producto (FABRICADO/REVENTA) o material
+    (INSUMO vendido suelto, producto_id NULL). None si no hay ninguno."""
+    if det.producto is not None and det.producto.nombre:
+        return det.producto.nombre
+    material = getattr(det, "material", None)
+    if material is not None and material.nombre:
+        return material.nombre
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Cadena completa de un pedido
 # ---------------------------------------------------------------------------
@@ -62,9 +73,11 @@ def cadena_expediente(db: Session, pedido_id: int, incluir_auditoria: bool = Fal
             joinedload(Pedido.cliente),
             joinedload(Pedido.creador),
             joinedload(Pedido.cotizacion).joinedload(Cotizacion.detalles).joinedload(DetalleCotizacion.producto),
+            joinedload(Pedido.cotizacion).joinedload(Cotizacion.detalles).joinedload(DetalleCotizacion.material),
             joinedload(Pedido.cotizacion).joinedload(Cotizacion.moneda),
             joinedload(Pedido.cotizacion).joinedload(Cotizacion.creador),
             joinedload(Pedido.detalles).joinedload(DetallePedido.producto),
+            joinedload(Pedido.detalles).joinedload(DetallePedido.material),
         )
         .filter(Pedido.id == pedido_id)
         .first()
@@ -142,7 +155,9 @@ def _produccion_por_detalle(db: Session, pedido: Pedido) -> list[dict]:
         item = {
             "id": det.id,
             "producto_id": det.producto_id,
-            "producto_nombre": det.producto.nombre if det.producto else None,
+            "material_id": det.material_id,
+            "tipo_item": det.tipo_item,
+            "producto_nombre": _nombre_item(det),
             "cantidad": _f(det.cantidad),
             "precio": _f(det.precio),
             "costo_unitario": _f(det.costo_unitario),
@@ -233,6 +248,7 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
             joinedload(Venta.moneda),
             joinedload(Venta.creador),
             joinedload(Venta.detalles).joinedload(DetalleVenta.producto),
+            joinedload(Venta.detalles).joinedload(DetalleVenta.material),
             joinedload(Venta.pagos).joinedload(Pago.moneda),
         )
         .filter(Venta.pedido_id == pedido_id)
@@ -295,7 +311,9 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
         "detalles": [
             {
                 "producto_id": d.producto_id,
-                "producto_nombre": d.producto.nombre if d.producto else None,
+                "material_id": d.material_id,
+                "tipo_item": d.tipo_item,
+                "producto_nombre": _nombre_item(d),
                 "cantidad": _f(d.cantidad),
                 "precio": _f(d.precio),
                 "costo_unitario": _f(d.costo_unitario),
@@ -348,7 +366,11 @@ def _gastos_del_pedido(db: Session, detalles_pedido: list[dict]) -> list[dict]:
 def _facturas(db: Session, pedido_id: int) -> list[dict]:
     facturas = (
         db.query(Factura)
-        .options(joinedload(Factura.creador), joinedload(Factura.detalles).joinedload(DetalleFactura.producto))
+        .options(
+            joinedload(Factura.creador),
+            joinedload(Factura.detalles).joinedload(DetalleFactura.producto),
+            joinedload(Factura.detalles).joinedload(DetalleFactura.material),
+        )
         .filter(Factura.pedido_id == pedido_id)
         .order_by(Factura.id.desc())
         .all()
@@ -369,7 +391,9 @@ def _facturas(db: Session, pedido_id: int) -> list[dict]:
             "detalles": [
                 {
                     "producto_id": d.producto_id,
-                    "producto_nombre": d.producto.nombre if d.producto else None,
+                    "material_id": d.material_id,
+                    "tipo_item": d.tipo_item,
+                    "producto_nombre": d.descripcion or _nombre_item(d),
                     "descripcion": d.descripcion,
                     "cantidad": _f(d.cantidad),
                     "precio_usd": _f(d.precio_usd),
@@ -470,7 +494,6 @@ def _serializar_cliente(cliente: Client) -> dict:
         "cedula": cliente.cedula,
         "telefono": cliente.telefono,
         "direccion": cliente.direccion,
-        "email": cliente.email,
         "ciudad": cliente.ciudad,
         "estado": cliente.estado,
         "observaciones": cliente.observaciones,
@@ -493,7 +516,9 @@ def _serializar_cotizacion(db: Session, cotizacion: Cotizacion) -> dict:
         "detalles": [
             {
                 "producto_id": d.producto_id,
-                "producto_nombre": d.producto.nombre if d.producto else None,
+                "material_id": d.material_id,
+                "tipo_item": d.tipo_item,
+                "producto_nombre": _nombre_item(d),
                 "cantidad": _f(d.cantidad),
                 "precio": _f(d.precio),
                 "dimensiones": {
@@ -539,6 +564,7 @@ def expediente_cotizacion(db: Session, cotizacion_id: int, incluir_auditoria: bo
             joinedload(Cotizacion.moneda),
             joinedload(Cotizacion.creador),
             joinedload(Cotizacion.detalles).joinedload(DetalleCotizacion.producto),
+            joinedload(Cotizacion.detalles).joinedload(DetalleCotizacion.material),
         )
         .filter(Cotizacion.id == cotizacion_id)
         .first()

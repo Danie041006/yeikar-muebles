@@ -20,11 +20,35 @@ def _snapshot(cotizacion: model.Cotizacion) -> dict:
     }
 
 
+def _anotar_pedido(db: Session, cotizaciones: list):
+    """Marca en cada cotización su pedido asociado (si ya fue convertida).
+
+    No es una columna: se anota sobre el objeto ORM como atributo transitorio
+    para que la API (from_attributes) lo exponga como pedido_id/pedido_estado.
+    Un solo query batch para toda la página, no N+1.
+    """
+    if not cotizaciones:
+        return
+    from app.modules.orders.model import Pedido
+    ids = [c.id for c in cotizaciones]
+    filas = db.query(Pedido.cotizacion_id, Pedido.id, Pedido.estado).filter(
+        Pedido.cotizacion_id.in_(ids)
+    ).all()
+    por_cotizacion = {cot_id: (pid, estado) for cot_id, pid, estado in filas}
+    for cot in cotizaciones:
+        pareja = por_cotizacion.get(cot.id)
+        cot.pedido_id = pareja[0] if pareja else None
+        cot.pedido_estado = pareja[1] if pareja else None
+
+
 def obtener_cotizacion(db: Session, id_cotizacion: int, usuario: Usuario | None = None):
     query = db.query(model.Cotizacion).filter(model.Cotizacion.id == id_cotizacion)
     if usuario is not None:
         query = filtrar_registros_propios(query, model.Cotizacion.creado_por_id, usuario)
-    return query.first()
+    cotizacion = query.first()
+    if cotizacion:
+        _anotar_pedido(db, [cotizacion])
+    return cotizacion
 
 def obtener_cotizaciones(
     db: Session,
@@ -85,7 +109,9 @@ def obtener_cotizaciones(
 
     query = query.order_by(model.Cotizacion.fecha.desc(), model.Cotizacion.id.desc())
 
-    return query.offset(salto).limit(limite).all()
+    cotizaciones = query.offset(salto).limit(limite).all()
+    _anotar_pedido(db, cotizaciones)
+    return cotizaciones
 
 def _validar_consistencia_detalles(moneda_id, total_estimado, detalles):
     """Defensa en profundidad: cuando la cotización es en moneda extranjera, los

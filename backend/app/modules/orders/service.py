@@ -144,6 +144,20 @@ def actualizar_pedido(
     # pedidos cancelados/entregados.
     if nuevo_estado and nuevo_estado != estado_anterior:
         validar_transicion(TRANSICIONES_PEDIDO, estado_anterior, nuevo_estado, "pedido")
+        # Atajo sin producción: un pedido SIN líneas FABRICADO (solo reventa,
+        # insumos o piezas de exhibición) no necesita pasar por PRODUCCION:
+        # puede ir APROBADO → TERMINADO directamente. Con fabricables se exige
+        # el flujo normal (PRODUCCION → TERMINADO).
+        if estado_anterior == "APROBADO" and nuevo_estado == "TERMINADO":
+            fabricables = [
+                d for d in db_pedido.detalles
+                if (d.tipo_item or "FABRICADO") == "FABRICADO"
+            ]
+            if fabricables:
+                raise ValueError(
+                    "Este pedido tiene muebles a fabricar: debe pasar por PRODUCCION "
+                    "antes de marcarlo TERMINADO."
+                )
         # PRODUCCION → TERMINADO manual: exigir que TODAS las órdenes de
         # producción del pedido estén FINALIZADA (no se "come" la producción).
         # Solo cuentan las líneas FABRICABLES: los productos de REVENTA no
@@ -153,7 +167,7 @@ def actualizar_pedido(
             from app.modules.production.model import OrdenProduccion
             detalles_fabricables = [
                 d for d in db_pedido.detalles
-                if not (d.producto is not None and d.producto.es_reventa)
+                if (d.tipo_item or "FABRICADO") == "FABRICADO"
             ]
             n_ordenes_finalizadas = db.query(OrdenProduccion).join(
                 model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id
@@ -162,7 +176,6 @@ def actualizar_pedido(
                 OrdenProduccion.estado == "FINALIZADA",
             ).count()
             if not detalles_fabricables:
-                # Pedido solo de reventa: nada que fabricar, puede cerrarse.
                 pass
             elif n_ordenes_finalizadas < len(detalles_fabricables):
                 raise ValueError(
@@ -173,17 +186,21 @@ def actualizar_pedido(
     for campo, valor in datos.items():
         setattr(db_pedido, campo, valor)
     
+    # Envío automático al TERMINADO (cualquier ruta: manual, atajo sin
+    # producción o producción finalizada). crear_envio_automatico es
+    # idempotente (si ya existe el envío, no duplica).
+    if nuevo_estado == "TERMINADO" and estado_anterior != "TERMINADO":
+        from app.modules.envios.service import crear_envio_automatico
+        crear_envio_automatico(db, db_pedido.id, usuario)
+    
     # If transitioning to PRODUCCION, generate production orders and stages
-    # Todo en la MISMA transacción: un crash no puede dejar el pedido en
-    # PRODUCCION sin sus órdenes de producción.
-    # Los productos de REVENTA no generan orden: no se fabrican, se venden del
-    # inventario (su descuento ocurre al facturar).
+    # Solo los ítems FABRICADO generan orden; REVENTA e INSUMO no se fabrican.
     if estado_anterior != "PRODUCCION" and nuevo_estado == "PRODUCCION":
         from app.modules.production.model import OrdenProduccion
         from datetime import date
 
         for detalle in db_pedido.detalles:
-            if detalle.producto is not None and detalle.producto.es_reventa:
+            if (detalle.tipo_item or "FABRICADO") != "FABRICADO":
                 continue
             existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
             if not existente:
@@ -288,15 +305,21 @@ def convertir_cotizacion_a_pedido(
     if not detalles:
         raise ValueError("El pedido requiere al menos un detalle de producto")
 
-    # Validar que los precios/cantidades coincidan con los de la cotización:
-    # una cotización de 2.6M no puede convertirse en una factura de 1 peso.
-    detalles_cotizacion = {dc.producto_id: dc for dc in (db_cotizacion.detalles or [])}
+    # Validar que los precios/cantidades coincidan con los de la cotización.
+    # Indexar por (tipo_item, producto_id, material_id) para mezclar fabricados, reventa e insumos.
+    detalles_cotizacion = {}
+    for dc in (db_cotizacion.detalles or []):
+        key = (dc.tipo_item or "FABRICADO", dc.producto_id, dc.material_id)
+        detalles_cotizacion[key] = dc
     for detalle in detalles:
         detalle_dict = detalle if isinstance(detalle, dict) else detalle.model_dump()
-        dc = detalles_cotizacion.get(detalle_dict.get("producto_id"))
+        tipo = detalle_dict.get("tipo_item", "FABRICADO")
+        key = (tipo, detalle_dict.get("producto_id"), detalle_dict.get("material_id"))
+        dc = detalles_cotizacion.get(key)
         if dc is None:
+            ref = detalle_dict.get("material_id") or detalle_dict.get("producto_id")
             raise ValueError(
-                f"El producto {detalle_dict.get('producto_id')} no forma parte de la cotización. "
+                f"El ítem (tipo={tipo}, id={ref}) no forma parte de la cotización. "
                 "El pedido debe copiar exactamente los renglones cotizados."
             )
         precio_enviado = float(detalle_dict.get("precio", 0) or 0)
@@ -305,7 +328,7 @@ def convertir_cotizacion_a_pedido(
         cantidad_cotizada = float(dc.cantidad)
         if abs(precio_enviado - precio_cotizado) > 0.01 or abs(cantidad_enviada - cantidad_cotizada) > 0.001:
             raise ValueError(
-                f"El detalle del producto {dc.producto_id} no coincide con la cotización: "
+                f"El ítem (tipo={tipo}, id={ref}) no coincide con la cotización: "
                 f"se cotizó {cantidad_cotizada:g} × {precio_cotizado:,.2f} y se envía "
                 f"{cantidad_enviada:g} × {precio_enviado:,.2f}. "
                 "El pedido debe copiar exactamente los precios y cantidades cotizados."
@@ -354,12 +377,23 @@ def convertir_cotizacion_a_pedido(
     estado_cotizacion_anterior = db_cotizacion.estado
     db_cotizacion.estado = "APROBADA"
 
-    # Crear la cabecera de pedido basada en la cotización
+    # El pedido nace DIRECTAMENTE en PRODUCCION: la conversión de la cotización
+    # ES la confirmación del pedido (no hay paso intermedio "aprobado" que
+    # repetir en el tablero de pedidos). Las órdenes de producción de las líneas
+    # FABRICADO se generan automáticamente más abajo. Solo un pedido sin líneas
+    # a fabricar (reventa/insumos/exhibición) nace APROBADO: no tiene
+    # producción, y desde ahí va directo a TERMINADO (envío automático).
+    tiene_fabricables = any(
+        (d.get("tipo_item", "FABRICADO") if isinstance(d, dict) else (d.tipo_item or "FABRICADO"))
+        == "FABRICADO"
+        for d in detalles
+    )
+    estado_pedido = "PRODUCCION" if tiene_fabricables else "APROBADO"
     db_pedido = model.Pedido(
         cotizacion_id=db_cotizacion.id,
         cliente_id=db_cotizacion.cliente_id,
         fecha=date.today(),
-        estado="COTIZADO",
+        estado=estado_pedido,
         observaciones=db_cotizacion.observaciones,
         fecha_entrega_estimada=fecha_entrega_estimada,
         creado_por_id=usuario.id if usuario is not None else None,
@@ -369,36 +403,41 @@ def convertir_cotizacion_a_pedido(
     db.flush()
 
     for detalle in detalles:
-        # Validar que el producto exista (evita IntegrityError 500/409 engañoso)
         detalle_dict = dict(detalle) if isinstance(detalle, dict) else detalle.model_dump()
-        from app.modules.productos.model import Producto as ProductoModel
-        producto_existe = db.query(ProductoModel.id).filter(
-            ProductoModel.id == detalle_dict.get("producto_id")
-        ).first()
-        if not producto_existe:
-            raise ValueError(
-                f"El producto con id {detalle_dict.get('producto_id')} no existe. "
-                "No se puede convertir la cotización con un producto inexistente."
-            )
-        # Si el detalle no trae costo, intentar completarlo desde la cotización.
-        # Nunca escribir 0.0: el fallback al precio_costo_base del producto en la
-        # venta exige NULL (0.0 es un costo falso que rompe el margen).
+        tipo = detalle_dict.get("tipo_item", "FABRICADO")
+        # Validar que el producto o material exista
+        if tipo == "INSUMO":
+            from app.modules.productos.model import Material as MaterialModel
+            if not db.query(MaterialModel.id).filter(MaterialModel.id == detalle_dict.get("material_id")).first():
+                raise ValueError(f"El material con id {detalle_dict.get('material_id')} no existe.")
+        else:
+            from app.modules.productos.model import Producto as ProductoModel
+            if not db.query(ProductoModel.id).filter(ProductoModel.id == detalle_dict.get("producto_id")).first():
+                raise ValueError(f"El producto con id {detalle_dict.get('producto_id')} no existe.")
+        # Costo y dimensiones: FABRICADO/REVENTA toman el costo de la
+        # cotización; INSUMO también propaga su costo real (compra + pasada,
+        # que el frontend guarda en costo_total en COP), dividido por la
+        # cantidad para obtener el costo unitario. Las dimensiones solo
+        # aplican a FABRICADO/REVENTA.
         if detalle_dict.get("costo_unitario") is None:
             for dc in (db_cotizacion.detalles or []):
-                if dc.producto_id == detalle_dict.get("producto_id"):
-                    detalle_dict["costo_unitario"] = float(dc.costo_total) if dc.costo_total else None
+                if (dc.producto_id == detalle_dict.get("producto_id")
+                        and dc.material_id == detalle_dict.get("material_id")
+                        and dc.costo_total):
+                    if tipo == "INSUMO" and dc.cantidad:
+                        detalle_dict["costo_unitario"] = float(dc.costo_total) / float(dc.cantidad)
+                    else:
+                        detalle_dict["costo_unitario"] = float(dc.costo_total)
                     break
-        # Las dimensiones (ancho/largo) cotizadas deben pasar al pedido: son las
-        # que usa producción para escalar la receta y mostrar el tamaño en el
-        # kanban. Antes se perdían en la conversión y el tablero las mostraba vacías.
-        if detalle_dict.get("ancho") is None or detalle_dict.get("largo") is None:
-            for dc in (db_cotizacion.detalles or []):
-                if dc.producto_id == detalle_dict.get("producto_id"):
-                    if detalle_dict.get("ancho") is None:
-                        detalle_dict["ancho"] = float(dc.ancho) if dc.ancho else None
-                    if detalle_dict.get("largo") is None:
-                        detalle_dict["largo"] = float(dc.largo) if dc.largo else None
-                    break
+        if tipo != "INSUMO":
+            if detalle_dict.get("ancho") is None or detalle_dict.get("largo") is None:
+                for dc in (db_cotizacion.detalles or []):
+                    if dc.producto_id == detalle_dict.get("producto_id"):
+                        if detalle_dict.get("ancho") is None:
+                            detalle_dict["ancho"] = float(dc.ancho) if dc.ancho else None
+                        if detalle_dict.get("largo") is None:
+                            detalle_dict["largo"] = float(dc.largo) if dc.largo else None
+                        break
         if not detalle_dict.get("porcentaje_ganancia"):
             costo = detalle_dict.get("costo_unitario")
             precio = detalle_dict.get("precio", 0.0)
@@ -419,6 +458,25 @@ def convertir_cotizacion_a_pedido(
         )
         db.add(db_detalle)
     db.flush()
+
+    # El pedido nació en PRODUCCION: generar las órdenes de producción de las
+    # líneas FABRICADO (REVENTA/INSUMO no se fabrican). Mismo criterio que
+    # actualizar_pedido al pasar a PRODUCCION, pero sin paso intermedio.
+    if estado_pedido == "PRODUCCION":
+        from app.modules.production.model import OrdenProduccion
+        for detalle in db_pedido.detalles:
+            if (detalle.tipo_item or "FABRICADO") != "FABRICADO":
+                continue
+            existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
+            if not existente:
+                db.add(OrdenProduccion(
+                    detalle_pedido_id=detalle.id,
+                    estado="PENDIENTE",
+                    fecha_inicio=None,
+                    fecha_fin=None,
+                    creado_por_id=usuario.id if usuario is not None else None,
+                    actualizado_por_id=usuario.id if usuario is not None else None,
+                ))
 
     # ── Factura automática en la moneda de la cotización ──────────────────
     db_venta = venta_service.crear_venta_desde_pedido(

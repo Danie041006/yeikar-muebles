@@ -84,7 +84,7 @@ export default function Modal({
              className={`relative bg-white rounded-2xl shadow-modal border border-yeikar-secondary-light/15 w-full ${sizes[size]} max-h-[90vh] flex flex-col z-10 overflow-hidden outline-none`}
           >
             {(title || subtitle) && (
-               <div className="flex items-start justify-between px-6 py-4.5 border-b border-yeikar-secondary-light/10 bg-yeikar-tertiary/45">
+               <div className="flex items-start justify-between px-4 sm:px-6 py-4 border-b border-yeikar-secondary-light/10 bg-yeikar-tertiary/45">
                 <div>
                   {typeof title === 'string' ? (
                     <h3 id={titleId} className="text-lg font-black font-headline text-yeikar-neutral tracking-tight">
@@ -105,10 +105,10 @@ export default function Modal({
               </div>
             )}
 
-              <div className="overflow-y-auto px-6 py-5 flex-1">{children}</div>
+              <div className="overflow-y-auto px-4 sm:px-6 py-4 sm:py-5 flex-1">{children}</div>
 
              {footer && (
-               <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-yeikar-secondary-light/10 bg-yeikar-tertiary/45">
+               <div className="flex items-center justify-end gap-3 flex-wrap px-4 sm:px-6 py-4 border-t border-yeikar-secondary-light/10 bg-yeikar-tertiary/45">
                 {footer}
               </div>
             )}

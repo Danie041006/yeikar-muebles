@@ -1,12 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
 from typing import List, Optional
 from app.modules.clients.schemas import ClientResponse
-from app.modules.productos.schemas import ProductoResponse
+from app.modules.productos.schemas import ProductoResponse, MaterialResponse
 from app.modules.quotes.schemas import CotizacionResponse
 
 class DetallePedidoBase(BaseModel):
-    producto_id: int
+    producto_id: Optional[int] = None
+    material_id: Optional[int] = None
+    tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO)$")
     cantidad: float = Field(gt=0)
     precio: float = Field(ge=0)
     costo_unitario: Optional[float] = Field(None, ge=0)
@@ -19,6 +21,18 @@ class DetallePedidoBase(BaseModel):
     descripcion_especifica: Optional[str] = None
     observaciones: Optional[str] = None
 
+    @model_validator(mode="after")
+    def _validate_item(self):
+        if self.tipo_item == "INSUMO":
+            if not self.material_id:
+                raise ValueError("material_id es requerido para tipo_item INSUMO")
+            if self.producto_id:
+                raise ValueError("producto_id no debe enviarse para tipo_item INSUMO")
+        else:
+            if not self.producto_id:
+                raise ValueError("producto_id es requerido para tipo_item FABRICADO/REVENTA")
+        return self
+
 class DetallePedidoCreate(DetallePedidoBase):
     pass
 
@@ -28,6 +42,7 @@ class DetallePedidoResponse(DetallePedidoBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     producto: Optional[ProductoResponse] = None
+    material: Optional[MaterialResponse] = None
 
     class Config:
         from_attributes = True
@@ -78,5 +93,5 @@ class ConvertirCotizacionBody(BaseModel):
     # TRM solo cuando el abono se recibe en una moneda no deducible de la tasa
     # de la cotización (p.ej. VES con factura en USD/COP).
     tasa_cambio_adelanto: Optional[float] = None
-    # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE
+    # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE | BINANCE
     metodo_pago: Optional[str] = None

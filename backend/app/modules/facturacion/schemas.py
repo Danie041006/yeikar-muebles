@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from app.modules.clients.schemas import ClientResponse
-from app.modules.productos.schemas import ProductoResponse
+from app.modules.productos.schemas import ProductoResponse, MaterialResponse
 
 
 # ------------------------------------------------------------
@@ -19,13 +19,16 @@ class DetalleFacturaCreate(BaseModel):
 class DetalleFacturaResponse(BaseModel):
     id: int
     factura_id: int
-    producto_id: int
+    tipo_item: str = "FABRICADO"
+    producto_id: Optional[int] = None
+    material_id: Optional[int] = None
     descripcion: Optional[str] = None
     cantidad: float
     precio_usd: float
     subtotal_usd: float
     subtotal_bs: float
     producto: Optional[ProductoResponse] = None
+    material: Optional[MaterialResponse] = None
 
     class Config:
         from_attributes = True

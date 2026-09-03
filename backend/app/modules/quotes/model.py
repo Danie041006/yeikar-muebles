@@ -3,7 +3,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
 from app.modules.clients.model import Client
-from app.modules.productos.model import Producto
+from app.modules.productos.model import Producto, Material
 
 class Cotizacion(Base):
     __tablename__ = "cotizacion"
@@ -37,7 +37,9 @@ class DetalleCotizacion(Base):
 
     id = Column(BigInteger, primary_key=True, index=True)
     cotizacion_id = Column(BigInteger, ForeignKey("cotizacion.id", ondelete="CASCADE"), nullable=False)
-    producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=False)
+    producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=True)
+    material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
+    tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO
     cantidad = Column(Numeric(10, 2), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
     alto = Column(Numeric(10, 2), nullable=True)
@@ -52,6 +54,7 @@ class DetalleCotizacion(Base):
 
     cotizacion = relationship("Cotizacion", back_populates="detalles")
     producto = relationship("Producto")
+    material = relationship("Material")
     materiales = relationship("CotizacionDetalleMaterial", back_populates="detalle_cotizacion", cascade="all, delete-orphan")
 
 class CotizacionAnalisisIA(Base):

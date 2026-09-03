@@ -28,18 +28,18 @@ export default function StatCard({
 }: StatCardProps) {
   return (
     <div
-      className={`relative bg-white border border-yeikar-secondary-light/10 rounded-2xl p-6 shadow-card hover:shadow-lift transition-all duration-200 overflow-hidden ${className}`}
+      className={`relative bg-white border border-yeikar-secondary-light/10 rounded-2xl p-4 sm:p-6 shadow-card hover:shadow-lift transition-all duration-200 overflow-hidden ${className}`}
     >
       {/* Top golden accent ribbon */}
       <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${accent}`} />
 
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
+      <div className="flex items-start justify-between gap-3 sm:gap-4">
+        <div className="space-y-1 min-w-0">
            <p className="text-[11px] font-mono font-bold uppercase tracking-[0.1em] text-yeikar-neutral/55">
             {label}
           </p>
-          <div className="flex items-baseline gap-2">
-            <h3 className="text-2xl font-black font-headline tracking-tight text-yeikar-neutral leading-none">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <h3 className="text-xl sm:text-2xl font-black font-headline tracking-tight text-yeikar-neutral leading-none break-words">
               {value}
             </h3>
             {trend && (

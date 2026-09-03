@@ -17,6 +17,7 @@ from app.modules.nomina import model, schemas
 from app.modules.empleados.model import Empleado
 from app.modules.costos_produccion.model import PrecioProduccion
 from app.modules.production.model import EtapaProduccion, OrdenProduccion
+from app.modules.production.model import ProduccionCrudoManoObra, ProduccionCrudo
 from app.modules.orders.model import DetallePedido, Pedido
 from app.modules.catalogos.model import Area, Cargo, TipoGasto, Moneda
 from app.modules.gastos.model import Gasto
@@ -31,6 +32,18 @@ TIPO_GASTO_AGUINALDO = "AGUINALDO ANUAL"
 # Config de áreas (aguinaldo %)
 # ------------------------------------------------------------
 def listar_config_areas(db: Session) -> List[model.NominaAreaConfig]:
+    areas = db.query(Area).all()
+    existentes = {cfg.area_id: cfg for cfg in db.query(model.NominaAreaConfig).all()}
+    hubo_cambios = False
+    for a in areas:
+        if a.id not in existentes:
+            pct = Decimal("8.00") if "ebanister" in (a.nombre or "").lower() else Decimal("5.00")
+            nuevo = model.NominaAreaConfig(area_id=a.id, porcentaje_aguinaldo=pct)
+            db.add(nuevo)
+            hubo_cambios = True
+    if hubo_cambios:
+        db.commit()
+
     return (
         db.query(model.NominaAreaConfig)
         .options(joinedload(model.NominaAreaConfig.area))
@@ -59,7 +72,61 @@ def _porcentaje_area(db: Session, area_id: Optional[int]) -> Decimal:
     if area_id is None:
         return Decimal("0")
     cfg = db.query(model.NominaAreaConfig).filter(model.NominaAreaConfig.area_id == area_id).first()
-    return cfg.porcentaje_aguinaldo if cfg else Decimal("0")
+    if not cfg:
+        cfg = model.NominaAreaConfig(area_id=area_id, porcentaje_aguinaldo=Decimal("5.00"))
+        db.add(cfg)
+        db.commit()
+        db.refresh(cfg)
+    return cfg.porcentaje_aguinaldo
+
+
+def _resolver_area_de_cargo(db: Session, cargo: Optional[Cargo]) -> Optional[Area]:
+    if not cargo or not cargo.nombre:
+        return None
+    nombre_cargo = cargo.nombre.strip().upper()
+    mapping = {
+        "EBANISTA": "Ebanistería",
+        "TAPICERO": "Tapicería",
+        "PINTOR": "Pintura",
+        "PREPARADOR": "Preparación",
+        "VIDRIERO": "Vidriería",
+    }
+    target = mapping.get(nombre_cargo)
+    if target:
+        area = db.query(Area).filter(Area.nombre.ilike(target)).first()
+        if area:
+            return area
+    if len(nombre_cargo) >= 4:
+        prefijo = nombre_cargo[:4].lower()
+        area = db.query(Area).filter(Area.nombre.ilike(f"{prefijo}%")).first()
+        if area:
+            return area
+    return None
+
+
+def _porcentaje_aguinaldo(db: Session, emp: Optional[Empleado], area_id_linea: Optional[int] = None) -> Decimal:
+    """Obtiene el % de aguinaldo aplicable con prioridad:
+    1. % específico configurado en el empleado (emp.porcentaje_aguinaldo).
+    2. % del área del trabajador según su cargo (ej. Ebanista → Ebanistería).
+    3. % del área específica de la pieza/etapa (area_id_linea).
+    4. 0 si no aplica.
+    """
+    if emp and emp.porcentaje_aguinaldo is not None:
+        return Decimal(str(emp.porcentaje_aguinaldo))
+
+    if emp and emp.cargo:
+        area_emp = _resolver_area_de_cargo(db, emp.cargo)
+        if area_emp:
+            pct = _porcentaje_area(db, area_emp.id)
+            if pct > 0:
+                return pct
+
+    if area_id_linea is not None:
+        pct = _porcentaje_area(db, area_id_linea)
+        if pct > 0:
+            return pct
+
+    return Decimal("0")
 
 
 def _etapas_del_periodo(db: Session, desde: date, hasta: date):
@@ -105,6 +172,34 @@ def _precio_catalogo(db: Session, area_id: int, producto_id: Optional[int]) -> D
     return item.precio if item else Decimal("0")
 
 
+def _obtener_manos_obra_periodo(db: Session, desde: date, hasta: date):
+    from app.modules.production.model import ManoObra
+    inicio = datetime.combine(desde, time.min)
+    fin = datetime.combine(hasta, time.max)
+    return (
+        db.query(ManoObra)
+        .options(
+            joinedload(ManoObra.empleado),
+            joinedload(ManoObra.etapa)
+            .joinedload(EtapaProduccion.area),
+            joinedload(ManoObra.etapa)
+            .joinedload(EtapaProduccion.orden)
+            .joinedload(OrdenProduccion.detalle_pedido)
+            .joinedload(DetallePedido.producto),
+            joinedload(ManoObra.etapa)
+            .joinedload(EtapaProduccion.orden)
+            .joinedload(OrdenProduccion.detalle_pedido)
+            .joinedload(DetallePedido.pedido)
+            .joinedload(Pedido.cliente),
+        )
+        .filter(
+            ManoObra.created_at >= inicio,
+            ManoObra.created_at <= fin,
+        )
+        .all()
+    )
+
+
 def generar_nomina(db: Session, desde: date, hasta: date) -> schemas.NominaDraftResponse:
     if desde > hasta:
         raise ValueError("La fecha inicial no puede ser posterior a la final.")
@@ -119,20 +214,67 @@ def generar_nomina(db: Session, desde: date, hasta: date) -> schemas.NominaDraft
     )
     por_empleado = {e.id: e for e in empleados}
 
-    # Producción completada del periodo, agrupada por responsable
-    etapas = _etapas_del_periodo(db, desde, hasta)
+    # 1. Mano de obra registrada manualmente en etapas (prioridad real del taller)
+    manos = _obtener_manos_obra_periodo(db, desde, hasta)
     lineas_por_empleado: dict = {e.id: [] for e in empleados}
+    etapas_con_mano_obra: set = set()
+
+    for mo in manos:
+        if not mo.listo_nomina:
+            continue
+        if mo.empleado_id not in por_empleado:
+            continue
+        emp = por_empleado[mo.empleado_id]
+        if emp.tipo_pago != "DESTAJO":
+            continue
+
+        etapas_con_mano_obra.add(mo.etapa_produccion_id)
+        det = mo.etapa.orden.detalle_pedido if mo.etapa and mo.etapa.orden else None
+        prod = det.producto if det else None
+        cli = det.pedido.cliente if det and det.pedido else None
+        area = mo.etapa.area if mo.etapa else None
+
+        recargo = mo.porcentaje_recargo or Decimal("0")
+        monto_final = (mo.monto or Decimal("0")) * (Decimal("1") + recargo / Decimal("100"))
+
+        desc = prod.nombre if prod else "Producción"
+        if mo.observaciones:
+            desc = f"{desc} ({mo.observaciones})"
+        elif mo.precio_produccion_descripcion:
+            desc = f"{desc} ({mo.precio_produccion_descripcion})"
+
+        lineas_por_empleado[emp.id].append(
+            schemas.LineaDraft(
+                origen="ETAPA",
+                etapa_id=mo.etapa_produccion_id,
+                descripcion=desc,
+                area_id=area.id if area else None,
+                area_nombre=area.nombre if area else None,
+                cliente_nombre=cli.nombre if cli else None,
+                cantidad=Decimal("1"),
+                precio_unitario=monto_final,
+                total=monto_final,
+            )
+        )
+
+    # 2. Etapas completadas sin desglose manual individual (fallback a tarifario de catálogo)
+    etapas = _etapas_del_periodo(db, desde, hasta)
     for ep in etapas:
+        if ep.id in etapas_con_mano_obra:
+            continue
         if ep.empleado_responsable_id not in por_empleado:
             continue
         emp = por_empleado[ep.empleado_responsable_id]
         if emp.tipo_pago != "DESTAJO":
             continue
+
         detalle = ep.orden.detalle_pedido
         producto = detalle.producto
         cliente = detalle.pedido.cliente
         cantidad = detalle.cantidad
         precio = _precio_catalogo(db, ep.area_id, detalle.producto_id)
+        if precio <= 0:
+            continue
         total = precio * cantidad
         lineas_por_empleado[emp.id].append(
             schemas.LineaDraft(
@@ -145,6 +287,51 @@ def generar_nomina(db: Session, desde: date, hasta: date) -> schemas.NominaDraft
                 cantidad=cantidad,
                 precio_unitario=precio,
                 total=total,
+            )
+        )
+
+    # 3. Mano de obra de producción en crudo (registros con listo_nomina=True)
+    ebanisteria = db.query(Area).filter(Area.nombre.ilike("%ebanister%")).first()
+    ebanisteria_id = ebanisteria.id if ebanisteria else None
+    inicio_dt = datetime.combine(desde, time.min)
+    fin_dt = datetime.combine(hasta, time.max)
+    crudo_mos = (
+        db.query(ProduccionCrudoManoObra)
+        .options(
+            joinedload(ProduccionCrudoManoObra.empleado),
+            joinedload(ProduccionCrudoManoObra.produccion)
+            .joinedload(ProduccionCrudo.crudo),
+        )
+        .filter(
+            ProduccionCrudoManoObra.listo_nomina.is_(True),
+            ProduccionCrudoManoObra.created_at >= inicio_dt,
+            ProduccionCrudoManoObra.created_at <= fin_dt,
+        )
+        .all()
+    )
+    for mo in crudo_mos:
+        if mo.empleado_id not in por_empleado:
+            continue
+        emp = por_empleado[mo.empleado_id]
+        if emp.tipo_pago != "DESTAJO":
+            continue
+        recargo = mo.porcentaje_recargo or Decimal("0")
+        monto_final = (mo.monto or Decimal("0")) * (Decimal("1") + recargo / Decimal("100"))
+        prod_nombre = mo.produccion.crudo.nombre if mo.produccion and mo.produccion.crudo else "Crudo"
+        desc = f"{prod_nombre}"
+        if mo.observaciones:
+            desc = f"{desc} ({mo.observaciones})"
+        lineas_por_empleado[emp.id].append(
+            schemas.LineaDraft(
+                origen="CRUDO",
+                etapa_id=None,
+                descripcion=desc,
+                area_id=ebanisteria_id,
+                area_nombre="Ebanistería",
+                cliente_nombre=None,
+                cantidad=Decimal("1"),
+                precio_unitario=monto_final,
+                total=monto_final,
             )
         )
 
@@ -170,11 +357,8 @@ def generar_nomina(db: Session, desde: date, hasta: date) -> schemas.NominaDraft
         bono = Decimal("0")
         if emp.tipo_pago == "DESTAJO":
             for l in lineas:
-                pct = _porcentaje_area(db, l.area_id)
+                pct = _porcentaje_aguinaldo(db, emp, l.area_id)
                 bono += l.total * pct / Decimal("100")
-        # Sobrescritura opcional: porcentaje de aguinaldo propio del empleado
-        if emp.porcentaje_aguinaldo is not None and emp.tipo_pago == "DESTAJO":
-            bono = total_produccion * emp.porcentaje_aguinaldo / Decimal("100")
         monto = total_produccion if emp.tipo_pago == "DESTAJO" else (emp.sueldo_semanal or Decimal("0"))
         detalles_draft.append(
             schemas.DetalleDraft(
@@ -244,41 +428,41 @@ def _validar_semana_disponible(db: Session, desde: date, hasta: date) -> None:
 def resumen_semanal(db: Session, desde: date, hasta: date) -> dict:
     """Vista previa de "qué hizo cada empleado de producción" en el rango.
 
-    - Piezas: etapas COMPLETADAS no-retrabajo del responsable, con el valor de
-      destajo según `precio_produccion` (área+producto). Piezas sin precio
-      vinculado se marcan (no pagan).
-    - Mano de obra: registros de `mano_obra` creados en el rango (pagado/pendiente).
-
-    NO genera ni guarda nada: es solo consulta, para revisar antes de armar la nómina.
+    Toma la mano de obra registrada por pieza/tarea (marcada como lista para nómina),
+    las etapas completadas y la mano de obra de producción en crudo.
     """
     if desde > hasta:
         raise ValueError("La fecha inicial no puede ser posterior a la final.")
 
-    from app.modules.production.model import ManoObra
-
+    manos = _obtener_manos_obra_periodo(db, desde, hasta)
     etapas = _etapas_del_periodo(db, desde, hasta)
-    empleados_ids = {ep.empleado_responsable_id for ep in etapas}
 
-    inicio = datetime.combine(desde, time.min)
-    fin = datetime.combine(hasta, time.max)
-    manos = (
-        db.query(ManoObra)
+    inicio_dt = datetime.combine(desde, time.min)
+    fin_dt = datetime.combine(hasta, time.max)
+    crudo_mos = (
+        db.query(ProduccionCrudoManoObra)
         .options(
-            joinedload(ManoObra.empleado),
-            joinedload(ManoObra.etapa)
-            .joinedload(EtapaProduccion.orden)
-            .joinedload(OrdenProduccion.detalle_pedido)
-            .joinedload(DetallePedido.producto),
+            joinedload(ProduccionCrudoManoObra.empleado),
+            joinedload(ProduccionCrudoManoObra.produccion)
+            .joinedload(ProduccionCrudo.crudo),
         )
         .filter(
-            ManoObra.created_at >= inicio,
-            ManoObra.created_at <= fin,
+            ProduccionCrudoManoObra.created_at >= inicio_dt,
+            ProduccionCrudoManoObra.created_at <= fin_dt,
         )
         .all()
     )
+
+    ebanisteria = db.query(Area).filter(Area.nombre.ilike("%ebanister%")).first()
+    ebanisteria_id = ebanisteria.id if ebanisteria else None
+
+    empleados_ids = {ep.empleado_responsable_id for ep in etapas}
     for mo in manos:
         if mo.empleado_id:
             empleados_ids.add(mo.empleado_id)
+    for cmo in crudo_mos:
+        if cmo.empleado_id:
+            empleados_ids.add(cmo.empleado_id)
 
     emps = []
     if empleados_ids:
@@ -297,8 +481,45 @@ def resumen_semanal(db: Session, desde: date, hasta: date) -> dict:
         total_destajo = Decimal("0")
         sin_precio = 0
         lineas_bono: list = []
+
+        # 1. Mano de obra directa registrada en etapas
+        manos_emp = [m for m in manos if m.empleado_id == eid]
+        etapas_con_mo_emp = set()
+        for mo in manos_emp:
+            etapas_con_mo_emp.add(mo.etapa_produccion_id)
+            recargo = mo.porcentaje_recargo or Decimal("0")
+            monto = (mo.monto or Decimal("0")) * (Decimal("1") + recargo / Decimal("100"))
+            det = mo.etapa.orden.detalle_pedido if mo.etapa and mo.etapa.orden else None
+            prod = det.producto if det else None
+            cli = det.pedido.cliente if det and det.pedido else None
+            area = mo.etapa.area if mo.etapa else None
+
+            desc = prod.nombre if prod else "Producción"
+            if mo.observaciones:
+                desc = f"{desc} ({mo.observaciones})"
+            elif mo.precio_produccion_descripcion:
+                desc = f"{desc} ({mo.precio_produccion_descripcion})"
+
+            piezas.append({
+                "producto": desc,
+                "area": area.nombre if area else None,
+                "cliente": cli.nombre if cli else None,
+                "cantidad": 1.0,
+                "precio_unitario": float(monto),
+                "total": float(monto),
+                "fecha_fin": mo.created_at.isoformat() if mo.created_at else None,
+                "listo_nomina": bool(mo.listo_nomina),
+            })
+
+            if mo.listo_nomina:
+                total_destajo += monto
+                lineas_bono.append((monto, area.id if area else None))
+
+        # 2. Etapas completadas sin MO manual
         for ep in etapas:
             if ep.empleado_responsable_id != eid:
+                continue
+            if ep.id in etapas_con_mo_emp:
                 continue
             detalle = ep.orden.detalle_pedido
             producto = detalle.producto
@@ -315,6 +536,7 @@ def resumen_semanal(db: Session, desde: date, hasta: date) -> dict:
                 "precio_unitario": float(precio) if tiene_precio else None,
                 "total": float(total) if total is not None else None,
                 "fecha_fin": ep.fecha_fin.isoformat() if ep.fecha_fin else None,
+                "listo_nomina": True,
             })
             if not tiene_precio:
                 sin_precio += 1
@@ -322,30 +544,37 @@ def resumen_semanal(db: Session, desde: date, hasta: date) -> dict:
                 total_destajo += total
                 lineas_bono.append((total, ep.area_id))
 
+        # 3. Mano de obra de producción en crudo
+        crudo_emp = [c for c in crudo_mos if c.empleado_id == eid]
+        for cmo in crudo_emp:
+            recargo = cmo.porcentaje_recargo or Decimal("0")
+            monto = (cmo.monto or Decimal("0")) * (Decimal("1") + recargo / Decimal("100"))
+            prod_nombre = cmo.produccion.crudo.nombre if cmo.produccion and cmo.produccion.crudo else "Crudo"
+            desc = f"{prod_nombre}"
+            if cmo.observaciones:
+                desc = f"{desc} ({cmo.observaciones})"
+
+            piezas.append({
+                "producto": desc,
+                "area": "Ebanistería",
+                "cliente": None,
+                "cantidad": 1.0,
+                "precio_unitario": float(monto),
+                "total": float(monto),
+                "fecha_fin": cmo.created_at.isoformat() if cmo.created_at else None,
+                "listo_nomina": bool(cmo.listo_nomina),
+            })
+
+            if cmo.listo_nomina:
+                total_destajo += monto
+                lineas_bono.append((monto, ebanisteria_id))
+
         bono = Decimal("0")
         tipo_pago = emp.tipo_pago if emp else None
         if tipo_pago == "DESTAJO":
             for t, aid in lineas_bono:
-                bono += t * _porcentaje_area(db, aid) / Decimal("100")
-            if emp.porcentaje_aguinaldo is not None:
-                bono = total_destajo * emp.porcentaje_aguinaldo / Decimal("100")
-
-        mo_lineas = []
-        mo_total = mo_pagado = Decimal("0")
-        for mo in manos:
-            if mo.empleado_id != eid:
-                continue
-            recargo = mo.porcentaje_recargo or Decimal("0")
-            monto = (mo.monto or Decimal("0")) * (Decimal("1") + recargo / Decimal("100"))
-            mo_total += monto
-            if mo.pagado:
-                mo_pagado += monto
-            det = mo.etapa.orden.detalle_pedido if mo.etapa and mo.etapa.orden else None
-            mo_lineas.append({
-                "descripcion": det.producto.nombre if det and det.producto else "Producción",
-                "monto": float(monto.quantize(Decimal("0.01"))),
-                "pagado": bool(mo.pagado),
-            })
+                pct = _porcentaje_aguinaldo(db, emp, aid)
+                bono += t * pct / Decimal("100")
 
         salida.append({
             "empleado_id": eid,
@@ -357,12 +586,6 @@ def resumen_semanal(db: Session, desde: date, hasta: date) -> dict:
             "piezas_sin_precio": sin_precio,
             "total_destajo": float(total_destajo),
             "aguinaldo_estimado": float(bono.quantize(Decimal("0.01"))),
-            "mano_obra": {
-                "total": float(mo_total.quantize(Decimal("0.01"))),
-                "pagado": float(mo_pagado.quantize(Decimal("0.01"))),
-                "pendiente": float((mo_total - mo_pagado).quantize(Decimal("0.01"))),
-                "lineas": mo_lineas,
-            },
         })
 
     return {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "empleados": salida}
@@ -489,10 +712,8 @@ def _actualizar_totales_detalle(db: Session, detalle: model.NominaDetalle) -> No
     bono = Decimal("0")
     if detalle.tipo_pago == "DESTAJO":
         for l in detalle.lineas:
-            pct = _porcentaje_area(db, l.area_id)
+            pct = _porcentaje_aguinaldo(db, detalle.empleado, l.area_id)
             bono += l.total * pct / Decimal("100")
-        if detalle.empleado.porcentaje_aguinaldo is not None:
-            bono = total * detalle.empleado.porcentaje_aguinaldo / Decimal("100")
     detalle.bono_aguinaldo = bono
     if detalle.tipo_pago == "DESTAJO":
         detalle.monto_a_pagar = total

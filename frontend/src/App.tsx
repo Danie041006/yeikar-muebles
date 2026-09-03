@@ -7,10 +7,10 @@ import Clientes from './pages/Clientes';
 import Cotizaciones from './pages/Cotizaciones';
 import Pedidos from './pages/Pedidos';
 import ProduccionKanban from './pages/ProduccionKanban';
+import ProduccionCrudo from './pages/ProduccionCrudo';
 import Inventario from './pages/Inventario';
 import Reportes from './pages/Reportes';
 import Productos from './pages/Productos';
-import Calculadora from './pages/Calculadora';
 import Ventas from './pages/Ventas';
 import Facturacion from './pages/Facturacion';
 import Despachos from './pages/Despachos';
@@ -21,7 +21,6 @@ import Cuentas from './pages/Cuentas';
 import CostosProduccion from './pages/CostosProduccion';
 import Nomina from './pages/Nomina';
 import Empleados from './pages/Empleados';
-import CotizadorInteligente from './pages/CotizadorInteligente';
 import Auditoria from './pages/Auditoria';
 import EstadoDia from './pages/EstadoDia';
 import Expediente from './pages/Expediente';
@@ -35,15 +34,14 @@ const ROUTE_MODULES: Record<string, string> = {
   '/dashboard': 'dashboard',
   '/clientes': 'clientes',
   '/cotizaciones': 'cotizaciones',
-  '/cotizaciones-ia': 'cotizaciones_ia',
   '/pedidos': 'pedidos',
   '/historial': 'pedidos',
   '/produccion': 'produccion',
+  '/produccion-crudo': 'produccion',
   '/inventario': 'inventario',
   '/reportes': 'reportes',
   '/reporte-diario': 'reportes',
   '/productos': 'productos',
-  '/costos': 'productos',
   '/ventas': 'ventas',
   '/facturacion': 'facturacion',
   '/envios': 'envios',
@@ -120,10 +118,6 @@ const pageMeta: Record<string, { title: string; description: string }> = {
     title: 'Cotizaciones',
     description: 'Crea y gestiona cotizaciones para tus proyectos de mueblería.',
   },
-  '/cotizaciones-ia': {
-    title: 'Cotizador Inteligente',
-    description: 'Cotizaciones asistidas por inteligencia artificial para tu mueblería.',
-  },
   '/pedidos': {
     title: 'Pedidos',
     description: 'Administración de pedidos y órdenes de compra.',
@@ -135,6 +129,10 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   '/produccion': {
     title: 'Producción',
     description: 'Gestión de producción con tablero Kanban para seguimiento de etapas.',
+  },
+  '/produccion-crudo': {
+    title: 'Producción de Productos en Crudo',
+    description: 'Fabricación de ítems en crudo: registra consumos de material y suma stock al finalizar.',
   },
   '/inventario': {
     title: 'Inventario',
@@ -151,10 +149,6 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   '/productos': {
     title: 'Productos',
     description: 'Catálogo de productos con recetas, costos y precios.',
-  },
-  '/costos': {
-    title: 'Calculadora de Costos',
-    description: 'Calculadora de costos de fabricación para muebles y productos.',
   },
   '/ventas': {
     title: 'Ventas',
@@ -242,16 +236,6 @@ function App() {
             }
           />
           <Route
-            path="/cotizaciones-ia"
-            element={
-              <PrivateRoute>
-                <DashboardLayout>
-                  <><SEO {...pageMeta['/cotizaciones-ia']} /><CotizadorInteligente /></>
-                </DashboardLayout>
-              </PrivateRoute>
-            }
-          />
-          <Route
             path="/pedidos"
             element={
               <PrivateRoute>
@@ -277,6 +261,16 @@ function App() {
               <PrivateRoute>
                 <DashboardLayout>
                   <><SEO {...pageMeta['/produccion']} /><ProduccionKanban /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/produccion-crudo"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/produccion-crudo']} /><ProduccionCrudo /></>
                 </DashboardLayout>
               </PrivateRoute>
             }
@@ -317,16 +311,6 @@ function App() {
               <PrivateRoute>
                 <DashboardLayout>
                   <><SEO {...pageMeta['/productos']} /><Productos /></>
-                </DashboardLayout>
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/costos"
-            element={
-              <PrivateRoute>
-                <DashboardLayout>
-                  <><SEO {...pageMeta['/costos']} /><Calculadora /></>
                 </DashboardLayout>
               </PrivateRoute>
             }

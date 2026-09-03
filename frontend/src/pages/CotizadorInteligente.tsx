@@ -178,7 +178,7 @@ export default function CotizadorInteligente() {
   /** Cargar productos para la receta de referencia */
   const cargarProductos = useCallback(async () => {
     try {
-      const list = await productosService.getProductos();
+      const list = await productosService.getProductos(undefined, { limite: 1000 });
       setProductos(list.map((p) => ({ id: p.id, nombre: p.nombre })));
     } catch (err) {
       console.error('Error al cargar productos:', err);

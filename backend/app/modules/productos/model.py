@@ -4,7 +4,7 @@ from sqlalchemy.sql import func
 from app.db.base import Base
 
 # Importar catalogos para que SQLAlchemy los registre y resuelva las relaciones
-from app.modules.catalogos.model import TipoProducto, UnidadMedida, Moneda
+from app.modules.catalogos.model import TipoProducto, UnidadMedida, Moneda, CategoriaInventario
 
 
 class Producto(Base):
@@ -16,9 +16,10 @@ class Producto(Base):
     tipo_producto_id= Column(BigInteger, ForeignKey("tipo_producto.id"), nullable=False)
     descripcion     = Column(Text, nullable=True)
     activo          = Column(Boolean, default=True)
-    # --- Dimensiones base para costeo paramétrico ---
-    ancho_base      = Column(Numeric(10, 2), default=1.60, nullable=True)
-    largo_base      = Column(Numeric(10, 2), default=1.90, nullable=True)
+    # --- Dimensiones base para costeo paramétrico (OPCIONALES: null si el
+    # mueble aún no tiene medidas de referencia; el motor asume 1.60×1.90) ---
+    ancho_base      = Column(Numeric(10, 2), nullable=True)
+    largo_base      = Column(Numeric(10, 2), nullable=True)
     alto_base       = Column(Numeric(10, 2), nullable=True)
     # --- Precio fijo importado del Excel (estructura de costos) ---
     precio_costo_base   = Column(Numeric(15, 2), nullable=True)   # TOTAL COSTO DE PRODUCCIÓN del Excel
@@ -27,22 +28,35 @@ class Producto(Base):
     hoja_excel          = Column(String(150), nullable=True)       # Nombre de la hoja fuente en el Excel
     stock_minimo        = Column(Numeric(10, 2), nullable=False, server_default="8")
     es_reventa          = Column(Boolean, default=False, nullable=False)  # True = se revende (colchón, nevera...); False = se fabrica
+    # True = pieza de exhibición: se fabrica una vez y vive en el stock del
+    # showroom. Su venta descuenta stock al facturar (como reventa), pero NO
+    # entra a producción desde un pedido ni cuenta como compra de reventa.
+    es_exhibicion       = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
     # Moneda de los precios de referencia (costo/venta). Base del ERP: COP (id=1).
     # Los productos de reventa suelen comprarse en USD; la conversión a COP se
     # hace con la tasa vigente al USAR el precio, nunca congelada.
     moneda_id           = Column(BigInteger, ForeignKey("moneda.id", ondelete="RESTRICT"), nullable=True, server_default="1")
+    # Categoría para el desglose del inventario (COLCHONES, ELECTRODOMÉSTICOS...)
+    categoria_inventario_id = Column(BigInteger, ForeignKey("categoria_inventario.id", ondelete="SET NULL"), nullable=True, index=True)
     # --------------------------------------------------------------
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, onupdate=func.now())
 
     tipo_producto   = relationship("TipoProducto")
     moneda          = relationship("Moneda")
+    categoria_inventario = relationship("CategoriaInventario")
     materiales      = relationship("ProductoMaterial", back_populates="producto", cascade="all, delete-orphan")
     secciones       = relationship("SeccionProducto", back_populates="producto", cascade="all, delete-orphan")
 
     @property
     def fotos(self):
-        """Fotos de referencia del mueble (adjuntos tipo PRODUCTO)."""
+        """Fotos de referencia del mueble (adjuntos tipo PRODUCTO).
+
+        Si el listado precargó el batch (ver adjuntos_info_batch), se usa ese
+        resultado; si no, se consulta la BD (1 query por producto)."""
+        cache = self.__dict__.get("_fotos_cache")
+        if cache is not None:
+            return cache
         from sqlalchemy.orm import object_session
         from app.modules.adjuntos.service import adjuntos_info
         s = object_session(self)
@@ -60,10 +74,27 @@ class Material(Base):
     costo_base      = Column(Numeric(15, 2), nullable=False)
     stock_minimo    = Column(Numeric(10, 2), nullable=False, server_default="8")
     activo          = Column(Boolean, default=True)
+    # --- Dimensiones de la unidad de compra (solo materiales laminares) ---
+    # Ej: lámina MDF de 1.83 × 2.44 m → largo_cm=244, ancho_cm=183.
+    # Si ambos están definidos el material es "laminar": la receta puede pedir
+    # CORTES (ej. 80×130) y el inventario registra sobrantes.
+    largo_cm        = Column(Numeric(10, 2), nullable=True)
+    ancho_cm        = Column(Numeric(10, 2), nullable=True)
+    # Categoría para el desglose del inventario (LÁMINAS MDF, ESPUMA, PINTURA...)
+    categoria_inventario_id = Column(BigInteger, ForeignKey("categoria_inventario.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Departamento del taller dueño del insumo (EBANISTERIA | PREPARACION | PINTURA |
+    # TAPICERIA | VIDRIERIA | TERMINACION). NULL = transversal/general. El área de
+    # TENDIDO no es departamento propio: sus insumos se marcan EBANISTERIA.
+    departamento = Column(String(30), nullable=True)
     created_at      = Column(DateTime, server_default=func.now())
     updated_at      = Column(DateTime, onupdate=func.now())
 
     unidad_medida   = relationship("UnidadMedida")
+    categoria_inventario = relationship("CategoriaInventario")
+
+    @property
+    def es_laminar(self) -> bool:
+        return self.largo_cm is not None and self.ancho_cm is not None
 
 
 class ProductoMaterial(Base):
@@ -79,6 +110,9 @@ class ProductoMaterial(Base):
       ESPACIADO  → se colocan a distancias fijas a lo largo del perímetro
       POR_RANGO  → la cantidad salta en valores discretos según rangos JSON
       FORMULA    → expresión matemática personalizada (campo formula_personalizada)
+      CORTE      → cantidad_base = NÚMERO DE CORTES de ancho_corte_cm × largo_corte_cm
+                   (materiales laminares: escala por área y el costo es proporcional
+                   al área del corte sobre el área de la lámina completa)
     """
     __tablename__ = "producto_material"
 
@@ -92,6 +126,11 @@ class ProductoMaterial(Base):
     # Solo para ESPACIADO
     distancia_pauta_cm    = Column(Numeric(8, 2), nullable=True)
     tornillos_por_pieza   = Column(Integer, nullable=True)
+
+    # Solo para CORTE (materiales laminares): medidas del corte en cm.
+    # cantidad_base = número de cortes de ese tamaño.
+    ancho_corte_cm        = Column(Numeric(10, 2), nullable=True)
+    largo_corte_cm        = Column(Numeric(10, 2), nullable=True)
 
     # Condición de activación: {"campo": "nuevo_largo", "op": ">", "valor": 2.0}
     condicion_activacion  = Column(JSON, nullable=True)

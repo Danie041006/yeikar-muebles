@@ -24,13 +24,18 @@ Ejecutar:
     cd backend && venv/bin/python -m pytest test/test_facturacion.py -v
 """
 import pytest
+from datetime import date
 
 from conftest import (
     ADMIN_HEADERS,
     VENTAS_HEADERS,
+    _uniq,
     crear_cliente,
     crear_cotizacion,
+    crear_material,
+    crear_movimiento,
     crear_producto,
+    registrar_inventario_de_material,
     registrar_venta_de_pedido,
 )
 from app.modules.auditoria.model import AuditEvent
@@ -415,3 +420,92 @@ def test_mismo_producto_en_varias_lineas(client, cleaner):
     assert precios == [pytest.approx(100.0), pytest.approx(200.0)]
     for d in det["detalles"]:
         assert d["cantidad"] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# 7) Pedido con INSUMO (material vendido suelto) → factura fiscal correcta
+# ---------------------------------------------------------------------------
+def test_factura_pedido_con_insumo(client, db, cleaner):
+    """Cotización mixta (mueble FABRICADO + insumo INSUMO) → pedido → factura.
+
+    La línea INSUMO se factura con material_id (producto_id NULL), tipo_item
+    INSUMO y descripción = nombre del material. Al convertir se descuenta el
+    stock del insumo (venta automática)."""
+    from sqlalchemy import text
+
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)
+    material = crear_material(client, cleaner, costo_base=5000.0)
+    # Stock del insumo: la venta automática de la conversión lo exige.
+    _, mov = crear_movimiento(client, cleaner, material["id"], "ENTRADA", 10)
+
+    precio_prod, precio_ins, cant_ins = 100000.0, 8000.0, 2
+    # Cotización mixta: 1 mueble + 2 unidades del insumo suelto.
+    payload = {
+        "cliente_id": cliente["id"],
+        "fecha": str(date.today()),
+        "estado": "BORRADOR",
+        "total_estimado": precio_prod + precio_ins * cant_ins,
+        "moneda_id": 1,
+        "tasa_cambio": 1.0,
+        "observaciones": _uniq("cot_mixta"),
+        "detalles": [
+            {"producto_id": producto["id"], "tipo_item": "FABRICADO",
+             "cantidad": 1, "precio": precio_prod, "ancho": 1.6, "largo": 1.9},
+            {"producto_id": None, "material_id": material["id"], "tipo_item": "INSUMO",
+             "cantidad": cant_ins, "precio": precio_ins},
+        ],
+    }
+    r = client.post("/api/v1/cotizacion/", json=payload, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, f"Cotización mixta → {r.status_code}: {r.text}"
+    cot = r.json()
+    cleaner.registrar("cotizacion", cot["id"])
+
+    # Conversión copiando los renglones EXACTOS (tipo_item + material_id).
+    rc = client.post(f"/api/v1/pedido/convertir/{cot['id']}", json={
+        "detalles": [
+            {"producto_id": producto["id"], "tipo_item": "FABRICADO",
+             "cantidad": 1, "precio": precio_prod},
+            {"producto_id": None, "material_id": material["id"], "tipo_item": "INSUMO",
+             "cantidad": cant_ins, "precio": precio_ins},
+        ],
+        "adelanto": precio_prod + precio_ins * cant_ins,
+        "moneda_adelanto_id": 1,
+        "metodo_pago": "EFECTIVO_COP",
+    }, headers=ADMIN_HEADERS)
+    assert rc.status_code == 201, f"Conversión mixta → {rc.status_code}: {rc.text}"
+    pedido = rc.json()
+    cleaner.registrar("pedido", pedido["id"])
+    registrar_venta_de_pedido(client, cleaner, pedido["id"])
+
+    # La venta automática descontó el stock del insumo (10 - 2 = 8).
+    row = db.execute(
+        text("SELECT cantidad FROM inventario WHERE material_id = :m"),
+        {"m": material["id"]},
+    ).fetchone()
+    assert row is not None
+    assert float(row[0]) == pytest.approx(8.0)
+    registrar_inventario_de_material(db, cleaner, material["id"])
+
+    # Facturar las dos líneas.
+    lineas_ped = _lineas_facturables(client, pedido["id"])
+    assert len(lineas_ped) == 2, f"Deben facturarse 2 líneas (mueble + insumo): {lineas_ped}"
+    r, factura = _emitir(client, cleaner, pedido["id"], [
+        {"detalle_pedido_id": lineas_ped[0]["detalle_pedido_id"], "precio_usd": 100},
+        {"detalle_pedido_id": lineas_ped[1]["detalle_pedido_id"], "precio_usd": 20},
+    ], tasa_usd_ves=50)
+    assert r.status_code == 201, f"Facturar mixto → {r.status_code}: {r.text}"
+
+    det = client.get(f"/api/v1/factura/{factura['id']}", headers=ADMIN_HEADERS).json()
+    assert len(det["detalles"]) == 2
+    por_tipo = {d.get("tipo_item", "FABRICADO"): d for d in det["detalles"]}
+    assert set(por_tipo) == {"FABRICADO", "INSUMO"}
+
+    d_ins = por_tipo["INSUMO"]
+    assert d_ins["material_id"] == material["id"]
+    assert d_ins["producto_id"] is None
+    assert d_ins["descripcion"] == material["nombre"]
+
+    d_prod = por_tipo["FABRICADO"]
+    assert d_prod["producto_id"] == producto["id"]
+    assert d_prod["material_id"] is None

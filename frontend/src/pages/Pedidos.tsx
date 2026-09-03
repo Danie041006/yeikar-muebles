@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import {
   Button,
@@ -19,6 +19,7 @@ import { pedidoService, Order } from '../services/pedidoService';
 
 export default function Pedidos() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const toast = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState('');
@@ -29,6 +30,25 @@ export default function Pedidos() {
   const [error, setError] = useState('');
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+
+  // Deep-link ?pedido=N (desde una cotización convertida): carga la lista y
+  // abre el detalle de ese pedido al llegar. Si no está en el listado visible
+  // (p. ej. otro mes), lo busca directo por id.
+  const pedidoParam = searchParams.get('pedido');
+  const pedidoDeepLinkDone = useRef(false);
+  useEffect(() => {
+    if (!pedidoParam || pedidoDeepLinkDone.current || !orders.length) return;
+    pedidoDeepLinkDone.current = true;
+    const encontrado = orders.find((o) => String(o.id) === pedidoParam);
+    if (encontrado) {
+      setSelectedOrder(encontrado);
+      return;
+    }
+    pedidoService.getById(Number(pedidoParam))
+      .then((o) => setSelectedOrder(o))
+      .catch(() => toast.error(`No se encontró el pedido #${pedidoParam}.`));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orders, pedidoParam]);
 
   // Confirm Delete
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -105,7 +125,7 @@ export default function Pedidos() {
   // el select solo ofrece los saltos válidos del flujo de negocio.
   const TRANSICIONES_PEDIDO: Record<string, string[]> = {
     COTIZADO: ['APROBADO', 'CANCELADO'],
-    APROBADO: ['PRODUCCION', 'CANCELADO'],
+    APROBADO: ['PRODUCCION', 'TERMINADO', 'CANCELADO'],
     PRODUCCION: ['PAUSADO', 'TERMINADO', 'CANCELADO'],
     PAUSADO: ['PRODUCCION', 'CANCELADO'],
     TERMINADO: ['ENTREGADO'],
@@ -122,12 +142,26 @@ export default function Pedidos() {
     CANCELADO: 'Cancelado',
   };
 
-  const opcionesEstado = (estado: string) => {
+  // Un pedido "sin producción" no tiene líneas FABRICADO (solo reventa,
+  // insumos o piezas de exhibición): no pasa por PRODUCCION.
+  const tieneFabricables = (order: Order) =>
+    (order.detalles ?? []).some((d) => (d.tipo_item || 'FABRICADO') === 'FABRICADO');
+
+  const opcionesEstado = (estado: string, order?: Order) => {
+    const sinProduccion = order ? !tieneFabricables(order) : false;
     const actual = { value: estado, label: ESTADO_LABEL[estado] ?? estado };
-    const siguientes = (TRANSICIONES_PEDIDO[estado] ?? []).map((v) => ({
+    let siguientes = (TRANSICIONES_PEDIDO[estado] ?? []).map((v) => ({
       value: v,
       label: ESTADO_LABEL[v] ?? v,
     }));
+    if (sinProduccion && estado === 'APROBADO') {
+      // Atajo sin producción: oculta PRODUCCION/PAUSADO (no aplican) y ofrece
+      // "Terminado" con etiqueta clara (el despacho se crea solo).
+      siguientes = siguientes.filter((v) => !['PRODUCCION', 'PAUSADO'].includes(v.value));
+      siguientes = siguientes.map((v) =>
+        v.value === 'TERMINADO' ? { ...v, label: 'Terminado (listo para despacho)' } : v,
+      );
+    }
     return [actual, ...siguientes];
   };
 
@@ -173,19 +207,32 @@ export default function Pedidos() {
     }
   };
 
-  const EstadoSelect = ({ order }: { order: Order }) => (
-    <select
-      value={order.estado}
-      disabled={statusUpdatingId !== null || (TRANSICIONES_PEDIDO[order.estado] ?? []).length === 0}
-      onChange={(e) => handleUpdateStatus(order.id, order.observaciones, e.target.value)}
-      className={`px-2.5 py-1.5 rounded-full font-bold text-xs font-headline border focus:outline-none focus:ring-2 focus:ring-yeikar-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${estadoSelectClass(order.estado)}`}
-      aria-label={`Cambiar estado del pedido #${order.id}`}
-    >
-      {opcionesEstado(order.estado).map((est) => (
-        <option key={est.value} value={est.value}>{est.label}</option>
-      ))}
-    </select>
-  );
+  const EstadoSelect = ({ order }: { order: Order }) => {
+    const sinProduccion = !tieneFabricables(order);
+    return (
+      <div className="flex items-center gap-1.5">
+        <select
+          value={order.estado}
+          disabled={statusUpdatingId !== null || (TRANSICIONES_PEDIDO[order.estado] ?? []).length === 0}
+          onChange={(e) => handleUpdateStatus(order.id, order.observaciones, e.target.value)}
+          className={`px-2.5 py-1.5 rounded-full font-bold text-xs font-headline border focus:outline-none focus:ring-2 focus:ring-yeikar-primary/30 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ${estadoSelectClass(order.estado)}`}
+          aria-label={`Cambiar estado del pedido #${order.id}`}
+        >
+          {opcionesEstado(order.estado, order).map((est) => (
+            <option key={est.value} value={est.value}>{est.label}</option>
+          ))}
+        </select>
+        {sinProduccion && !['ENTREGADO', 'CANCELADO'].includes(order.estado) && (
+          <span
+            title="No requiere producción: solo reventa, insumos o piezas de exhibición"
+            className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-yeikar-primary/10 text-yeikar-primary-dark border border-yeikar-primary/20 whitespace-nowrap"
+          >
+            Sin producción
+          </span>
+        )}
+      </div>
+    );
+  };
 
   const renderActions = (order: Order) => (
     <>
@@ -201,7 +248,7 @@ export default function Pedidos() {
           className="btn px-3 py-2 rounded-lg text-xs bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary-light flex items-center gap-1"
           title="Ir a Facturas y Cobros"
         >
-          <span>Factura / Cobros</span>
+          <span>Ver los cobros de este pedido</span>
         </button>
       )}
       <button
@@ -364,14 +411,14 @@ export default function Pedidos() {
           <>
             {selectedOrder && (
               <Button variant="outline" onClick={() => navigate(`/historial?tipo=pedido&id=${selectedOrder.id}`)}>
-                📂 Ver expediente completo
+                Ver información del Pedido
               </Button>
             )}
             {selectedOrder && ['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(selectedOrder.estado) && (
               <Button
                 onClick={() => { setSelectedOrder(null); navigate('/ventas'); }}
               >
-                Ver / Crear Factura y Cobros →
+                Ver los Cobros 
               </Button>
             )}
             <Button variant="outline" onClick={() => setSelectedOrder(null)}>
@@ -383,9 +430,16 @@ export default function Pedidos() {
         {selectedOrder && (
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b border-yeikar-secondary-light/10 pb-4">
-              <Badge tone={estadoTone(selectedOrder.estado)} dot>
-                {estadoLabel(selectedOrder.estado)}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge tone={estadoTone(selectedOrder.estado)} dot>
+                  {estadoLabel(selectedOrder.estado)}
+                </Badge>
+                {!tieneFabricables(selectedOrder) && (
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-yeikar-primary/10 text-yeikar-primary-dark border border-yeikar-primary/20">
+                    Sin producción · va directo a despacho
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-sm font-body border-b border-yeikar-secondary-light/10 pb-4">
@@ -410,9 +464,18 @@ export default function Pedidos() {
                       <div className="flex justify-between font-headline font-bold text-sm">
                         <span className="flex items-center gap-2">
                           <span className="text-yeikar-secondary">
-                            {det.producto?.nombre || 'Producto Personalizado'}
+                            {det.tipo_item === 'INSUMO'
+                              ? det.material?.nombre || `Material #${det.material_id}`
+                              : det.producto?.nombre || 'Producto Personalizado'}
                           </span>
-                          {det.producto?.es_reventa ? (
+                          {det.tipo_item === 'INSUMO' ? (
+                            <span
+                              className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                              title="Insumo de inventario: descuenta stock, no pasa por producción"
+                            >
+                              Insumo
+                            </span>
+                          ) : det.producto?.es_reventa ? (
                             <span
                               className="bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
                               title="Producto de reventa: se entrega del inventario, no pasa por producción"
