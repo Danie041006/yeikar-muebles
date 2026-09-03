@@ -90,8 +90,12 @@ export interface MovimientoCreate {
   tasa_pago?: number;
   /** Proveedor (dónde se compró) — opcional, solo entradas. */
   proveedor_id?: number;
+  /** Nombre libre del proveedor: si coincide con un registro se linkea; si no, queda como texto. */
+  proveedor_nombre?: string;
   /** Cliente para el que se compró el material — opcional, solo entradas. */
   cliente_id?: number;
+  /** Nombre libre del cliente (misma mecánica que el proveedor). */
+  cliente_nombre?: string;
   /** "Fiar": ENTRADA sin pagar → se registra automáticamente la deuda (cuenta por pagar). */
   fiar?: boolean;
 }
@@ -157,8 +161,12 @@ export interface MovimientoProductoCreate {
   tasa_pago?: number;
   /** Proveedor (dónde se compró) — opcional, solo entradas. */
   proveedor_id?: number;
+  /** Nombre libre del proveedor (se linkea si coincide con un registro). */
+  proveedor_nombre?: string;
   /** Cliente para el que se compró el producto — opcional, solo entradas. */
   cliente_id?: number;
+  /** Nombre libre del cliente (misma mecánica que el proveedor). */
+  cliente_nombre?: string;
 }
 
 export interface MovimientoProductoResponse {

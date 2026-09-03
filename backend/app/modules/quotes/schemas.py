@@ -5,6 +5,21 @@ from app.modules.clients.schemas import ClientResponse
 from app.modules.catalogos.schemas import MonedaResponse
 from app.modules.productos.schemas import MaterialResponse
 
+class ClienteRapidoCreate(BaseModel):
+    """Alta mínima de cliente desde el flujo de cotización: solo lo necesario
+    para cotizar. El resto del perfil se completa desde el módulo Clientes."""
+
+    nombre: str = Field(min_length=1, max_length=150)
+    telefono: str = Field(min_length=1, max_length=50)
+    cedula: Optional[str] = Field(None, max_length=30)
+
+
+class ClienteRapidoResponse(BaseModel):
+    id: int
+    nombre: str
+    telefono: str
+
+
 class DetalleCotizacionBase(BaseModel):
     producto_id: Optional[int] = None
     material_id: Optional[int] = None
@@ -68,6 +83,9 @@ class CotizacionUpdate(BaseModel):
     tasa_cambio: Optional[float] = Field(None, gt=0)
     total_en_moneda_base: Optional[float] = Field(None, ge=0)
     observaciones: Optional[str] = None
+    # Reemplazo COMPLETO de los renglones (mismo contrato que al crear): si se
+    # envía, la cotización queda exactamente con estos detalles.
+    detalles: Optional[List[DetalleCotizacionCreate]] = None
 
 class CotizacionResponse(CotizacionBase):
     id: int

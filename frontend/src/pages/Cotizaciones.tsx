@@ -18,6 +18,7 @@ import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
 import { Package, Sparkles, Plus } from 'lucide-react';
@@ -39,6 +40,61 @@ interface CotizacionItemForm {
   insumoCosto?: { costo_compra: number; pasada_unitaria: number; costo_real: number } | null;
 }
 
+/** Convierte los detalles de una cotización guardada al estado del formulario
+ *  para poder EDITARLA. Los precios/costos almacenados ya están en la moneda de
+ *  la cotización: el calcResult se construye en esa moneda (conversión
+ *  identidad al guardar) y los costos vuelven a per-unidad, de modo que editar
+ *  NO recalcula ni altera los montos ya cotizados. */
+function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionItemForm[] {
+  return (quote.detalles || []).map((d) => {
+    const cantidad = d.cantidad || 1;
+    const calcResult: CalculationResult = {
+      costo_materiales: (d.costo_materiales ?? 0) / cantidad,
+      costo_mano_obra: (d.costo_mano_obra ?? 0) / cantidad,
+      costo_gastos_indirectos: (d.costo_gastos ?? 0) / cantidad,
+      costo_total: (d.costo_total ?? 0) / cantidad,
+      impuesto_porcentaje: 0,
+      impuestos: 0,
+      base_con_impuestos: d.precio,
+      precio_sugerido: d.precio,
+      precio_venta: d.precio,
+      materiales_detalle: [],
+      moneda_codigo: monedaCodigo,
+    };
+    if (d.tipo_item === 'INSUMO') {
+      return {
+        producto_id: '',
+        material_id: d.material_id ? String(d.material_id) : '',
+        tipo_item: 'INSUMO',
+        cantidad: d.cantidad,
+        ancho: '',
+        largo: '',
+        ganancia: '',
+        impuesto: '',
+        observaciones: d.observaciones || '',
+        calcResult,
+        calcLoading: false,
+        receta_personalizada: null,
+        insumoCosto: { costo_compra: 0, pasada_unitaria: 0, costo_real: (d.costo_total ?? 0) / cantidad },
+      };
+    }
+    return {
+      producto_id: d.producto_id ? String(d.producto_id) : '',
+      material_id: '',
+      tipo_item: d.tipo_item || 'FABRICADO',
+      cantidad: d.cantidad,
+      ancho: d.ancho ? String(d.ancho) : '',
+      largo: d.largo ? String(d.largo) : '',
+      ganancia: '',
+      impuesto: '',
+      observaciones: d.observaciones || '',
+      calcResult,
+      calcLoading: false,
+      receta_personalizada: d.receta_personalizada || null,
+    };
+  });
+}
+
 // Ordena productos por tipo (id del catálogo) y nombre dentro de cada tipo,
 // para que el selector agrupado muestre Fabricado → Revendido → Cama → ...
 // (mañana: Comedor, Silla... aparecen solos al crearse en el catálogo).
@@ -52,6 +108,7 @@ const ordenarProductosPorTipo = (prods: Product[]): Product[] =>
 
 export default function Cotizaciones() {
   const toast = useToast();
+  const { user, esAdmin } = useAuth();
   const lastCalcErrorRef = useRef('');
   const navigate = useNavigate();
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -133,6 +190,11 @@ export default function Cotizaciones() {
   const [dpPrecio, setDpPrecio] = useState('');
   const [dpMoneda, setDpMoneda] = useState('1');
   const [savingDp, setSavingDp] = useState(false);
+
+  // ── "Cliente nuevo" desde la cotización (nombre + teléfono + cédula opcional) ──
+  const [showNuevoClienteModal, setShowNuevoClienteModal] = useState(false);
+  const [ncForm, setNcForm] = useState({ nombre: '', telefono: '', cedula: '' });
+  const [savingNc, setSavingNc] = useState(false);
 
   // Modal de personalización de receta ad-hoc por renglón
   const [showPersonalizarModal, setShowPersonalizarModal] = useState(false);
@@ -602,6 +664,23 @@ export default function Cotizaciones() {
     setIsFormOpen(true);
   };
 
+  // TODOS pueden ver las cotizaciones de los demás, pero solo su autor (o un
+  // admin) puede modificarlas: editar, cambiar estado, convertir o eliminar.
+  // El backend valida lo mismo; aquí solo se ocultan las acciones.
+  const puedeEditar = (quote: Quote) => esAdmin || quote.creado_por_id === user?.id;
+
+  const handleOpenEdit = (quote: Quote) => {
+    setEditingQuote(quote);
+    setSelectedClientId(String(quote.cliente_id));
+    setObservaciones(quote.observaciones || '');
+    setSelectedMonedaId(quote.moneda_id || 1);
+    setTasaCambio(quote.tasa_cambio || 1);
+    setTasasDia({});
+    setItems(itemsDesdeCotizacion(quote, quote.moneda?.codigo || 'COP'));
+    setError('');
+    setIsFormOpen(true);
+  };
+
   // ── Deep-link desde Exhibición (?pieza=ID): abre el formulario con la pieza
   const [searchParams] = useSearchParams();
   const piezaParam = searchParams.get('pieza');
@@ -648,6 +727,32 @@ export default function Cotizaciones() {
     resolverYPoner();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [piezaParam, products]);
+
+  // ── Cliente nuevo desde la cotización ──
+  const handleCrearClienteDesdeCotizacion = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ncForm.nombre.trim() || !ncForm.telefono.trim()) {
+      setError('Indica el nombre y el teléfono del cliente.');
+      return;
+    }
+    setSavingNc(true);
+    try {
+      const creado = await cotizacionService.crearClienteRapido({
+        nombre: ncForm.nombre.trim().toUpperCase(),
+        telefono: ncForm.telefono.trim(),
+        cedula: ncForm.cedula.trim() || undefined,
+      });
+      setClients((prev) => (prev.some((c) => c.id === creado.id) ? prev : [...prev, creado]));
+      setSelectedClientId(String(creado.id));
+      setShowNuevoClienteModal(false);
+      setNcForm({ nombre: '', telefono: '', cedula: '' });
+      toast.success(`Cliente "${creado.nombre}" seleccionado.`);
+    } catch (err: any) {
+      setError(String(err?.response?.data?.detail || 'No se pudo crear el cliente.'));
+    } finally {
+      setSavingNc(false);
+    }
+  };
 
   // ── Producto nuevo desde la cotización ──
   const abrirNuevoProducto = () => {
@@ -868,7 +973,8 @@ export default function Cotizaciones() {
 
     const quoteData: QuoteCreate = {
       cliente_id: Number(selectedClientId),
-      fecha: new Date().toISOString().split('T')[0],
+      // Al editar se conserva la fecha original (no re-fechar a hoy).
+      fecha: editingQuote ? editingQuote.fecha : new Date().toISOString().split('T')[0],
       estado: editingQuote ? editingQuote.estado : 'BORRADOR',
       total_estimado: totalEstimado,
       moneda_id: selectedMonedaId,
@@ -887,7 +993,7 @@ export default function Cotizaciones() {
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
-      setError('Error al guardar la cotización.');
+      setError(String((err as any)?.response?.data?.detail || 'Error al guardar la cotización.'));
     }
   };
 
@@ -903,7 +1009,7 @@ export default function Cotizaciones() {
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
-      toast.error('Error al actualizar el estado de la cotización.');
+      toast.error(String((err as any)?.response?.data?.detail || 'Error al actualizar el estado de la cotización.'));
     }
   };
 
@@ -919,7 +1025,7 @@ export default function Cotizaciones() {
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
-      toast.error('Error al eliminar.');
+      toast.error(String((err as any)?.response?.data?.detail || 'Error al eliminar.'));
     }
   };
 
@@ -1303,7 +1409,18 @@ export default function Cotizaciones() {
 
   const renderQuoteAcciones = (quote: Quote) => (
     <>
-      {quote.estado === 'BORRADOR' && (
+      {puedeEditar(quote) && (
+        <button
+          onClick={() => handleOpenEdit(quote)}
+          className="p-1.5 text-yeikar-secondary hover:text-yeikar-primary transition-colors"
+          title="Editar cotización (cambiar comentarios, montos o renglones)"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+        </button>
+      )}
+      {puedeEditar(quote) && quote.estado === 'BORRADOR' && (
         <button
           onClick={() => handleUpdateStatus(quote, 'ENVIADA')}
           className="text-xs bg-blue-50 text-blue-600 hover:underline font-bold py-1.5"
@@ -1312,7 +1429,7 @@ export default function Cotizaciones() {
           Enviar
         </button>
       )}
-      {quote.estado === 'ENVIADA' && (
+      {puedeEditar(quote) && quote.estado === 'ENVIADA' && (
         <>
           <button
             onClick={() => handleOpenConvert(quote)}
@@ -1330,7 +1447,7 @@ export default function Cotizaciones() {
           </button>
         </>
       )}
-      {quote.estado === 'APROBADA' && !quote.pedido_id && (
+      {puedeEditar(quote) && quote.estado === 'APROBADA' && !quote.pedido_id && (
         <button
           onClick={() => handleOpenConvert(quote)}
           className="bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral px-2.5 py-1.5 rounded text-xs font-bold font-headline shadow-sm"
@@ -1366,15 +1483,17 @@ export default function Cotizaciones() {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
         </svg>
       </button>
-      <button
-        onClick={() => handleDelete(quote.id)}
-        className="p-1.5 text-red-600 hover:text-red-800 transition-colors"
-        title="Eliminar"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-        </svg>
-      </button>
+      {puedeEditar(quote) && (
+        <button
+          onClick={() => handleDelete(quote.id)}
+          className="p-1.5 text-red-600 hover:text-red-800 transition-colors"
+          title="Eliminar"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      )}
     </>
   );
 
@@ -1516,6 +1635,16 @@ export default function Cotizaciones() {
               <div>
                 <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
                   Cliente *
+                  <button
+                    type="button"
+                    onClick={() => setShowNuevoClienteModal(true)}
+                    title="Crear cliente nuevo"
+                    className="ml-2 text-yeikar-neutral/40 hover:text-yeikar-primary transition-colors align-middle"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 5v14M5 12h14" />
+                    </svg>
+                  </button>
                 </label>
                 <SearchSelect
                   value={selectedClientId}
@@ -3049,6 +3178,60 @@ export default function Cotizaciones() {
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowNuevoProductoModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" disabled={savingNp} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingNp ? 'Creando...' : 'Crear y agregar'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Cliente Nuevo (alta mínima desde la cotización) */}
+      {showNuevoClienteModal && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full overflow-hidden border border-yeikar-secondary-light/10">
+            <div className="bg-yeikar-secondary text-white px-5 py-4">
+              <h3 className="font-headline font-black text-base">Nuevo Cliente</h3>
+            </div>
+            <form onSubmit={handleCrearClienteDesdeCotizacion} className="p-5 space-y-4 font-body">
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. MARÍA PÉREZ"
+                  value={ncForm.nombre}
+                  onChange={(e) => setNcForm((f) => ({ ...f, nombre: e.target.value }))}
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Teléfono *</label>
+                <input
+                  type="tel"
+                  required
+                  placeholder="Ej. 0412-5555555"
+                  value={ncForm.telefono}
+                  onChange={(e) => setNcForm((f) => ({ ...f, telefono: e.target.value }))}
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                  Cédula <span className="text-yeikar-neutral/40 font-normal">opcional</span>
+                </label>
+                <input
+                  type="text"
+                  value={ncForm.cedula}
+                  onChange={(e) => setNcForm((f) => ({ ...f, cedula: e.target.value }))}
+                  placeholder="V-12345678"
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
+                />
+              </div>
+              <p className="text-[11px] text-yeikar-neutral/50">
+                Si el teléfono ya existe, se selecciona el cliente actual (no se duplica).
+              </p>
+              <div className="flex gap-3 pt-2 border-t border-yeikar-secondary-light/5">
+                <button type="button" onClick={() => setShowNuevoClienteModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
+                <button type="submit" disabled={savingNc} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingNc ? 'Guardando...' : 'Crear y seleccionar'}</button>
               </div>
             </form>
           </div>

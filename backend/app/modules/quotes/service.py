@@ -4,10 +4,24 @@ from datetime import date
 from app.modules.quotes import model, schemas
 from app.modules.clients.model import Client
 from app.modules.auditoria.service import record_event
-from app.modules.users.deps import filtrar_registros_propios
+from app.modules.users.deps import tiene_alcance_total
 from app.modules.users.model import Usuario
 
 MONEDA_BASE_ID = 1  # COP
+
+
+def _exigir_escritura_propia(cotizacion: model.Cotizacion, usuario: Usuario | None) -> None:
+    """TODOS pueden VER todas las cotizaciones (lectura compartida), pero solo
+    su autor (o un rol con alcance total) puede modificarlas: cambiar montos,
+    estado, eliminarlas o convertirlas a pedido. Dueño/Administrador no pasan
+    por aquí."""
+    if usuario is None or tiene_alcance_total(usuario):
+        return
+    if cotizacion.creado_por_id != usuario.id:
+        raise ValueError(
+            f"No puedes modificar la cotización #{cotizacion.id}: fue creada por "
+            "otro usuario. Solo su autor puede editarla."
+        )
 
 def _snapshot(cotizacion: model.Cotizacion) -> dict:
     return {
@@ -41,11 +55,10 @@ def _anotar_pedido(db: Session, cotizaciones: list):
         cot.pedido_estado = pareja[1] if pareja else None
 
 
-def obtener_cotizacion(db: Session, id_cotizacion: int, usuario: Usuario | None = None):
-    query = db.query(model.Cotizacion).filter(model.Cotizacion.id == id_cotizacion)
-    if usuario is not None:
-        query = filtrar_registros_propios(query, model.Cotizacion.creado_por_id, usuario)
-    cotizacion = query.first()
+def obtener_cotizacion(db: Session, id_cotizacion: int):
+    # Lectura compartida: cualquier usuario con el módulo ve todas las
+    # cotizaciones. La escritura se restringe en actualizar/eliminar/convertir.
+    cotizacion = db.query(model.Cotizacion).filter(model.Cotizacion.id == id_cotizacion).first()
     if cotizacion:
         _anotar_pedido(db, [cotizacion])
     return cotizacion
@@ -58,11 +71,9 @@ def obtener_cotizaciones(
     solo_mes_actual: bool = True,
     mes: int = None,
     anio: int = None,
-    usuario: Usuario | None = None,
 ):
     query = db.query(model.Cotizacion)
-    if usuario is not None:
-        query = filtrar_registros_propios(query, model.Cotizacion.creado_por_id, usuario)
+    # Lectura compartida: se ven todas las cotizaciones, no solo las propias.
     if buscar:
         query = query.join(Client).filter(
             or_(
@@ -135,6 +146,41 @@ def _validar_consistencia_detalles(moneda_id, total_estimado, detalles):
             f"(precio ÷ tasa de cambio). Revisa los precios de los productos."
         )
 
+def crear_cliente_rapido(
+    db: Session,
+    esquema: schemas.ClienteRapidoCreate,
+    usuario: Usuario | None = None,
+) -> dict:
+    """Alta mínima de cliente desde el flujo de COTIZACIÓN.
+
+    Es parte de cotizar, no de la gestión del catálogo: solo exige permiso de
+    cotizaciones (cualquier cotizador puede registrar un cliente nuevo inline).
+    Si ya existe un cliente con ese teléfono se devuelve ESE en vez de duplicar
+    (el teléfono es la llave de identificación del cliente).
+    """
+    from app.modules.clients.model import Client
+    from app.modules.clients.schemas import ClientCreate
+    from app.modules.clients.service import create_client
+
+    nombre = esquema.nombre.strip()
+    telefono = esquema.telefono.strip()
+    if not nombre:
+        raise ValueError("El nombre del cliente es obligatorio.")
+    if not telefono:
+        raise ValueError("El teléfono del cliente es obligatorio.")
+
+    existente = db.query(Client).filter(Client.telefono == telefono).first()
+    if existente:
+        return {"id": existente.id, "nombre": existente.nombre, "telefono": existente.telefono}
+
+    cliente = create_client(db, ClientCreate(
+        nombre=nombre,
+        telefono=telefono,
+        cedula=esquema.cedula or None,
+    ), usuario)
+    return {"id": cliente.id, "nombre": cliente.nombre, "telefono": cliente.telefono}
+
+
 def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Usuario | None = None):
     datos = esquema.model_dump(exclude={"detalles"})
     detalles_datos = esquema.detalles
@@ -178,13 +224,24 @@ def actualizar_cotizacion(
     esquema: schemas.CotizacionUpdate,
     usuario: Usuario | None = None,
 ):
-    db_obj = obtener_cotizacion(db, id_cotizacion, usuario)
+    db_obj = obtener_cotizacion(db, id_cotizacion)
     if not db_obj:
         return None
+    _exigir_escritura_propia(db_obj, usuario)
     antes = _snapshot(db_obj)
     datos = esquema.model_dump(exclude_unset=True)
+    # Los renglones se reemplazan COMPLETOS (contrato igual que al crear): la
+    # edición desde la UI envía los detalles tal cual quedaron en el formulario.
+    # cotizacion_detalle_material cae en cascada al borrar los detalles.
+    detalles_nuevos = datos.pop("detalles", None)
     for campo, valor in datos.items():
         setattr(db_obj, campo, valor)
+    if detalles_nuevos is not None:
+        db.query(model.DetalleCotizacion).filter(
+            model.DetalleCotizacion.cotizacion_id == db_obj.id
+        ).delete(synchronize_session=False)
+        for detalle in detalles_nuevos:
+            db.add(model.DetalleCotizacion(cotizacion_id=db_obj.id, **detalle))
     # Recalcular total_en_moneda_base si cambió total, moneda o tasa (antes quedaba stale)
     if "total_estimado" in datos or "moneda_id" in datos or "tasa_cambio" in datos:
         if db_obj.moneda_id == MONEDA_BASE_ID:
@@ -210,10 +267,11 @@ def actualizar_cotizacion(
     return db_obj
 
 def eliminar_cotizacion(db: Session, id_cotizacion: int, usuario: Usuario | None = None):
-    db_obj = obtener_cotizacion(db, id_cotizacion, usuario)
+    db_obj = obtener_cotizacion(db, id_cotizacion)
     if not db_obj:
         return False
-    
+    _exigir_escritura_propia(db_obj, usuario)
+
     # Verificar si está asociada a un pedido
     from app.modules.orders.model import Pedido
     pedido_asociado = db.query(Pedido).filter(Pedido.cotizacion_id == id_cotizacion).first()

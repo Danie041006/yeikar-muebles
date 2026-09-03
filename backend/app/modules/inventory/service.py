@@ -16,6 +16,30 @@ from app.modules.clients.model import Client
 MONEDA_BASE_ID = 1  # COP
 
 
+def _resolver_proveedor_cliente(
+    db: Session,
+    proveedor_id: Optional[int],
+    proveedor_nombre: Optional[str],
+    cliente_id: Optional[int],
+    cliente_nombre: Optional[str],
+) -> tuple:
+    """El proveedor/cliente de un movimiento se puede indicar por id (registro
+    existente) o por NOMBRE LIBRE. Si viene el nombre y coincide con un registro,
+    se linkea el id; si no, el nombre queda como texto en el movimiento — no se
+    crea un registro del catálogo a la fuerza."""
+    proveedor_nombre = (proveedor_nombre or "").strip() or None
+    cliente_nombre = (cliente_nombre or "").strip() or None
+    if proveedor_nombre and proveedor_id is None:
+        prov = db.query(Proveedor).filter(Proveedor.nombre == proveedor_nombre).first()
+        if prov:
+            proveedor_id = prov.id
+    if cliente_nombre and cliente_id is None:
+        cli = db.query(Client).filter(Client.nombre == cliente_nombre).first()
+        if cli:
+            cliente_id = cli.id
+    return proveedor_id, proveedor_nombre, cliente_id, cliente_nombre
+
+
 def _gasto_compra_contado(
     db: Session,
     *,
@@ -227,8 +251,13 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         raise ValueError(f"Tipo de movimiento inválido: {movimiento.tipo}")
 
     # Crear el registro de movimiento
-    proveedor_id = getattr(movimiento, "proveedor_id", None)
-    cliente_id = getattr(movimiento, "cliente_id", None)
+    proveedor_id, proveedor_nombre, cliente_id, cliente_nombre = _resolver_proveedor_cliente(
+        db,
+        getattr(movimiento, "proveedor_id", None),
+        getattr(movimiento, "proveedor_nombre", None),
+        getattr(movimiento, "cliente_id", None),
+        getattr(movimiento, "cliente_nombre", None),
+    )
     if proveedor_id is not None and not db.query(Proveedor).filter(Proveedor.id == proveedor_id).first():
         raise ValueError(f"El proveedor #{proveedor_id} no existe.")
     if cliente_id is not None and not db.query(Client).filter(Client.id == cliente_id).first():
@@ -243,6 +272,8 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         llevada=getattr(movimiento, "llevada", None),
         proveedor_id=proveedor_id,
         cliente_id=cliente_id,
+        proveedor_nombre=proveedor_nombre,
+        cliente_nombre=cliente_nombre,
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
@@ -306,8 +337,16 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     if movimiento.tipo == "ENTRADA" and fiar:
         if getattr(movimiento, "pagado_desde_metodo_caja_id", None):
             raise ValueError("Elige entre pagar de una cuenta o fiar, no ambos.")
+        # La deuda nace contra un proveedor del CATÁLOGO: si se escribió un
+        # nombre libre que no coincide con ninguno, se crea (es el único caso
+        # donde el nombre libre sí materializa un registro).
+        if not proveedor_id and proveedor_nombre:
+            proveedor_nuevo = Proveedor(nombre=proveedor_nombre)
+            db.add(proveedor_nuevo)
+            db.flush()
+            proveedor_id = proveedor_nuevo.id
         if not proveedor_id:
-            raise ValueError("Para fiar debes indicar el proveedor (proveedor_id).")
+            raise ValueError("Para fiar debes indicar el proveedor (campo Proveedor del movimiento).")
         if movimiento.costo_unitario is None or Decimal(str(movimiento.costo_unitario)) <= 0:
             raise ValueError("Para fiar debes indicar el costo unitario del insumo.")
         from app.modules.cuentas_por_pagar.service import crear_cuenta_desde_entrada
@@ -340,8 +379,8 @@ def obtener_movimientos_por_material(
         model.MovimientoInventario.material_id == material_id
     ).order_by(model.MovimientoInventario.fecha.desc()).limit(limit).all()
     for m in movs:
-        m.proveedor_nombre = m.proveedor.nombre if m.proveedor else None
-        m.cliente_nombre = m.cliente.nombre if m.cliente else None
+        m.proveedor_nombre = m.proveedor_nombre or (m.proveedor.nombre if m.proveedor else None)
+        m.cliente_nombre = m.cliente_nombre or (m.cliente.nombre if m.cliente else None)
     return movs
 
 
@@ -560,8 +599,13 @@ def registrar_movimiento_producto(
     else:
         raise ValueError(f"Tipo de movimiento inválido: {movimiento.tipo}")
 
-    proveedor_id = getattr(movimiento, "proveedor_id", None)
-    cliente_id = getattr(movimiento, "cliente_id", None)
+    proveedor_id, proveedor_nombre, cliente_id, cliente_nombre = _resolver_proveedor_cliente(
+        db,
+        getattr(movimiento, "proveedor_id", None),
+        getattr(movimiento, "proveedor_nombre", None),
+        getattr(movimiento, "cliente_id", None),
+        getattr(movimiento, "cliente_nombre", None),
+    )
     if proveedor_id is not None and not db.query(Proveedor).filter(Proveedor.id == proveedor_id).first():
         raise ValueError(f"El proveedor #{proveedor_id} no existe.")
     if cliente_id is not None and not db.query(Client).filter(Client.id == cliente_id).first():
@@ -576,6 +620,8 @@ def registrar_movimiento_producto(
         llevada=getattr(movimiento, "llevada", None),
         proveedor_id=proveedor_id,
         cliente_id=cliente_id,
+        proveedor_nombre=proveedor_nombre,
+        cliente_nombre=cliente_nombre,
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
@@ -647,8 +693,8 @@ def obtener_movimientos_producto(
         model.MovimientoProductoInventario.producto_id == producto_id
     ).order_by(model.MovimientoProductoInventario.fecha.desc()).limit(limit).all()
     for m in movs:
-        m.proveedor_nombre = m.proveedor.nombre if m.proveedor else None
-        m.cliente_nombre = m.cliente.nombre if m.cliente else None
+        m.proveedor_nombre = m.proveedor_nombre or (m.proveedor.nombre if m.proveedor else None)
+        m.cliente_nombre = m.cliente_nombre or (m.cliente.nombre if m.cliente else None)
     return movs
 
 

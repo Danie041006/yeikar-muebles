@@ -283,11 +283,16 @@ def convertir_cotizacion_a_pedido(
     # Buscar la cotización con FOR UPDATE: dos conversiones simultáneas quedan
     # serializadas; la segunda detecta el pedido ya creado en vez de lanzar 500.
     cotizacion_query = db.query(Cotizacion).filter(Cotizacion.id == id_cotizacion)
-    if usuario is not None:
-        cotizacion_query = filtrar_registros_propios(cotizacion_query, Cotizacion.creado_por_id, usuario)
     db_cotizacion = cotizacion_query.with_for_update().first()
     if not db_cotizacion:
         raise ValueError("Cotizacion no encontrada")
+    # Convertir es una ESCRITURA sobre la cotización (la marca APROBADA y crea
+    # el pedido): solo su autor (o un rol de alcance total) puede hacerlo.
+    if usuario is not None and not tiene_alcance_total(usuario) and db_cotizacion.creado_por_id != usuario.id:
+        raise ValueError(
+            f"No puedes convertir la cotización #{id_cotizacion}: fue creada por "
+            "otro usuario. Solo su autor puede convertirla."
+        )
 
     # Idempotencia: si la cotización ya fue convertida, devolver el pedido existente
     pedido_existente = db.query(model.Pedido).filter(model.Pedido.cotizacion_id == id_cotizacion).first()

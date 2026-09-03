@@ -5,7 +5,6 @@ import { productosService, type MonedaInfo } from '../services/productosService'
 import { crudoService, produccionService, type Crudo } from '../services/produccionService';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { cuentasService } from '../services/cuentasService';
-import { clienteService, type Client } from '../services/clienteService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
@@ -98,10 +97,6 @@ export default function Inventario() {
   // automático al comprar reventa de contado.
   const [metodosCaja, setMetodosCaja] = useState<{ id: number; nombre: string }[]>([]);
   const [loading, setLoading] = useState(true);
-  // Proveedores (dónde se compró) y clientes (material comprado para un cliente)
-  // — selects opcionales al registrar una entrada.
-  const [proveedores, setProveedores] = useState<{ id: number; nombre: string }[]>([]);
-  const [clientes, setClientes] = useState<Client[]>([]);
 
   // ---- Insumos ----
   const [inventario, setInventario] = useState<InventarioItem[]>([]);
@@ -136,8 +131,8 @@ export default function Inventario() {
     pago_key: '',   // "cuentaId:monedaId" — vacío = a crédito
     tasa_pago: '',
     llevada: '',    // "la llevada": flete/aduana (opcional)
-    proveedor_id: '', // dónde se compró (opcional, solo entradas)
-    cliente_id: '',  // comprado para un cliente específico (opcional, solo entradas)
+    proveedor_nombre: '', // dónde se compró (texto libre, opcional, solo entradas)
+    cliente_nombre: '',  // comprado para un cliente específico (texto libre, opcional)
   });
   const [savingMov, setSavingMov] = useState(false);
 
@@ -179,8 +174,8 @@ export default function Inventario() {
     tasa_pago: '',
     observaciones: '',
     llevada: '',    // "la llevada": flete/aduana (opcional)
-    proveedor_id: '', // dónde se compró (opcional, solo entradas)
-    cliente_id: '',  // comprado para un cliente específico (opcional, solo entradas)
+    proveedor_nombre: '', // dónde se compró (texto libre, opcional, solo entradas)
+    cliente_nombre: '',  // comprado para un cliente específico (texto libre, opcional)
   });
   const [savingMovProd, setSavingMovProd] = useState(false);
 
@@ -263,7 +258,7 @@ export default function Inventario() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [ubiData, uniData, monData, metodosData, catsMat, catsProd, tiposData, provData, cliData] = await Promise.all([
+      const [ubiData, uniData, monData, metodosData, catsMat, catsProd, tiposData] = await Promise.all([
         api.get<Ubicacion[]>('/catalogos/ubicacion/'),
         api.get<UnidadMedida[]>('/catalogos/unidad-medida/'),
         api.get<MonedaInfo[]>('/catalogos/moneda/'),
@@ -271,8 +266,6 @@ export default function Inventario() {
         inventarioService.getCategorias('MATERIAL').catch(() => []),
         inventarioService.getCategorias('PRODUCTO').catch(() => []),
         api.get<{ id: number; nombre: string }[]>('/catalogos/tipo-producto/').catch(() => null),
-        api.get<{ id: number; nombre: string }[]>('/proveedor/').catch(() => null),
-        clienteService.getAll().catch(() => []),
       ]);
       setUbicaciones(ubiData.data);
       setUnidades(uniData.data);
@@ -280,8 +273,6 @@ export default function Inventario() {
       setCategoriasMaterial(catsMat);
       setCategoriasProducto(catsProd);
       setTiposProducto(Array.isArray(tiposData) ? tiposData : (tiposData?.data ?? []));
-      setProveedores(Array.isArray(provData) ? provData : (provData?.data ?? []));
-      setClientes(cliData);
       // Métodos únicos de caja (el resumen trae una fila por cuenta)
       const vistos = new Set<number>();
       const metodos: { id: number; nombre: string }[] = [];
@@ -612,7 +603,7 @@ export default function Inventario() {
       categoria_inventario_id: mat.categoria_inventario_id != null ? String(mat.categoria_inventario_id) : '',
       departamento: mat.departamento ?? null,
     });
-    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_id: '', cliente_id: '' });
+    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
     try {
       setLoadingKardex(true);
       const data = await inventarioService.getKardex(mat.id);
@@ -663,7 +654,7 @@ export default function Inventario() {
     // "Fiar": entrada sin cuenta de pago → la deuda queda registrada con el
     // proveedor (obligatorio). Sin proveedor, no se puede fiar.
     const fiando = movMaterial.tipo === 'ENTRADA' && !pago.cuentaId;
-    if (fiando && !movMaterial.proveedor_id) {
+    if (fiando && !movMaterial.proveedor_nombre) {
       toast.error('Al fiar debes indicar el proveedor (campo Proveedor del movimiento).');
       return;
     }
@@ -690,13 +681,13 @@ export default function Inventario() {
         tasa_pago: esEntrada && pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID ? tasaNum : undefined,
         // "La llevada": flete/aduana (solo tiene sentido en compras de contado)
         llevada: esEntrada && movMaterial.llevada ? parseFloat(movMaterial.llevada) : undefined,
-        proveedor_id: esEntrada && movMaterial.proveedor_id ? parseInt(movMaterial.proveedor_id) : undefined,
-        cliente_id: esEntrada && movMaterial.cliente_id ? parseInt(movMaterial.cliente_id) : undefined,
+        proveedor_nombre: esEntrada && movMaterial.proveedor_nombre ? movMaterial.proveedor_nombre.trim() : undefined,
+        cliente_nombre: esEntrada && movMaterial.cliente_nombre ? movMaterial.cliente_nombre.trim() : undefined,
         fiar: fiando || undefined,
         observaciones: [movMaterial.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_id: '', cliente_id: '' });
+      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -725,7 +716,7 @@ export default function Inventario() {
     setSelectedProductoId(p.id);
     // En exhibición, el movimiento típico es ENTRADA a la ubicación de exhibición.
     const ubiExh = tab === 'exhibicion' ? ubicaciones.find(u => esNombreExhibicion(u.nombre)) : undefined;
-    setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_id: '', cliente_id: '' });
+    setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
     refrescarKardexProducto(p.id);
   };
 
@@ -768,12 +759,12 @@ export default function Inventario() {
           movProducto.tipo === 'ENTRADA' && pago.cuentaId && tasaNum > 0 ? tasaNum : undefined,
         // "La llevada": flete/aduana (solo en compras de contado)
         llevada: movProducto.tipo === 'ENTRADA' && movProducto.llevada ? parseFloat(movProducto.llevada) : undefined,
-        proveedor_id: movProducto.tipo === 'ENTRADA' && movProducto.proveedor_id ? parseInt(movProducto.proveedor_id) : undefined,
-        cliente_id: movProducto.tipo === 'ENTRADA' && movProducto.cliente_id ? parseInt(movProducto.cliente_id) : undefined,
+        proveedor_nombre: movProducto.tipo === 'ENTRADA' && movProducto.proveedor_nombre ? movProducto.proveedor_nombre.trim() : undefined,
+        cliente_nombre: movProducto.tipo === 'ENTRADA' && movProducto.cliente_nombre ? movProducto.cliente_nombre.trim() : undefined,
         observaciones: [movProducto.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_id: '', cliente_id: '' });
+      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
       fetchProductos();
       refrescarKardexProducto(selectedProductoId);
     } catch (error: any) {
@@ -1761,35 +1752,31 @@ export default function Inventario() {
                       <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(e) => setMovMaterial(p => ({ ...p, llevada: e.target.value }))} className={inputCls} />
                     </div>
 
-                    {/* Proveedor: dónde se compró (opcional) */}
+                    {/* Proveedor: dónde se compró (opcional, texto libre) */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
                         Proveedor <span className="text-yeikar-neutral/40 font-normal">(dónde se compró — opcional)</span>
                       </label>
-                      <SearchSelect
-                        value={movMaterial.proveedor_id}
-                        onChange={(v) => setMovMaterial(p => ({ ...p, proveedor_id: String(v) }))}
-                        options={[
-                          { value: '', label: 'Sin proveedor' },
-                          ...proveedores.map((pr) => ({ value: pr.id, label: pr.nombre })),
-                        ]}
-                        placeholder="Buscar proveedor..."
+                      <input
+                        type="text"
+                        value={movMaterial.proveedor_nombre}
+                        onChange={(e) => setMovMaterial(p => ({ ...p, proveedor_nombre: e.target.value }))}
+                        placeholder="Ej. Distribuidora Maderas C.A."
+                        className={inputCls}
                       />
                     </div>
 
-                    {/* Cliente: material comprado para un cliente específico (opcional) */}
+                    {/* Cliente: material comprado para un cliente específico (opcional, texto libre) */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
                         Cliente <span className="text-yeikar-neutral/40 font-normal">(comprado para un cliente — opcional)</span>
                       </label>
-                      <SearchSelect
-                        value={movMaterial.cliente_id}
-                        onChange={(v) => setMovMaterial(p => ({ ...p, cliente_id: String(v) }))}
-                        options={[
-                          { value: '', label: 'Sin cliente específico' },
-                          ...clientes.map((c) => ({ value: c.id, label: c.nombre })),
-                        ]}
-                        placeholder="Buscar cliente..."
+                      <input
+                        type="text"
+                        value={movMaterial.cliente_nombre}
+                        onChange={(e) => setMovMaterial(p => ({ ...p, cliente_nombre: e.target.value }))}
+                        placeholder="Ej. Cliente sin registrar"
+                        className={inputCls}
                       />
                     </div>
 
@@ -1873,7 +1860,7 @@ export default function Inventario() {
                             Se registrará una deuda de ≈ <b>${(totalRef + (parseFloat(movMaterial.llevada || '0') || 0)).toLocaleString('es-CO')} COP</b>
                             {' '}(compra + pasada) en <b>Egresos y Gastos → Por Pagar</b>.
                           </p>
-                          {!movMaterial.proveedor_id && (
+                          {!movMaterial.proveedor_nombre && (
                             <p className="text-[11px] font-bold text-red-600">
                               Al fiar es obligatorio indicar el proveedor (campo de arriba).
                             </p>
@@ -2059,35 +2046,31 @@ export default function Inventario() {
                       <input type="number" step="0.01" min="0" placeholder="0.00" value={movProducto.llevada} onChange={(e) => setMovProducto(p => ({ ...p, llevada: e.target.value }))} className={inputCls} />
                     </div>
 
-                    {/* Proveedor: dónde se compró (opcional) */}
+                    {/* Proveedor: dónde se compró (opcional, texto libre) */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
                         Proveedor <span className="text-yeikar-neutral/40 font-normal">(dónde se compró — opcional)</span>
                       </label>
-                      <SearchSelect
-                        value={movProducto.proveedor_id}
-                        onChange={(v) => setMovProducto(p => ({ ...p, proveedor_id: String(v) }))}
-                        options={[
-                          { value: '', label: 'Sin proveedor' },
-                          ...proveedores.map((pr) => ({ value: pr.id, label: pr.nombre })),
-                        ]}
-                        placeholder="Buscar proveedor..."
+                      <input
+                        type="text"
+                        value={movProducto.proveedor_nombre}
+                        onChange={(e) => setMovProducto(p => ({ ...p, proveedor_nombre: e.target.value }))}
+                        placeholder="Ej. Distribuidora Maderas C.A."
+                        className={inputCls}
                       />
                     </div>
 
-                    {/* Cliente: producto comprado para un cliente específico (opcional) */}
+                    {/* Cliente: producto comprado para un cliente específico (opcional, texto libre) */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
                         Cliente <span className="text-yeikar-neutral/40 font-normal">(comprado para un cliente — opcional)</span>
                       </label>
-                      <SearchSelect
-                        value={movProducto.cliente_id}
-                        onChange={(v) => setMovProducto(p => ({ ...p, cliente_id: String(v) }))}
-                        options={[
-                          { value: '', label: 'Sin cliente específico' },
-                          ...clientes.map((c) => ({ value: c.id, label: c.nombre })),
-                        ]}
-                        placeholder="Buscar cliente..."
+                      <input
+                        type="text"
+                        value={movProducto.cliente_nombre}
+                        onChange={(e) => setMovProducto(p => ({ ...p, cliente_nombre: e.target.value }))}
+                        placeholder="Ej. Cliente sin registrar"
+                        className={inputCls}
                       />
                     </div>
 

@@ -10,6 +10,20 @@ from app.modules.quotes import schemas, service
 
 router = APIRouter(dependencies=[Depends(require_module('cotizaciones'))])
 
+@router.post("/cliente-rapido", response_model=schemas.ClienteRapidoResponse, status_code=status.HTTP_201_CREATED)
+def crear_cliente_rapido(
+    esquema: schemas.ClienteRapidoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Alta mínima de cliente desde el formulario de cotización: NO exige el
+    módulo clientes (es parte de cotizar). Si el teléfono ya existe, devuelve
+    el cliente actual en vez de duplicarlo."""
+    try:
+        return service.crear_cliente_rapido(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.post("/", response_model=schemas.CotizacionResponse, status_code=status.HTTP_201_CREATED)
 def crear_cotizacion(
     esquema: schemas.CotizacionCreate,
@@ -34,7 +48,7 @@ def listar_cotizaciones(
 ):
     return service.obtener_cotizaciones(
         db, salto=salto, limite=limite, buscar=buscar,
-        solo_mes_actual=solo_mes_actual, mes=mes, anio=anio, usuario=usuario_actual
+        solo_mes_actual=solo_mes_actual, mes=mes, anio=anio
     )
 
 @router.get("/{id_cotizacion}", response_model=schemas.CotizacionResponse)
@@ -43,7 +57,7 @@ def ver_cotizacion(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    db_obj = service.obtener_cotizacion(db, id_cotizacion, usuario_actual)
+    db_obj = service.obtener_cotizacion(db, id_cotizacion)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Cotizacion no encontrada")
     return db_obj

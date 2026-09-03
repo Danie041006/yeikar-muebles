@@ -117,6 +117,7 @@ docker compose up -d --build    # builds backend + frontend + db
 ## Gotchas
 
 - El Cotizador IA es 100% manual (sin APIs de pago): `contexto-exportar` arma el paquete (inventario + receta similar + ejemplos reales + esquema JSON) para una IA de navegador, e `import-structure` importa el JSON pegado. No requiere `OPENAI_API_KEY` ni claves de Gemini
+- Alcance de cotizaciones: TODOS con el módulo `cotizaciones` VEN todas las cotizaciones (lectura compartida), pero solo su autor (o Dueño/Administrador) puede editarlas, cambiar estado, eliminarlas o convertirlas a pedido. `PUT /cotizacion/{id}` acepta `detalles` y los reemplaza completos (mismo contrato que al crear). El botón lápiz del frontend se oculta si no eres el autor
 - Frontend `api.ts` has two axios instances: `api` (for `/api/v1/`) and `authApi` (for `/api/auth/`) — use the right one
 - Alembic env has an explicit import list for all models — adding a new module means adding its model import there
 - `ALLOWED_ORIGINS` default includes `localhost:5173` (Vite dev) — add yours if using a different port

@@ -48,9 +48,13 @@ class MovimientoCreate(BaseModel):
     moneda_pago_id: Optional[int] = None
     tasa_pago: Optional[Decimal] = Field(None, gt=0)
     # Opcionales (solo entradas): proveedor = dónde se compró; cliente = material
-    # comprado para un cliente específico.
+    # comprado para un cliente específico. Se puede indicar el id (registro
+    # existente) O el nombre libre: si el nombre coincide con un registro, se
+    # linkea; si no, queda guardado como texto en el movimiento.
     proveedor_id: Optional[int] = None
     cliente_id: Optional[int] = None
+    proveedor_nombre: Optional[str] = None
+    cliente_nombre: Optional[str] = None
     # "Fiar": ENTRADA sin pagar de una cuenta → se registra automáticamente una
     # cuenta por pagar (compra + pasada) con el proveedor indicado.
     fiar: Optional[bool] = False
@@ -121,9 +125,12 @@ class MovimientoProductoCreate(BaseModel):
     moneda_pago_id: Optional[int] = None
     tasa_pago: Optional[Decimal] = Field(None, gt=0)
     # Opcionales (solo entradas): proveedor = dónde se compró; cliente = producto
-    # comprado para un cliente específico.
+    # comprado para un cliente específico. Id o nombre libre, igual que en los
+    # movimientos de materiales.
     proveedor_id: Optional[int] = None
     cliente_id: Optional[int] = None
+    proveedor_nombre: Optional[str] = None
+    cliente_nombre: Optional[str] = None
 
 
 class MovimientoProductoResponse(MovimientoProductoCreate):

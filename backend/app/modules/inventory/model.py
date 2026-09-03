@@ -69,6 +69,11 @@ class MovimientoInventario(Base):
     # Proveedor (dónde se compró) y cliente (material comprado para un cliente específico) — opcionales, solo entradas
     proveedor_id = Column(BigInteger, ForeignKey("proveedor.id", ondelete="RESTRICT"), nullable=True)
     cliente_id = Column(Integer, ForeignKey("cliente.id", ondelete="RESTRICT"), nullable=True)
+    # Texto libre: cuando se escribe el proveedor/cliente a mano y no existe un
+    # registro con ese nombre, el dato queda en estas columnas (los FK son
+    # opcionales y solo se llenan si el nombre coincide con un registro).
+    proveedor_nombre = Column(String(150), nullable=True)
+    cliente_nombre = Column(String(150), nullable=True)
     fecha = Column(DateTime, server_default=func.now())
     referencia_tipo = Column(String(100), nullable=True)
     referencia_id = Column(BigInteger, nullable=True)
@@ -120,6 +125,9 @@ class MovimientoProductoInventario(Base):
     # Proveedor (dónde se compró) y cliente (comprado para un cliente específico) — opcionales, solo entradas
     proveedor_id = Column(BigInteger, ForeignKey("proveedor.id", ondelete="RESTRICT"), nullable=True)
     cliente_id = Column(Integer, ForeignKey("cliente.id", ondelete="RESTRICT"), nullable=True)
+    # Texto libre, igual que en movimiento_inventario.
+    proveedor_nombre = Column(String(150), nullable=True)
+    cliente_nombre = Column(String(150), nullable=True)
     fecha = Column(DateTime, server_default=func.now())
     referencia_tipo = Column(String(100), nullable=True)   # VENTA, COMPRA, PRODUCCION, AJUSTE...
     referencia_id = Column(BigInteger, nullable=True)
