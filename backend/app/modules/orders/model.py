@@ -28,7 +28,7 @@ class Pedido(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
     detalles = relationship("DetallePedido", back_populates="pedido", cascade="all, delete-orphan")
 
 class DetallePedido(Base):

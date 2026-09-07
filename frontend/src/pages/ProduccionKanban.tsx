@@ -2342,76 +2342,85 @@ export default function ProduccionKanban() {
         return (
           <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
-              <h3 className="text-xl font-headline font-black text-yeikar-secondary">Confirmar uso de lámina</h3>
+              <h3 className="text-xl font-headline font-black text-yeikar-secondary">¿Cuánto se usó de la lámina?</h3>
               <p className="text-xs text-yeikar-neutral/60">
-                <span className="font-bold text-yeikar-secondary">{mat?.nombre}</span>: pediste{' '}
-                <b>{pedidas}</b> lámina(s) completa(s) de {L}×{A} cm con costo provisional{' '}
-                <b>${(pedidas * costoBase).toLocaleString('es-CO')}</b>. ¿Cuánto se usó?
+                Pediste <b>{pedidas}</b> {pedidas === 1 ? 'lámina' : 'láminas'} de{' '}
+                <span className="font-bold text-yeikar-secondary">{mat?.nombre}</span> ({L}×{A} cm).
+                Escribe las piezas que ya cortaste de ella:
               </p>
               <form
                 onSubmit={(e) => { e.preventDefault(); ejecutarConfirmarConsumo(); }}
                 className="space-y-3"
               >
                 <div className="grid grid-cols-3 gap-2">
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="N.º cortes"
-                    value={confirmarForm.cantidad_cortes}
-                    onChange={(e) => setConfirmarForm(prev => ({ ...prev, cantidad_cortes: e.target.value }))}
-                    required
-                    className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
-                  />
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="Largo cm"
-                    value={confirmarForm.largo_corte_cm}
-                    onChange={(e) => setConfirmarForm(prev => ({ ...prev, largo_corte_cm: e.target.value }))}
-                    required
-                    className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
-                  />
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    placeholder="Ancho cm"
-                    value={confirmarForm.ancho_corte_cm}
-                    onChange={(e) => setConfirmarForm(prev => ({ ...prev, ancho_corte_cm: e.target.value }))}
-                    required
-                    className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
-                  />
+                  <div>
+                    <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">Piezas</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ej. 5"
+                      value={confirmarForm.cantidad_cortes}
+                      onChange={(e) => setConfirmarForm(prev => ({ ...prev, cantidad_cortes: e.target.value }))}
+                      required
+                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">Largo (cm)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ej. 100"
+                      value={confirmarForm.largo_corte_cm}
+                      onChange={(e) => setConfirmarForm(prev => ({ ...prev, largo_corte_cm: e.target.value }))}
+                      required
+                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">Ancho (cm)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ej. 40"
+                      value={confirmarForm.ancho_corte_cm}
+                      onChange={(e) => setConfirmarForm(prev => ({ ...prev, ancho_corte_cm: e.target.value }))}
+                      required
+                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                    />
+                  </div>
                 </div>
                 {cabeAlgo && cortes > 0 ? (
                   <div className="space-y-1 text-[10px] font-mono">
                     <p className="text-yeikar-secondary bg-yeikar-primary/5 border border-yeikar-primary/20 rounded-lg px-2 py-1">
-                      Caben <b>{porLamina}</b> corte(s) de {ac}×{lc} cm por lámina de {L}×{A} cm.
+                      En cada lámina caben <b>{porLamina}</b> piezas de {ac}×{lc} cm.
                     </p>
                     <p className="text-yeikar-secondary bg-yeikar-primary/5 border border-yeikar-primary/20 rounded-lg px-2 py-1">
-                      {cortes} corte(s) necesitan <b>{necesarias}</b> lámina(s) · pediste {pedidas}:{' '}
+                      Con <b>{cortes}</b> {cortes === 1 ? 'pieza' : 'piezas'} usas <b>{necesarias}</b> {necesarias === 1 ? 'lámina' : 'láminas'} — pediste {pedidas}:{' '}
                       {diferencia === null ? '' : diferencia > 0 ? (
-                        <span className="font-bold text-emerald-700">se devolverán {diferencia} lámina(s) al depósito</span>
+                        <span className="font-bold text-emerald-700">te sobraron {diferencia} y vuelven al depósito</span>
                       ) : diferencia < 0 ? (
-                        <span className="font-bold text-red-600">faltan {-diferencia} lámina(s) — se descontarán del stock</span>
+                        <span className="font-bold text-red-600">te faltan {-diferencia} — se descontarán del inventario</span>
                       ) : (
-                        <span className="font-bold text-emerald-700">cantidad exacta</span>
+                        <span className="font-bold text-emerald-700">justo lo que pediste ✓</span>
                       )}
                     </p>
                     {sobranteReal && (
                       <p className="text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
-                        Costo real: <b>${(costoReal ?? 0).toLocaleString('es-CO')}</b> · el pedazo restante (~{sobranteReal.restante.toFixed(0)} cm²) queda como sobrante reutilizable.
+                        Se cobra <b>${Math.round(costoReal ?? 0).toLocaleString('es-CO')}</b> por lo usado. El pedazo que sobró queda guardado para otro mueble.
                       </p>
                     )}
                   </div>
                 ) : lc > 0 && ac > 0 && cortes > 0 ? (
                   <p className="text-[10px] font-mono text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1">
-                    Un corte de {ac}×{lc} no cabe en la lámina de {L}×{A} cm.
+                    Una pieza de {ac}×{lc} no cabe en la lámina de {L}×{A} cm. Revisa las medidas.
                   </p>
                 ) : null}
                 <details className="text-[10px] text-yeikar-neutral/60">
-                  <summary className="cursor-pointer font-semibold">Sobrante manual (opcional)</summary>
+                  <summary className="cursor-pointer font-semibold">¿El pedazo que sobró tiene otras medidas? (opcional)</summary>
                   <div className="grid grid-cols-2 gap-2 mt-1">
                     <input
                       type="number"

@@ -28,11 +28,11 @@ class Envio(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
     @property
     def asignado_por_nombre(self):
-        return self.asignado_por.nombre_usuario if self.asignado_por else None
+        return (self.asignado_por.nombre or self.asignado_por.nombre_usuario) if self.asignado_por else None
 
 
 class EnvioAsignacion(Base):

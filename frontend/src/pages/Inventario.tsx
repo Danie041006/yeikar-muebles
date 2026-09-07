@@ -8,6 +8,7 @@ import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
+import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
 
 interface Ubicacion {
   id: number;
@@ -399,7 +400,7 @@ export default function Inventario() {
       toast.success('Ítem en crudo registrado.');
       fetchCrudo();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al registrar el ítem en crudo.');
+      toast.error(extractErrorMessage(error, 'Error al registrar el ítem en crudo.'));
     } finally {
       setSavingCrudo(false);
     }
@@ -421,7 +422,7 @@ export default function Inventario() {
       toast.success('Pieza de crudo asignada al pedido. Se descontó del stock.');
       fetchCrudo();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'No se pudo asignar el crudo al pedido.');
+      toast.error(extractErrorMessage(error, 'No se pudo asignar el crudo al pedido.'));
     } finally {
       setAsignando(false);
     }
@@ -450,7 +451,7 @@ export default function Inventario() {
       fetchInsumos();
       toast.success('Insumo registrado.');
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al crear el insumo.');
+      toast.error(extractErrorMessage(error, 'Error al crear el insumo.'));
     }
   };
 
@@ -472,7 +473,7 @@ export default function Inventario() {
       toast.success('Sobrante registrado. Ya puede usarse en cortes.');
       fetchSobrantes();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al registrar el sobrante.');
+      toast.error(extractErrorMessage(error, 'Error al registrar el sobrante.'));
     } finally {
       setSavingSobrante(false);
     }
@@ -484,7 +485,7 @@ export default function Inventario() {
       toast.success('Sobrante marcado como desechado.');
       fetchSobrantes();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al deshechar.');
+      toast.error(extractErrorMessage(error, 'Error al deshechar.'));
     }
   };
 
@@ -495,7 +496,7 @@ export default function Inventario() {
       toast.success('Sobrante eliminado.');
       fetchSobrantes();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al eliminar.');
+      toast.error(extractErrorMessage(error, 'Error al eliminar.'));
     }
   };
 
@@ -505,13 +506,15 @@ export default function Inventario() {
     if (!newProducto.nombre.trim()) return;
     const pagoModal = parsePagoKey(newProducto.cuenta_pago_id);
     const prodMonedaNueva = parseInt(newProducto.moneda_id || String(MONEDA_BASE_ID)) || MONEDA_BASE_ID;
+    const pagoMid = pagoModal.monedaId ?? prodMonedaNueva;
+    const necesitaTasa = !!pagoModal.cuentaId && pagoMid !== prodMonedaNueva;
+    const par = resolverParMonedas(codMonedaDe(prodMonedaNueva), codMonedaDe(pagoMid));
     if (
-      pagoModal.cuentaId &&
-      (pagoModal.monedaId !== MONEDA_BASE_ID || prodMonedaNueva !== MONEDA_BASE_ID) &&
+      necesitaTasa &&
       !(parseFloat(newProducto.tasa_pago || '0') > 0)
     ) {
       toast.error(
-        `Indica la tasa de cambio: 1 ${codMonedaDe(pagoModal.monedaId ?? prodMonedaNueva)} = ? COP.`
+        `Indica la tasa de cambio: ${par.label}.`
       );
       return;
     }
@@ -585,7 +588,7 @@ export default function Inventario() {
       }
       fetchProductos();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al crear el producto.');
+      toast.error(extractErrorMessage(error, 'Error al crear el producto.'));
     } finally {
       setSavingProducto(false);
     }
@@ -633,7 +636,7 @@ export default function Inventario() {
       toast.success('Insumo actualizado.');
       fetchInsumos();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al guardar el insumo.');
+      toast.error(extractErrorMessage(error, 'Error al guardar el insumo.'));
     } finally {
       setSavingEdit(false);
     }
@@ -648,7 +651,8 @@ export default function Inventario() {
     const pago = esEntrada ? parsePagoKey(movMaterial.pago_key) : { cuentaId: null, monedaId: null };
     const tasaNum = parseFloat(movMaterial.tasa_pago || '0');
     if (pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID && !(tasaNum > 0)) {
-      toast.error(`Indica la tasa de cambio: 1 ${codMonedaDe(pago.monedaId)} = ? COP.`);
+      const par = resolverParMonedas('COP', codMonedaDe(pago.monedaId));
+      toast.error(`Indica la tasa de cambio: ${par.label}.`);
       return;
     }
     // "Fiar": entrada sin cuenta de pago → la deuda queda registrada con el
@@ -659,7 +663,7 @@ export default function Inventario() {
       return;
     }
 
-    const costoBruto = esEntrada && movMaterial.costo_unitario ? parseFloat(movMaterial.costo_unitario) : undefined;
+    const costoBruto = esEntrada && movMaterial.costo_unitario && parseFloat(movMaterial.costo_unitario) > 0 ? parseFloat(movMaterial.costo_unitario) : undefined;
     const pctDesc = esEntrada && movMaterial.descuento_porcentaje ? parseFloat(movMaterial.descuento_porcentaje) : 0;
     const costoNeto = costoBruto !== undefined && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
@@ -692,7 +696,7 @@ export default function Inventario() {
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al registrar el movimiento.');
+      toast.error(extractErrorMessage(error, 'Error al registrar el movimiento.'));
     } finally {
       setSavingMov(false);
     }
@@ -728,13 +732,15 @@ export default function Inventario() {
     const esEntrada = movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION';
     const pago = esEntrada ? parsePagoKey(movProducto.pagado_desde_metodo_caja_id) : { cuentaId: null as number | null, monedaId: null as number | null };
     const refMid = Number(productoSeleccionado?.moneda_id ?? MONEDA_BASE_ID);
+    const pagoMid = pago.monedaId ?? refMid;
     const tasaNum = parseFloat(movProducto.tasa_pago || '0');
-    if (pago.cuentaId && (pago.monedaId !== MONEDA_BASE_ID || refMid !== MONEDA_BASE_ID) && !(tasaNum > 0)) {
-      toast.error(`Indica la tasa de cambio: 1 ${codMonedaDe(pago.monedaId ?? refMid)} = ? COP.`);
+    if (pago.cuentaId && pagoMid !== refMid && !(tasaNum > 0)) {
+      const par = resolverParMonedas(codMonedaDe(refMid), codMonedaDe(pagoMid));
+      toast.error(`Indica la tasa de cambio: ${par.label}.`);
       return;
     }
 
-    const costoBruto = esEntrada && movProducto.costo_unitario ? parseFloat(movProducto.costo_unitario) : undefined;
+    const costoBruto = esEntrada && movProducto.costo_unitario && parseFloat(movProducto.costo_unitario) > 0 ? parseFloat(movProducto.costo_unitario) : undefined;
     const pctDesc = esEntrada && movProducto.descuento_porcentaje ? parseFloat(movProducto.descuento_porcentaje) : 0;
     const costoNeto = costoBruto !== undefined && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
@@ -768,7 +774,7 @@ export default function Inventario() {
       fetchProductos();
       refrescarKardexProducto(selectedProductoId);
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al registrar el movimiento.');
+      toast.error(extractErrorMessage(error, 'Error al registrar el movimiento.'));
     } finally {
       setSavingMovProd(false);
     }
@@ -833,7 +839,7 @@ export default function Inventario() {
       toast.success('Pieza de exhibición registrada.');
       fetchProductos();
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al crear la pieza.');
+      toast.error(extractErrorMessage(error, 'Error al crear la pieza.'));
     } finally {
       setSavingPieza(false);
     }
@@ -855,7 +861,7 @@ export default function Inventario() {
       toast.success(`Orden #${orden.id} creada. Gestiona sus etapas en Producción.`);
       navigate('/produccion');
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al crear la orden de producción.');
+      toast.error(extractErrorMessage(error, 'Error al crear la orden de producción.'));
     } finally {
       setSavingProducir(false);
     }
@@ -1836,8 +1842,9 @@ export default function Inventario() {
                   const totalRef = netoUnit * (parseFloat(movMaterial.cantidad || '0') || 0);
                   const pagoCod = codMonedaDe(monedaId);
                   const necesitaTasa = !!cuentaId && monedaId !== MONEDA_BASE_ID;
+                  const par = resolverParMonedas('COP', pagoCod);
                   const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
-                  const deduc = cuentaId ? (necesitaTasa && tasaNum > 0 ? totalRef / tasaNum : totalRef) : 0;
+                  const deduc = cuentaId ? (necesitaTasa && tasaNum > 0 ? convertirMonedaHumana(totalRef, 'COP', pagoCod, tasaNum) : totalRef) : 0;
                   return (
                     <>
                       <div className="space-y-1">
@@ -1870,14 +1877,14 @@ export default function Inventario() {
                       {necesitaTasa && (
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-yeikar-secondary">
-                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">(1 {pagoCod} = ? COP · se ingresa manualmente)</span>
+                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
                           </label>
-                          <input type="number" step="0.01" min="0" required value={movMaterial.tasa_pago} onChange={(e) => setMovMaterial(p => ({ ...p, tasa_pago: e.target.value }))} placeholder="Ej: 4000" className={inputCls} />
+                          <input type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) => setMovMaterial(p => ({ ...p, tasa_pago: e.target.value }))} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
                         </div>
                       )}
                       {!!cuentaId && (
                         <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                          Se descontarán ≈ <b>${deduc.toLocaleString('es-CO')} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
+                          Se descontarán ≈ <b>${deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
                           {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
                         </p>
                       )}
@@ -2129,8 +2136,9 @@ export default function Inventario() {
                   const pagoMid = monedaId ?? refMid;
                   const pagoCod = codMonedaDe(pagoMid);
                   const refCod = codMonedaDe(refMid);
-                  // Tasa manual obligatoria si el pago o la referencia no son COP
-                  const necesitaTasa = !!cuentaId && (pagoMid !== MONEDA_BASE_ID || refMid !== MONEDA_BASE_ID);
+                  // Tasa manual si las monedas difieren
+                  const necesitaTasa = !!cuentaId && pagoMid !== refMid;
+                  const par = resolverParMonedas(refCod, pagoCod);
                   const tasaNum = parseFloat(movProducto.tasa_pago || '0') || 0;
                   const bruto = parseFloat(movProducto.costo_unitario || '0') || 0;
                   const desc = parseFloat(movProducto.descuento_porcentaje || '0') || 0;
@@ -2138,8 +2146,7 @@ export default function Inventario() {
                   const totalRef = costoNetoUnit * (parseFloat(movProducto.cantidad || '0') || 0);
                   const deduc = !cuentaId ? 0
                     : pagoMid === refMid ? totalRef
-                    : pagoMid === MONEDA_BASE_ID ? totalRef * tasaNum
-                    : totalRef / tasaNum;
+                    : convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum);
                   return (
                     <>
                       <div className="space-y-1">
@@ -2159,14 +2166,14 @@ export default function Inventario() {
                       {cuentaId && necesitaTasa && (
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-yeikar-secondary">
-                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">(1 {pagoCod === 'COP' ? refCod : pagoCod} = ? COP)</span>
+                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
                           </label>
-                          <input type="number" step="0.01" min="0" required value={movProducto.tasa_pago} onChange={(e) => setMovProducto(p => ({ ...p, tasa_pago: e.target.value }))} placeholder="Ej: 4000" className={inputCls} />
+                          <input type="number" step="any" min="0" required value={movProducto.tasa_pago} onChange={(e) => setMovProducto(p => ({ ...p, tasa_pago: e.target.value }))} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
                         </div>
                       )}
                       {!!cuentaId && (
                         <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                          Se descontarán ≈ <b>${deduc.toLocaleString('es-CO')} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movProducto.pagado_desde_metodo_caja_id)?.nombre}</b>
+                          Se descontarán ≈ <b>{deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movProducto.pagado_desde_metodo_caja_id)?.nombre}</b>
                           {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
                         </p>
                       )}
@@ -2479,7 +2486,16 @@ export default function Inventario() {
                 const pagoMid = monedaId ?? refMid;
                 const pagoCod = codMonedaDe(pagoMid);
                 const refCod = codMonedaDe(refMid);
-                const necesitaTasa = !!cuentaId && (pagoMid !== MONEDA_BASE_ID || refMid !== MONEDA_BASE_ID);
+                const necesitaTasa = !!cuentaId && pagoMid !== refMid;
+                const par = resolverParMonedas(refCod, pagoCod);
+                const tasaNum = parseFloat(newProducto.tasa_pago || '0') || 0;
+                const bruto = parseFloat(newProducto.costo_base || '0') || 0;
+                const desc = parseFloat(newProducto.descuento_porcentaje || '0') || 0;
+                const neto = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
+                const totalRef = neto * (parseFloat(newProducto.cantidad_inicial || '0') || 0);
+                const deduc = !cuentaId ? 0
+                  : pagoMid === refMid ? totalRef
+                  : convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum);
                 return (
                   <div className="space-y-2">
                     <div>
@@ -2502,16 +2518,22 @@ export default function Inventario() {
                     {cuentaId && necesitaTasa && (
                       <div>
                         <label className="block text-xs font-bold text-yeikar-secondary mb-1">
-                          Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">(1 {pagoCod === 'COP' ? refCod : pagoCod} = ? COP · manual)</span>
+                          Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
                         </label>
                         <input
-                          type="number" step="0.01" min="0" required
+                          type="number" step="any" min="0" required
                           value={newProducto.tasa_pago}
                           onChange={(e) => setNewProducto(prev => ({ ...prev, tasa_pago: e.target.value }))}
-                          placeholder="Ej: 4000"
+                          placeholder={`Ej: ${par.placeholder}`}
                           className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
                         />
                       </div>
+                    )}
+                    {!!cuentaId && (
+                      <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                        Se descontarán ≈ <b>{deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === newProducto.cuenta_pago_id)?.nombre}</b>
+                        {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
+                      </p>
                     )}
                   </div>
                 );

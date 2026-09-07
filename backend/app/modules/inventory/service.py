@@ -80,41 +80,51 @@ def _gasto_compra_contado(
     def _codigo(mid):
         return db.query(Moneda.codigo).filter(Moneda.id == mid).scalar() or f"#{mid}"
 
-    if pago == MONEDA_BASE_ID and ref_moneda_id == MONEDA_BASE_ID:
-        monto, tasa, gasto_moneda = total_ref, Decimal("1.0"), MONEDA_BASE_ID
-    elif pago == ref_moneda_id:
-        if ref_moneda_id == MONEDA_BASE_ID:
-            monto, tasa, gasto_moneda = total_ref, Decimal("1.0"), MONEDA_BASE_ID
+    CURRENCY_PRIORITY = ["EUR", "USD", "VES", "COP"]
+
+    def _resolver_par(cod_a: str, cod_b: str):
+        idx_a = CURRENCY_PRIORITY.index(cod_a) if cod_a in CURRENCY_PRIORITY else 99
+        idx_b = CURRENCY_PRIORITY.index(cod_b) if cod_b in CURRENCY_PRIORITY else 99
+        if idx_a <= idx_b:
+            return cod_a, cod_b
+        return cod_b, cod_a
+
+    from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+
+    ref_cod = _codigo(ref_moneda_id)
+    pago_cod = _codigo(pago)
+
+    if pago == ref_moneda_id:
+        monto = total_ref
+        gasto_moneda = pago
+        if pago == MONEDA_BASE_ID:
+            tasa = Decimal("1.0")
         else:
-            if not tasa_pago or tasa_pago <= 0:
-                raise ValueError(
-                    f"Indica la tasa de cambio: 1 {_codigo(pago)} = ? COP "
-                    "(la tasa se ingresa manualmente en cada operación)."
-                )
-            monto, tasa, gasto_moneda = total_ref, Decimal(str(tasa_pago)), pago
-    elif ref_moneda_id == MONEDA_BASE_ID:
-        if not tasa_pago or tasa_pago <= 0:
-            raise ValueError(
-                f"Indica la tasa de cambio: 1 {_codigo(pago)} = ? COP "
-                "(la tasa se ingresa manualmente en cada operación)."
-            )
-        monto = (total_ref / Decimal(str(tasa_pago))).quantize(Decimal("0.01"))
-        tasa, gasto_moneda = Decimal(str(tasa_pago)), pago
-    elif pago == MONEDA_BASE_ID:
-        # Referencia extranjera pagada en pesos: la tasa va expresada al revés
-        # ("1 [ref] = X COP") y la deducción es directa en pesos.
-        if not tasa_pago or tasa_pago <= 0:
-            raise ValueError(
-                f"Indica la tasa de cambio: 1 {_codigo(ref_moneda_id)} = ? COP "
-                "(la tasa se ingresa manualmente en cada operación)."
-            )
-        monto = (total_ref * Decimal(str(tasa_pago))).quantize(Decimal("0.01"))
-        tasa, gasto_moneda = Decimal("1.0"), MONEDA_BASE_ID
+            tasa = Decimal(str(tasa_pago)) if tasa_pago and tasa_pago > 0 else obtener_tasa_moneda_a_cop(db, pago)
     else:
-        raise ValueError(
-            "Paga desde la cuenta en la moneda del producto o en COP "
-            "(otras combinaciones requieren dos tasas manuales)."
-        )
+        base_cod, quote_cod = _resolver_par(ref_cod, pago_cod)
+        if not tasa_pago or tasa_pago <= 0:
+            raise ValueError(
+                f"Indica la tasa de cambio: 1 {base_cod} = ? {quote_cod} "
+                "(la tasa se ingresa manualmente en cada operación)."
+            )
+        tasa_dec = Decimal(str(tasa_pago))
+
+        # Conversión del monto a debitar de la cuenta (en moneda pago_cod):
+        if ref_cod == base_cod and pago_cod == quote_cod:
+            monto = (total_ref * tasa_dec).quantize(Decimal("0.01"))
+        else:
+            monto = (total_ref / tasa_dec).quantize(Decimal("0.01"))
+
+        gasto_moneda = pago
+
+        # Tasa de cambio hacia COP para la contabilidad del Gasto:
+        if pago == MONEDA_BASE_ID:
+            tasa = Decimal("1.0")
+        elif ref_moneda_id == MONEDA_BASE_ID:
+            tasa = tasa_dec
+        else:
+            tasa = obtener_tasa_moneda_a_cop(db, pago)
 
     tipo_gasto = db.query(TipoGasto).filter(TipoGasto.nombre == tipo_gasto_nombre).first()
     if not tipo_gasto:

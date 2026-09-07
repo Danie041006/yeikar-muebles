@@ -29,7 +29,7 @@ class Cotizacion(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
     detalles = relationship("DetalleCotizacion", back_populates="cotizacion", cascade="all, delete-orphan")
 
 class DetalleCotizacion(Base):

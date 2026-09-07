@@ -1182,7 +1182,7 @@ def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
     "Compra #N") para enriquecerlo con el nombre real; queda NULL quien no
     aplica o si el registro original ya no existe.
     """
-    quien = m.usuario.nombre_usuario if m.usuario else None
+    quien = (m.usuario.nombre or m.usuario.nombre_usuario) if m.usuario else None
     ref = (m.referencia or "").strip()
     if ref.startswith("Gasto #"):
         try:
@@ -1193,7 +1193,7 @@ def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
             nombre_tipo = g.tipo_gasto.nombre if g.tipo_gasto else "Gasto"
             desc = g.descripcion or ""
             concepto = f"Gasto: {nombre_tipo}" + (f" — {desc}" if desc else "")
-            return concepto, (g.creador.nombre_usuario if g.creador else quien)
+            return concepto, ((g.creador.nombre or g.creador.nombre_usuario) if g.creador else quien)
         return "Gasto", quien
     if ref.startswith("Pago #"):
         try:
@@ -1398,7 +1398,7 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
                     cuenta_nombre=cuenta_por_ref.get(f"Gasto #{g.id}"),
                     referencia=f"Gasto #{g.id}",
                     concepto=concepto,
-                    quien=(g.creador.nombre_usuario if g.creador else "Sistema"),
+                    quien=((g.creador.nombre or g.creador.nombre_usuario) if g.creador else "Sistema"),
                 )
             )
 

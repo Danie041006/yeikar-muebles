@@ -14,7 +14,7 @@ import {
   type PagoCreate,
   type MetodoPagoOption,
 } from '../services/ventaService';
-import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural } from '../utils/format';
+import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, extractErrorMessage } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 
@@ -139,14 +139,17 @@ function ModalDetalle({
   // Si monedaPagoId coincide con la moneda de la venta, TRM no aplica
   const monedaVentaId = detalle?.moneda_id ?? null;
   const necesitaTRM = monedaPagoId !== null && monedaVentaId !== null && monedaPagoId !== monedaVentaId;
-  // tasa_natural va en el sentido natural: 1 [V] = X [P] (p. ej. 1 USD = 4500 COP).
-  // El backend guarda la inversa (tasa_almacenada = 1 / tasa_natural): 1 [P] = tasa [V].
-  const tasaNatural = parseFloat(tasaNaturalInput) || 0;
-  const tasaAlmacenada = tasaNatural > 0 ? tasaNaturalAAlmacenada(tasaNatural) : 0;
-  const montoNum = parseFloat(monto) || 0;
-  const montoEquivalente = necesitaTRM && tasaNatural > 0 ? convertirConTasaNatural(montoNum, tasaNatural) : montoNum;
   const monedaPago = monedas.find(m => m.id === monedaPagoId);
   const monedaVenta = monedas.find(m => m.id === monedaVentaId);
+  const parPago = resolverParMonedas(monedaVenta?.codigo, monedaPago?.codigo);
+  const tasaHumana = parseFloat(tasaNaturalInput) || 0;
+  const tasaAlmacenada = tasaHumana > 0
+    ? calcularTasaAlmacenadaPago(monedaPago?.codigo, monedaVenta?.codigo, tasaHumana)
+    : 0;
+  const montoNum = parseFloat(monto) || 0;
+  const montoEquivalente = necesitaTRM && tasaHumana > 0
+    ? convertirMonedaHumana(montoNum, monedaPago?.codigo, monedaVenta?.codigo, tasaHumana)
+    : montoNum;
   const saldoRestante = detalle ? Number(detalle.saldo_pendiente) : 0;
 
   const handlePago = async () => {
@@ -160,8 +163,8 @@ function ModalDetalle({
       setErrorPago('Selecciona la moneda del pago.');
       return;
     }
-    if (necesitaTRM && (!tasaNaturalInput || tasaNatural <= 0)) {
-      setErrorPago('La moneda del pago difiere de la de la factura. Ingresa la tasa de cambio (1 factura = ? pago).');
+    if (necesitaTRM && (!tasaNaturalInput || tasaHumana <= 0)) {
+      setErrorPago(`La moneda del pago difiere de la de la factura. Ingresa la tasa de cambio (${parPago.label}).`);
       return;
     }
     try {
@@ -174,7 +177,7 @@ function ModalDetalle({
         metodo_pago: metodoPago,
         referencia: referencia || undefined,
         observaciones: observaciones || undefined,
-        ...(necesitaTRM ? { tasa_cambio: tasaNaturalAAlmacenada(tasaNatural) } : {}),
+        ...(necesitaTRM ? { tasa_cambio: tasaAlmacenada } : {}),
       };
       const pagoCreado = await pagoService.registrar(payload);
       // Recibo digital (opcional): comprobante del pago
@@ -192,7 +195,7 @@ function ModalDetalle({
       await cargar();
       onPagoRegistrado();
     } catch (err: any) {
-      setErrorPago(err?.response?.data?.detail || 'Error al registrar el pago.');
+      setErrorPago(extractErrorMessage(err, 'Error al registrar el pago.'));
     } finally {
       setSubmitting(false);
     }
@@ -201,14 +204,12 @@ function ModalDetalle({
   const handleSetRestante = () => {
     if (!detalle) return;
     if (necesitaTRM) {
-      if (tasaNatural <= 0) {
-        setErrorPago('Ingresa primero la tasa de cambio (1 factura = ? pago) para calcular el monto restante.');
+      if (tasaHumana <= 0) {
+        setErrorPago(`Ingresa primero la tasa de cambio (${parPago.label}) para calcular el monto restante.`);
         return;
       }
-      // El saldo está en la moneda de la venta; con tasa natural (1 V = X P)
-      // el monto a cobrar en la moneda del pago es saldo × tasa_natural.
-      const montoCalc = saldoRestante * tasaNatural;
-      setMonto(montoCalc.toFixed(4));
+      const montoCalc = convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaPago?.codigo, tasaHumana);
+      setMonto(montoCalc.toFixed(2));
     } else {
       setMonto(saldoRestante.toString());
     }
@@ -514,15 +515,15 @@ function ModalDetalle({
                         {necesitaTRM && (
                           <div>
                             <label className="text-xs font-bold text-amber-600 block mb-1">
-                              Tasa: 1 {monedaVenta?.codigo} = X {monedaPago?.codigo}
+                              Tasa: {parPago.label}
                             </label>
                             <input
                               type="number"
                               min="0"
-                              step="0.01"
+                              step="any"
                               value={tasaNaturalInput}
                               onChange={(e) => setTasaNaturalInput(e.target.value)}
-                              placeholder={`1 ${monedaVenta?.codigo} = ? ${monedaPago?.codigo}`}
+                              placeholder={`Ej: ${parPago.placeholder}`}
                               className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-amber-50"
                             />
                           </div>
@@ -530,7 +531,7 @@ function ModalDetalle({
                       </div>
 
                       {/* Preview de conversión */}
-                      {necesitaTRM && montoNum > 0 && tasaNatural > 0 && (
+                      {necesitaTRM && montoNum > 0 && tasaHumana > 0 && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                           <p className="text-sm font-bold text-amber-800 font-mono">
                             ≈ {montoEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {nombreMoneda(monedaVenta?.codigo)}

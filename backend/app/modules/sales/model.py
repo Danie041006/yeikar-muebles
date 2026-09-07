@@ -40,7 +40,7 @@ class Venta(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
 
 from app.modules.productos.model import Producto, Material

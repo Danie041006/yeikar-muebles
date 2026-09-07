@@ -66,7 +66,7 @@ class OrdenProduccion(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
 class EtapaProduccion(Base):
     __tablename__ = "etapa_produccion"
@@ -157,7 +157,7 @@ class ConsumoMaterial(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
     @property
     def solicitante_nombre(self):
@@ -191,7 +191,7 @@ class ManoObra(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
     @property
     def precio_produccion_descripcion(self):
@@ -316,7 +316,7 @@ class ProduccionCrudo(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
     @property
     def mano_obra_total(self):
@@ -387,7 +387,7 @@ class ProduccionCrudoConsumo(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
 
 class ProduccionCrudoUso(Base):
@@ -447,4 +447,4 @@ class ProduccionCrudoManoObra(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None

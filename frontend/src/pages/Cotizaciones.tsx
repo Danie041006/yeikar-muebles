@@ -6,7 +6,7 @@ import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, Quot
 import { clienteService, Client } from '../services/clienteService';
 import { pedidoService } from '../services/pedidoService';
 import { ventaService, VentaDetalle, METODOS_PAGO, cargarMetodosPago, labelMetodoPago, type MetodoPagoOption } from '../services/ventaService';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
 import { normalizarEstructuraCostos } from '../utils/estructuraCostos';
 import EstructuraCostos from '../components/EstructuraCostos';
 import DocumentoCotizacion from '../components/Expediente/DocumentoCotizacion';
@@ -243,9 +243,12 @@ export default function Cotizaciones() {
   // La tasa del abono SIEMPRE la define el usuario cuando la moneda de pago
   // difiere de la moneda de la cotización. Nunca se deduce de la tasa congelada
   // de la cotización (puede pagarse días después con otra tasa).
+  const quoteCod = quoteMoneda?.codigo || 'COP';
+  const adelantoCod = monedaAdelantoSel?.codigo || 'COP';
   const monedasIguales = adelantoMonedaId === quoteEnConversion?.moneda_id;
-  const tasaPagoPorQuote = monedasIguales ? 1 : Number(adelantoTrm) || 0;
-  const tasaAbonoValida = monedasIguales || tasaPagoPorQuote > 0;
+  const parAdelanto = resolverParMonedas(quoteCod, adelantoCod);
+  const tasaHumanaAbono = Number(adelantoTrm) || 0;
+  const tasaAbonoValida = monedasIguales || tasaHumanaAbono > 0;
 
   const pctAbono = Number(adelantoPct) || 0;
   const montoFijoAbono = Number(adelantoMonto) || 0;
@@ -256,12 +259,12 @@ export default function Cotizaciones() {
   const abonoEnMonedaCotizacion =
     adelantoModo === 'pct'
       ? (quoteTotal * pctAbono) / 100
-      : montoFijoAbono * tasaPagoPorQuote;
+      : (monedasIguales ? montoFijoAbono : convertirMonedaHumana(montoFijoAbono, adelantoCod, quoteCod, tasaHumanaAbono));
 
   // Monto que realmente se registra como pago, en la moneda que elige el cliente.
   const abonoMontoPago =
     adelantoModo === 'pct'
-      ? ((quoteTotal * pctAbono) / 100) / (tasaPagoPorQuote || 1)
+      ? (monedasIguales ? (quoteTotal * pctAbono) / 100 : convertirMonedaHumana((quoteTotal * pctAbono) / 100, quoteCod, adelantoCod, tasaHumanaAbono))
       : montoFijoAbono;
 
   const abonoExcedeTotal = abonoEnMonedaCotizacion > quoteTotal + 0.01;
@@ -1136,7 +1139,7 @@ export default function Cotizaciones() {
         }
         if (!monedasIguales && !tasaAbonoValida) {
           setConvertError(
-            `Indica la tasa de cambio (TRM) del abono: 1 ${monedaAdelantoSel?.codigo ?? '?'} = X ${quoteMoneda?.codigo ?? '?'}.`
+            `Indica la tasa de cambio (TRM) del abono: ${parAdelanto.label}.`
           );
           return;
         }
@@ -1190,15 +1193,15 @@ export default function Cotizaciones() {
 
       const metodoLabel = labelMetodoPago(metodosPago, adelantoMetodo);
       const monedaPagoDifiere = adelantoMonedaId !== selectedQuoteForConvert.moneda_id;
-      // TRM enviada al backend = '1 {pago} = X {cotización}' × tasa de la cotización (COP por cotización).
       const tasaVenta = Number(selectedQuoteForConvert.tasa_cambio) || 1;
+      const factorPago = abonoMontoPago > 0 ? abonoEnMonedaCotizacion / abonoMontoPago : 1.0;
       await pedidoService.convertQuote(selectedQuoteForConvert.id, {
         detalles: convertDetails,
         fecha_entrega_estimada: deliveryDate || undefined,
         adelanto: abonoActivo ? abonoMontoPago : undefined,
         moneda_adelanto_id: adelantoMonedaId,
         tasa_cambio_adelanto:
-          abonoActivo && monedaPagoDifiere ? tasaPagoPorQuote * tasaVenta : undefined,
+          abonoActivo && monedaPagoDifiere ? factorPago * tasaVenta : undefined,
         metodo_pago: abonoActivo ? adelantoMetodo : undefined,
       });
       setIsConvertOpen(false);
@@ -1211,7 +1214,7 @@ export default function Cotizaciones() {
     } catch (err) {
       console.error(err);
       setConvertError(
-        (err as any)?.response?.data?.detail || 'Error al convertir la cotización a pedido.'
+        extractErrorMessage(err, 'Error al convertir la cotización a pedido.')
       );
     } finally {
       setIsConverting(false);
@@ -2476,7 +2479,7 @@ export default function Cotizaciones() {
                 {!monedasIguales && (
                   <div className="mt-2">
                     <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
-                      TRM: 1 {monedaAdelantoSel?.codigo ?? '?'} = X {quoteMoneda?.codigo ?? '?'}
+                      TRM: {parAdelanto.label}
                     </label>
                     <input
                       type="number"
@@ -2484,12 +2487,19 @@ export default function Cotizaciones() {
                       step="any"
                       value={adelantoTrm}
                       onChange={(e) => setAdelantoTrm(e.target.value)}
-                      placeholder={`1 ${monedaAdelantoSel?.codigo ?? '?'} = ? ${quoteMoneda?.codigo ?? '?'}`}
+                      placeholder={`Ej: ${parAdelanto.placeholder}`}
                       className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
                     />
                     {abonoActivo && !tasaAbonoValida && (
                       <p className="mt-1 text-xs font-semibold text-red-600">
                         Indica la tasa para poder registrar el abono.
+                      </p>
+                    )}
+                    {abonoActivo && tasaAbonoValida && (
+                      <p className="mt-1 text-[11px] font-mono text-yeikar-neutral/60">
+                        {adelantoModo === 'pct'
+                          ? `Abono de ${formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteCod)} equivale a ≈ ${formatCurrency(Math.round(abonoMontoPago), adelantoCod)}`
+                          : `Abono de ${formatCurrency(Math.round(abonoMontoPago), adelantoCod)} equivale a ≈ ${formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteCod)}`}
                       </p>
                     )}
                   </div>
@@ -2524,7 +2534,7 @@ export default function Cotizaciones() {
                       : `${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? '')} ${monedaAdelantoSel?.codigo ?? ''}`}{' '}
                     = {formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteMoneda?.codigo ?? '')}
                     {!monedasIguales && tasaAbonoValida
-                      ? ` · 1 ${monedaAdelantoSel?.codigo} = ${tasaPagoPorQuote.toLocaleString('es-ES')} ${quoteMoneda?.codigo}`
+                      ? ` · 1 ${parAdelanto.baseCod} = ${tasaHumanaAbono.toLocaleString('es-ES')} ${parAdelanto.quoteCod}`
                       : ''}
                     {adelantoMetodo ? ` · ${labelMetodoPago(metodosPago, adelantoMetodo)}` : ''} — se registra como primer pago.
                   </>

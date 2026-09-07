@@ -25,7 +25,7 @@ class Nomina(Base):
 
     @property
     def creador_nombre(self):
-        return self.creador.nombre_usuario if self.creador else None
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
 
 class NominaDetalle(Base):

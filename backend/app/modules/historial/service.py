@@ -49,7 +49,7 @@ def _dt(v):
 
 
 def _nombre_usuario(u):
-    return u.nombre_usuario if u else None
+    return (u.nombre or u.nombre_usuario) if u else None
 
 
 def _nombre_item(det):
