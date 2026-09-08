@@ -173,6 +173,7 @@ export default function Cotizaciones() {
   const [observaciones, setObservaciones] = useState('');
   const [items, setItems] = useState<CotizacionItemForm[]>([]);
   const [isProductSelectorOpen, setIsProductSelectorOpen] = useState(false);
+  const [productSelectorModo, setProductSelectorModo] = useState<'todos' | 'fabricados' | 'reventa'>('todos');
   const [productSelectorTargetIndex, setProductSelectorTargetIndex] = useState<number | null>(null);
 
   // ── "Producto nuevo" desde la cotización (nombre + tipo + foto + precio) ──
@@ -609,11 +610,24 @@ export default function Cotizaciones() {
     ]);
   };
 
-  const handleOpenProductSelector = (index?: number) => {
+  const handleOpenProductSelector = (index?: number, modo: 'todos' | 'fabricados' | 'reventa' = 'fabricados') => {
     if (index !== undefined) {
       setProductSelectorTargetIndex(index);
+      // Editar un renglón existente: bloquear el catálogo a SU clase de
+      // producto (un renglón de reventa no se reemplaza por un mueble).
+      const item = items[index];
+      if (item && item.tipo_item === 'INSUMO') {
+        setProductSelectorModo('todos');
+      } else if (item && item.tipo_item === 'REVENTA') {
+        setProductSelectorModo('reventa');
+      } else if (item && item.tipo_item === 'FABRICADO') {
+        setProductSelectorModo('fabricados');
+      } else {
+        setProductSelectorModo(modo);
+      }
     } else {
       setProductSelectorTargetIndex(null);
+      setProductSelectorModo(modo);
     }
     setIsProductSelectorOpen(true);
   };
@@ -1753,12 +1767,21 @@ export default function Cotizaciones() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => handleOpenProductSelector()}
+                      onClick={() => handleOpenProductSelector(undefined, 'fabricados')}
                       className="bg-yeikar-secondary text-yeikar-tertiary text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-yeikar-primary hover:text-yeikar-neutral transition-all flex items-center gap-1.5 shadow-sm"
-                      title="Abrir catálogo para añadir un nuevo mueble"
+                      title="Abrir catálogo de muebles fabricados para añadir un renglón"
                     >
                       <Package className="w-3.5 h-3.5" />
                       <span>+ Mueble</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenProductSelector(undefined, 'reventa')}
+                      className="bg-sky-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-sky-600 transition-all flex items-center gap-1.5 shadow-sm"
+                      title="Agregar un producto de reventa / stock (colchones, exhibición…)"
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      <span>+ Reventa</span>
                     </button>
                     <button
                       type="button"
@@ -3093,6 +3116,7 @@ export default function Cotizaciones() {
           setProductSelectorTargetIndex(null);
         }}
         products={products}
+        modo={productSelectorModo}
         selectedProductId={
           productSelectorTargetIndex !== null && items[productSelectorTargetIndex]
             ? items[productSelectorTargetIndex].producto_id
@@ -3104,7 +3128,11 @@ export default function Cotizaciones() {
         selectedMonedaId={selectedMonedaId}
         title={
           productSelectorTargetIndex !== null
-            ? `Seleccionar Mueble para Renglón ${productSelectorTargetIndex + 1}`
+            ? productSelectorModo === 'reventa'
+              ? `Seleccionar Producto de Reventa para Renglón ${productSelectorTargetIndex + 1}`
+              : `Seleccionar Mueble para Renglón ${productSelectorTargetIndex + 1}`
+            : productSelectorModo === 'reventa'
+            ? 'Catálogo de Productos de Reventa'
             : 'Catálogo de Modelos y Muebles'
         }
       />

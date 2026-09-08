@@ -15,7 +15,14 @@ interface ProductSelectorModalProps {
   tasaCambio?: number;
   selectedMonedaId?: number;
   title?: string;
+  // Modo del catálogo: 'todos' mezcla muebles y reventa (con chips de filtro);
+  // 'fabricados' y 'reventa' BLOQUEAN la lista a esa clase de producto.
+  modo?: 'todos' | 'fabricados' | 'reventa';
 }
+
+// "De stock": se vende tal cual, sin fabricarse. Una pieza de exhibición se
+// vende como reventa (mismo trato en el renglón), así que cuenta aquí.
+const esItemStock = (p: Product) => !!(p.es_reventa || p.es_exhibicion);
 
 export default function ProductSelectorModal({
   open,
@@ -27,10 +34,14 @@ export default function ProductSelectorModal({
   tasaCambio = 1,
   selectedMonedaId = 1,
   title = 'Catálogo de Modelos y Muebles',
+  modo = 'todos',
 }: ProductSelectorModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('TODOS');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const esModoBloqueado = modo !== 'todos';
+  const categoriaBloqueada = modo === 'reventa' ? 'REVENTA' : 'FABRICADOS';
+  const categoriaActiva = esModoBloqueado ? categoriaBloqueada : selectedCategory;
 
   // Reset search and category when opened
   useEffect(() => {
@@ -46,7 +57,7 @@ export default function ProductSelectorModal({
     let revCount = 0;
 
     products.forEach((p) => {
-      if (p.es_reventa) {
+      if (esItemStock(p)) {
         revCount++;
       } else {
         fabCount++;
@@ -86,16 +97,16 @@ export default function ProductSelectorModal({
     const query = searchTerm.toLowerCase().trim();
 
     return products.filter((p) => {
-      // Category filter
-      if (selectedCategory === 'FABRICADOS' && p.es_reventa) return false;
-      if (selectedCategory === 'REVENTA' && !p.es_reventa) return false;
+      // Category filter (en modo bloqueado la categoría es fija)
+      if (categoriaActiva === 'FABRICADOS' && esItemStock(p)) return false;
+      if (categoriaActiva === 'REVENTA' && !esItemStock(p)) return false;
       if (
-        selectedCategory !== 'TODOS' &&
-        selectedCategory !== 'FABRICADOS' &&
-        selectedCategory !== 'REVENTA'
+        categoriaActiva !== 'TODOS' &&
+        categoriaActiva !== 'FABRICADOS' &&
+        categoriaActiva !== 'REVENTA'
       ) {
         const cat = p.tipo_producto?.nombre || p.categoria || 'Sin clasificar';
-        if (cat !== selectedCategory) return false;
+        if (cat !== categoriaActiva) return false;
       }
 
       // Text search filter
@@ -108,7 +119,7 @@ export default function ProductSelectorModal({
 
       return matchName || matchCode || matchDesc || matchCat;
     });
-  }, [products, searchTerm, selectedCategory]);
+  }, [products, searchTerm, categoriaActiva]);
 
   const handleSelect = (product: Product) => {
     onSelectProduct(product);
@@ -133,7 +144,11 @@ export default function ProductSelectorModal({
                 {title}
               </h3>
               <p className="text-xs text-stone-500 font-body">
-                Haga clic sobre un mueble o presione &ldquo;Seleccionar&rdquo; para agregarlo al presupuesto
+                {modo === 'reventa'
+                  ? 'Selecciona un producto de stock (colchones, exhibición…) para agregarlo al presupuesto'
+                  : modo === 'fabricados'
+                  ? 'Haga clic sobre un mueble o presione “Seleccionar” para agregarlo al presupuesto'
+                  : 'Haga clic sobre un mueble o producto y presione “Seleccionar” para agregarlo al presupuesto'}
               </p>
             </div>
           </div>
@@ -197,7 +212,8 @@ export default function ProductSelectorModal({
             </div>
           </div>
 
-          {/* Indices / Categories Horizontal Bar */}
+          {/* Indices / Categories Horizontal Bar (solo en modo 'todos') */}
+          {!esModoBloqueado && (
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
             <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 flex items-center gap-1 shrink-0 font-headline">
               <Tag className="w-3 h-3 text-yeikar-primary" /> Filtro:
@@ -257,6 +273,7 @@ export default function ProductSelectorModal({
               </button>
             ))}
           </div>
+          )}
         </div>
 
         {/* Content Area: Products Grid or Index List */}
@@ -317,7 +334,7 @@ export default function ProductSelectorModal({
                                 : 'bg-amber-100 text-amber-900 border border-amber-200/60'
                             }`}
                           >
-                            {p.es_reventa ? 'Reventa' : 'Fabricado'}
+                            {esItemStock(p) ? 'Reventa' : 'Fabricado'}
                           </span>
                           <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-md">
                             {catName}
@@ -360,7 +377,7 @@ export default function ProductSelectorModal({
                       </div>
 
                       {/* Dimensions info if fabricated */}
-                      {!p.es_reventa && (p.ancho_base || p.largo_base) && (
+                      {!esItemStock(p) && (p.ancho_base || p.largo_base) && (
                         <div className="flex items-center gap-1 text-[11px] text-stone-500 font-mono bg-stone-50 px-2 py-1 rounded-lg border border-stone-100 my-2">
                           <Ruler className="w-3.5 h-3.5 text-yeikar-primary shrink-0" />
                           <span>
@@ -375,7 +392,7 @@ export default function ProductSelectorModal({
                     <div className="pt-3 mt-1 border-t border-stone-100 flex items-center justify-between gap-2">
                       <div>
                         <span className="block text-[9px] uppercase font-bold text-stone-400">
-                          {p.es_reventa ? 'Precio Ref.' : 'Precio Base'}
+                          {esItemStock(p) ? 'Precio Ref.' : 'Precio Base'}
                           {priceInfo?.code ? ` · ${priceInfo.code}` : ''}
                         </span>
                         <span className="font-mono text-xs font-black text-yeikar-secondary">
@@ -458,13 +475,13 @@ export default function ProductSelectorModal({
                                   : 'bg-amber-100 text-amber-900'
                               }`}
                             >
-                              {p.es_reventa ? 'Reventa' : 'Fabricado'}
+                              {esItemStock(p) ? 'Reventa' : 'Fabricado'}
                             </span>
                             <span className="text-stone-600">{catName}</span>
                           </div>
                         </td>
                         <td className="py-3 px-4 font-mono text-stone-600">
-                          {!p.es_reventa && (p.ancho_base || p.largo_base) ? (
+                          {!esItemStock(p) && (p.ancho_base || p.largo_base) ? (
                             <span>
                               {Number(p.ancho_base || 1).toFixed(2)}m × {Number(p.largo_base || 1).toFixed(2)}m
                             </span>
@@ -514,7 +531,7 @@ export default function ProductSelectorModal({
           <div className="flex items-center gap-3">
             <span className="font-medium">
               Mostrando <span className="font-bold text-yeikar-neutral">{filteredProducts.length}</span> de{' '}
-              <span className="font-bold text-yeikar-neutral">{products.length}</span> muebles en catálogo
+              <span className="font-bold text-yeikar-neutral">{products.length}</span> productos en catálogo
             </span>
           </div>
           <button
