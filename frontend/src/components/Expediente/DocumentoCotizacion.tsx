@@ -159,9 +159,14 @@ export default function DocumentoCotizacion({
                     // INSUMO: material vendido suelto (producto_id NULL) — sin
                     // medidas paramétricas; su descripción son las observaciones.
                     const esInsumo = det.tipo_item === 'INSUMO';
+                    // Ítem sin producto ni insumo asociado (importación
+                    // histórica): nombre y descripción se FUSIONAN en un solo
+                    // campo — nunca se muestra "Prod #?".
+                    const sinAsociar = !det.producto_id && !det.material_id;
+                    const textoItem = det.observaciones || det.producto_nombre || 'ÍTEM A MEDIDA';
                     const modelName = det.producto_nombre
-                      || (det.material_id ? `Insumo #${det.material_id}` : `Prod #${det.producto_id ?? '?'}`);
-                    const dims = esInsumo ? null : `${det.ancho ?? 1.0}×${det.largo ?? 1.0} m`;
+                      || (det.material_id ? `Insumo #${det.material_id}` : 'Ítem a medida');
+                    const dims = sinAsociar || esInsumo ? null : `${det.ancho ?? 1.0}×${det.largo ?? 1.0} m`;
                     const desc = [dims, det.observaciones].filter(Boolean).join(' — ');
                     const rowTotal = Number(det.precio) * Number(det.cantidad);
                     const cantTexto = Number(det.cantidad) % 1 === 0
@@ -169,21 +174,42 @@ export default function DocumentoCotizacion({
                       : Number(det.cantidad).toFixed(2);
                     return (
                       <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
-                        <td className="px-3 py-2 font-serif font-bold text-stone-950">
-                          <div className="flex items-center gap-2">
-                            {det.foto && (
-                              <img
-                                src={det.foto || undefined}
-                                alt={modelName}
-                                className="h-16 w-16 rounded-lg object-cover border border-stone-300 shrink-0"
-                                loading="lazy"
-                              />
-                            )}
-                            <span>{modelName}</span>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
-                        <td className="px-3 py-2 text-stone-700 italic font-medium">{desc}</td>
+                        {sinAsociar ? (
+                          <td colSpan={3} className="px-3 py-2 font-serif font-bold text-stone-950">
+                            <div className="flex items-start gap-2">
+                              {det.foto && (
+                                <img
+                                  src={det.foto || undefined}
+                                  alt={textoItem}
+                                  className="h-16 w-16 rounded-lg object-cover border border-stone-300 shrink-0"
+                                  loading="lazy"
+                                />
+                              )}
+                              <span>
+                                <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
+                                {textoItem}
+                              </span>
+                            </div>
+                          </td>
+                        ) : (
+                          <>
+                            <td className="px-3 py-2 font-serif font-bold text-stone-950">
+                              <div className="flex items-center gap-2">
+                                {det.foto && (
+                                  <img
+                                    src={det.foto || undefined}
+                                    alt={modelName}
+                                    className="h-16 w-16 rounded-lg object-cover border border-stone-300 shrink-0"
+                                    loading="lazy"
+                                  />
+                                )}
+                                <span>{modelName}</span>
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
+                            <td className="px-3 py-2 text-stone-700 italic font-medium">{desc}</td>
+                          </>
+                        )}
                         <td className="px-3 py-2 text-right font-mono text-stone-850 font-medium">{formatCurrency(Number(det.precio), moneda)}</td>
                         <td className="px-3 py-2 text-right font-mono font-extrabold text-stone-950">{formatCurrency(rowTotal, moneda)}</td>
                       </tr>

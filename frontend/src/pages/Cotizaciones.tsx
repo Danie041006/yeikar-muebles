@@ -2704,7 +2704,9 @@ export default function Cotizaciones() {
                           : null;
                         return {
                           ...d,
-                          producto_nombre: prod?.nombre ?? mat?.nombre ?? `Prod #${d.producto_id ?? d.material_id ?? '?'}`,
+                          // Sin producto ni insumo (importación histórica): la
+                          // descripción ES el nombre — fusionados en un solo campo.
+                          producto_nombre: prod?.nombre ?? mat?.nombre ?? d.observaciones ?? 'Ítem a medida',
                           foto: prod?.fotos?.[0]?.url ?? null,
                         };
                       }) ?? [],
