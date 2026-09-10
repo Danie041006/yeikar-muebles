@@ -21,8 +21,13 @@ class DetallePedidoBase(BaseModel):
     descripcion_especifica: Optional[str] = None
     observaciones: Optional[str] = None
 
+class DetallePedidoCreate(DetallePedidoBase):
     @model_validator(mode="after")
     def _validate_item(self):
+        # La validación de integridad vive SOLO en el Create: el Response
+        # también debe poder serializar pedidos 100% personalizados
+        # (producto_id NULL, p. ej. notas de entrega históricas o muebles a
+        # medida), que la BD sí permite. Mismo patrón que Cotizaciones.
         if self.tipo_item == "INSUMO":
             if not self.material_id:
                 raise ValueError("material_id es requerido para tipo_item INSUMO")
@@ -32,9 +37,6 @@ class DetallePedidoBase(BaseModel):
             if not self.producto_id:
                 raise ValueError("producto_id es requerido para tipo_item FABRICADO/REVENTA")
         return self
-
-class DetallePedidoCreate(DetallePedidoBase):
-    pass
 
 class DetallePedidoResponse(DetallePedidoBase):
     id: int
