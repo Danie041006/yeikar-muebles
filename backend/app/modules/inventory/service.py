@@ -363,12 +363,15 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         crear_cuenta_desde_entrada(
             db,
             proveedor_id=proveedor_id,
+            material_id=material.id,
             material_nombre=material.nombre,
             cantidad=movimiento.cantidad,
             costo_unitario=movimiento.costo_unitario or Decimal("0.0"),
             llevada=llevada or Decimal("0.0"),
             fecha=datetime.utcnow().date(),
             movimiento_id=db_mov.id,
+            cliente_id=cliente_id,
+            cliente_nombre=cliente_nombre,
             usuario=usuario,
         )
     return db_mov

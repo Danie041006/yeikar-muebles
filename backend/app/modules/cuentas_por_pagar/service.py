@@ -8,6 +8,8 @@ from app.modules.catalogos.model import Moneda, TipoGasto
 from app.modules.cuentas_por_pagar import model, schemas
 from app.modules.gastos.schemas import GastoCreate
 from app.modules.gastos.service import crear_gasto
+from app.modules.productos.model import Material
+from app.modules.clients.model import Client
 from app.modules.proveedores.model import Proveedor
 from app.modules.users.deps import filtrar_registros_propios
 from app.modules.users.model import Usuario
@@ -26,6 +28,21 @@ def _validar_fks(db: Session, proveedor_id: int, tipo_gasto_id: int, moneda_id: 
     if not moneda:
         raise ValueError(f"La moneda con id {moneda_id} no existe.")
     return moneda
+
+
+def _validar_detalles(db: Session, detalles: Optional[list[schemas.DetalleCuentaPorPagarCreate]]) -> Decimal:
+    """Valida los renglones de una deuda (material/cliente existentes si se
+    indican por id) y devuelve la suma de sus totales."""
+    if not detalles:
+        return Decimal("0.0")
+    total = Decimal("0.0")
+    for i, det in enumerate(detalles):
+        if det.material_id is not None and not db.query(Material).filter(Material.id == det.material_id).first():
+            raise ValueError(f"El material con id {det.material_id} del renglón {i + 1} no existe.")
+        if det.cliente_id is not None and not db.query(Client).filter(Client.id == det.cliente_id).first():
+            raise ValueError(f"El cliente con id {det.cliente_id} del renglón {i + 1} no existe.")
+        total += (Decimal(str(det.cantidad)) * Decimal(str(det.precio_unitario))).quantize(Decimal("0.01"))
+    return total
 
 
 def _resolver_tasa(db: Session, moneda: Moneda, fecha: date, tasa_cambio) -> Decimal:
@@ -83,6 +100,8 @@ def obtener_cuenta(db: Session, cxp_id: int, usuario: Optional[Usuario] = None):
         joinedload(model.CuentaPorPagar.proveedor),
         joinedload(model.CuentaPorPagar.moneda),
         joinedload(model.CuentaPorPagar.tipo_gasto),
+        joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.material),
+        joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.cliente),
         joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.metodo_caja),
     ).filter(model.CuentaPorPagar.id == cxp_id)
     if usuario is not None:
@@ -102,6 +121,8 @@ def obtener_cuentas(
         joinedload(model.CuentaPorPagar.proveedor),
         joinedload(model.CuentaPorPagar.moneda),
         joinedload(model.CuentaPorPagar.tipo_gasto),
+        joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.material),
+        joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.cliente),
         joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.metodo_caja),
     )
     if usuario is not None:
@@ -151,21 +172,43 @@ def crear_cuenta(db: Session, datos: schemas.CuentaPorPagarCreate, usuario: Opti
     moneda = _validar_fks(db, datos.proveedor_id, datos.tipo_gasto_id, datos.moneda_id)
     tasa = _resolver_tasa(db, moneda, datos.fecha, datos.tasa_cambio)
 
+    monto = Decimal(str(datos.monto))
+    if datos.detalles:
+        suma_detalles = _validar_detalles(db, datos.detalles)
+        # La cabecera debe cuadrar con sus renglones (tolerancia de centavos).
+        if abs(suma_detalles - monto) > Decimal("0.05"):
+            raise ValueError(
+                f"El monto de la deuda ({monto}) no cuadra con sus renglones (suman {suma_detalles})."
+            )
+
     cxp = model.CuentaPorPagar(
         proveedor_id=datos.proveedor_id,
         tipo_gasto_id=datos.tipo_gasto_id,
         moneda_id=datos.moneda_id,
         fecha=datos.fecha,
         descripcion=datos.descripcion,
-        monto=datos.monto,
+        monto=monto,
         tasa_cambio=tasa,
-        monto_en_moneda_base=(datos.monto * tasa).quantize(Decimal("0.01")),
+        monto_en_moneda_base=(monto * tasa).quantize(Decimal("0.01")),
         estado="PENDIENTE",
         origen_tipo="MANUAL",
         creado_por_id=usuario.id if usuario is not None else None,
     )
     db.add(cxp)
     db.flush()
+    if datos.detalles:
+        for i, det in enumerate(datos.detalles):
+            db.add(model.DetalleCuentaPorPagar(
+                cuenta_por_pagar_id=cxp.id,
+                orden=i,
+                descripcion=det.descripcion,
+                material_id=det.material_id,
+                cantidad=det.cantidad,
+                precio_unitario=det.precio_unitario,
+                cliente_nombre=det.cliente_nombre,
+                cliente_id=det.cliente_id,
+                observaciones=det.observaciones,
+            ))
     _registrar_gasto_deuda(db, cxp, usuario)
     record_event(
         db,
@@ -184,12 +227,15 @@ def crear_cuenta_desde_entrada(
     db: Session,
     *,
     proveedor_id: int,
+    material_id: Optional[int],
     material_nombre: str,
     cantidad: Decimal,
     costo_unitario: Decimal,
     llevada: Decimal,
     fecha: date,
     movimiento_id: int,
+    cliente_id: Optional[int] = None,
+    cliente_nombre: Optional[str] = None,
     usuario=None,
 ) -> model.CuentaPorPagar:
     """Deuda nacida de una entrada de inventario sin pagar ("fiar"): el monto
@@ -215,6 +261,18 @@ def crear_cuenta_desde_entrada(
     )
     db.add(cxp)
     db.flush()
+    # Renglón de la deuda: el material comprado, con el cliente/obra si la
+    # entrada lo traía (p. ej. "madera para la obra del cliente X").
+    db.add(model.DetalleCuentaPorPagar(
+        cuenta_por_pagar_id=cxp.id,
+        orden=0,
+        descripcion=material_nombre,
+        material_id=material_id,
+        cantidad=cantidad,
+        precio_unitario=costo_unitario,
+        cliente_nombre=cliente_nombre,
+        cliente_id=cliente_id,
+    ))
     _registrar_gasto_deuda(db, cxp, usuario)
     return cxp
 

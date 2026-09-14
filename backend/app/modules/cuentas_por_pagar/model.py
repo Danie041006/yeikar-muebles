@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String
+from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Integer, Numeric, ForeignKey, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -40,11 +40,47 @@ class CuentaPorPagar(Base):
     gasto = relationship("Gasto")
     tipo_gasto = relationship("TipoGasto")
     moneda = relationship("Moneda")
+    detalles = relationship("DetalleCuentaPorPagar", back_populates="cuenta_por_pagar",
+                             cascade="all, delete-orphan", order_by="DetalleCuentaPorPagar.orden")
     pagos = relationship("PagoCuentaPorPagar", back_populates="cuenta_por_pagar", cascade="all, delete-orphan")
 
     @property
     def saldo(self) -> Decimal:
         return (Decimal(str(self.monto)) - Decimal(str(self.monto_pagado))).quantize(Decimal("0.01"))
+
+
+class DetalleCuentaPorPagar(Base):
+    """Renglón de una deuda: qué se compró, cuánto, a cuánto, y para quién.
+
+    Permite que una cuenta por pagar muestre el detalle de "qué cosas hacen
+    que uno deba lo que debe" (la hoja de control del proveedor): cada fila
+    es un ítem con cantidad, descripción, precio unitario y cliente/obra
+    destino. El `monto` de la cabecera es la suma de los renglones."""
+    __tablename__ = "detalle_cuenta_por_pagar"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    cuenta_por_pagar_id = Column(BigInteger, ForeignKey("cuenta_por_pagar.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Orden de visualización dentro de la deuda (renglón 1, 2, 3...)
+    orden = Column(Integer, nullable=False, default=0)
+    # Ítem: descripción libre (p. ej. "SOPOLI 90", "TORNILLOS 1\"X 6") o material del catálogo.
+    descripcion = Column(String(250), nullable=True)
+    material_id = Column(BigInteger, ForeignKey("material.id", ondelete="SET NULL"), nullable=True)
+    cantidad = Column(Numeric(12, 2), nullable=False, default=1)
+    precio_unitario = Column(Numeric(15, 2), nullable=False, default=0)
+    # Para quién se compró (cliente/obra). Texto libre: en la hoja de control
+    # son destinos como "FABRICA", "DEPOSITO", "NOCHEROS", "CAMA COMANDANTE".
+    cliente_nombre = Column(String(150), nullable=True)
+    cliente_id = Column(BigInteger, ForeignKey("cliente.id", ondelete="SET NULL"), nullable=True)
+    # Comprobante/nota adicional de la línea (p. ej. "entró el 20/05")
+    observaciones = Column(Text, nullable=True)
+
+    cuenta_por_pagar = relationship("CuentaPorPagar", back_populates="detalles")
+    material = relationship("Material")
+    cliente = relationship("Client")
+
+    @property
+    def total(self) -> Decimal:
+        return (Decimal(str(self.cantidad)) * Decimal(str(self.precio_unitario))).quantize(Decimal("0.01"))
 
 
 class PagoCuentaPorPagar(Base):

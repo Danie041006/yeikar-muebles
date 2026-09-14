@@ -336,12 +336,34 @@ class MaterialReferencia(BaseModel):
     laminas_equivalentes: Optional[float] = None
     costo_por_corte: Optional[float] = None
 
+class FotoReferencia(BaseModel):
+    url: str
+    nombre: Optional[str] = None
+
 class ReferenciaRecetaResponse(BaseModel):
     producto_id: int
     producto_nombre: str
     dimensiones: dict
     seccion_actual: Optional[str] = None
     materiales: List[MaterialReferencia]
+    # ── Contexto para la Hoja de Trabajo (documento imprimible del taller) ──
+    # Sin montos: el operario no necesita costos, solo qué hacer y cómo debe
+    # quedar. Las fotos son URLs públicas (adjuntos tipo PRODUCTO).
+    orden_id: Optional[int] = None
+    pedido_id: Optional[int] = None
+    area_nombre: Optional[str] = None
+    etapa_id: Optional[int] = None
+    etapa_observaciones: Optional[str] = None
+    color: Optional[str] = None
+    acabado: Optional[str] = None
+    descripcion_especifica: Optional[str] = None
+    observaciones_detalle: Optional[str] = None
+    observaciones_pedido: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+    cliente_telefono: Optional[str] = None
+    fecha_entrega_estimada: Optional[str] = None
+    cantidad: Optional[float] = None
+    producto_fotos: List[FotoReferencia] = []
 
 
 # ------------------------------------------------------------

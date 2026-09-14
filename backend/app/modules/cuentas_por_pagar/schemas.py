@@ -32,6 +32,26 @@ class AbonoResponse(AbonoBase):
         from_attributes = True
 
 
+class DetalleCuentaPorPagarCreate(BaseModel):
+    # Renglón de la deuda: qué se compró, a cuánto, y para quién.
+    descripcion: Optional[str] = None
+    material_id: Optional[int] = None
+    cantidad: Decimal = Field(1, gt=0)
+    precio_unitario: Decimal = Field(0, ge=0)
+    cliente_nombre: Optional[str] = None
+    cliente_id: Optional[int] = None
+    observaciones: Optional[str] = None
+
+
+class DetalleCuentaPorPagarResponse(DetalleCuentaPorPagarCreate):
+    id: int
+    orden: int
+    total: Decimal
+
+    class Config:
+        from_attributes = True
+
+
 class CuentaPorPagarBase(BaseModel):
     proveedor_id: int
     tipo_gasto_id: int
@@ -43,7 +63,9 @@ class CuentaPorPagarBase(BaseModel):
 
 
 class CuentaPorPagarCreate(CuentaPorPagarBase):
-    pass
+    # Renglones que componen la deuda. Si se envían, el monto debe ser la
+    # suma de los renglones (se valida en el servicio).
+    detalles: Optional[List[DetalleCuentaPorPagarCreate]] = None
 
 
 class CuentaPorPagarResponse(CuentaPorPagarBase):
@@ -61,6 +83,7 @@ class CuentaPorPagarResponse(CuentaPorPagarBase):
     proveedor: Optional[ProveedorResponse] = None
     moneda: Optional[MonedaResponse] = None
     tipo_gasto: Optional[TipoGastoResponse] = None
+    detalles: List[DetalleCuentaPorPagarResponse] = []
     pagos: List[AbonoResponse] = []
 
     class Config:

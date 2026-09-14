@@ -1,0 +1,32 @@
+# ──────────────────────────────────────────────────────────────────────────
+# YEIKAR API — Caddy: proxy inverso con HTTPS automático
+#
+# La dirección del sitio se lee de la variable API_DOMAIN en .env:
+#   - Producción: API_DOMAIN=api.tudominio.com
+#     → Caddy pide el certificado TLS (candadito 🔒) a Let's Encrypt
+#       automáticamente. No tocas nada más.
+#   - Prueba local: API_DOMAIN=:80
+#     → sirve HTTP puro en localhost, sin TLS (útil antes de tener dominio).
+# ──────────────────────────────────────────────────────────────────────────
+
+{$API_DOMAIN} {
+	# Todo lo que llega a este dominio va al backend FastAPI
+	reverse_proxy backend:8000
+
+	# Comprime las respuestas (menos datos por el móvil)
+	encode zstd gzip
+
+	# Cota del proxy para subidas (comprobantes/fotos). El backend ya limita
+	# a 25 MB por archivo; aquí se replica el límite.
+	request_body {
+		max_size 25MB
+	}
+
+	# Cabeceras de seguridad básicas
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		-Server
+	}
+}

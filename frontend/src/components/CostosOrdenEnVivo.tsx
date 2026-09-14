@@ -10,7 +10,7 @@ import { fmtMoneda } from '../utils/format';
 const MONEDA_BASE = 'COP';
 const BORDE = 'border border-slate-300';
 
-export default function CostosOrdenEnVivo({ data, loading }: { data: CostosEnVivoOrden | null; loading?: boolean }) {
+export default function CostosOrdenEnVivo({ data, loading, compacto = false }: { data: CostosEnVivoOrden | null; loading?: boolean; compacto?: boolean }) {
   if (loading && !data) {
     return (
       <div className="rounded-2xl border border-yeikar-secondary-light/15 bg-white p-6 text-center text-sm text-yeikar-neutral/40">
@@ -27,32 +27,49 @@ export default function CostosOrdenEnVivo({ data, loading }: { data: CostosEnViv
 
   return (
     <div className="rounded-2xl border border-yeikar-secondary-light/15 bg-white overflow-hidden">
-      {/* Encabezado estilo documento */}
-      <div className="bg-gradient-to-r from-yeikar-neutral via-yeikar-secondary to-yeikar-neutral-dark px-5 py-4 text-white">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <p className="font-headline text-base font-black tracking-wide">COMERCIALIZADORA YEIKAR</p>
-            <p className="text-xs font-bold tracking-[0.3em] text-yeikar-primary-light">ESTRUCTURA DE COSTOS EN VIVO</p>
-          </div>
-          <div className="text-right text-sm">
-            <p className="font-mono font-bold text-yeikar-primary-light">ORDEN #{data.orden_id} · {data.estado.replace('_', ' ')}</p>
-            {data.producto_nombre && <p className="font-headline text-base font-black">{data.producto_nombre}</p>}
-            {(data.dimensiones?.ancho != null || data.dimensiones?.largo != null) && (
-              <p className="text-xs text-white/60">
-                {data.dimensiones.ancho ?? '?'} × {data.dimensiones.largo ?? '?'} m
-                {data.unidades > 1 ? ` · ${data.unidades} und` : ''}
-              </p>
-            )}
+      {/* Encabezado estilo documento (el membrete completo se usa fuera del modal de etapa) */}
+      {compacto ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
+          <p className="text-[10px] font-bold font-headline uppercase tracking-wider text-yeikar-neutral/50">
+            Estructura de costos de la orden
+          </p>
+          <p className="font-mono text-xs font-bold text-yeikar-secondary">
+            ORDEN #{data.orden_id} · {data.estado.replace('_', ' ')}
+          </p>
+        </div>
+      ) : (
+        <div className="bg-gradient-to-r from-yeikar-neutral via-yeikar-secondary to-yeikar-neutral-dark px-5 py-4 text-white">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <p className="font-headline text-base font-black tracking-wide">COMERCIALIZADORA YEIKAR</p>
+              <p className="text-xs font-bold tracking-[0.3em] text-yeikar-primary-light">ESTRUCTURA DE COSTOS EN VIVO</p>
+            </div>
+            <div className="text-right text-sm">
+              <p className="font-mono font-bold text-yeikar-primary-light">ORDEN #{data.orden_id} · {data.estado.replace('_', ' ')}</p>
+              {data.producto_nombre && <p className="font-headline text-base font-black">{data.producto_nombre}</p>}
+              {(data.dimensiones?.ancho != null || data.dimensiones?.largo != null) && (
+                <p className="text-xs text-white/60">
+                  {data.dimensiones.ancho ?? '?'} × {data.dimensiones.largo ?? '?'} m
+                  {data.unidades > 1 ? ` · ${data.unidades} und` : ''}
+                </p>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="p-5 space-y-4">
         {vacio ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            Sin consumos ni mano de obra registrados aún. Al registrar materiales y mano de obra, aquí verás el
-            desglose por sección como en el Excel.
-          </div>
+          compacto ? (
+            <p className="text-xs text-yeikar-neutral/50 italic text-center py-2">
+              Sin consumos ni mano de obra en la orden todavía — el desglose por sección aparecerá aquí al registrar el primer movimiento.
+            </p>
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Sin consumos ni mano de obra registrados aún. Al registrar materiales y mano de obra, aquí verás el
+              desglose por sección como en el Excel.
+            </div>
+          )
         ) : (
           data.secciones.map((sec) => (
             <div key={sec.nombre} className="overflow-x-auto">

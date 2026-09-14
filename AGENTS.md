@@ -75,6 +75,7 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 - Product recipe stored in `producto_material` with `seccion` field (EBANISTERIA, TAPICERIA, PINTURA, etc.)
 - Recipe quantities scale via `tipo_escala` (FIJO, LINEAL, AREA, ESPACIADO, POR_RANGO, FORMULA) — logic in `cost_service.py`
 - Stage modal loads reference recipe from `GET /produccion/etapa/{id}/referencia-receta`
+- Botón "Hoja de Trabajo" en el modal de etapa → documento imprimible por área (`DocumentoHojaTrabajo.tsx`, SIN montos, foto grande del mueble, observaciones destacadas, materiales con casillas). Genera PDF via `utils/pdfCaptura.ts` (tubería html2canvas→jsPDF con saltos inteligentes `data-pdf-item`; reutilizable para otros documentos). La receta de referencia funciona también para órdenes EXHIBICION/STOCK (producto de la orden, sin detalle de pedido)
 
 ## Product recipe / cost system
 
@@ -128,3 +129,9 @@ docker compose up -d --build    # builds backend + frontend + db
 - Production se despliega AUTOMÁTICAMENTE en cada `git push` a `main` (GitHub integrado con Vercel). No hace falta `vercel --prod`.
 - Dos proyectos conectados al mismo repo: `yeikar-api` (root dir `backend`, Python) y `yeikar-web` (root dir `frontend`, Vite). Cada push dispara ambos.
 - URLs: https://yeikar-api.vercel.app y https://yeikar-web.vercel.app
+
+## Migración a VPS (en curso)
+
+- El plan es: frontend sigue en Vercel; backend + BD migran a un VPS Contabo con Caddy (TLS) y backups offsite a Cloudflare R2.
+- Guía completa paso a paso (modo principiante): `DEPLOY.md`
+- El `docker-compose.yml` ya soporta el VPS: servicio `caddy` (dominio via `API_DOMAIN` en `.env`, `:80` en local), red con subnet fija (Caddy IP 10.200.0.10 → `FORWARDED_ALLOW_IPS`), `backup` con script verificado (`scripts/backup.sh`) y `offsite-sync` a R2 (`scripts/offsite-sync.sh`, inactivo sin credenciales).

@@ -109,7 +109,9 @@ function SeccionCotizacion({ cot }: { cot?: CotizacionExp | null }) {
         <tbody className="divide-y divide-yeikar-secondary-light/5">
           {cot.detalles.map((d, i) => (
             <tr key={i}>
-              <td className={`${tablaTd} whitespace-normal font-semibold`}>{d.producto_nombre || `Producto #${d.producto_id}`}</td>
+              <td className={`${tablaTd} whitespace-normal font-semibold`}>
+                {d.producto_nombre || d.observaciones || (d.producto_id ? `Producto #${d.producto_id}` : 'Ítem a medida')}
+              </td>
               <td className={`${tablaTd} text-right`}>{d.cantidad}</td>
               <td className={`${tablaTd} text-right`}>{dinero(d.precio, cot.moneda)}</td>
               <td className={`${tablaTd} text-right font-bold`}>{dinero(d.precio * d.cantidad, cot.moneda)}</td>
@@ -154,7 +156,9 @@ function SeccionPedido({ exp }: { exp: Expediente }) {
         <tbody className="divide-y divide-yeikar-secondary-light/5">
           {exp.detalles_pedido.map((d) => (
             <tr key={d.id}>
-              <td className={`${tablaTd} whitespace-normal font-semibold`}>{d.producto_nombre || `Producto #${d.producto_id}`}</td>
+              <td className={`${tablaTd} whitespace-normal font-semibold`}>
+                {d.producto_nombre || d.descripcion_especifica || (d.producto_id ? `Producto #${d.producto_id}` : 'Ítem a medida')}
+              </td>
               <td className={`${tablaTd} text-right`}>{d.cantidad}</td>
               <td className={`${tablaTd} text-right`}>{dinero(d.precio)}</td>
               <td className={`${tablaTd} text-right`}>{dinero(d.costo_unitario)}</td>
@@ -271,7 +275,7 @@ function SeccionProduccion({ detalles }: { detalles: Expediente['detalles_pedido
               <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                 <div>
                   <p className="font-headline font-bold text-sm text-yeikar-secondary">
-                    {d.producto_nombre || `Producto #${d.producto_id}`}
+                    {d.producto_nombre || d.descripcion_especifica || (d.producto_id ? `Producto #${d.producto_id}` : 'Ítem a medida')}
                     <span className="text-yeikar-neutral/45 font-mono text-xs ml-2">x{d.cantidad}</span>
                   </p>
                   <p className="text-[11px] text-yeikar-neutral/55 font-mono">

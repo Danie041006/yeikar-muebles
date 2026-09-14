@@ -965,29 +965,46 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
     ESPACIADO/POR_RANGO/...), usando el mismo motor de costeo paramétrico
     de `cost_service` (antes se mostraba cantidad_base sin escalar, lo que
     confundía al operario con materiales variables como la pintura).
+
+    Además devuelve el contexto completo para la HOJA DE TRABAJO (documento
+    imprimible del taller, sin montos): fotos del producto, cliente, N° de
+    pedido/orden, color/acabado, observaciones y fecha de entrega. Funciona
+    también para órdenes sin pedido (EXHIBICION/STOCK): en ese caso el
+    producto sale de la propia orden y las dimensiones son las base (o las
+    copiadas a la orden).
     """
     from app.modules.productos.model import Material as MatModel
 
     etapa = _scope_stages(
         db.query(EtapaProduccion).options(
             joinedload(EtapaProduccion.area),
-            joinedload(EtapaProduccion.orden).joinedload(OrdenProduccion.detalle_pedido).joinedload(DetallePedido.producto)
+            joinedload(EtapaProduccion.orden).joinedload(OrdenProduccion.detalle_pedido).joinedload(DetallePedido.producto),
+            joinedload(EtapaProduccion.orden).joinedload(OrdenProduccion.producto),
+            joinedload(EtapaProduccion.orden).joinedload(OrdenProduccion.detalle_pedido).joinedload(DetallePedido.pedido).joinedload(Pedido.cliente),
         ).filter(EtapaProduccion.id == id_etapa),
         usuario,
     ).first()
 
-    if not etapa or not etapa.orden or not etapa.orden.detalle_pedido:
+    if not etapa or not etapa.orden:
         return None
 
-    detalle = etapa.orden.detalle_pedido
-    producto = detalle.producto
+    orden = etapa.orden
+    detalle = orden.detalle_pedido
+    pedido = detalle.pedido if detalle else None
+    producto = detalle.producto if detalle else orden.producto
     if not producto:
         return None
 
     ancho_base = Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")
     largo_base = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
-    nuevo_ancho = Decimal(str(detalle.ancho)) if detalle.ancho else ancho_base
-    nuevo_largo = Decimal(str(detalle.largo)) if detalle.largo else largo_base
+    if detalle:
+        nuevo_ancho = Decimal(str(detalle.ancho)) if detalle.ancho else ancho_base
+        nuevo_largo = Decimal(str(detalle.largo)) if detalle.largo else largo_base
+    else:
+        # Orden sin pedido (EXHIBICION/STOCK): dimensiones copiadas a la orden
+        # o, en su defecto, las base del producto.
+        nuevo_ancho = Decimal(str(orden.ancho)) if orden.ancho else ancho_base
+        nuevo_largo = Decimal(str(orden.largo)) if orden.largo else largo_base
     area_base = ancho_base * largo_base
     area_nueva = nuevo_ancho * nuevo_largo
 
@@ -1032,6 +1049,15 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
                 item["costo_por_corte"] = float(laminas_motor.costo_por_corte(mat.costo_base, area_corte, area_lamina)) if area_lamina > 0 else float(mat.costo_base)
         materiales.append(item)
 
+    # producto.fotos entrega dicts ({id, nombre, mime, tamano, url}) — igual
+    # que _foto_crudo. Normalizamos por si algún día devolviera objetos.
+    def _campo(f, clave):
+        return f.get(clave) if isinstance(f, dict) else getattr(f, clave, None)
+
+    fotos = [{"url": _campo(f, "url"), "nombre": _campo(f, "nombre")} for f in (producto.fotos or [])]
+    fotos = [f for f in fotos if f["url"]]
+    cliente = pedido.cliente if pedido else None
+
     return {
         "producto_id": producto.id,
         "producto_nombre": producto.nombre,
@@ -1041,6 +1067,22 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         },
         "seccion_actual": _normalizar_seccion(etapa.area.nombre) if etapa.area else None,
         "materiales": materiales,
+        # Contexto para la Hoja de Trabajo
+        "etapa_id": etapa.id,
+        "orden_id": orden.id,
+        "pedido_id": pedido.id if pedido else None,
+        "area_nombre": etapa.area.nombre if etapa.area else None,
+        "etapa_observaciones": etapa.observaciones,
+        "color": detalle.color if detalle else None,
+        "acabado": detalle.acabado if detalle else None,
+        "descripcion_especifica": detalle.descripcion_especifica if detalle else None,
+        "observaciones_detalle": detalle.observaciones if detalle else None,
+        "observaciones_pedido": pedido.observaciones if pedido else None,
+        "cliente_nombre": cliente.nombre if cliente else None,
+        "cliente_telefono": cliente.telefono if cliente else None,
+        "fecha_entrega_estimada": str(pedido.fecha_entrega_estimada) if pedido and pedido.fecha_entrega_estimada else None,
+        "cantidad": float(detalle.cantidad) if detalle else 1.0,
+        "producto_fotos": fotos,
     }
 
 
