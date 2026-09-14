@@ -1,0 +1,30 @@
+{
+  "id": "N32",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-01-23",
+  "cliente": {
+    "nombre": "EDDY DELGADO",
+    "rif_cedula": "V-10.158.153",
+    "direccion": "SAN CRISTOBAL",
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "CANAPE DE 2 PTS MARRON TELA ROSADA CORTARLO A LA MEDIDA DE 2.10", "precio_unitario": 744, "precio_total_impreso": 744 },
+    { "cantidad": 1, "descripcion": "SOFA DE 3 PTOS Y TAPIZADO EN TELA FRAGANCIA CHOCOLATE 3.10 GSM TEXTIL PASTO TODO CAPITONEADO.", "precio_unitario": 498, "precio_total_impreso": 498 },
+    { "cantidad": 1, "descripcion": "POLTRONA CON SU PUFF EN COLOR CUERO VERDE", "precio_unitario": 1497, "precio_total_impreso": 1497 },
+    { "cantidad": 5, "descripcion": "COJINES EN COLOR VERDE DIOR VERDE", "precio_unitario": 0, "precio_total_impreso": 0, "observaciones": "OBSEQUIO" },
+    { "cantidad": 1, "descripcion": "JUEGO DE SALA DE SOFA DE 3 PUESTOS Y DE 2 PUESTOS.", "precio_unitario": 0, "precio_total_impreso": 0, "observaciones": "OBSEQUIO" }
+  ],
+  "total_declarado": 2739,
+  "abonos": [
+    { "fecha": "2025-11-21", "metodo": "EFECTIVO", "monto": 36, "origen": "IMPRESO", "detalle": "ABONO DEL RESTANTE DE LOS 1.600" },
+    { "fecha": "2026-04-01", "metodo": "DEVOLUCION", "monto": 1840, "origen": "IMPRESO", "detalle": "ABONO DE LA DEVOLUCION DEL JUEGO DE SALA COMPLETO DE LA FECHA 06/09/2025" }
+  ],
+  "saldo_impreso": 863,
+  "saldo_final_manuscrito": 863,
+  "saldo_confirmado_por_dueno": 863,
+  "reconciliacion": { "suma_items": 2739, "suma_abonos": 1876, "total_menos_abonos": 863, "cuadra": true },
+  "saldo_para_importar": 863
+}

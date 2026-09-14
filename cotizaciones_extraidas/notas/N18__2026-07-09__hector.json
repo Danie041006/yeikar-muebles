@@ -1,0 +1,37 @@
+{
+  "id": "N18",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-07-09",
+  "cliente": {
+    "nombre": "HECTOR",
+    "rif_cedula": "C.I.V (sin número en la nota)",
+    "direccion": "SAN CRISTOBAL TACHIRA",
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "COLCHON DALLAS DE 1 PILLOW 1.40", "observaciones": null, "precio_unitario": 293, "precio_total_impreso": 293 }
+  ],
+  "total_declarado": 293,
+  "abonos": [
+    { "fecha": "2026-07-27", "metodo": "EFECTIVO", "monto": 150, "origen": "MANUSCRITO" }
+  ],
+  "saldo_impreso": 143,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": 143,
+  "fecha_entrega": "2026-07-10",
+  "entrega_impresa": "ENTREGADO EL 10/07/2026 (impreso)",
+  "reconciliacion": {
+    "suma_items_impresos": 293,
+    "suma_items_con_multiplicacion_real": 293,
+    "suma_abonos_total": 150,
+    "total_menos_abonos": 143,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "Cliente sin teléfono en la nota; RIF dice 'C.I.V' sin número."
+  ],
+  "saldo_para_importar": 143
+}

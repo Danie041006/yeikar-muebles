@@ -226,3 +226,71 @@ def test_venta_exhibicion_reporta_costo_real(client, db, cleaner):
         "SELECT cantidad FROM producto_inventario WHERE producto_id = :p AND ubicacion_id = :u"
     ), {"p": pieza["id"], "u": ubi}).scalar()
     assert float(restante) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# 4. Receta de referencia (hoja de trabajo) para una orden SIN pedido:
+#    antes devolvía 404 siempre que la orden no tuviera detalle de pedido;
+#    ahora toma el producto de la propia orden (EXHIBICION/STOCK) y expone
+#    el contexto del documento (orden_id, dims base, fotos, seccion).
+# ---------------------------------------------------------------------------
+def test_referencia_receta_orden_sin_pedido(client, db, cleaner):
+    from helpers_e2e import area_id as _area_id, crear_empleado
+
+    pieza = crear_producto_exhibicion(client, cleaner)  # base 1.60 × 1.90
+    orden = crear_orden(client, cleaner, {
+        "estado": "PENDIENTE", "es_stock": True, "producto_id": pieza["id"],
+    })
+    emp = crear_empleado(client, cleaner)
+    etapa = crear_etapa(client, cleaner, orden["id"], _area_id(db, "Ebanistería"), emp["id"])
+
+    r = client.get(f"/api/v1/produccion/etapa/{etapa['id']}/referencia-receta",
+                   headers=ADMIN_HEADERS)
+    assert r.status_code == 200, f"referencia-receta (sin pedido) → {r.status_code}: {r.text}"
+    data = r.json()
+
+    assert data["orden_id"] == orden["id"]
+    assert data["pedido_id"] is None
+    assert data["seccion_actual"] == "EBANISTERIA"
+    # Sin detalle de pedido: cae a las dimensiones base del producto
+    assert data["dimensiones"]["ancho"] == 1.60
+    assert data["dimensiones"]["largo"] == 1.90
+    assert data["producto_fotos"] == []
+
+
+# ---------------------------------------------------------------------------
+# 5. Regresión: la receta de referencia con producto CON FOTO debe responder
+#    200 (antes explotaba con 500: producto.fotos entrega dicts, no objetos).
+#    Este caso alimenta la Hoja de Trabajo del Kanban.
+# ---------------------------------------------------------------------------
+def test_referencia_receta_con_foto_del_producto(client, db, cleaner):
+    import uuid as _uuid
+    from helpers_e2e import area_id as _area_id, crear_empleado
+
+    pieza = crear_producto_exhibicion(client, cleaner)
+    # Adjunto PRODUCTO real (misma vía que el alta de piezas: uuid público)
+    db.execute(text(
+        "INSERT INTO adjunto (entidad_tipo, entidad_id, uuid, nombre_original, mime, tamano, archivo) "
+        "VALUES ('PRODUCTO', :p, :u, 'foto.webp', 'image/webp', 4, :b)"
+    ), {"p": pieza["id"], "u": str(_uuid.uuid4()), "b": b"abcd"})
+    db.commit()
+    aid = db.execute(text(
+        "SELECT id FROM adjunto WHERE entidad_tipo = 'PRODUCTO' AND entidad_id = :p"
+    ), {"p": pieza["id"]}).scalar()
+    cleaner.registrar("adjunto", int(aid))
+
+    orden = crear_orden(client, cleaner, {
+        "estado": "PENDIENTE", "es_stock": True, "producto_id": pieza["id"],
+    })
+    emp = crear_empleado(client, cleaner)
+    etapa = crear_etapa(client, cleaner, orden["id"], _area_id(db, "Ebanistería"), emp["id"])
+
+    r = client.get(f"/api/v1/produccion/etapa/{etapa['id']}/referencia-receta",
+                   headers=ADMIN_HEADERS)
+    assert r.status_code == 200, (
+        f"con foto del producto debe ser 200 → {r.status_code}: {r.text}"
+    )
+    data = r.json()
+    fotos = data["producto_fotos"]
+    assert len(fotos) == 1, f"debe exponer la foto del producto: {data}"
+    assert fotos[0]["url"].startswith("/api/v1/adjunto/publico/"), fotos

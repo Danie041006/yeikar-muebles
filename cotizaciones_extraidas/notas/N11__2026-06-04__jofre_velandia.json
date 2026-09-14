@@ -1,0 +1,41 @@
+{
+  "id": "N11",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-06-04",
+  "cliente": {
+    "nombre": "JOFRE VELANDIA",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 2, "descripcion": "POLTRONAS MODELO MINIMALISTA", "observaciones": null, "precio_unitario": 420, "precio_total_impreso": 840 },
+    { "cantidad": 1, "descripcion": "POLTRONA MODELO RIHAB", "observaciones": null, "precio_unitario": 330, "precio_total_impreso": 330 }
+  ],
+  "total_declarado": 1170,
+  "abonos": [
+    { "fecha": "2026-06-04", "metodo": "BANCOLOMBIA", "monto": 83, "origen": "IMPRESO", "detalle_literal": "fecha impresa parcial '?/6/2026'" },
+    { "fecha": "2026-08-08", "metodo": "EFECTIVO", "monto": 469, "origen": "MANUSCRITO", "detalle_literal": "?08|2026 Abono 1.500.000/3200 = 469" }
+  ],
+  "saldo_impreso": 1087,
+  "saldo_final_manuscrito": 618,
+  "saldo_confirmado_por_dueno": 618,
+  "fecha_entrega": "2026-08-08",
+  "entrega_impresa": "Entregado A/08/2026 (manuscrito ilegible)",
+  "reconciliacion": {
+    "suma_items_impresos": 1170,
+    "suma_items_con_multiplicacion_real": 1170,
+    "suma_abonos_total": 552,
+    "total_menos_abonos": 618,
+    "coincide_con_saldo_final_manuscrito": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "Fecha del abono impreso BANCOLOMBIA parcial ('?/6/2026'): se asume la fecha de la nota (4/6/2026).",
+    "Fecha manuscrita del abono de $469 ilegible ('?08|2026'): se importa como 8/08/2026 (coincide con la fecha de entrega manuscrita).",
+    "Cliente sin RIF, dirección ni teléfono en la nota."
+  ],
+  "saldo_para_importar": 618
+}

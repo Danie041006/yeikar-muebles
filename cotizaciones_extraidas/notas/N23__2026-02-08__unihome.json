@@ -1,0 +1,35 @@
+{
+  "id": "N23",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-02-08",
+  "cliente": {
+    "nombre": "UNIHOME",
+    "rif_cedula": "J-50048892-2",
+    "direccion": "CALLE 6 LOCAL N+42 CENTRO SAN FELIX",
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "SALDO DE LA CUENTA NUEVA", "observaciones": null, "precio_unitario": 33330, "precio_total_impreso": 33330 },
+    { "cantidad": 1, "descripcion": "SALDO DE LA CUENTA NUEVA", "observaciones": null, "precio_unitario": 25845, "precio_total_impreso": 25845 }
+  ],
+  "total_declarado": 59175,
+  "abonos": [],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 33995,
+  "saldo_confirmado_por_dueno": 33995,
+  "reconciliacion": {
+    "suma_items_impresos": 59175,
+    "suma_items_con_multiplicacion_real": 59175,
+    "pagado_consolidado_para_importar": 25180,
+    "total_menos_pagado_consolidado": 33995
+  },
+  "inconsistencias": [
+    "El detalle de abonos/ajustes de la nota no cierra de forma confiable con el saldo final manuscrito. Se respeta el saldo confirmado por el dueño: $33.995 USD; se registra pago consolidado de $25.180 USD y se conserva la explicación en la venta."
+  ],
+  "dudas": [
+    "Cliente sin teléfono visible en la nota."
+  ],
+  "saldo_para_importar": 33995
+}

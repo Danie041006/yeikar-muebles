@@ -1,0 +1,29 @@
+{
+  "id": "N38",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2025-11-04",
+  "fecha_entrega": "2025-11-04",
+  "cliente": {
+    "nombre": "SARGENTO CACERES",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null,
+    "observaciones_cliente": "Sargento Castro (paga)"
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "MANO DE OBRA", "precio_unitario": 567420, "precio_total_impreso": 567420 },
+    { "cantidad": 6, "descripcion": "BISAGRAS", "precio_unitario": 11500, "precio_total_impreso": 69000 },
+    { "cantidad": 3, "descripcion": "MANIJAS", "precio_unitario": 5000, "precio_total_impreso": 15000 },
+    { "cantidad": 1, "descripcion": "LAMINA", "precio_unitario": 330000, "precio_total_impreso": 330000 },
+    { "cantidad": 3, "descripcion": "CORREDERAS", "precio_unitario": 11000, "precio_total_impreso": 33000 }
+  ],
+  "total_declarado": 1014420,
+  "abonos": [],
+  "saldo_impreso": 1014420,
+  "saldo_final_manuscrito": 1014420,
+  "saldo_confirmado_por_dueno": 1014420,
+  "reconciliacion": { "suma_items": 1014420, "suma_abonos": 0, "total_menos_abonos": 1014420, "cuadra": true },
+  "saldo_para_importar": 1014420
+}

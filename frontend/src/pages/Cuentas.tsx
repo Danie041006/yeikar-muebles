@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   cuentasService, ResumenCuenta, MovimientoCaja, Moneda,
   MovimientoCreate, MetodoCaja, TransferenciaPayload,
@@ -48,6 +48,15 @@ const emptyTransferForm = () => ({
   observaciones: '',
 });
 
+function DetalleFila({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[130px_1fr] gap-3 items-baseline">
+      <dt className="font-mono text-[10px] uppercase tracking-wider text-yeikar-neutral/40">{label}</dt>
+      <dd className="break-words whitespace-pre-line text-sm text-yeikar-neutral/90">{children}</dd>
+    </div>
+  );
+}
+
 export default function Cuentas() {
   const [resumen, setResumen] = useState<ResumenCuenta[]>([]);
   const [movimientos, setMovimientos] = useState<MovimientoCaja[]>([]);
@@ -72,6 +81,7 @@ export default function Cuentas() {
   const [fechaHasta, setFechaHasta] = useState('');
 
   const [confirmAccion, setConfirmAccion] = useState<null | { tipo: 'cuenta' | 'movimiento'; id: number; nombre?: string }>(null);
+  const [detalleMov, setDetalleMov] = useState<MovimientoCaja | null>(null);
 
   const cargarTodo = useCallback(async () => {
     setLoading(true);
@@ -273,14 +283,19 @@ export default function Cuentas() {
 
   const renderAccionesMov = (m: MovimientoCaja) => (
     <>
-      <Button variant="ghost" size="sm" className="text-yeikar-primary-dark" onClick={() => abrirMovimiento(m.metodo_caja_id, m)}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="text-yeikar-primary-dark"
+        onClick={(e) => { e.stopPropagation(); abrirMovimiento(m.metodo_caja_id, m); }}
+      >
         Editar
       </Button>
       <Button
         variant="ghost"
         size="sm"
         className="text-red-600 hover:text-red-700 hover:bg-red-50"
-        onClick={() => setConfirmAccion({ tipo: 'movimiento', id: m.id })}
+        onClick={(e) => { e.stopPropagation(); setConfirmAccion({ tipo: 'movimiento', id: m.id }); }}
       >
         Eliminar
       </Button>
@@ -470,6 +485,7 @@ export default function Cuentas() {
             columns={movColumns}
             rows={movimientos}
             rowKey={(m) => m.id}
+            onRowClick={(m) => setDetalleMov(m)}
             cardBadge={(m) => <Badge tone={TIPO_TONE[m.tipo] ?? 'neutral'}>{m.tipo}</Badge>}
             tableActions={renderAccionesMov}
             cardActions={renderAccionesMov}
@@ -743,6 +759,74 @@ export default function Cuentas() {
             />
           </Field>
         </div>
+      </Modal>
+
+      {/* Detalle del movimiento */}
+      <Modal
+        open={detalleMov !== null}
+        onClose={() => setDetalleMov(null)}
+        title="Detalle del Movimiento"
+        subtitle={detalleMov ? `${detalleMov.metodo_caja?.nombre ?? '-'} · ${detalleMov.fecha.slice(0, 10)}` : undefined}
+        size="md"
+        footer={<Button variant="outline" onClick={() => setDetalleMov(null)}>Cerrar</Button>}
+      >
+        {detalleMov && (
+          <div className="space-y-5">
+            <div className="rounded-xl border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-yeikar-neutral/45">
+                  {detalleMov.metodo_caja?.codigo ?? ''}
+                </span>
+                <Badge tone={TIPO_TONE[detalleMov.tipo] ?? 'neutral'}>{detalleMov.tipo}</Badge>
+              </div>
+              <p className="mt-2 font-mono text-3xl font-bold text-yeikar-secondary">
+                {monedaDe(detalleMov.moneda_id)?.simbolo ?? ''}{fmt(Number(detalleMov.monto))}
+                <span className="ml-1.5 text-sm font-normal text-yeikar-neutral/50">
+                  {monedaDe(detalleMov.moneda_id)?.codigo ?? ''}
+                </span>
+              </p>
+              <p className="mt-1 text-sm text-yeikar-neutral/55">
+                ≈ <span className="font-mono font-semibold text-yeikar-primary-dark">${fmt(Number(detalleMov.monto_en_moneda_base))}</span> COP
+                {Number(detalleMov.tasa_cambio) !== 1 && (
+                  <span className="ml-1.5 font-mono text-xs text-yeikar-neutral/40">tasa {Number(detalleMov.tasa_cambio)}</span>
+                )}
+              </p>
+            </div>
+
+            <dl className="space-y-3">
+              <DetalleFila label="Cuenta">
+                {detalleMov.metodo_caja?.nombre ?? '-'}
+                <span className="ml-1 font-mono text-xs text-yeikar-neutral/40">
+                  {monedaDe(detalleMov.metodo_caja?.moneda_id ?? detalleMov.moneda_id)?.codigo ?? ''}
+                </span>
+              </DetalleFila>
+              <DetalleFila label="Fecha">
+                <span className="font-mono">{detalleMov.fecha.slice(0, 10)}</span>
+              </DetalleFila>
+              <DetalleFila label="Registrado">
+                {detalleMov.created_at
+                  ? new Date(detalleMov.created_at).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' })
+                  : '—'}
+              </DetalleFila>
+              <DetalleFila label="Responsable">
+                {detalleMov.usuario?.nombre_usuario ?? (detalleMov.usuario_id ? `Usuario #${detalleMov.usuario_id}` : 'Sistema')}
+              </DetalleFila>
+              <DetalleFila label="Referencia">
+                {detalleMov.referencia || '—'}
+              </DetalleFila>
+              <DetalleFila label="Observaciones">
+                {detalleMov.observaciones || '—'}
+              </DetalleFila>
+              {(detalleMov.pago_id || detalleMov.transferencia_id) && (
+                <DetalleFila label="Origen">
+                  {detalleMov.pago_id
+                    ? `Cobro de venta · pago #${detalleMov.pago_id}`
+                    : `Transferencia #T${detalleMov.transferencia_id} (sale de una cuenta y entra en la otra)`}
+                </DetalleFila>
+              )}
+            </dl>
+          </div>
+        )}
       </Modal>
 
       <ConfirmDialog

@@ -1,0 +1,25 @@
+{
+  "id": "N42",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2025-08-20",
+  "fecha_entrega": "2025-08-20",
+  "cliente": {
+    "nombre": "YORLEDY FARFAN",
+    "rif_cedula": null,
+    "direccion": "LAS COMUNAS, UREÑA ESTADO TACHIRA",
+    "telefono": "0424-7188814"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "SOMIER MATRIMONIAL DE 1.40 TAPIZADO EN TELA GRIS.", "precio_unitario": 200, "precio_total_impreso": 200 },
+    { "cantidad": 1, "descripcion": "COLCHON VEGA SEMI ORTOPEDICO 1.40", "precio_unitario": 188, "precio_total_impreso": 188 }
+  ],
+  "total_declarado": 388,
+  "abonos": [],
+  "saldo_impreso": 388,
+  "saldo_final_manuscrito": 388,
+  "saldo_confirmado_por_dueno": 388,
+  "reconciliacion": { "suma_items": 388, "suma_abonos": 0, "total_menos_abonos": 388, "cuadra": true },
+  "saldo_para_importar": 388
+}

@@ -5,7 +5,7 @@ import {
 } from '../services/gastoService';
 import { cuentasService, ResumenCuenta } from '../services/cuentasService';
 import {
-  cuentasPorPagarService, CuentaPorPagar, ResumenCuentasPorPagar, Abono,
+  cuentasPorPagarService, CuentaPorPagar, ResumenCuentasPorPagar, Abono, DetalleCuentaPorPagar, DetalleCuentaPorPagarCreate,
 } from '../services/cuentasPorPagarService';
 import { nombreMoneda, fmtMoneda } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
@@ -69,6 +69,7 @@ export default function Gastos() {
     fecha: hoy(),
     monto: 0,
     descripcion: '',
+    detalles: [] as DetalleCuentaPorPagarCreate[],
   });
   const [abonoForm, setAbonoForm] = useState({
     fecha: hoy(),
@@ -200,6 +201,14 @@ export default function Gastos() {
     if (!deudaForm.proveedor_id || !deudaForm.tipoTexto.trim() || !deudaForm.monto || deudaForm.monto <= 0) {
       return;
     }
+    // Si hay renglones, el monto debe cuadrar con su suma.
+    const sumaDetalles = deudaForm.detalles
+      .reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.precio_unitario) || 0), 0);
+    const hayDetalles = deudaForm.detalles.length > 0;
+    if (hayDetalles && Math.abs(sumaDetalles - Number(deudaForm.monto)) > 0.05) {
+      toast.error(`El monto (${deudaForm.monto}) no cuadra con los renglones (suman ${Math.round(sumaDetalles * 100) / 100}).`);
+      return;
+    }
     try {
       const tipo_gasto_id = await resolverTipoGasto(deudaForm.tipoTexto);
       await cuentasPorPagarService.create({
@@ -209,14 +218,39 @@ export default function Gastos() {
         fecha: deudaForm.fecha,
         descripcion: deudaForm.descripcion.trim() || null,
         monto: deudaForm.monto,
+        detalles: hayDetalles ? deudaForm.detalles : undefined,
       });
       setShowDeudaModal(false);
-      setDeudaForm({ proveedor_id: 0, tipoTexto: '', moneda_id: 1, fecha: hoy(), monto: 0, descripcion: '' });
+      setDeudaForm({ proveedor_id: 0, tipoTexto: '', moneda_id: 1, fecha: hoy(), monto: 0, descripcion: '', detalles: [] });
       cargarPorPagar();
       toast.success('Deuda registrada. Aparecerá en Por Pagar.');
     } catch (e: any) {
       toast.error(e?.response?.data?.detail || 'No se pudo registrar la deuda.');
     }
+  };
+
+  // ── Por Pagar: edición de renglones de la deuda ──
+  const actualizarDetalle = (idx: number, campo: keyof DetalleCuentaPorPagarCreate, valor: number | string) => {
+    setDeudaForm((prev) => {
+      const detalles = prev.detalles.map((d, i) => (i === idx ? { ...d, [campo]: valor } : d));
+      const suma = detalles.reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.precio_unitario) || 0), 0);
+      return { ...prev, detalles, monto: Math.round(suma * 100) / 100 };
+    });
+  };
+
+  const agregarDetalle = () => {
+    setDeudaForm((prev) => ({
+      ...prev,
+      detalles: [...prev.detalles, { descripcion: '', cantidad: 1, precio_unitario: 0, cliente_nombre: '' }],
+    }));
+  };
+
+  const quitarDetalle = (idx: number) => {
+    setDeudaForm((prev) => {
+      const detalles = prev.detalles.filter((_, i) => i !== idx);
+      const suma = detalles.reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.precio_unitario) || 0), 0);
+      return { ...prev, detalles, monto: Math.round(suma * 100) / 100 };
+    });
   };
 
   // ── Por Pagar: abonar (parcial o pago completo) ──
@@ -334,6 +368,12 @@ export default function Gastos() {
         <Button variant="ghost" size="sm" className="text-yeikar-secondary hover:bg-yeikar-tertiary/40"
           onClick={() => setHistorialDeuda(d)}>
           Historial ({d.pagos.length})
+        </Button>
+      )}
+      {(d.detalles && d.detalles.length > 0) && (
+        <Button variant="ghost" size="sm" className="text-yeikar-secondary hover:bg-yeikar-tertiary/40"
+          onClick={() => setHistorialDeuda(d)}>
+          Detalle ({d.detalles.length})
         </Button>
       )}
       <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50"
@@ -1113,6 +1153,69 @@ export default function Gastos() {
               />
             </Field>
           </div>
+
+          {/* ── Renglones de la deuda (qué se compró y para quién) ── */}
+          <div className="col-span-2 rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-yeikar-secondary">Detalle de la deuda (renglones)</p>
+              <Button size="sm" variant="outline" onClick={agregarDetalle}>+ Agregar renglón</Button>
+            </div>
+            {deudaForm.detalles.length === 0 ? (
+              <p className="text-[11px] text-yeikar-neutral/50 italic">
+                Sin renglones: la deuda se registra con el monto solo. Si agregas renglones, cada uno dirá
+                qué se compró, a cuánto y para qué cliente/obra.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {deudaForm.detalles.map((d, idx) => (
+                  <div key={idx} className="grid grid-cols-1 sm:grid-cols-[1fr_80px_120px_1fr_32px] gap-2 items-end">
+                    <Field label={idx === 0 ? 'Descripción' : ''}>
+                      <Input
+                        type="text"
+                        value={d.descripcion || ''}
+                        onChange={(e) => actualizarDetalle(idx, 'descripcion', e.target.value)}
+                        placeholder='Ítem (ej. Tornillos 1")'
+                      />
+                    </Field>
+                    <Field label={idx === 0 ? 'Cant.' : ''}>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={d.cantidad}
+                        onChange={(e) => actualizarDetalle(idx, 'cantidad', Number(e.target.value))}
+                      />
+                    </Field>
+                    <Field label={idx === 0 ? 'P. unit' : ''}>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={d.precio_unitario}
+                        onChange={(e) => actualizarDetalle(idx, 'precio_unitario', Number(e.target.value))}
+                      />
+                    </Field>
+                    <Field label={idx === 0 ? 'Cliente / obra' : ''}>
+                      <Input
+                        type="text"
+                        value={d.cliente_nombre || ''}
+                        onChange={(e) => actualizarDetalle(idx, 'cliente_nombre', e.target.value)}
+                        placeholder="Para quién (ej. FABRICA, ZULEIKA)"
+                      />
+                    </Field>
+                    <Button variant="ghost" size="sm" className="text-red-600" onClick={() => quitarDetalle(idx)}>✕</Button>
+                  </div>
+                ))}
+                <div className="flex items-center justify-end gap-2 text-xs font-mono text-yeikar-neutral/60 pt-1">
+                  <span>Suma de renglones:</span>
+                  <span className="font-bold text-yeikar-secondary">
+                    {fmtMoneda(deudaForm.detalles.reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.precio_unitario) || 0), 0), 'COP')}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="col-span-2 rounded-lg border border-red-200 bg-red-50/70 px-4 py-3">
             <p className="text-xs font-medium uppercase tracking-wide text-red-600">Cómo funciona</p>
             <p className="mt-1 text-xs text-red-700/80 leading-relaxed">
@@ -1209,36 +1312,89 @@ export default function Gastos() {
       <Modal
         open={historialDeuda !== null}
         onClose={() => setHistorialDeuda(null)}
-        title={historialDeuda ? `Abonos — ${historialDeuda.proveedor?.nombre || 'proveedor'}` : 'Historial'}
-        subtitle={historialDeuda ? `${historialDeuda.pagos?.length || 0} abonos registrados` : ''}
-        size="lg"
+        title={historialDeuda ? `Detalle — ${historialDeuda.proveedor?.nombre || 'proveedor'}` : 'Detalle'}
+        subtitle={historialDeuda
+          ? `${historialDeuda.detalles?.length || 0} renglones · ${historialDeuda.pagos?.length || 0} abonos`
+          : ''}
+        size="xl"
       >
-        <div className="space-y-2 max-h-[50vh] overflow-y-auto pr-1">
-          {historialDeuda?.pagos && historialDeuda.pagos.length > 0 ? (
-            historialDeuda.pagos.map((p: Abono) => (
-              <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 px-4 py-3">
-                <div>
-                  <p className="text-sm font-bold text-yeikar-secondary">
-                    {fmtMoneda(Number(p.monto), historialDeuda.moneda?.codigo || 'COP')}
-                    <span className="ml-2 text-[11px] font-mono text-yeikar-neutral/50">≈ {fmtMoneda(Number(p.monto_en_moneda_base), 'COP')}</span>
-                  </p>
-                  <p className="text-[11px] text-yeikar-neutral/60">
-                    {p.fecha} · desde <b>{p.metodo_caja_nombre || 'cuenta'}</b>
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-600 hover:bg-red-50"
-                  onClick={() => setConfirmDeleteAbono({ deudaId: historialDeuda.id, abonoId: p.id })}
-                >
-                  Revertir
-                </Button>
+        <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+          {/* ── Desglose de la deuda (qué se compró y para quién) ── */}
+          {historialDeuda?.detalles && historialDeuda.detalles.length > 0 && (
+            <div className="rounded-xl border border-yeikar-secondary-light/10 overflow-hidden">
+              <div className="bg-yeikar-tertiary/20 px-4 py-2 text-xs font-bold uppercase tracking-wide text-yeikar-secondary">
+                Qué compone esta deuda
               </div>
-            ))
-          ) : (
-            <div className="p-6 text-center text-sm text-yeikar-neutral/50">Esta deuda no tiene abonos todavía.</div>
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="border-b border-yeikar-secondary-light/10 text-[10px] uppercase tracking-wider text-yeikar-neutral/45">
+                    <th className="px-3 py-1.5 text-left">Ítem</th>
+                    <th className="px-3 py-1.5 text-right">Cant.</th>
+                    <th className="px-3 py-1.5 text-right">P. unit</th>
+                    <th className="px-3 py-1.5 text-right">Total</th>
+                    <th className="px-3 py-1.5 text-left">Cliente / obra</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-yeikar-secondary-light/5">
+                  {historialDeuda.detalles.map((det: DetalleCuentaPorPagar) => (
+                    <tr key={det.id}>
+                      <td className="px-3 py-2 font-medium text-yeikar-secondary break-words">
+                        {det.descripcion || (det.material?.nombre ? `Material: ${det.material.nombre}` : '—')}
+                        {det.observaciones && (
+                          <span className="block text-[10px] text-yeikar-neutral/50 font-normal italic">{det.observaciones}</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">{det.cantidad}</td>
+                      <td className="px-3 py-2 text-right font-mono">{fmtMoneda(Number(det.precio_unitario), 'COP')}</td>
+                      <td className="px-3 py-2 text-right font-mono font-bold text-yeikar-secondary">{fmtMoneda(Number(det.total), 'COP')}</td>
+                      <td className="px-3 py-2 text-yeikar-neutral/70">{det.cliente_nombre || det.cliente?.nombre || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-yeikar-secondary-light/10 bg-yeikar-tertiary/10">
+                    <td colSpan={3} className="px-3 py-1.5 text-right font-bold uppercase text-[10px] tracking-wider text-yeikar-neutral/50">Total</td>
+                    <td className="px-3 py-1.5 text-right font-mono font-black text-yeikar-secondary">{fmtMoneda(Number(historialDeuda.monto), historialDeuda.moneda?.codigo || 'COP')}</td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
           )}
+
+          {/* ── Abonos registrados ── */}
+          <div className="rounded-xl border border-emerald-200/50 overflow-hidden">
+            <div className="bg-emerald-50 px-4 py-2 text-xs font-bold uppercase tracking-wide text-emerald-700">
+              Abonos ({historialDeuda?.pagos?.length || 0})
+            </div>
+            <div className="divide-y divide-yeikar-secondary-light/5 max-h-[30vh] overflow-y-auto">
+              {historialDeuda?.pagos && historialDeuda.pagos.length > 0 ? (
+                historialDeuda.pagos.map((p: Abono) => (
+                  <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                    <div>
+                      <p className="text-sm font-bold text-emerald-700">
+                        {fmtMoneda(Number(p.monto), historialDeuda.moneda?.codigo || 'COP')}
+                        <span className="ml-2 text-[11px] font-mono text-yeikar-neutral/50">≈ {fmtMoneda(Number(p.monto_en_moneda_base), 'COP')}</span>
+                      </p>
+                      <p className="text-[11px] text-yeikar-neutral/60">
+                        {p.fecha} · desde <b>{p.metodo_caja_nombre || 'cuenta'}</b>
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600 hover:bg-red-50"
+                      onClick={() => setConfirmDeleteAbono({ deudaId: historialDeuda.id, abonoId: p.id })}
+                    >
+                      Revertir
+                    </Button>
+                  </div>
+                ))
+              ) : (
+                <div className="p-6 text-center text-sm text-yeikar-neutral/50">Esta deuda no tiene abonos todavía.</div>
+              )}
+            </div>
+          </div>
         </div>
       </Modal>
 

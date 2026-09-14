@@ -338,3 +338,100 @@ def test_abono_multimoneda_deuda_cop_desde_cuenta_usd(client, cleaner, db):
     r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
     cxp_actual = next(c for c in r.json() if c["id"] == cxp["id"])
     assert float(cxp_actual["saldo"]) == 600000.0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Detalle por renglón (DetalleCuentaPorPagar): qué se compró y para quién.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def test_deuda_manual_con_renglones(client, cleaner, db):
+    """Deuda creada con renglones: cada uno guarda descripción, cant, precio y
+    cliente/obra destino; el monto debe cuadrar con la suma."""
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+
+    r = client.post("/api/v1/cuentas-por-pagar/", json={
+        "proveedor_id": proveedor["id"],
+        "tipo_gasto_id": tg["id"],
+        "moneda_id": 1,
+        "fecha": str(date.today()),
+        "descripcion": _uniq("deuda con detalle"),
+        "monto": 71000.0,
+        "detalles": [
+            {"descripcion": "SOPOLI 90 (tope para colgar cuadros)", "cantidad": 20, "precio_unitario": 600.0, "cliente_nombre": "FABRICA"},
+            {"descripcion": "HERRAJE DE CAMA BAUL", "cantidad": 2, "precio_unitario": 14500.0, "cliente_nombre": "CAMA COMANDANTE"},
+            {"descripcion": "TORNILLOS DE 1\"X 6", "cantidad": 100, "precio_unitario": 300.0},
+        ],
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, f"crear deuda con renglones → {r.status_code}: {r.text}"
+    body = r.json()
+    cleaner.registrar("cuenta_por_pagar", body["id"])
+
+    # 20×600 + 2×14500 + 100×300 = 12.000 + 29.000 + 30.000 = 71.000
+    assert float(body["monto"]) == 71000.0
+    assert len(body["detalles"]) == 3
+    det = body["detalles"][0]
+    assert det["descripcion"] == "SOPOLI 90 (tope para colgar cuadros)"
+    assert float(det["total"]) == 12000.0
+    assert det["cliente_nombre"] == "FABRICA"
+    assert det["orden"] == 0
+    # El gasto (P&L) nació con el monto de la deuda, no con la suma errónea.
+    gastos = _gastos_de_deuda(db, body["id"])
+    assert len(gastos) == 1 and float(gastos[0][1]) == 71000.0
+
+
+def test_deuda_renglones_monto_no_cuadra(client, cleaner, db):
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    r = client.post("/api/v1/cuentas-por-pagar/", json={
+        "proveedor_id": proveedor["id"],
+        "tipo_gasto_id": tg["id"],
+        "moneda_id": 1,
+        "fecha": str(date.today()),
+        "descripcion": _uniq("deuda descuadrada"),
+        "monto": 100000.0,
+        "detalles": [
+            {"descripcion": "Ítem", "cantidad": 10, "precio_unitario": 5000.0},
+        ],
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 400
+    assert "no cuadra" in r.json()["detail"]
+
+
+def test_entrada_fiar_crea_renglon_con_cliente(client, cleaner, db):
+    """El fiado guarda el material como renglón, y el cliente de la entrada
+    (para quién se compró) viaja al detalle de la deuda."""
+    proveedor = crear_proveedor(client, cleaner)
+    mat = crear_material(client, cleaner, costo_base=20000.0)
+    cliente = db.execute(text(
+        "INSERT INTO cliente (nombre, telefono, fecha_registro) "
+        "VALUES (:n, '0000', CURRENT_DATE) RETURNING id"
+    ), {"n": _uniq("Cliente obra")}).fetchone()
+    db.commit()
+    cleaner.registrar("cliente", cliente[0])
+
+    r = client.post("/api/v1/inventario/movimiento", json={
+        "material_id": mat["id"],
+        "ubicacion_id": 1,
+        "tipo": "ENTRADA",
+        "cantidad": 10,
+        "costo_unitario": 20000,
+        "proveedor_id": proveedor["id"],
+        "cliente_id": cliente[0],
+        "cliente_nombre": _uniq("obra libre"),
+        "fiar": True,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code in (200, 201), f"entrada fiada con cliente → {r.status_code}: {r.text}"
+    registrar_inventario_de_material(db, cleaner, mat["id"])
+
+    r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
+    cxp = next((c for c in r.json() if c["origen_tipo"] == "ENTRADA_INVENTARIO"
+                and c["detalles"] and c["detalles"][0]["material_id"] == mat["id"]), None)
+    assert cxp is not None, "Debe existir la deuda fiada con su renglón"
+    cleaner.registrar("cuenta_por_pagar", cxp["id"])
+    det = cxp["detalles"][0]
+    assert float(det["cantidad"]) == 10.0
+    assert float(det["precio_unitario"]) == 20000.0
+    assert det["material_id"] == mat["id"]
+    assert det["cliente_id"] == cliente[0]
+    assert float(cxp["monto"]) == 200000.0

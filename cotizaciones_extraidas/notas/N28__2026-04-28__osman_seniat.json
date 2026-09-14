@@ -1,0 +1,19 @@
+{
+  "id": "N28",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-04-28",
+  "cliente": { "nombre": "OSMAN SENIAT", "rif_cedula": null, "direccion": "UREÑA", "telefono": null },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "SOFA DE 3 PUESTOS SIN BRAZO Y TAPIZADO EN CUEROTEX", "observaciones": null, "precio_unitario": 1150000, "precio_total_impreso": 1150000 }
+  ],
+  "total_declarado": 1150000,
+  "abonos": [],
+  "saldo_confirmado_por_dueno": 1150000,
+  "fecha_entrega": "2026-04-28",
+  "reconciliacion": { "suma_items_impresos": 1150000, "suma_abonos_total": 0, "total_menos_abonos": 1150000 },
+  "inconsistencias": [ "La nota usa '$' pero el dueño confirmó que el saldo está en COP." ],
+  "dudas": [ "Cliente sin RIF ni teléfono visible." ],
+  "saldo_para_importar": 1150000
+}

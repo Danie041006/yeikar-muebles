@@ -1,0 +1,27 @@
+{
+  "id": "N27",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-04-28",
+  "cliente": { "nombre": "JEFERSON MIGRACION", "rif_cedula": null, "direccion": null, "telefono": null },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "MUEBLE TV DE 2.40 X 1.90 EN ALTO BRILLO", "observaciones": null, "precio_unitario": 1192, "precio_total_impreso": 1192 },
+    { "cantidad": 4, "descripcion": "MUEBLES CON PANEL, VIDRIERIA Y LUZ Y PUERTA; MUEBLES DIVIDIDOS DE 1.83 CON LUZ", "observaciones": null, "precio_unitario": 758, "precio_total_impreso": 3032 }
+  ],
+  "total_declarado": 4224,
+  "abonos": [
+    { "fecha": "2026-05-15", "metodo": "EFECTIVO", "monto": 355, "origen": "IMPRESO", "detalle_literal": "Abono de saldo a favor" },
+    { "fecha": "2026-06-06", "metodo": "EFECTIVO", "monto": 500, "origen": "MANUSCRITO" },
+    { "fecha": "2026-06-16", "metodo": "EFECTIVO", "monto": 500, "origen": "MANUSCRITO" },
+    { "fecha": "2026-06-24", "metodo": "EFECTIVO", "monto": 500, "origen": "MANUSCRITO" },
+    { "fecha": "2026-07-01", "metodo": "EFECTIVO", "monto": 500, "origen": "MANUSCRITO" },
+    { "fecha": "2026-07-10", "metodo": "EFECTIVO", "monto": 500, "origen": "MANUSCRITO" }
+  ],
+  "saldo_final_manuscrito": 1369,
+  "saldo_confirmado_por_dueno": 1369,
+  "reconciliacion": { "suma_items_impresos": 4224, "suma_abonos_total": 2855, "total_menos_abonos": 1369 },
+  "inconsistencias": [ "Se prioriza el saldo confirmado por el dueño: $1.369 USD. La primera anotación de abono y algunas fechas manuscritas son poco legibles." ],
+  "dudas": [ "Cliente sin RIF, dirección ni teléfono visible." ],
+  "saldo_para_importar": 1369
+}

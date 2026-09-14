@@ -1,0 +1,20 @@
+{
+  "id": "N30",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-03-30",
+  "cliente": { "nombre": "ELDIS CONTRERAS", "rif_cedula": null, "direccion": "SAN CRISTOBAL", "telefono": "0424-7790033" },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "PEINADORA DE 1.30 X 1.60 CON SU NICHO BUTACA", "observaciones": null, "precio_unitario": 1087, "precio_total_impreso": 1087 },
+    { "cantidad": 3, "descripcion": "REPISAS DE 60 X 90 EN MELAMINA BLANCO", "observaciones": null, "precio_unitario": 326, "precio_total_impreso": 978 }
+  ],
+  "total_declarado": 2065,
+  "abonos": [ { "fecha": "2026-03-30", "metodo": "EFECTIVO", "monto": 1103, "origen": "IMPRESO", "detalle_literal": "Abono de saldo a favor" } ],
+  "saldo_impreso": 962,
+  "saldo_confirmado_por_dueno": 962,
+  "reconciliacion": { "suma_items_impresos": 2065, "suma_abonos_total": 1103, "total_menos_abonos": 962 },
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 962
+}

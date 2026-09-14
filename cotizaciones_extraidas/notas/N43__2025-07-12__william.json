@@ -1,0 +1,29 @@
+{
+  "id": "N43",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2025-07-12",
+  "fecha_entrega": "2025-07-18",
+  "cliente": {
+    "nombre": "WILLIAM",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "SOMIER Y ESPALDAR 1,40", "precio_unitario": 574, "precio_total_impreso": 574 },
+    { "cantidad": 1, "descripcion": "COLCHON DALLAS 2X2", "precio_unitario": 409, "precio_total_impreso": 409 }
+  ],
+  "total_declarado": 983,
+  "abonos": [
+    { "fecha": "2025-07-12", "metodo": "EFECTIVO", "monto": 222, "origen": "IMPRESO", "detalle": "ABONO 900,000/4050" },
+    { "fecha": "2025-08-11", "metodo": "EFECTIVO", "monto": 250, "origen": "MANUSCRITO", "detalle": "Abono en efectivo" },
+    { "fecha": "2025-09-01", "metodo": "TRANSFERENCIA", "monto": 201, "origen": "MANUSCRITO", "detalle": "Abono al bancolombia 800.000/3.980" }
+  ],
+  "saldo_impreso": 761,
+  "saldo_final_manuscrito": 310,
+  "saldo_confirmado_por_dueno": 310,
+  "reconciliacion": { "suma_items": 983, "suma_abonos": 673, "total_menos_abonos": 310, "cuadra": true },
+  "saldo_para_importar": 310
+}

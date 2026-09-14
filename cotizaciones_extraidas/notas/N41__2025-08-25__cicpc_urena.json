@@ -1,0 +1,26 @@
+{
+  "id": "N41",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2025-08-25",
+  "fecha_entrega": "2025-08-24",
+  "cliente": {
+    "nombre": "CICPC UREÑA",
+    "rif_cedula": null,
+    "direccion": "UREÑA LA CRUZ",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "SOFA DE 2 PUESTOS TAPIZADO EN CUERINA NEGRA.", "precio_unitario": 400000, "precio_total_impreso": 400000 }
+  ],
+  "total_declarado": 400000,
+  "abonos": [
+    { "fecha": "2025-08-25", "metodo": "EFECTIVO", "monto": 200000, "origen": "IMPRESO", "detalle": "ABONO EN EFECTIVO" }
+  ],
+  "saldo_impreso": 200000,
+  "saldo_final_manuscrito": 200000,
+  "saldo_confirmado_por_dueno": 200000,
+  "reconciliacion": { "suma_items": 400000, "suma_abonos": 200000, "total_menos_abonos": 200000, "cuadra": true },
+  "saldo_para_importar": 200000
+}

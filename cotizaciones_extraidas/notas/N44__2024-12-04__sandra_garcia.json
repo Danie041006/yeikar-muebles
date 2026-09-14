@@ -1,0 +1,27 @@
+{
+  "id": "N44",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2024-12-04",
+  "fecha_entrega": "2024-12-04",
+  "cliente": {
+    "nombre": "SANDRA GARCIA",
+    "rif_cedula": "V-18355976",
+    "direccion": "CALLE 5 BARRIO SAN ISIDRO",
+    "telefono": "0424-7306486",
+    "observaciones_cliente": "Firma: VICTOR ORTEGA. Nota al margen: Porte lo declaro hoy 31/01/2026"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "CONGELADOR FREEZER DE 200L MARCA MABE COLOR BLANCO", "precio_unitario": 369, "precio_total_impreso": 369 }
+  ],
+  "total_declarado": 369,
+  "abonos": [
+    { "fecha": "2024-12-04", "metodo": "EFECTIVO", "monto": 150, "origen": "IMPRESO", "detalle": "ABONO EN EFCTIVO 630PESOS X 4200" }
+  ],
+  "saldo_impreso": 219,
+  "saldo_final_manuscrito": 219,
+  "saldo_confirmado_por_dueno": 219,
+  "reconciliacion": { "suma_items": 369, "suma_abonos": 150, "total_menos_abonos": 219, "cuadra": true },
+  "saldo_para_importar": 219
+}

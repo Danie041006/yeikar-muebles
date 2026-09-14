@@ -1,0 +1,25 @@
+{
+  "id": "N39",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2025-12-01",
+  "fecha_entrega": "2025-12-17",
+  "cliente": {
+    "nombre": "JHON CARRILLO",
+    "rif_cedula": null,
+    "direccion": "LAS VILLAS",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "CLOSET GRANDE", "precio_unitario": 1400000, "precio_total_impreso": 1400000 },
+    { "cantidad": 1, "descripcion": "CLOSET", "precio_unitario": 800000, "precio_total_impreso": 800000 }
+  ],
+  "total_declarado": 2200000,
+  "abonos": [],
+  "saldo_impreso": 2200000,
+  "saldo_final_manuscrito": 2200000,
+  "saldo_confirmado_por_dueno": 2200000,
+  "reconciliacion": { "suma_items": 2200000, "suma_abonos": 0, "total_menos_abonos": 2200000, "cuadra": true },
+  "saldo_para_importar": 2200000
+}

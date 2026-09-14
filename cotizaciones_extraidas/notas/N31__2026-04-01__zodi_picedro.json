@@ -1,0 +1,20 @@
+{
+  "id": "N31",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-04-01",
+  "cliente": { "nombre": "ZODI (Picedro)", "rif_cedula": null, "direccion": "SAN CRISTOBAL", "telefono": null },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "ARREGLO DE SOFA DE 2 PUESTOS", "observaciones": null, "precio_unitario": 317, "precio_total_impreso": 317 },
+    { "cantidad": 1, "descripcion": "ARREGLO DE SILLA EJECUTIVA", "observaciones": null, "precio_unitario": 75, "precio_total_impreso": 75 },
+    { "cantidad": 1, "descripcion": "MUEBLE CAFETERO ALTO 1 METRO X 80 ANCHO Y 40 DE FONDO", "observaciones": null, "precio_unitario": 542, "precio_total_impreso": 542 }
+  ],
+  "total_declarado": 934,
+  "abonos": [],
+  "saldo_confirmado_por_dueno": 934,
+  "reconciliacion": { "suma_items_impresos": 934, "suma_abonos_total": 0, "total_menos_abonos": 934 },
+  "inconsistencias": [],
+  "dudas": [ "Cliente sin RIF ni teléfono visible; se conserva el nombre Picedro como aparece en la referencia." ],
+  "saldo_para_importar": 934
+}

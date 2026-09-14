@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YEIKAR · Preview — Tickets de Pago 10×10 (v2)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --stone-900: #1c1917;
+    --stone-800: #292524;
+    --stone-700: #44403c;
+    --stone-600: #57534e;
+    --stone-500: #78716c;
+    --stone-400: #a8a29e;
+    --stone-300: #d6d3d1;
+    --stone-200: #e7e5e4;
+    --stone-50: #fafaf9;
+    --amber-800: #92400e;
+    --corte: rgba(147, 51, 234, 0.45);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Hanken Grotesk', system-ui, sans-serif;
+    background: #efece6;
+    color: var(--stone-800);
+    padding: 28px 16px 80px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  .intro {
+    background: white; border: 1px solid var(--stone-200); border-radius: 16px;
+    padding: 20px 24px; margin-bottom: 28px;
+  }
+  .intro h1 { font-size: 20px; font-weight: 900; color: var(--stone-900); }
+  .intro p { font-size: 13px; color: var(--stone-600); margin-top: 6px; line-height: 1.55; }
+  .intro b { color: var(--amber-800); }
+  .btn-print {
+    margin-top: 14px; display: inline-flex; align-items: center; gap: 8px;
+    background: var(--stone-900); color: #fff; border: 0; cursor: pointer;
+    font-family: inherit; font-weight: 700; font-size: 13px;
+    padding: 10px 18px; border-radius: 12px;
+  }
+  .btn-print:hover { background: var(--stone-700); }
+  h2.seccion {
+    font-size: 12px; font-weight: 900; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--stone-500); margin: 34px 0 12px;
+  }
+  .nota { font-size: 12px; color: var(--stone-500); margin-bottom: 10px; }
+
+  /* ══════════ TICKET 10×10 — v2 compacto ══════════ */
+  .ticket {
+    position: relative;
+    width: 100mm; height: 100mm;   /* alto fijo: TODO debe caber aquí */
+    background: white;
+    border: 1.5px solid var(--stone-800);
+    padding: 4.5mm 6mm;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    font-size: 8.5px; color: var(--stone-800);
+  }
+  .ticket .marca-agua {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0.055; pointer-events: none; z-index: 0;
+  }
+  .ticket .marca-agua img { width: 64mm; }
+  .ticket > .contenido {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; flex: 1; min-height: 0;
+  }
+
+  /* Cabecero compacto */
+  .t-head {
+    display: flex; justify-content: space-between; gap: 4mm;
+    border-bottom: 1.2px solid var(--stone-800);
+    padding-bottom: 1.8mm;
+  }
+  .t-empresa { font-weight: 900; font-size: 9.5px; color: var(--stone-900); letter-spacing: 0.02em; }
+  .t-titular { font-weight: 700; font-size: 7.6px; color: var(--stone-700); margin-top: 0.4mm; }
+  .t-rif { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 6.8px; color: var(--stone-600); margin-top: 0.4mm; }
+  .t-actividad { font-size: 5.6px; color: var(--stone-500); margin-top: 0.6mm; line-height: 1.25; max-width: 64mm; }
+  .t-num { text-align: right; flex-shrink: 0; }
+  .t-num img { width: 11mm; opacity: 0.85; margin-left: auto; display: block; }
+  .t-num .etq { font-size: 6px; font-weight: 800; letter-spacing: 0.14em; color: var(--stone-400); text-transform: uppercase; margin-top: 0.6mm; }
+  .t-num .linea {
+    margin-top: 1.6mm; border-bottom: 1px dotted var(--stone-400);
+    height: 5mm; width: 18mm;
+  }
+
+  /* Filas de campos (fecha/monto, pagado a) */
+  .t-row { display: flex; gap: 4.5mm; align-items: flex-end; margin-top: 2mm; }
+  .t-campo { display: flex; gap: 1.8mm; align-items: flex-end; }
+  .t-label { font-weight: 900; font-size: 7.8px; letter-spacing: 0.05em; color: var(--stone-700); white-space: nowrap; padding-bottom: 0.6mm; }
+  .t-caja { width: 6.4mm; height: 5.4mm; border: 1.2px solid var(--stone-600); border-radius: 1px; }
+  .t-linea { flex: 1; border-bottom: 1px dotted var(--stone-400); height: 5.4mm; min-width: 8mm; }
+
+  /* Bloques de escritura — alturas fijas; el aire libre va para las firmas */
+  .t-bloque { margin-top: 2mm; }
+  .t-lineas { display: flex; flex-direction: column; }
+  .t-lineas .r {
+    border-bottom: 1px dotted var(--stone-400);
+    min-height: 5mm;
+  }
+  /* LA SUMA DE: 2 renglones fijos */
+  .t-bloque.suma .t-lineas .r { height: 5.2mm; flex: none; }
+  /* POR CONCEPTO DE: 4 renglones a altura fija */
+  .t-bloque.concepto { flex: none; }
+  .t-bloque.concepto .t-lineas .r { height: 5.2mm; flex: none; }
+
+  /* Firmas — ancladas al borde inferior, con aire después de las observaciones */
+  .t-firmas {
+    margin-top: 2mm; padding-top: 2mm;
+    flex: 1; min-height: 12mm;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 7mm;
+    align-content: end; align-items: end;
+  }
+  .t-firmas .firma { text-align: center; }
+  .t-firmas .firma .linea { border-bottom: 1px solid var(--stone-500); height: 6mm; }
+  .t-firmas .firma .etq { font-size: 6.4px; font-weight: 800; letter-spacing: 0.1em; color: var(--stone-500); margin-top: 0.8mm; text-transform: uppercase; }
+
+  /* Valores llenados (ejemplo fase digital) */
+  .lleno .t-caja.vacia { border: none; width: auto; height: auto; font-family: 'JetBrains Mono', monospace; font-size: 7.5px; font-weight: 700; }
+  .lleno .r.texto { flex: none; border-bottom: 1px solid var(--stone-300); font-weight: 700; font-size: 8.6px; color: var(--stone-900); line-height: 1.35; padding-bottom: 0.6mm; }
+
+  /* ══════════ HOJA CARTA 2×2 ══════════ */
+  .hoja {
+    width: 215.9mm; min-height: 279.4mm;
+    background: white;
+    border: 1px solid var(--stone-300);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    place-items: center;
+    row-gap: 12mm;
+    padding: 22mm 5.95mm;
+    position: relative;
+  }
+  .corte-v, .corte-h { position: absolute; pointer-events: none; z-index: 2; }
+  .corte-v { left: 50%; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--corte); }
+  .corte-h { top: 50%; left: 0; right: 0; height: 0; border-top: 1px dashed var(--corte); }
+  .leyenda-corte { font-size: 11px; color: #7e22ce; margin: 8px 0 14px; text-align: center; }
+
+  .dos-col { display: flex; gap: 40px; align-items: flex-start; flex-wrap: wrap; }
+
+  /* ══════════ VARIANTE HORIZONTAL: hoja 29.9×21.6, ticket 13.8×9.4 (letra más grande) ══════════ */
+  .hoja-h {
+    width: 299.4mm; height: 215.9mm;
+    background: white;
+    border: 1px solid var(--stone-300);
+    margin: 0 auto; position: relative;
+    display: grid; grid-template-columns: 1fr 1fr;
+    place-items: center;
+    row-gap: 8mm;
+    padding: 9mm 5.95mm;
+    overflow: hidden;
+  }
+  .hoja-h .corte-v { left: 50%; top: 0; bottom: 0; width: 0; border-left: 1px dashed var(--corte); }
+  .hoja-h .corte-h { top: 50%; left: 0; right: 0; height: 0; border-top: 1px dashed var(--corte); }
+
+  .ticket-h {
+    position: relative; width: 138mm; height: 94mm;
+    background: white; border: 1.5px solid var(--stone-800);
+    padding: 5mm 6.5mm;
+    display: flex; flex-direction: column; overflow: hidden;
+    font-size: 10px; color: var(--stone-800);
+  }
+  .ticket-h .marca-agua { opacity: 0.05; }
+  .ticket-h .marca-agua img { width: 82mm; }
+  .ticket-h .t-head { padding-bottom: 1.6mm; }
+  .ticket-h .t-empresa { font-size: 11.5px; }
+  .ticket-h .t-titular { font-size: 9px; }
+  .ticket-h .t-rif { font-size: 8px; }
+  .ticket-h .t-actividad { font-size: 6.8px; max-width: 92mm; }
+  .ticket-h .t-num img { width: 13mm; }
+  .ticket-h .t-num .linea { width: 22mm; height: 6mm; margin-top: 1.4mm; }
+  .ticket-h .t-label { font-size: 9.2px; }
+  .ticket-h .t-caja { width: 7.6mm; height: 6.4mm; }
+  .ticket-h .t-linea { height: 6.4mm; }
+  .ticket-h .t-row { margin-top: 1.8mm; }
+  .ticket-h .t-bloque { margin-top: 1.8mm; }
+  .ticket-h .t-lineas .r { min-height: 5.4mm; }
+  .ticket-h .t-bloque.suma .r { height: 5.8mm; }
+  /* 3 renglones más largos ≈ misma capacidad que los 4 verticales */
+  .ticket-h .t-bloque.concepto .r { height: 5.8mm; }
+  .ticket-h .t-firmas { margin-top: 1.8mm; padding-top: 1.6mm; }
+  .ticket-h .firma .linea { height: 6.5mm; }
+  .ticket-h .firma .etq { font-size: 7.2px; }
+
+  /* ══════════ impresión real: SOLO la hoja con los 4 tickets ══════════ */
+  @media print {
+    html, body { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+    .wrap { max-width: none; padding: 0; margin: 0; }
+    /* Ocultar TODO lo que no sea la hoja de tickets */
+    .intro, h2.seccion, .nota, .leyenda-corte, .zoom-tip, .solo-pantalla, .solo-horizontal,
+    .btn-h { display: none !important; }
+    .hoja {
+      width: 215.9mm; height: 279.4mm;
+      min-height: 0; max-height: 279.4mm;
+      overflow: hidden;
+      border: none; margin: 0;
+      break-inside: avoid;
+      page-break-after: avoid;
+    }
+  }
+
+  /* Impresión HORIZONTAL (botón especial): solo la hoja apaisada */
+  body.solo-hoja-h .intro,
+  body.solo-hoja-h h2.seccion,
+  body.solo-hoja-h .nota,
+  body.solo-hoja-h .leyenda-corte,
+  body.solo-hoja-h .zoom-tip,
+  body.solo-hoja-h .dos-col,
+  body.solo-hoja-h .hoja,
+  body.solo-hoja-h .btn-print { display: none !important; }
+  @media print {
+    body.solo-hoja-h { background: #fff !important; padding: 0 !important; margin: 0 !important; }
+    body.solo-hoja-h .hoja-h {
+      width: 299.4mm; height: 215.9mm;
+      overflow: hidden; border: none; margin: 0;
+      break-inside: avoid;
+    }
+  }
+</style>
+<!-- Regla @page VERTICAL en su propio bloque: el botón de impresión horizontal
+     la DESACTIVA (disabled=true) para que el @page apaisado gane seguro, y
+     la reactiva al terminar. -->
+<style id="pg-vertical">
+  @media print {
+    @page { size: letter portrait; margin: 0; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="intro">
+      <h1>YEIKAR — Tickets de Pago 10×10 · SOLO DISEÑO (v6.1 — horizontal forzado)</h1>
+      <p>
+        <b>v6.1:</b> el botón de la hoja HORIZONTAL ahora <b>desactiva la regla @page vertical</b> antes de
+        imprimir (por eso salía vertical) y la reactiva al terminar. Si el preview aún sale vertical,
+        pon <b>"Más ajustes → Disposición: Horizontal"</b> en el diálogo.
+        <b>v6:</b> hoja apaisada 29,9×21,6 cm con tickets de 13,8×9,4 cm, letra más grande (sección 3).
+        La versión vertical 4×10×10 sigue en la sección 2. Logo: <b>solo marca de agua</b>. ⚠️ Ctrl+Shift+R.
+      </p>
+      <button class="btn-print" onclick="window.print()">🖨️ Probar impresión real (imprime la hoja de 4)</button>
+    </div>
+
+    <h2 class="seccion">1 · El ticket — versión EN BLANCO (para llenar a mano)</h2>
+    <div class="dos-col solo-pantalla">
+
+      <!-- ═══════ TICKET EN BLANCO ═══════ -->
+      <div class="ticket">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════ TICKET LLENADO (ejemplo fase 2) ═══════ -->
+      <div class="ticket lleno solo-ejemplo">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea" style="text-align:center; font-family:'JetBrains Mono',monospace; font-weight:700; font-size:8px; color:var(--amber-800); border-bottom:1px solid var(--stone-500); display:flex; align-items:flex-end; justify-content:center;">000123</div>
+            </div>
+          </div>
+
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja vacia"><b>08</b></div><div class="t-caja vacia"><b>09</b></div><div class="t-caja vacia"><b>26</b></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div style="flex:1; font-family:'JetBrains Mono',monospace; font-weight:700; font-size:11.5px; color:var(--amber-800); border-bottom:1px solid var(--stone-300); padding-bottom:0.4mm;">$ 150,00</div>
+            </div>
+          </div>
+
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div style="flex:1; font-weight:700; font-size:9px; color:var(--stone-900); border-bottom:1px solid var(--stone-300); padding-bottom:0.6mm;">MARÍA PÉREZ · 0412-5551234</div>
+          </div>
+
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas">
+              <div class="r texto">CIENTO CINCUENTA CON 00/100 DÓLARES AMERICANOS (USD)</div>
+            </div>
+          </div>
+
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas">
+              <div class="r texto" style="font-weight:600; font-size:7.8px; color:var(--stone-700);">Abono · Venta #00412 · Cama 2×2 m<br/>Transferencia Banesco · ref. 8842 <span style="color:var(--stone-400)">(≈ $630.000 COP)</span></div>
+              <div class="r"></div>
+            </div>
+          </div>
+
+          <div class="t-firmas">
+            <div class="firma">
+              <div style="border-bottom:1px solid var(--stone-500); height:6mm; font-weight:700; font-size:8.5px; color:var(--stone-800); display:flex; align-items:flex-end; justify-content:center; padding-bottom:0.4mm;">LILIA C. BAUTISTA</div>
+              <div class="etq">Entregado por</div>
+            </div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="nota solo-pantalla" style="margin-top:10px">← A la derecha, el ejemplo <b>generado por el sistema</b> (fase 2, para luego): monto en letras automático, cliente, referencia del pago y N° = id del pago. "Entregado por" sale del nombre de quien registra el cobro.</p>
+
+    <h2 class="seccion">2 · La hoja imprimible — 4 tickets en blanco por carta</h2>
+    <p class="nota">PDF exacto a tamaño carta (21,59 × 27,94 cm). 4 tickets en 2×2 con guías de corte moradas. Imprimes una hoja → 4 tickets → cero desperdicio.</p>
+
+    <div class="hoja">
+      <div class="corte-v"></div>
+      <div class="corte-h"></div>
+
+      <div class="ticket">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticket">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticket">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticket">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="leyenda-corte">- - - línea morada punteada = guía de corte (1 corte vertical + 1 horizontal) - - -</p>
+
+    <h2 class="seccion">3 · EXPERIMENTO — Hoja HORIZONTAL 29.9×21.6 cm (carta apaisada +2 cm de ancho) · letra más grande</h2>
+    <p class="nota">
+      Hoja apaisada de <b>29,9 × 21,6 cm</b> (carta horizontal + 2 cm de ancho, como pediste).
+      Los tickets pasan a <b>13,8 × 9,4 cm</b> (40% más anchos): renglones de escritura más largos y
+      <b>letra más grande</b>. "POR CONCEPTO DE" lleva 3 renglones pero cada uno es tan largo que la
+      capacidad de escritura total es igual o mayor que la versión vertical. Al imprimir en papel
+      carta/A4 horizontal el navegador lo ajusta solo (~92%); en un papel de ese tamaño exacto saldría 1:1.
+      <br/>📌 <b>Si el preview sale vertical:</b> abre "Más ajustes" y pon <b>Disposición/Orientación: Horizontal</b>
+      (algunas impresoras fuerzan su orientación por defecto).
+    </p>
+    <button class="btn-print btn-h" onclick="imprimirHorizontal()">🖨️ Imprimir hoja HORIZONTAL (29.9×21.6)</button>
+    <div style="height: 12px"></div>
+
+    <div class="hoja-h solo-horizontal" id="hoja-horizontal">
+      <div class="corte-v"></div>
+      <div class="corte-h"></div>
+
+      <div class="ticket ticket-h">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticket ticket-h">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticket ticket-h">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="ticket ticket-h">
+        <div class="marca-agua"><img src="logo-marca-de-agua.PNG" alt="" /></div>
+        <div class="contenido">
+          <div class="t-head">
+            <div>
+              <div class="t-empresa">COMERCIALIZADORA YEIKAR</div>
+              <div class="t-titular">LILIA CAROLINA BAUTISTA</div>
+              <div class="t-rif">RIF V-18969838-7</div>
+              <div class="t-actividad">Fabricación, compra venta, importación y comercialización al mayor y detal de todo tipo de artículos para el hogar.</div>
+            </div>
+            <div class="t-num">
+              <img src="logo-marca-de-agua.PNG" alt="" />
+              <div class="etq">N°</div>
+              <div class="linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <div class="t-campo">
+              <span class="t-label">FECHA:</span>
+              <div class="t-caja"></div><div class="t-caja"></div><div class="t-caja"></div>
+            </div>
+            <div class="t-campo" style="flex:1">
+              <span class="t-label">MONTO:</span>
+              <div class="t-linea"></div>
+            </div>
+          </div>
+          <div class="t-row">
+            <span class="t-label">PAGADO&nbsp;A:</span>
+            <div class="t-linea"></div>
+          </div>
+          <div class="t-bloque suma">
+            <span class="t-label">LA&nbsp;SUMA&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-bloque concepto">
+            <span class="t-label">POR&nbsp;CONCEPTO&nbsp;DE:</span>
+            <div class="t-lineas"><div class="r"></div><div class="r"></div><div class="r"></div></div>
+          </div>
+          <div class="t-firmas">
+            <div class="firma"><div class="linea"></div><div class="etq">Entregado por</div></div>
+            <div class="firma"><div class="linea"></div><div class="etq">Recibe conforme</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="leyenda-corte">- - - Hoja apaisada: 1 corte vertical + 1 horizontal = 4 tickets de 13,8 × 9,4 cm - - -</p>
+
+  </div>
+  <script>
+    // Imprimir SOLO la hoja horizontal, con @page apaisado de 299.4×215.9mm.
+    // La regla @page vertical (pg-vertical) se DESACTIVA para que no compita.
+    function imprimirHorizontal() {
+      const vertical = document.getElementById('pg-vertical');
+      if (vertical) vertical.disabled = true;
+
+      const estilo = document.createElement('style');
+      estilo.id = 'pg-horizontal';
+      estilo.textContent = '@media print { @page { size: 299.4mm 215.9mm; margin: 0; } }';
+      document.head.appendChild(estilo);
+      document.body.classList.add('solo-hoja-h');
+
+      const limpiar = () => {
+        document.getElementById('pg-horizontal')?.remove();
+        if (vertical) vertical.disabled = false;
+        document.body.classList.remove('solo-hoja-h');
+      };
+      window.addEventListener('afterprint', limpiar, { once: true });
+      window.print();
+      setTimeout(limpiar, 5000);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "id": "N34",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-03-12",
+  "cliente": {
+    "nombre": "CAPITAN PINTO",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "MESA DE CENTRO PARA EL SANTO ANGEL.", "precio_unitario": 170, "precio_total_impreso": 170 }
+  ],
+  "total_declarado": 170,
+  "abonos": [],
+  "saldo_impreso": 170,
+  "saldo_final_manuscrito": 170,
+  "saldo_confirmado_por_dueno": 170,
+  "reconciliacion": { "suma_items": 170, "suma_abonos": 0, "total_menos_abonos": 170, "cuadra": true },
+  "saldo_para_importar": 170
+}

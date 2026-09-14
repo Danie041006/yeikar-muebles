@@ -1,0 +1,28 @@
+{
+  "id": "N33",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2025-02-20",
+  "fecha_entrega": "2026-03-23",
+  "cliente": {
+    "nombre": "PAOLA BONILLA",
+    "rif_cedula": "V-18354455",
+    "direccion": "BARRIO GONZALO CASTELLANOS CASA #4-75",
+    "telefono": "350-7997204"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "COLCHON THERAPEDIC 1.40 COLFLEX", "precio_unitario": 399, "precio_total_impreso": 399 }
+  ],
+  "total_declarado": 399,
+  "abonos": [
+    { "fecha": "2026-03-03", "metodo": "EFECTIVO", "monto": 135, "origen": "IMPRESO", "detalle": "ABONO EN EFECTIVO" },
+    { "fecha": "2026-05-21", "metodo": "EFECTIVO", "monto": 177, "origen": "MANUSCRITO", "detalle": "ABONO en EFECTIVO 655.000 / 3.680 = 177" },
+    { "fecha": "2026-06-13", "metodo": "EFECTIVO", "monto": 55, "origen": "MANUSCRITO", "detalle": "ABONO En Efectivo 200.000 / 3.600 = 55" }
+  ],
+  "saldo_impreso": 264,
+  "saldo_final_manuscrito": 32,
+  "saldo_confirmado_por_dueno": 32,
+  "reconciliacion": { "suma_items": 399, "suma_abonos": 367, "total_menos_abonos": 32, "cuadra": true },
+  "saldo_para_importar": 32
+}

@@ -1,0 +1,28 @@
+{
+  "id": "N07",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-08-11",
+  "fecha_entrega": "2026-08-11",
+  "cliente": {
+    "nombre": "YURAIMA RANGEL",
+    "rif_cedula": "V-17.767.702",
+    "direccion": "UREÑA , LA INTEGRACION",
+    "telefono": "0424-7601100"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 3, "descripcion": "AIRE SPLIT DE 12.000 BTU INVERTER FRIGILUX", "precio_unitario": 406, "precio_total_impreso": 1218 },
+    { "cantidad": 1, "descripcion": "AIRE SPLIT DE 18.000 BTU INVERTER FRIGILUX", "precio_unitario": 675, "precio_total_impreso": 675 }
+  ],
+  "total_declarado": 1893,
+  "abonos": [
+    { "fecha": "2026-09-01", "metodo": "EFECTIVO", "monto": 781, "origen": "MANUSCRITO", "detalle": "abono en efectivo 2.500.000 / 3.100=" },
+    { "fecha": "2026-09-01", "metodo": "EFECTIVO", "monto": 200, "origen": "MANUSCRITO", "detalle": "abono en efectivo" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 912,
+  "saldo_confirmado_por_dueno": 912,
+  "reconciliacion": { "suma_items": 1893, "suma_abonos": 981, "total_menos_abonos": 912, "cuadra": true },
+  "saldo_para_importar": 912
+}

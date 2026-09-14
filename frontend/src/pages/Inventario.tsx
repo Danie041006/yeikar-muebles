@@ -7,6 +7,7 @@ import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
+import { motion } from 'framer-motion';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
 
@@ -49,6 +50,24 @@ interface Material {
 type Tab = 'insumos' | 'sobrantes' | 'productos' | 'exhibicion' | 'crudo';
 
 const TIPOS_MOVIMIENTO = ['ENTRADA', 'SALIDA', 'AJUSTE', 'DAÑO', 'DEVOLUCION'];
+
+// Ayuda contextual por tipo de movimiento (se muestra bajo los botones)
+const HINTS_TIPO: Record<string, string> = {
+  ENTRADA: 'Suma stock. Si pagas de contado elige la cuenta; si la dejas vacía queda fiado al proveedor.',
+  SALIDA: 'Resta stock del depósito (consumo o despacho).',
+  AJUSTE: 'Corrige el stock al valor contado en inventario físico.',
+  'DAÑO': 'Resta stock por merma o daño.',
+  DEVOLUCION: 'Devuelve stock al depósito.',
+};
+
+// Color del botón activo según tipo de movimiento
+const TIPO_BTN_ACTIVO: Record<string, string> = {
+  ENTRADA: 'bg-green-600 border-green-600',
+  SALIDA: 'bg-red-500 border-red-500',
+  AJUSTE: 'bg-slate-500 border-slate-500',
+  'DAÑO': 'bg-amber-500 border-amber-500',
+  DEVOLUCION: 'bg-sky-600 border-sky-600',
+};
 
 /** Quita acentos y pasa a mayúsculas: compara "Exhibición" con "EXHIBICION". */
 const quitarAcentos = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -105,6 +124,7 @@ export default function Inventario() {
   const [materiales, setMateriales] = useState<Material[]>([]);
   const [search, setSearch] = useState('');
   const [selectedMaterialId, setSelectedMaterialId] = useState<number | null>(null);
+  const [detalleTab, setDetalleTab] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
   const [kardex, setKardex] = useState<MovimientoResponse[]>([]);
   const [loadingKardex, setLoadingKardex] = useState(false);
   // Categorías de inventario (desglose: LÁMINAS MDF, ESPUMA, PINTURA...)
@@ -597,6 +617,7 @@ export default function Inventario() {
   // ---- Abrir panel de material (kardex + edición + movimiento) ----
   const handleOpenMaterial = async (mat: Material) => {
     setSelectedMaterialId(mat.id);
+    setDetalleTab('movimiento');
     setEditMaterial({
       nombre: mat.nombre,
       costo_base: mat.costo_base != null ? String(mat.costo_base) : '',
@@ -641,6 +662,16 @@ export default function Inventario() {
       setSavingEdit(false);
     }
   };
+
+  // Cerrar el modal de detalle con la tecla Escape
+  useEffect(() => {
+    if (!selectedMaterialId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedMaterialId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedMaterialId]);
 
   // ---- Registrar movimiento de material (desde el panel) ----
   const handleRegisterMovement = async (e: React.FormEvent) => {
@@ -1625,351 +1656,454 @@ export default function Inventario() {
           )}
         </div>
 
-        {/* ================= PANEL LATERAL (Insumo: editar + movimiento + historial) ================= */}
-        {tab === 'insumos' && selectedMaterialId && materialSeleccionado && (
-          <div className="w-full lg:w-[28rem] bg-white border border-yeikar-secondary-light/10 rounded-3xl p-5 shadow-sm space-y-5 flex flex-col max-h-[800px] overflow-hidden">
-            <div className="flex items-start justify-between border-b border-yeikar-secondary-light/5 pb-3">
-              <div>
-                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">DETALLE DE INSUMO</span>
-                <h3 className="font-headline font-black text-yeikar-secondary text-base truncate max-w-[240px]" title={materialSeleccionado.nombre}>
-                  {materialSeleccionado.nombre}
-                </h3>
-              </div>
-              <button
-                onClick={() => setSelectedMaterialId(null)}
-                className="p-1 hover:bg-yeikar-tertiary rounded-lg text-yeikar-neutral/40 hover:text-yeikar-neutral/70 transition-colors"
+        {/* ================= MODAL DETALLE DE INSUMO (movimiento + editar + historial) ================= */}
+        {tab === 'insumos' && selectedMaterialId && materialSeleccionado && (() => {
+          const stockInfo = insumoStock(materialSeleccionado);
+          const esEntradaMov = movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION';
+          const deptoLabel = DEPARTAMENTOS.find((d) => d.valor === materialSeleccionado.departamento)?.label || 'General';
+          const tabs = [
+            { key: 'movimiento' as const, label: 'Movimiento' },
+            { key: 'editar' as const, label: 'Editar Insumo' },
+            { key: 'historial' as const, label: 'Historial' },
+          ];
+          return (
+            <div
+              className="fixed inset-0 z-50 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+              onClick={() => setSelectedMaterialId(null)}
+            >
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 14 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white rounded-3xl shadow-xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10"
               >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+                {/* Encabezado con resumen del insumo */}
+                <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 pt-5 pb-4 relative">
+                  <button
+                    onClick={() => setSelectedMaterialId(null)}
+                    className="absolute right-4 top-4 p-1.5 rounded-lg hover:bg-white/15 transition-colors"
+                    aria-label="Cerrar"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-white/60">Detalle de insumo</span>
+                  <h3 className="font-headline font-black text-xl truncate pr-10" title={materialSeleccionado.nombre}>
+                    {materialSeleccionado.nombre}
+                  </h3>
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                      <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Stock actual</p>
+                      <p className={`font-mono font-bold text-lg leading-tight ${stockInfo.low ? 'text-amber-300' : 'text-white'}`}>
+                        {stockInfo.c.toLocaleString('es-ES')}
+                        <span className="text-xs font-normal text-white/70"> {materialSeleccionado.unidad_medida?.abreviatura || ''}</span>
+                      </p>
+                    </div>
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                      <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Costo</p>
+                      <p className="font-mono font-bold text-lg leading-tight text-white">
+                        ${Number(materialSeleccionado.costo_base || 0).toLocaleString('es-ES')}
+                      </p>
+                    </div>
+                    <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                      <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Depto.</p>
+                      <p className="font-headline font-bold text-sm leading-tight text-white truncate pt-1">{deptoLabel}</p>
+                    </div>
+                  </div>
+                </div>
 
-            <div className="flex-1 overflow-y-auto space-y-5 pr-1">
-              {/* Editar insumo */}
-              <form onSubmit={handleSaveMaterial} className="space-y-3 bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-2xl p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-secondary">Editar Insumo</span>
-                  <span className="text-[10px] font-mono text-yeikar-neutral/40">{materialSeleccionado.unidad_medida?.nombre || ''}</span>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Nombre</label>
-                  <input type="text" required value={editMaterial.nombre} onChange={(e) => setEditMaterial(p => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '').replace(' uppercase', '')} />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario</label>
-                    <input type="number" min="0" step="0.01" value={editMaterial.costo_base} onChange={(e) => setEditMaterial(p => ({ ...p, costo_base: e.target.value }))} className={inputCls} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Stock Mínimo</label>
-                    <input type="number" min="0" step="0.5" value={editMaterial.stock_minimo} onChange={(e) => setEditMaterial(p => ({ ...p, stock_minimo: e.target.value }))} className={inputCls} />
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Categoría de Inventario</label>
-                  <SearchSelect
-                    value={editMaterial.categoria_inventario_id}
-                    onChange={(v) => setEditMaterial(p => ({ ...p, categoria_inventario_id: String(v) }))}
-                    options={[{ value: '', label: 'Sin categoría' }, ...categoriasMaterial.map((c) => ({ value: c.id, label: c.nombre }))]}
-                    placeholder="Sin categoría..."
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Departamento</label>
-                  <SearchSelect
-                    value={editMaterial.departamento ?? ''}
-                    onChange={(v) => setEditMaterial(p => ({ ...p, departamento: v ? String(v) : null }))}
-                    options={[
-                      { value: '', label: 'General (sin departamento)' },
-                      ...DEPARTAMENTOS.map((d) => ({ value: d.valor, label: d.label })),
-                    ]}
-                    placeholder="General..."
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Largo Lámina (cm)</label>
-                    <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.largo_cm} onChange={(e) => setEditMaterial(p => ({ ...p, largo_cm: e.target.value }))} className={inputCls} />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Ancho Lámina (cm)</label>
-                    <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.ancho_cm} onChange={(e) => setEditMaterial(p => ({ ...p, ancho_cm: e.target.value }))} className={inputCls} />
-                  </div>
-                </div>
-                {editMaterial.largo_cm && editMaterial.ancho_cm ? (
-                  <p className="text-[10px] text-yeikar-neutral/50">
-                    Material laminar: admite consumos por cortes y sobrantes ({(parseFloat(editMaterial.largo_cm) * parseFloat(editMaterial.ancho_cm) / 10000).toFixed(2)} m² por lámina).
-                  </p>
-                ) : (
-                  <p className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                    Sin dimensiones: no podrá pedirse por láminas completas ni cortarse en producción. Llena largo × ancho para habilitarlo.
-                  </p>
-                )}
-                <button
-                  type="submit"
-                  disabled={savingEdit}
-                  className="w-full py-2 bg-yeikar-secondary hover:bg-yeikar-secondary-light text-white rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
-                >
-                  {savingEdit ? 'Guardando...' : 'Guardar Cambios'}
-                </button>
-              </form>
-
-              {/* Registrar movimiento */}
-              <form onSubmit={handleRegisterMovement} className="space-y-3 bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-2xl p-4">
-                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-primary">Registrar Movimiento</span>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Tipo Movimiento</label>
-                  <select value={movMaterial.tipo} onChange={(e) => setMovMaterial(p => ({ ...p, tipo: e.target.value }))} className={selectCls}>
-                    {TIPOS_MOVIMIENTO.map(t => (
-                      <option key={t} value={t}>
-                        {t === 'ENTRADA' ? 'ENTRADA (Compra/Carga)' : t === 'SALIDA' ? 'SALIDA (Consumo/Despacho)' : t === 'AJUSTE' ? 'AJUSTE (Inventario físico)' : t === 'DAÑO' ? 'DAÑO (Mermas)' : 'DEVOLUCION'}
-                      </option>
+                {/* Tabs */}
+                <div className="px-6 pt-4">
+                  <div className="flex gap-1 p-1 bg-yeikar-tertiary/40 rounded-2xl">
+                    {tabs.map((t) => (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setDetalleTab(t.key)}
+                        className={`flex-1 py-2 rounded-xl text-[11px] font-headline font-black uppercase tracking-wider transition-all ${
+                          detalleTab === t.key
+                            ? 'bg-white shadow text-yeikar-secondary'
+                            : 'text-yeikar-neutral/45 hover:text-yeikar-secondary'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
                     ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
-                  <SearchSelect
-                    value={movMaterial.ubicacion_id}
-                    onChange={(v) => setMovMaterial(p => ({ ...p, ubicacion_id: String(v) }))}
-                    options={ubicaciones.map((u) => ({ value: u.id, label: u.nombre }))}
-                    placeholder="Seleccione una ubicación"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
-                  <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
-                </div>
-                {(movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION') && (
-                  <div className="space-y-3 bg-white/40 p-3 rounded-xl border border-yeikar-secondary-light/10">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-yeikar-secondary">
-                        Precio Unitario (Lista) <span className="text-yeikar-neutral/40 font-normal">(Actualiza el precio al instante)</span>
-                      </label>
-                      <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.costo_unitario} onChange={(e) => setMovMaterial(p => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
-                    </div>
-
-                    {/* "La llevada" */}
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-yeikar-secondary">
-                        La Llevada<span className="text-yeikar-neutral/40 font-normal">(opcional — genera gasto desde la cuenta)</span>
-                      </label>
-                      <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(e) => setMovMaterial(p => ({ ...p, llevada: e.target.value }))} className={inputCls} />
-                    </div>
-
-                    {/* Proveedor: dónde se compró (opcional, texto libre) */}
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-yeikar-secondary">
-                        Proveedor <span className="text-yeikar-neutral/40 font-normal">(dónde se compró — opcional)</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={movMaterial.proveedor_nombre}
-                        onChange={(e) => setMovMaterial(p => ({ ...p, proveedor_nombre: e.target.value }))}
-                        placeholder="Ej. Distribuidora Maderas C.A."
-                        className={inputCls}
-                      />
-                    </div>
-
-                    {/* Cliente: material comprado para un cliente específico (opcional, texto libre) */}
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-yeikar-secondary">
-                        Cliente <span className="text-yeikar-neutral/40 font-normal">(comprado para un cliente — opcional)</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={movMaterial.cliente_nombre}
-                        onChange={(e) => setMovMaterial(p => ({ ...p, cliente_nombre: e.target.value }))}
-                        placeholder="Ej. Cliente sin registrar"
-                        className={inputCls}
-                      />
-                    </div>
-
-                    {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && (
-                      <div className="space-y-2 pt-1 border-t border-yeikar-secondary-light/10">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold text-yeikar-secondary">
-                            % Descuento por pago de contado / al mayor
-                          </label>
-                          <span className="text-[10px] text-yeikar-neutral/40">Opcional</span>
-                        </div>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.1"
-                            placeholder="Ej: 10"
-                            value={movMaterial.descuento_porcentaje}
-                            onChange={(e) => setMovMaterial(p => ({ ...p, descuento_porcentaje: e.target.value }))}
-                            className={`${inputCls} pr-8`}
-                          />
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-yeikar-neutral/40">%</span>
-                        </div>
-
-                        {parseFloat(movMaterial.descuento_porcentaje || '0') > 0 && (() => {
-                          const bruto = parseFloat(movMaterial.costo_unitario || '0') || 0;
-                          const desc = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
-                          const montoDesc = (bruto * desc) / 100;
-                          const neto = Math.max(0, bruto - montoDesc);
-                          return (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 text-[11px] space-y-1 text-emerald-900">
-                              <div className="flex justify-between">
-                                <span>Precio lista:</span>
-                                <span className="font-mono">${bruto.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex justify-between text-emerald-700 font-semibold">
-                                <span>Descuento ({desc}%):</span>
-                                <span className="font-mono">-${montoDesc.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="flex justify-between font-bold border-t border-emerald-200 pt-1 text-emerald-950">
-                                <span>Costo neto a registrar:</span>
-                                <span className="font-mono">${neto.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    )}
                   </div>
-                )}
-                {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && cuentasPago.length > 0 && (() => {
-                  const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
-                  const brutoRef = parseFloat(movMaterial.costo_unitario || '0') || 0;
-                  const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
-                  const netoUnit = descPct > 0 ? Math.max(0, brutoRef * (1 - descPct / 100)) : brutoRef;
-                  const totalRef = netoUnit * (parseFloat(movMaterial.cantidad || '0') || 0);
-                  const pagoCod = codMonedaDe(monedaId);
-                  const necesitaTasa = !!cuentaId && monedaId !== MONEDA_BASE_ID;
-                  const par = resolverParMonedas('COP', pagoCod);
-                  const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
-                  const deduc = cuentaId ? (necesitaTasa && tasaNum > 0 ? convertirMonedaHumana(totalRef, 'COP', pagoCod, tasaNum) : totalRef) : 0;
-                  return (
-                    <>
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-yeikar-secondary">
-                          ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — vacío = a crédito)</span>
-                        </label>
-                        <SearchSelect
-                          value={movMaterial.pago_key}
-                          onChange={(v) => setMovMaterial(p => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago }))}
-                          options={[
-                            { value: '', label: 'Fiar (registrar deuda)' },
-                            ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
-                          ]}
-                          placeholder="Contado desde..."
-                        />
+                </div>
+
+                {/* Cuerpo */}
+                <div className="flex-1 overflow-y-auto p-6">
+                  {/* ── TAB: Registrar movimiento ── */}
+                  {detalleTab === 'movimiento' && (
+                    <form onSubmit={handleRegisterMovement} className="space-y-4">
+                      {/* Tipo de movimiento (botones) */}
+                      <div>
+                        <label className="text-xs font-bold text-yeikar-secondary mb-1.5 block">Tipo de movimiento</label>
+                        <div className="grid grid-cols-5 gap-1.5">
+                          {TIPOS_MOVIMIENTO.map((t) => {
+                            const activo = movMaterial.tipo === t;
+                            return (
+                              <button
+                                key={t}
+                                type="button"
+                                title={HINTS_TIPO[t] || t}
+                                onClick={() => setMovMaterial((p) => ({ ...p, tipo: t }))}
+                                className={`py-2 rounded-xl border text-[10px] font-headline font-black uppercase tracking-wide transition-all ${
+                                  activo
+                                    ? `${TIPO_BTN_ACTIVO[t] || 'bg-yeikar-secondary border-yeikar-secondary'} text-white shadow-sm`
+                                    : 'bg-white border-yeikar-secondary-light/15 text-yeikar-neutral/50 hover:border-yeikar-secondary-light/40 hover:text-yeikar-secondary'
+                                }`}
+                              >
+                                {t}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movMaterial.tipo]}</p>
                       </div>
-                      {!cuentaId && (
-                        <div className="space-y-1.5">
-                          <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
-                            Se registrará una deuda de ≈ <b>${(totalRef + (parseFloat(movMaterial.llevada || '0') || 0)).toLocaleString('es-CO')} COP</b>
-                            {' '}(compra + pasada) en <b>Egresos y Gastos → Por Pagar</b>.
-                          </p>
-                          {!movMaterial.proveedor_nombre && (
-                            <p className="text-[11px] font-bold text-red-600">
-                              Al fiar es obligatorio indicar el proveedor (campo de arriba).
-                            </p>
+
+                      {/* Ubicación + Cantidad */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
+                          <SearchSelect
+                            value={movMaterial.ubicacion_id}
+                            onChange={(v) => setMovMaterial((p) => ({ ...p, ubicacion_id: String(v) }))}
+                            options={ubicaciones.map((u) => ({ value: u.id, label: u.nombre }))}
+                            placeholder="Seleccione..."
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">
+                            Cantidad <span className="text-yeikar-neutral/40 font-normal">({materialSeleccionado.unidad_medida?.abreviatura || materialSeleccionado.unidad_medida?.nombre || ''})</span>
+                          </label>
+                          <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial((p) => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
+                        </div>
+                      </div>
+
+                      {/* Datos de la compra (entradas y devoluciones) */}
+                      {esEntradaMov && (
+                        <div className="space-y-3 bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-2xl p-4">
+                          <p className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-yeikar-neutral/45">Datos de la compra · opcional</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-yeikar-secondary">
+                                Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(actualiza el costo)</span>
+                              </label>
+                              <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.costo_unitario} onChange={(e) => setMovMaterial((p) => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-yeikar-secondary">
+                                La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete — genera gasto)</span>
+                              </label>
+                              <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(e) => setMovMaterial((p) => ({ ...p, llevada: e.target.value }))} className={inputCls} />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-yeikar-secondary">
+                                Proveedor <span className="text-yeikar-neutral/40 font-normal">(dónde compró)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={movMaterial.proveedor_nombre}
+                                onChange={(e) => setMovMaterial((p) => ({ ...p, proveedor_nombre: e.target.value }))}
+                                placeholder="Ej. Distribuidora Maderas C.A."
+                                className={inputCls.replace('font-mono', '')}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-yeikar-secondary">
+                                Cliente <span className="text-yeikar-neutral/40 font-normal">(comprado para)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={movMaterial.cliente_nombre}
+                                onChange={(e) => setMovMaterial((p) => ({ ...p, cliente_nombre: e.target.value }))}
+                                placeholder="Ej. Cliente sin registrar"
+                                className={inputCls.replace('font-mono', '')}
+                              />
+                            </div>
+                          </div>
+
+                          {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && (
+                            <div className="space-y-2 pt-1 border-t border-yeikar-secondary-light/10">
+                              <div className="flex items-center justify-between">
+                                <label className="text-xs font-bold text-yeikar-secondary">
+                                  % Descuento por pago de contado / al mayor
+                                </label>
+                                <span className="text-[10px] text-yeikar-neutral/40">Opcional</span>
+                              </div>
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  step="0.1"
+                                  placeholder="Ej: 10"
+                                  value={movMaterial.descuento_porcentaje}
+                                  onChange={(e) => setMovMaterial((p) => ({ ...p, descuento_porcentaje: e.target.value }))}
+                                  className={`${inputCls} pr-8`}
+                                />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-yeikar-neutral/40">%</span>
+                              </div>
+
+                              {parseFloat(movMaterial.descuento_porcentaje || '0') > 0 && (() => {
+                                const bruto = parseFloat(movMaterial.costo_unitario || '0') || 0;
+                                const desc = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
+                                const montoDesc = (bruto * desc) / 100;
+                                const neto = Math.max(0, bruto - montoDesc);
+                                return (
+                                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 text-[11px] space-y-1 text-emerald-900">
+                                    <div className="flex justify-between">
+                                      <span>Precio lista:</span>
+                                      <span className="font-mono">${bruto.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div className="flex justify-between text-emerald-700 font-semibold">
+                                      <span>Descuento ({desc}%):</span>
+                                      <span className="font-mono">-${montoDesc.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div className="flex justify-between font-bold border-t border-emerald-200 pt-1 text-emerald-950">
+                                      <span>Costo neto a registrar:</span>
+                                      <span className="font-mono">${neto.toLocaleString('es-CO', { minimumFractionDigits: 2 })}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           )}
                         </div>
                       )}
-                      {necesitaTasa && (
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-yeikar-secondary">
-                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
-                          </label>
-                          <input type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) => setMovMaterial(p => ({ ...p, tasa_pago: e.target.value }))} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
-                        </div>
-                      )}
-                      {!!cuentaId && (
-                        <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                          Se descontarán ≈ <b>${deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
-                          {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
-                        </p>
-                      )}
-                    </>
-                  );
-                })()}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
-                  <textarea rows={2} placeholder="Detalle o referencia..." value={movMaterial.observaciones} onChange={(e) => setMovMaterial(p => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
-                </div>
-                <button
-                  type="submit"
-                  disabled={savingMov}
-                  className="w-full py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
-                >
-                  {savingMov ? 'Registrando...' : 'Registrar Movimiento'}
-                </button>
-              </form>
 
-              {/* Historial */}
-              <div>
-                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-secondary">Historial</span>
-                {loadingKardex ? (
-                  <div className="flex flex-col items-center justify-center py-8 space-y-3">
-                    <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
-                    <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
-                  </div>
-                ) : (
-                  <div className="mt-3 space-y-3">
-                    {kardex.length === 0 ? (
-                      <p className="text-xs text-yeikar-neutral/40 italic text-center py-4">No se registran movimientos para este material.</p>
-                    ) : (
-                      kardex.map((mov) => {
-                        const isEntry = mov.tipo === 'ENTRADA' || mov.tipo === 'DEVOLUCION';
-                        const isAdjustment = mov.tipo === 'AJUSTE';
+                      {/* Pago: cuenta / fiado / tasa */}
+                      {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && cuentasPago.length > 0 && (() => {
+                        const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
+                        const brutoRef = parseFloat(movMaterial.costo_unitario || '0') || 0;
+                        const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
+                        const netoUnit = descPct > 0 ? Math.max(0, brutoRef * (1 - descPct / 100)) : brutoRef;
+                        const totalRef = netoUnit * (parseFloat(movMaterial.cantidad || '0') || 0);
+                        const pagoCod = codMonedaDe(monedaId);
+                        const necesitaTasa = !!cuentaId && monedaId !== MONEDA_BASE_ID;
+                        const par = resolverParMonedas('COP', pagoCod);
+                        const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
+                        const tasaValida = necesitaTasa && tasaNum > 0;
+                        const deduc = cuentaId ? (tasaValida ? convertirMonedaHumana(totalRef, 'COP', pagoCod, tasaNum) : totalRef) : 0;
                         return (
-                          <div key={mov.id} className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-xl p-3 text-xs space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className={`font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded border ${
-                                isAdjustment ? 'bg-slate-50 text-slate-700 border-slate-200' : isEntry ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
-                              }`}>
-                                {mov.tipo}
-                              </span>
-                              <span className="font-mono text-[10px] text-yeikar-neutral/40">
-                                {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                              </span>
+                          <div className="space-y-3">
+                            <div className="space-y-1">
+                              <label className="text-xs font-bold text-yeikar-secondary">
+                                ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — vacío = a crédito)</span>
+                              </label>
+                              <SearchSelect
+                                value={movMaterial.pago_key}
+                                onChange={(v) => setMovMaterial((p) => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago }))}
+                                options={[
+                                  { value: '', label: 'Fiar (registrar deuda)' },
+                                  ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
+                                ]}
+                                placeholder="Contado desde..."
+                              />
                             </div>
-                            <div className="flex items-baseline justify-between mt-1.5">
-                              <span className="text-yeikar-neutral/60 font-medium">Cantidad:</span>
-                              <span className={`font-mono font-bold text-sm ${isEntry ? 'text-green-600' : 'text-yeikar-secondary'}`}>
-                                {isEntry ? '+' : isAdjustment ? '' : '-'}{parseFloat(mov.cantidad.toString()).toLocaleString('es-ES')}
-                              </span>
-                            </div>
-                            {mov.costo_unitario != null && isEntry && (
-                              <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
-                                Precio: <span className="font-mono font-semibold">${Number(mov.costo_unitario).toLocaleString('es-ES')}</span>
-                              </p>
+                            {!cuentaId && parseFloat(movMaterial.cantidad || '0') > 0 && (
+                              <div className="space-y-1.5">
+                                <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
+                                  Se registrará una deuda de ≈ <b>${(totalRef + (parseFloat(movMaterial.llevada || '0') || 0)).toLocaleString('es-CO')} COP</b>
+                                  {' '}(compra + llevada) en <b>Egresos y Gastos → Por Pagar</b>.
+                                </p>
+                                {!movMaterial.proveedor_nombre && (
+                                  <p className="text-[11px] font-bold text-red-600">
+                                    Al fiar es obligatorio indicar el proveedor (campo de arriba).
+                                  </p>
+                                )}
+                              </div>
                             )}
-                            {mov.llevada != null && Number(mov.llevada) > 0 && (
-                              <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
-                                Llevada (flete): <span className="font-mono font-semibold text-amber-700">${Number(mov.llevada).toLocaleString('es-ES')}</span>
-                              </p>
+                            {necesitaTasa && (
+                              <div className="space-y-1">
+                                <label className="text-xs font-bold text-yeikar-secondary">
+                                  Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
+                                </label>
+                                <input type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) => setMovMaterial((p) => ({ ...p, tasa_pago: e.target.value }))} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
+                              </div>
                             )}
-                            {(mov.proveedor_nombre || mov.cliente_nombre) && (
-                              <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
-                                {mov.proveedor_nombre && <>Proveedor: <span className="font-semibold text-yeikar-secondary">{mov.proveedor_nombre}</span></>}
-                                {mov.proveedor_nombre && mov.cliente_nombre && ' · '}
-                                {mov.cliente_nombre && <>Cliente: <span className="font-semibold text-yeikar-secondary">{mov.cliente_nombre}</span></>}
-                              </p>
-                            )}
-                            {mov.observaciones && (
-                              <p className="text-[11px] text-yeikar-neutral/50 italic mt-1 bg-white/40 p-1.5 rounded border border-yeikar-secondary-light/5">
-                                {mov.observaciones}
-                              </p>
+                            {!!cuentaId && parseFloat(movMaterial.cantidad || '0') > 0 && (
+                              tasaValida ? (
+                                <div className="text-[11px] text-emerald-900 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2 space-y-0.5">
+                                  <p>
+                                    Se descontarán ≈ <b>${deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
+                                  </p>
+                                  <p className="text-[10px] text-emerald-700/80">
+                                    Compra total: <span className="font-mono">${totalRef.toLocaleString('es-CO')} COP</span> · tasa {tasaNum.toLocaleString('es-CO')}
+                                  </p>
+                                </div>
+                              ) : necesitaTasa ? (
+                                <p className="text-[11px] text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg px-3 py-2">
+                                  La compra suma ≈ <b>${totalRef.toLocaleString('es-CO')} COP</b> · escribe la tasa <b>({par.label})</b> para calcular cuánto se descuenta en {pagoCod}.
+                                </p>
+                              ) : (
+                                <p className="text-[11px] text-emerald-900 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                                  Se descontarán ≈ <b>${deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
+                                </p>
+                              )
                             )}
                           </div>
                         );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
+                      })()}
+
+                      {/* Observaciones */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
+                        <textarea rows={2} placeholder="Detalle o referencia..." value={movMaterial.observaciones} onChange={(e) => setMovMaterial((p) => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={savingMov}
+                        className="w-full py-3 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50 shadow-gold"
+                      >
+                        {savingMov ? 'Registrando...' : 'Registrar Movimiento'}
+                      </button>
+                    </form>
+                  )}
+
+                  {/* ── TAB: Editar insumo ── */}
+                  {detalleTab === 'editar' && (
+                    <form onSubmit={handleSaveMaterial} className="space-y-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Nombre</label>
+                        <input type="text" required value={editMaterial.nombre} onChange={(e) => setEditMaterial((p) => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '').replace(' uppercase', '')} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario</label>
+                          <input type="number" min="0" step="0.01" value={editMaterial.costo_base} onChange={(e) => setEditMaterial((p) => ({ ...p, costo_base: e.target.value }))} className={inputCls} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">Stock Mínimo</label>
+                          <input type="number" min="0" step="0.5" value={editMaterial.stock_minimo} onChange={(e) => setEditMaterial((p) => ({ ...p, stock_minimo: e.target.value }))} className={inputCls} />
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Categoría de Inventario</label>
+                        <SearchSelect
+                          value={editMaterial.categoria_inventario_id}
+                          onChange={(v) => setEditMaterial((p) => ({ ...p, categoria_inventario_id: String(v) }))}
+                          options={[{ value: '', label: 'Sin categoría' }, ...categoriasMaterial.map((c) => ({ value: c.id, label: c.nombre }))]}
+                          placeholder="Sin categoría..."
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Departamento</label>
+                        <SearchSelect
+                          value={editMaterial.departamento ?? ''}
+                          onChange={(v) => setEditMaterial((p) => ({ ...p, departamento: v ? String(v) : null }))}
+                          options={[
+                            { value: '', label: 'General (sin departamento)' },
+                            ...DEPARTAMENTOS.map((d) => ({ value: d.valor, label: d.label })),
+                          ]}
+                          placeholder="General..."
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">Largo Lámina (cm)</label>
+                          <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.largo_cm} onChange={(e) => setEditMaterial((p) => ({ ...p, largo_cm: e.target.value }))} className={inputCls} />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">Ancho Lámina (cm)</label>
+                          <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.ancho_cm} onChange={(e) => setEditMaterial((p) => ({ ...p, ancho_cm: e.target.value }))} className={inputCls} />
+                        </div>
+                      </div>
+                      {editMaterial.largo_cm && editMaterial.ancho_cm ? (
+                        <p className="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                          Material laminar: admite consumos por cortes y sobrantes ({(parseFloat(editMaterial.largo_cm) * parseFloat(editMaterial.ancho_cm) / 10000).toFixed(2)} m² por lámina).
+                        </p>
+                      ) : (
+                        <p className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                          Sin dimensiones: no podrá pedirse por láminas completas ni cortarse en producción. Llena largo × ancho para habilitarlo.
+                        </p>
+                      )}
+                      <button
+                        type="submit"
+                        disabled={savingEdit}
+                        className="w-full py-2.5 bg-yeikar-secondary hover:bg-yeikar-secondary-light text-white rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                      >
+                        {savingEdit ? 'Guardando...' : 'Guardar Cambios'}
+                      </button>
+                    </form>
+                  )}
+
+                  {/* ── TAB: Historial (kardex) ── */}
+                  {detalleTab === 'historial' && (
+                    <div>
+                      {loadingKardex ? (
+                        <div className="flex flex-col items-center justify-center py-8 space-y-3">
+                          <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
+                          <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {kardex.length === 0 ? (
+                            <p className="text-xs text-yeikar-neutral/40 italic text-center py-4">No se registran movimientos para este material.</p>
+                          ) : (
+                            kardex.map((mov) => {
+                              const isEntry = mov.tipo === 'ENTRADA' || mov.tipo === 'DEVOLUCION';
+                              const isAdjustment = mov.tipo === 'AJUSTE';
+                              return (
+                                <div key={mov.id} className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-xl p-3 text-xs space-y-1">
+                                  <div className="flex items-center justify-between">
+                                    <span className={`font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded border ${
+                                      isAdjustment ? 'bg-slate-50 text-slate-700 border-slate-200' : isEntry ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
+                                    }`}>
+                                      {mov.tipo}
+                                    </span>
+                                    <span className="font-mono text-[10px] text-yeikar-neutral/40">
+                                      {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-baseline justify-between mt-1.5">
+                                    <span className="text-yeikar-neutral/60 font-medium">Cantidad:</span>
+                                    <span className={`font-mono font-bold text-sm ${isEntry ? 'text-green-600' : 'text-yeikar-secondary'}`}>
+                                      {isEntry ? '+' : isAdjustment ? '' : '-'}{parseFloat(mov.cantidad.toString()).toLocaleString('es-ES')}
+                                    </span>
+                                  </div>
+                                  {mov.costo_unitario != null && isEntry && (
+                                    <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
+                                      Precio: <span className="font-mono font-semibold">${Number(mov.costo_unitario).toLocaleString('es-ES')}</span>
+                                    </p>
+                                  )}
+                                  {mov.llevada != null && Number(mov.llevada) > 0 && (
+                                    <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
+                                      Llevada (flete): <span className="font-mono font-semibold text-amber-700">${Number(mov.llevada).toLocaleString('es-ES')}</span>
+                                    </p>
+                                  )}
+                                  {(mov.proveedor_nombre || mov.cliente_nombre) && (
+                                    <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
+                                      {mov.proveedor_nombre && <>Proveedor: <span className="font-semibold text-yeikar-secondary">{mov.proveedor_nombre}</span></>}
+                                      {mov.proveedor_nombre && mov.cliente_nombre && ' · '}
+                                      {mov.cliente_nombre && <>Cliente: <span className="font-semibold text-yeikar-secondary">{mov.cliente_nombre}</span></>}
+                                    </p>
+                                  )}
+                                  {mov.observaciones && (
+                                    <p className="text-[11px] text-yeikar-neutral/50 italic mt-1 bg-white/40 p-1.5 rounded border border-yeikar-secondary-light/5">
+                                      {mov.observaciones}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* ================= PANEL LATERAL (Producto: movimiento + historial) ================= */}
         {(tab === 'productos' || tab === 'exhibicion') && selectedProductoId && productoSeleccionado && (

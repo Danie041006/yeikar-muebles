@@ -1,0 +1,55 @@
+{
+  "id": "N06",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-04-16",
+  "cliente": {
+    "nombre": "TATIANA BAUTISTA",
+    "rif_cedula": "V-21.033.701",
+    "direccion": "BARRIO LAS COMUNAS",
+    "telefono": "313-3178591"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "AIRE SPLIT 220 DE 12000BTU MARCA GPLUS",
+      "observaciones": null,
+      "precio_unitario": 312,
+      "precio_total_impreso": 312
+    }
+  ],
+  "total_declarado": 312,
+  "abonos": [
+    { "fecha": "2026-04-16", "metodo": "EFECTIVO", "monto": 13, "origen": "IMPRESO", "detalle_literal": "ABONO EN EFECTIVO 50.000/3650=  (13,70)" },
+    { "fecha": "2026-04-18", "metodo": "EFECTIVO", "monto": 13, "origen": "IMPRESO", "detalle_literal": "8/4/2026 ABONO EN EFECTIVO 50.000/3680=  (13,59)" },
+    { "fecha": "2026-06-16", "metodo": "EFECTIVO", "monto": 13, "origen": "MANUSCRITO", "detalle_literal": "50.000/3880= (12,89)" },
+    { "fecha": "2026-06-30", "metodo": "EFECTIVO", "monto": 13, "origen": "MANUSCRITO", "detalle_literal": "fecha manuscrita '31/06' (no existe) -> 30/06" },
+    { "fecha": "2026-08-24", "metodo": "EFECTIVO", "monto": 172, "origen": "MANUSCRITO", "detalle_literal": "ABONO DE LO AHORRADO 550.000/3.200 = 171,9 -> 172" },
+    { "fecha": "2026-08-02", "metodo": "EFECTIVO", "monto": 22, "origen": "MANUSCRITO", "detalle_literal": "90.000/3.100" },
+    { "fecha": "2026-08-07", "metodo": "EFECTIVO", "monto": 15, "origen": "MANUSCRITO", "detalle_literal": "50.000/3.300 (15,15)" },
+    { "fecha": "2026-08-05", "metodo": "EFECTIVO", "monto": 15, "origen": "MANUSCRITO", "detalle_literal": "50.000/3.100 (16,13)" }
+  ],
+  "saldo_impreso": 286,
+  "saldo_final_manuscrito": 36,
+  "saldo_confirmado_por_dueno": 36,
+  "fecha_entrega": "2026-04-16",
+  "entrega_impresa": null,
+  "reconciliacion": {
+    "suma_items_impresos": 312,
+    "suma_items_con_multiplicacion_real": 312,
+    "suma_abonos_total": 276,
+    "total_menos_abonos": 36,
+    "coincide_con_saldo_final_manuscrito": true
+  },
+  "inconsistencias": [
+    "Cadena de saldos manuscrita no cierra exactamente con los montos leídos: la suma de abonos según los Saldos impresos/manuscritos (276) da saldo final 36 (que cuadra con 312)."
+  ],
+  "dudas": [
+    "Segundo abono impreso: fecha '8/4/2026' parcialmente legible (¿18/4?); se importa como 18/4.",
+    "Abono manuscrito del 24/8 ('ABONO DE LO AHORRADO 550.000'): lectura alternativa 550.000/3.100 = 177. Se importa 172 (550.000/3.200) porque es el único valor que hace cuadrar la cadena de saldos con el saldo final 36 confirmado por el dueño.",
+    "Fechas manuscritas '2/8', '7/8' y '5/8' escritas después del 24/8 en la cadena de saldos descendente (posiblemente sean de septiembre); se importan tal como están escritas.",
+    "La cadena de saldos legibles (273, 260, 83, 61/60, 46/51, 36) no cuadra línea por línea con los montos; el cierre final (36) sí cuadra."
+  ],
+  "saldo_para_importar": 36
+}

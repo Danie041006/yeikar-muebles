@@ -1,0 +1,42 @@
+{
+  "id": "N19",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-01-20",
+  "cliente": {
+    "nombre": "JEFREY RODRIGUEZ",
+    "rif_cedula": null,
+    "direccion": "SAN CRISTOBAL . PIRINEOS",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "CUENTA DE LA FECHA 31/01/2025", "observaciones": null, "precio_unitario": 1321000, "precio_total_impreso": 1321000 },
+    { "cantidad": 1, "descripcion": "CUENTA DE LA FECHA 28/01/2025", "observaciones": null, "precio_unitario": 746000, "precio_total_impreso": 746000 }
+  ],
+  "total_declarado": 2067000,
+  "abonos": [
+    { "fecha": "2026-02-02", "metodo": "EFECTIVO", "monto": 250000, "origen": "MANUSCRITO", "detalle_literal": "02-02-2026 Abono en efectivo - ABONO 250.000, Saldo 1.817.000" },
+    { "fecha": "2026-02-16", "metodo": "EFECTIVO", "monto": 500000, "origen": "MANUSCRITO", "detalle_literal": "16-02-2026 Abono en efectivo - ABONO 500.000, Saldo 1.317.000" },
+    { "fecha": "2026-04-04", "metodo": "EFECTIVO", "monto": 500000, "origen": "MANUSCRITO", "detalle_literal": "04-04-2026 Abono en efectivo - ABONO 500.000, Saldo 817.000" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 817000,
+  "saldo_confirmado_por_dueno": 817000,
+  "fecha_entrega": "2026-01-20",
+  "entrega_impresa": null,
+  "reconciliacion": {
+    "suma_items_impresos": 2067000,
+    "suma_items_con_multiplicacion_real": 2067000,
+    "suma_abonos_total": 1250000,
+    "total_menos_abonos": 817000,
+    "coincide_con_saldo_final_manuscrito": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "La nota usa '$' pero los montos (1.321.000 / 746.000 / 2.067.000) están en COP según el dueño. Se importa en moneda COP.",
+    "Los renglones son referencias a cuentas anteriores (31/01/2025 y 28/01/2025).",
+    "Cliente sin RIF ni teléfono en la nota."
+  ],
+  "saldo_para_importar": 817000
+}

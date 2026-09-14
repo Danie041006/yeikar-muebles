@@ -1,0 +1,91 @@
+{
+  "id": "N01",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-06-04",
+  "cliente": {
+    "nombre": "DANIEL GOMEZ MONTOYA",
+    "rif_cedula": "C.I.V 15.958.210",
+    "direccion": "SAN ANTONIO, PLAZA MIRANDA",
+    "telefono": "0414-5374815"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "REVESTIMIENTO DE PARED COMPLETA CON SUS 2 NICHOS DE AMBOS LADOS CON LUZ LED Y WALL PANEL EN EL CENTRO DONDE IRA EL LOGO, NO OLVIDAR HACERLE LA PUERTA MINI INTERNA PARA LA FLAUTA DE LA PARED. SE FABRICARA EN MELAMINA RH DE 15 MM. TONO ROVERE ARENA.",
+      "observaciones": null,
+      "precio_unitario": 1090,
+      "precio_total_impreso": 1090
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "ESCRITORIO TAL CUAL ALA FOTO DE 1.80 SEMI OVALADO CON UNA PEQUEÑA L. EN LA PARTE DIAGONAL ESQUINERA MANO DERECHA MIRANDO DE FRENTE HACERLE LA BANDEJA PARA EL TECLADO DE LA COMPUTADORA Y DE ESE MISMO LADO HACERLE 1 GAVETA Y ABAJO 1 PUERTA CON SU REPISAS Y DEL LADO IZQUIERDO HACERLE SOLO GAVETAS Y HACERLE UNA CALETA CON SEGURIDAD CON CORREDERAS DE CIERRE LENTO, TONO DE MELAMINA EN ROVERE ARENA.",
+      "observaciones": null,
+      "precio_unitario": 1100,
+      "precio_total_impreso": 1100
+    },
+    {
+      "cantidad": 2,
+      "descripcion": "POLTRONAS DEL MODELO DE LA FOTO TAPIZAR EN TELA GARDEN MARFIL.",
+      "observaciones": "OBSERVACION HACERLA CON LUZ CALIDAD REF: 3.000K",
+      "observaciones_destacada_en_rojo": true,
+      "precio_unitario": 340,
+      "precio_total_impreso": 680
+    },
+    {
+      "cantidad": 2,
+      "descripcion": "REPISAS EN MELAMINA BLANCA",
+      "observaciones": null,
+      "precio_unitario": 91,
+      "precio_total_impreso": 91
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "SILLA ERGONOMICA TAPIZ. EN TELA GARDEN MARFIL",
+      "observaciones": null,
+      "precio_unitario": 190,
+      "precio_total_impreso": 190
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "MUEBLE DE BAÑO CON SUS 6 PUERTAS CON MARCO Y SUS 3 CHAPAS TIPO MONEDA Y ENTREPAÑO.",
+      "observaciones": null,
+      "precio_unitario": 530,
+      "precio_total_impreso": 530
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "MUEBLE DE COCINA CON SUS 2 PUERTAS CORREDIZA CON MARCO Y 3 GAVETAS CON SU ENTREPAÑO.",
+      "observaciones": null,
+      "precio_unitario": 425,
+      "precio_total_impreso": 425
+    }
+  ],
+  "total_declarado": 4106,
+  "abonos": [
+    { "fecha": "2026-06-04", "metodo": "ZELLE", "monto": 883, "origen": "IMPRESO" },
+    { "fecha": "2026-06-30", "metodo": "ZELLE", "monto": 415, "origen": "IMPRESO" },
+    { "fecha": "2026-07-11", "metodo": "ZELLE", "monto": 417, "origen": "IMPRESO" },
+    { "fecha": "2026-07-15", "metodo": "ZELLE", "monto": 400, "origen": "MANUSCRITO" },
+    { "fecha": "2026-07-23", "metodo": "ZELLE", "monto": 350, "origen": "MANUSCRITO" }
+  ],
+  "saldo_impreso": 2391,
+  "saldo_final_manuscrito": 1641,
+  "reconciliacion": {
+    "suma_items_impresos": 4106,
+    "suma_items_con_multiplicacion_real": 4197,
+    "suma_abonos_total": 2465,
+    "total_menos_abonos": 1641,
+    "coincide_con_saldo_final_manuscrito": true
+  },
+  "inconsistencias": [
+    "REPISAS EN MELAMINA BLANCA: cantidad 2 x $91 = $182, pero el VALOR TOTAL impreso es $91. El TOTAL de la nota ($4.106) fue calculado con el $91 impreso (1090+1100+680+91+190+530+425 = 4.106). Si se aplicara la multiplicación real el total sería $4.197. Regla adoptada: manda el total impreso ($4.106)."
+  ],
+  "dudas": [],
+  "saldo_para_importar": 1641,
+  "descartada_por_dueno": "El dueño ordenó borrar esta nota (junto con toda su cadena importada) y conservar solo la N16 de Daniel, que cierra en saldo $500. Cadena eliminada de producción: cotización #15, pedido #12, envío, venta #12 y sus 5 pagos."
+}

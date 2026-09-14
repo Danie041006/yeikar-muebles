@@ -1,0 +1,26 @@
+{
+  "id": "N35",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-03-18",
+  "fecha_entrega": "2026-03-18",
+  "cliente": {
+    "nombre": "GREGORIO BENITEZ",
+    "rif_cedula": null,
+    "direccion": "UREÑA",
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "AIRE DE 18.000 MIL BTU LUZ 220 W MARCA MABE", "precio_unitario": 637, "precio_total_impreso": 637 }
+  ],
+  "total_declarado": 637,
+  "abonos": [
+    { "fecha": "2026-06-23", "metodo": "EFECTIVO", "monto": 91, "origen": "MANUSCRITO", "detalle": "ABONO SALDO que tenia A Favor" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 546,
+  "saldo_confirmado_por_dueno": 546,
+  "reconciliacion": { "suma_items": 637, "suma_abonos": 91, "total_menos_abonos": 546, "cuadra": true },
+  "saldo_para_importar": 546
+}

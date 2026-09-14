@@ -1,0 +1,76 @@
+{
+  "id": "N02",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-08-13",
+  "cliente": {
+    "nombre": "LILIBETH VILLALOBOS",
+    "rif_cedula": "C.I.V.13.939.895",
+    "direccion": "SAN CRISTOBAL",
+    "telefono": "4247031648"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "CAMA IGUAL A LA IMAGEN DE 1.60",
+      "observaciones": "TAPIZAR EN FOCUS MARFIL",
+      "precio_unitario": 1059,
+      "precio_total_impreso": 1059
+    },
+    {
+      "cantidad": 2,
+      "descripcion": "NOCHEROS IGUAL (A LA IMAGEN)",
+      "observaciones": null,
+      "precio_unitario": 249,
+      "precio_total_impreso": 498
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "SOFA CAMA MATRIMONIAL IGUAL A LA IMAGEN",
+      "observaciones": "TAPIZAR EN PERSEA BEIGE",
+      "precio_unitario": 1045,
+      "precio_total_impreso": 1045
+    },
+    {
+      "cantidad": 2,
+      "descripcion": "COLCHONES LADY BEST 1.40",
+      "observaciones": null,
+      "precio_unitario": 370,
+      "precio_total_impreso": 740
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "COLCHON PERFECT SLEEPER 1.60",
+      "observaciones": null,
+      "precio_unitario": 790,
+      "precio_total_impreso": 790
+    },
+    {
+      "cantidad": 2,
+      "descripcion": "SOMIER 1.40 TAPIZAR EN PRANNA ALMENDRA",
+      "observaciones": null,
+      "precio_unitario": 336,
+      "precio_total_impreso": 672
+    }
+  ],
+  "total_declarado": 4804,
+  "abonos": [],
+  "saldo_impreso": 4804,
+  "saldo_final_manuscrito": null,
+  "fecha_entrega": "2026-09-03",
+  "entrega_impresa": "ENTREGADO EL 03/09/2026",
+  "reconciliacion": {
+    "suma_items_impresos": 4804,
+    "suma_items_con_multiplicacion_real": 4804,
+    "suma_abonos_total": 0,
+    "total_menos_abonos": 4804,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 4804
+}

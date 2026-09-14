@@ -1,0 +1,51 @@
+{
+  "id": "N16",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-06-04",
+  "cliente": {
+    "nombre": "DANIEL GOMEZ MONTOYA",
+    "rif_cedula": "C.I.V 15.958.210",
+    "direccion": "SAN ANTONIO, PLAZA MIRANDA",
+    "telefono": "0414-5374815"
+  },
+  "moneda": "USD",
+  "items": [],
+  "total_declarado": 1478,
+  "abonos": [
+    { "fecha": "2026-07-07", "metodo": "ZELLE", "monto": 400, "origen": "IMPRESO", "detalle_literal": "fecha impresa parcial '?/7/2026'" },
+    { "fecha": "2026-07-07", "metodo": "ZELLE", "monto": 250, "origen": "IMPRESO", "detalle_literal": "fecha impresa parcial '?/7/2026'" },
+    { "fecha": "2026-07-07", "metodo": "ZELLE", "monto": 163, "origen": "IMPRESO", "detalle_literal": "fecha impresa parcial '?/7/2026'" },
+    { "fecha": "2026-08-18", "metodo": "ZELLE", "monto": 1000, "origen": "MANUSCRITO", "detalle_literal": "'18/2016 Abono al zelle'" },
+    { "fecha": "2026-08-18", "metodo": "ZELLE", "monto": 500, "origen": "MANUSCRITO", "detalle_literal": "'18/2016 Abono al zelle'" }
+  ],
+  "saldo_impreso": 478,
+  "saldo_final_manuscrito": 500,
+  "saldo_confirmado_por_dueno": 500,
+  "fecha_entrega": "2026-06-04",
+  "entrega_impresa": null,
+  "reconciliacion": {
+    "suma_items_impresos": null,
+    "nota_sin_items": true,
+    "suma_abonos_total": 1913,
+    "total_menos_abonos": -435,
+    "coincide_con_saldo_final_manuscrito": false
+  },
+  "inconsistencias": [
+    "NOTA CONFUSA (sin ítems impreso): TOTAL impreso $1.478, pero los abonos listados (400+250+163 impresos + 1000+500 manuscritos) suman $1.913 y dejarían saldo NEGATIVO. El manuscrito final anota 'Saldo $500'."
+  ],
+  "dudas": [
+    "Fechas de los abonos impresos parciales ('?/7/2026').",
+    "Fechas manuscritas '18/2016'.",
+    "PEDIR AL DUEÑO el historial real de abonos de esta nota para registrar los pagos correctos: la cadena no cierra. El dueño confirmó saldo final $500."
+  ],
+  "saldo_para_importar": 500,
+  "importacion_final": {
+    "decision_del_dueno": "El dueño ordenó conservar SOLO esta nota de Daniel y borrar la N01. El saldo real es $500.",
+    "total_importado": 2313,
+    "total_reconstruido": true,
+    "explicacion": "Los 3 zelles impresos (400+250+163=813) dejaron el saldo impreso en $1.478 → total implícito 2.291. El abono manuscrito de $1.000 (18/8) dejaba 478, pero el manuscrito y el dueño cierran en $500 → se ajustó el total a 2.313 para mostrar exactamente $500 de saldo.",
+    "pagos_importados": [400, 250, 163, 1000],
+    "saldo_resultante": 500
+  }
+}

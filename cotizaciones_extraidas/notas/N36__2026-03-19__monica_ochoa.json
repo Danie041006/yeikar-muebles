@@ -1,0 +1,26 @@
+{
+  "id": "N36",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-03-19",
+  "fecha_entrega": "2026-03-19",
+  "cliente": {
+    "nombre": "MONICA OCHOA",
+    "rif_cedula": "V-12.231.022",
+    "direccion": "UREÑA, AGUAS CALIENTES",
+    "telefono": "0414-7366513"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "TELEVISOR DE 40\" SMART MARCA NEEKOOL ANDROID.", "precio_unitario": 262, "precio_total_impreso": 262 }
+  ],
+  "total_declarado": 262,
+  "abonos": [
+    { "fecha": "2026-07-11", "metodo": "EFECTIVO", "monto": 26, "origen": "MANUSCRITO", "detalle": "ABONO en efectivo saldo a favor" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 236,
+  "saldo_confirmado_por_dueno": 236,
+  "reconciliacion": { "suma_items": 262, "suma_abonos": 26, "total_menos_abonos": 236, "cuadra": true },
+  "saldo_para_importar": 236
+}

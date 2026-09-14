@@ -1,0 +1,40 @@
+{
+  "id": "N21",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-07-02",
+  "cliente": {
+    "nombre": "ARNULFO ALVAREZ",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 2243, "descripcion": "METROS DE MADERA APAMATE", "observaciones": null, "precio_unitario": 1500, "precio_total_impreso": 3364500 }
+  ],
+  "total_declarado": 3364500,
+  "abonos": [
+    { "fecha": "2026-07-15", "metodo": "BANCOLOMBIA", "monto": 2200000, "origen": "MANUSCRITO", "detalle_literal": "'Ficha 15 y 2016 Abono al Bancolombia' - ABONO 2.200.000, Saldo 1.164.500" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 1164500,
+  "saldo_confirmado_por_dueno": 1164500,
+  "fecha_entrega": "2026-07-02",
+  "entrega_impresa": "ENTREGADO EL 02/07/2026 (impreso)",
+  "reconciliacion": {
+    "suma_items_impresos": 3364500,
+    "suma_items_con_multiplicacion_real": 3364500,
+    "suma_abonos_total": 2200000,
+    "total_menos_abonos": 1164500,
+    "coincide_con_saldo_final_manuscrito": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "Montos en COP según el dueño (la nota usa '$').",
+    "Fecha de la nota ilegible ('02/01/2026 o 02/07/2026'); se usa 02/07/2026 (coincide con la fecha de entrega impresa).",
+    "Fecha manuscrita del abono ilegible ('15 y 2016'); se usa 15/07/2026.",
+    "Cliente sin RIF, dirección ni teléfono en la nota."
+  ],
+  "saldo_para_importar": 1164500
+}

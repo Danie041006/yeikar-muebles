@@ -1,0 +1,38 @@
+{
+  "id": "N22",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-06-12",
+  "cliente": {
+    "nombre": "SARGENTO VARELA",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 13, "descripcion": "TABLAS PARA PASO DE ESCALERA 60X2X24CM — LA PARTE ARRIBA LE HACEMOS UN BISEL", "observaciones": null, "precio_unitario": 25846, "precio_total_impreso": 336000 }
+  ],
+  "total_declarado": 336000,
+  "abonos": [],
+  "saldo_impreso": 336000,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": 336000,
+  "fecha_entrega": "2026-07-01",
+  "entrega_impresa": "ENTREGADO EL 01/07/2026 (impreso)",
+  "reconciliacion": {
+    "suma_items_impresos": 336000,
+    "suma_items_con_multiplicacion_real": 335998,
+    "suma_abonos_total": 0,
+    "total_menos_abonos": 336000,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [
+    "13 × $25.846 = $335.998, pero el total impreso es $336.000 (redondeo de la nota). Se importa el total impreso."
+  ],
+  "dudas": [
+    "Montos en COP según el dueño (la nota usa '$').",
+    "Cliente sin RIF, dirección ni teléfono en la nota."
+  ],
+  "saldo_para_importar": 336000
+}

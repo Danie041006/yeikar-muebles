@@ -20,6 +20,21 @@ export interface Abono {
   created_at: string;
 }
 
+export interface DetalleCuentaPorPagar {
+  id: number;
+  orden: number;
+  descripcion?: string | null;
+  material_id?: number | null;
+  material?: { id: number; nombre: string } | null;
+  cantidad: number;
+  precio_unitario: number;
+  cliente_nombre?: string | null;
+  cliente_id?: number | null;
+  cliente?: { id: number; nombre: string } | null;
+  observaciones?: string | null;
+  total: number;
+}
+
 export interface CuentaPorPagar {
   id: number;
   proveedor_id: number;
@@ -42,7 +57,18 @@ export interface CuentaPorPagar {
   proveedor?: Proveedor | null;
   moneda?: { id: number; codigo: string; simbolo: string; nombre: string } | null;
   tipo_gasto?: { id: number; nombre: string; categoria: string } | null;
+  detalles?: DetalleCuentaPorPagar[];
   pagos?: Abono[];
+}
+
+export interface DetalleCuentaPorPagarCreate {
+  descripcion?: string | null;
+  material_id?: number | null;
+  cantidad: number;
+  precio_unitario: number;
+  cliente_nombre?: string | null;
+  cliente_id?: number | null;
+  observaciones?: string | null;
 }
 
 export interface CuentaPorPagarCreate {
@@ -53,6 +79,7 @@ export interface CuentaPorPagarCreate {
   descripcion?: string | null;
   monto: number;
   tasa_cambio?: number;
+  detalles?: DetalleCuentaPorPagarCreate[];
 }
 
 export interface AbonoCreate {

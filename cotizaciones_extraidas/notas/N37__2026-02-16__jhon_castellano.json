@@ -1,0 +1,29 @@
+{
+  "id": "N37",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-02-16",
+  "fecha_entrega": "2026-02-16",
+  "cliente": {
+    "nombre": "JHON CASTELLANO",
+    "rif_cedula": null,
+    "direccion": "UREÑA, EL CASTILLO",
+    "telefono": "0414-1067586"
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "REPARACION Y CAMBIO DE TELA DE SOFA DE 2 PUESTOS Y PUFF.", "precio_unitario": 999000, "precio_total_impreso": 999000 }
+  ],
+  "total_declarado": 999000,
+  "abonos": [
+    { "fecha": "2026-06-07", "metodo": "TRANSFERENCIA", "monto": 295000, "origen": "MANUSCRITO", "detalle": "abono al bancolombia" },
+    { "fecha": "2026-06-16", "metodo": "EFECTIVO", "monto": 130000, "origen": "MANUSCRITO", "detalle": "Abono en efectivo" },
+    { "fecha": "2026-08-15", "metodo": "EFECTIVO", "monto": 164000, "origen": "MANUSCRITO", "detalle": "50 Dolar a 3280=" },
+    { "fecha": "2026-08-31", "metodo": "TRANSFERENCIA", "monto": 130000, "origen": "MANUSCRITO", "detalle": "abono al bancolombia" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 280000,
+  "saldo_confirmado_por_dueno": 280000,
+  "reconciliacion": { "suma_items": 999000, "suma_abonos": 719000, "total_menos_abonos": 280000, "cuadra": true },
+  "saldo_para_importar": 280000
+}

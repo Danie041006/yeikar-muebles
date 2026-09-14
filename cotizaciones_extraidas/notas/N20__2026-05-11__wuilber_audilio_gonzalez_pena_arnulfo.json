@@ -1,0 +1,33 @@
+{
+  "id": "N20",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-05-11",
+  "cliente": {
+    "nombre": "WUILBER AUDILIO GONZALEZ PEÑA / ARNULFO",
+    "rif_cedula": "C.I V-14.435.106",
+    "direccion": "BARRIO LUIS PINEDA CARRERA 10 CASA #10-52",
+    "telefono": "0424-7167260"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "AIRE DE VENTANA MARCA HIUNDAY DE 12000BTU LUZ 110", "observaciones": null, "precio_unitario": 364, "precio_total_impreso": 364 }
+  ],
+  "total_declarado": 364,
+  "abonos": [],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": 364,
+  "fecha_entrega": "2026-05-11",
+  "entrega_impresa": "ENTREGADO EL 11/05/2026 (impreso)",
+  "reconciliacion": {
+    "suma_items_impresos": 364,
+    "suma_items_con_multiplicacion_real": 364,
+    "suma_abonos_total": 0,
+    "total_menos_abonos": 364,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 364
+}

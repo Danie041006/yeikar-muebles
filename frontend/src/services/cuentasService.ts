@@ -28,8 +28,10 @@ export interface MovimientoCaja {
   tasa_cambio: number;
   monto_en_moneda_base: number;
   transferencia_id?: number | null;
+  pago_id?: number | null;
   referencia?: string | null;
   observaciones?: string | null;
+  created_at?: string | null;
   metodo_caja?: MetodoCaja | null;
   moneda?: { id: number; codigo: string; simbolo: string } | null;
   usuario?: Responsable | null;

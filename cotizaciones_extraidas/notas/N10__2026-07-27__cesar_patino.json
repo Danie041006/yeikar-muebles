@@ -1,0 +1,46 @@
+{
+  "id": "N10",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-07-27",
+  "cliente": {
+    "nombre": "CESAR PATIÑO",
+    "rif_cedula": "C.I.V.19385416",
+    "direccion": "LA INTEGRACION",
+    "telefono": "4222327382"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "PUERTAS DE BAÑO EN COLOR HUMO DURATES", "observaciones": null, "precio_unitario": 435, "precio_total_impreso": 435 },
+    { "cantidad": 2, "descripcion": "PUERTA DE HABITACION EN COLOR HUMO", "observaciones": null, "precio_unitario": 435, "precio_total_impreso": 870 },
+    { "cantidad": 1, "descripcion": "CLOSET DE 2.60 DE ALTO X2,70.X 60 DE FONDO", "observaciones": null, "precio_unitario": 380, "precio_total_impreso": 380 },
+    { "cantidad": 1, "descripcion": "MODULAR DE 6 PTOS. CON TELA PERSA Y LOS COJINES EN NEGRO Y MODIFICAR LOS BRASOS DEL MODULAR HACERLO TAL CUAL AL MODELO DE LA FOTO.", "observaciones": null, "precio_unitario": 1607, "precio_total_impreso": 1607 },
+    { "cantidad": 1, "descripcion": "CAMA DE 1.40. CON 2 MESA DE NOCHE", "observaciones": null, "precio_unitario": 1500, "precio_total_impreso": 1500 },
+    { "cantidad": 1, "descripcion": "ESPEJO EN COLOR GRIS", "observaciones": null, "precio_unitario": 803, "precio_total_impreso": 803 },
+    { "cantidad": 1, "descripcion": "COLCHONES DE 2X2 PERFECT SLEEPER", "observaciones": null, "precio_unitario": 803, "precio_total_impreso": 803 },
+    { "cantidad": 1, "descripcion": "COLCHON DE 1.40 PERFECT SLEEPER", "observaciones": null, "precio_unitario": 643, "precio_total_impreso": 643 },
+    { "cantidad": 1, "descripcion": "CAMA DE 2X2 CON 2 MESAS DE NOCHE", "observaciones": null, "precio_unitario": 1564, "precio_total_impreso": 1564 }
+  ],
+  "total_declarado": 10086,
+  "abonos": [
+    { "fecha": "2026-07-17", "metodo": "ZELLE", "monto": 2400, "origen": "IMPRESO" },
+    { "fecha": "2026-08-01", "metodo": "ZELLE", "monto": 400, "origen": "IMPRESO" }
+  ],
+  "saldo_impreso": 7286,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": 7286,
+  "fecha_entrega": "2026-07-27",
+  "entrega_impresa": null,
+  "reconciliacion": {
+    "suma_items_impresos": 8605,
+    "suma_items_con_multiplicacion_real": 8605,
+    "suma_abonos_total": 2800,
+    "total_menos_abonos": 7286,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [
+    "SUMA DE ÍTEMS IMPRESOS ($8.605) NO CUADRA CON EL TOTAL IMPRESO ($10.086): diferencia $1.481. La nota facturó $10.086 (los abonos y el saldo impreso $7.286 salen de 10.086). Regla: manda el total impreso. Revisar contra el original si hay un ítem ilegible."
+  ],
+  "dudas": [],
+  "saldo_para_importar": 7286
+}

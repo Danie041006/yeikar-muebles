@@ -1,0 +1,41 @@
+{
+  "id": "N17",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-06-16",
+  "cliente": {
+    "nombre": "MARIA SANCHEZ",
+    "rif_cedula": "C.I.V 37.642.571",
+    "direccion": "SAN ANTONIO DEL TACHIRA",
+    "telefono": "0424-7366899"
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "TABLA DE 2.20 CM LARGO X 30 CM ANCHO", "observaciones": null, "precio_unitario": 105, "precio_total_impreso": 105 },
+    { "cantidad": 1, "descripcion": "TABLA DE 2.23 CM LARGO X 45 CM ANCHO", "observaciones": null, "precio_unitario": 105, "precio_total_impreso": 105 },
+    { "cantidad": 1, "descripcion": "TABLA DE 2.72 CM LARGO X 38 CM ANCHO", "observaciones": null, "precio_unitario": 105, "precio_total_impreso": 105 }
+  ],
+  "total_declarado": 315,
+  "abonos": [
+    { "fecha": "2026-06-18", "metodo": "EFECTIVO", "monto": 160, "origen": "MANUSCRITO", "detalle_literal": "'8/16 Abono al USD' -> ¿18/6? Abono 160, Saldo 155" },
+    { "fecha": "2026-06-26", "metodo": "EFECTIVO", "monto": 50, "origen": "MANUSCRITO", "detalle_literal": "'6/16 Abono al USD' -> Saldo 105" },
+    { "fecha": "2026-06-26", "metodo": "EFECTIVO", "monto": 50, "origen": "MANUSCRITO", "detalle_literal": "'6/16 Abono al USD' Abono 50, Saldo 55" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": 55,
+  "saldo_confirmado_por_dueno": 55,
+  "fecha_entrega": "2026-06-16",
+  "entrega_impresa": null,
+  "reconciliacion": {
+    "suma_items_impresos": 315,
+    "suma_items_con_multiplicacion_real": 315,
+    "suma_abonos_total": 260,
+    "total_menos_abonos": 55,
+    "coincide_con_saldo_final_manuscrito": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "Fechas manuscritas ilegibles ('8/16', '6/16', '6/16' con año '16'); se importa 18/6 y 26/6 (dos abonos) siguiendo la cadena de saldos 315→155→105→55."
+  ],
+  "saldo_para_importar": 55
+}

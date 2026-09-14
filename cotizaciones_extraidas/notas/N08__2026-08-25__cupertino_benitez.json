@@ -1,0 +1,43 @@
+{
+  "id": "N08",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-08-25",
+  "cliente": {
+    "nombre": "CUPERTINO BENITEZ",
+    "rif_cedula": "C.C.1.100.968.792",
+    "direccion": "BARRIO BOLIVARIANO",
+    "telefono": "350-2939549"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "COLCHON LADY BETS DE 1.40 DOBLE PILLON",
+      "observaciones": null,
+      "precio_unitario": 325,
+      "precio_total_impreso": 325
+    }
+  ],
+  "total_declarado": 325,
+  "abonos": [
+    { "fecha": "2026-08-25", "metodo": "EFECTIVO", "monto": 325, "origen": "IMPRESO", "detalle_literal": "ABONO $325 (fila impresa; saldo queda vacío)" }
+  ],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-08-25",
+  "entrega_impresa": "ENTREGADO 25/08/2026 (impreso)",
+  "reconciliacion": {
+    "suma_items_impresos": 325,
+    "suma_items_con_multiplicacion_real": 325,
+    "suma_abonos_total": 325,
+    "total_menos_abonos": 0,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "CONTRADICCIÓN CON EL DUEÑO: el dueño indicó 'a cupertino le faltan 325 usd', pero la nota impresa muestra ABONO $325 = TOTAL $325 (saldo en blanco = pagada completa). Se importa según la nota (PAGADA, saldo 0); pendiente confirmar con el dueño."
+  ],
+  "saldo_para_importar": 0
+}

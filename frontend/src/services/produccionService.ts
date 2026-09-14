@@ -192,12 +192,33 @@ export interface MaterialReferencia {
   costo_por_corte?: number;
 }
 
+export interface FotoReferencia {
+  url: string;
+  nombre?: string | null;
+}
+
 export interface ReferenciaReceta {
   producto_id: number;
   producto_nombre: string;
   dimensiones: { ancho: number | null; largo: number | null };
   seccion_actual?: string | null;
   materiales: MaterialReferencia[];
+  // ── Contexto para la Hoja de Trabajo (documento del taller, sin montos) ──
+  orden_id?: number | null;
+  pedido_id?: number | null;
+  area_nombre?: string | null;
+  etapa_id?: number | null;
+  etapa_observaciones?: string | null;
+  color?: string | null;
+  acabado?: string | null;
+  descripcion_especifica?: string | null;
+  observaciones_detalle?: string | null;
+  observaciones_pedido?: string | null;
+  cliente_nombre?: string | null;
+  cliente_telefono?: string | null;
+  fecha_entrega_estimada?: string | null;
+  cantidad?: number | null;
+  producto_fotos?: FotoReferencia[];
 }
 
 export const produccionService = {

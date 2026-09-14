@@ -1,0 +1,35 @@
+{
+  "id": "N15",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-08-06",
+  "cliente": {
+    "nombre": "MAYOR MORALES",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    { "cantidad": 1, "descripcion": "CAJA DE MONEDAS EN MELAMINA FLOR MORADO", "observaciones": null, "precio_unitario": 115, "precio_total_impreso": 115 }
+  ],
+  "total_declarado": 115,
+  "abonos": [],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": 115,
+  "fecha_entrega": "2026-08-06",
+  "entrega_impresa": "ENTREGADO 06/08/2026 (impreso)",
+  "reconciliacion": {
+    "suma_items_impresos": 115,
+    "suma_items_con_multiplicacion_real": 115,
+    "suma_abonos_total": 0,
+    "total_menos_abonos": 115,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "Cliente sin RIF, dirección ni teléfono en la nota."
+  ],
+  "saldo_para_importar": 115
+}

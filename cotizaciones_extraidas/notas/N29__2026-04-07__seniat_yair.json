@@ -1,0 +1,24 @@
+{
+  "id": "N29",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-04-07",
+  "cliente": { "nombre": "SENIAT YAIR", "rif_cedula": null, "direccion": "SAN CRISTOBAL", "telefono": null },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "CAMA MODELO DECO 1.60 CON SUS 1 NOCHEROS", "observaciones": null, "precio_unitario": 3600000, "precio_total_impreso": 3600000 },
+    { "cantidad": 1, "descripcion": "CAMA MODELO DECO 1.60 CON SUS 1 NOCHEROS (SEGUNDA CUENTA)", "observaciones": null, "precio_unitario": 2800000, "precio_total_impreso": 2800000 }
+  ],
+  "total_declarado": 5860000,
+  "abonos": [],
+  "saldo_final_manuscrito": 133400,
+  "saldo_confirmado_por_dueno": 133400,
+  "reconciliacion": {
+    "suma_items_impresos": 5860000,
+    "pagado_consolidado_para_importar": 5726600,
+    "total_menos_pagado_consolidado": 133400
+  },
+  "inconsistencias": [ "El historial de abonos manuscrito no se puede leer de forma segura línea por línea; se consolida en $5.726.600 COP para respetar el saldo final confirmado por el dueño: $133.400 COP." ],
+  "dudas": [ "Cliente sin RIF ni teléfono visible." ],
+  "saldo_para_importar": 133400
+}

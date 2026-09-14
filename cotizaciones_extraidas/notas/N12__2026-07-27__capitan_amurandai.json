@@ -1,0 +1,36 @@
+{
+  "id": "N12",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2026-07-27",
+  "cliente": {
+    "nombre": "CAPITAN AMURANDAI",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 2, "descripcion": "MESAS DE REUNIONES TAL CUAL A LAS OTRAS.", "observaciones": null, "precio_unitario": 1490000, "precio_total_impreso": 2980000 }
+  ],
+  "total_declarado": 2980000,
+  "abonos": [],
+  "saldo_impreso": null,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": 2980000,
+  "fecha_entrega": "2026-08-04",
+  "entrega_impresa": "ENTREGADO EL 04/08/2026 (impreso)",
+  "reconciliacion": {
+    "suma_items_impresos": 2980000,
+    "suma_items_con_multiplicacion_real": 2980000,
+    "suma_abonos_total": 0,
+    "total_menos_abonos": 2980000,
+    "coincide_con_saldo_impreso": true
+  },
+  "inconsistencias": [],
+  "dudas": [
+    "La nota usa '$' pero los montos (1.490.000 / 2.980.000) están en COP según confirmó el dueño. Se importa en moneda COP (moneda base del ERP).",
+    "Cliente sin RIF, dirección ni teléfono en la nota."
+  ],
+  "saldo_para_importar": 2980000
+}

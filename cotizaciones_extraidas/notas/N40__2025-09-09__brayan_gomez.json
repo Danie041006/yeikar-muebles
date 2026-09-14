@@ -1,0 +1,31 @@
+{
+  "id": "N40",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": { "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA", "rif": "V-18969838-7" },
+  "fecha": "2025-09-09",
+  "cliente": {
+    "nombre": "BRAYAN GOMEZ",
+    "rif_cedula": null,
+    "direccion": "TRANSITO UREÑA",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    { "cantidad": 1, "descripcion": "SOMIER Y ESPALDAR DE METRO TAPIZAR EN TELA JOY PLATA", "precio_unitario": 950000, "precio_total_impreso": 950000 },
+    { "cantidad": 1, "descripcion": "ESPALDAR SOLO", "precio_unitario": 500000, "precio_total_impreso": 500000 },
+    { "cantidad": 2, "descripcion": "MESAS DE NOCHE", "precio_unitario": 695000, "precio_total_impreso": 1390000 }
+  ],
+  "total_declarado": 2840000,
+  "abonos": [
+    { "fecha": "2025-09-09", "metodo": "EFECTIVO", "monto": 500000, "origen": "IMPRESO", "detalle": "ABONO EN EFECTIVO" },
+    { "fecha": "2025-09-10", "metodo": "EFECTIVO", "monto": 200000, "origen": "IMPRESO", "detalle": "ABONO DE REVISADO" },
+    { "fecha": "2025-09-13", "metodo": "EFECTIVO", "monto": 395000, "origen": "IMPRESO", "detalle": "ABONO EN EFECTIVO 100 X 3.950 = 395.000" },
+    { "fecha": "2025-11-23", "metodo": "EFECTIVO", "monto": 200000, "origen": "MANUSCRITO", "detalle": "Abono del revisado" },
+    { "fecha": "2026-05-14", "metodo": "EFECTIVO", "monto": 250000, "origen": "MANUSCRITO", "detalle": "Abono del Revisado de la jault Blanca" }
+  ],
+  "saldo_impreso": 1745000,
+  "saldo_final_manuscrito": 1295000,
+  "saldo_confirmado_por_dueno": 1295000,
+  "reconciliacion": { "suma_items": 2840000, "suma_abonos": 1545000, "total_menos_abonos": 1295000, "cuadra": true },
+  "saldo_para_importar": 1295000
+}
