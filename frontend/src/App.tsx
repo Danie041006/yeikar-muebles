@@ -16,6 +16,7 @@ import Facturacion from './pages/Facturacion';
 import Despachos from './pages/Despachos';
 import MisDespachos from './pages/MisDespachos';
 import Usuarios from './pages/Usuarios';
+import MiSeguridad from './pages/MiSeguridad';
 import Gastos from './pages/Gastos';
 import Cuentas from './pages/Cuentas';
 import CostosProduccion from './pages/CostosProduccion';
@@ -193,6 +194,10 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   '/auditoria': {
     title: 'Actividad del sistema',
     description: 'Trazabilidad de acciones, cambios y responsables dentro de YEIKAR.',
+  },
+  '/seguridad': {
+    title: 'Mi seguridad',
+    description: 'Sesiones activas y cambio de contraseña para proteger tus accesos.',
   },
 };
 
@@ -421,6 +426,16 @@ function App() {
               <PrivateRoute>
                 <DashboardLayout>
                   <><SEO {...pageMeta['/auditoria']} /><Auditoria /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/seguridad"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/seguridad']} /><MiSeguridad /></>
                 </DashboardLayout>
               </PrivateRoute>
             }

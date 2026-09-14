@@ -19,6 +19,7 @@ interface User {
   activo: boolean;
   ultimo_acceso: string | null;
   created_at: string;
+  totp_habilitado?: boolean;
   roles: Role[];
 }
 
@@ -218,6 +219,22 @@ export default function Usuarios() {
     } catch (err: any) {
       console.error(err);
       setError(err.response?.data?.detail || 'Error al modificar los roles del usuario.');
+    }
+  };
+
+  // Rescate: el usuario perdió la app 2FA. Apaga su segundo factor y cierra
+  // sus sesiones; entra de nuevo solo con contraseña.
+  const handleReset2FA = async (user: User) => {
+    if (!window.confirm(`¿Resetear el 2FA de "${user.nombre_usuario}"? Sus sesiones se cerrarán.`)) return;
+    setError('');
+    setSuccess('');
+    try {
+      await authApi.post(`/users/${user.id}/reset-2fa`);
+      setUsers(users.map(u => u.id === user.id ? { ...u, totp_habilitado: false } : u));
+      setSuccess(`2FA de "${user.nombre_usuario}" reseteado. Sus sesiones fueron cerradas.`);
+    } catch (err: any) {
+      console.error(err);
+      setError(err.response?.data?.detail || 'Error al resetear el 2FA.');
     }
   };
 
@@ -499,6 +516,33 @@ export default function Usuarios() {
         </div>
       ),
       mobileLabel: 'Roles de Acceso',
+    },
+    {
+      key: 'dosfa',
+      header: '2FA',
+      render: (u) => (
+        <div className="flex items-center gap-2">
+          <span
+            className={`px-2 py-1 rounded text-[10px] font-bold uppercase border ${
+              u.totp_habilitado
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-yeikar-tertiary/20 text-yeikar-neutral/45 border-yeikar-secondary-light/15'
+            }`}
+          >
+            {u.totp_habilitado ? 'Activo' : 'Off'}
+          </span>
+          {u.totp_habilitado && (
+            <button
+              onClick={() => handleReset2FA(u)}
+              title="Resetear 2FA (para quien perdió su app)"
+              className="px-1.5 py-1 rounded text-[10px] font-bold text-rose-500 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all"
+            >
+              Reiniciar
+            </button>
+          )}
+        </div>
+      ),
+      mobileLabel: '2FA',
     },
   ];
 

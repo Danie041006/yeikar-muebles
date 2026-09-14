@@ -13,6 +13,7 @@ export interface UsuarioMe {
   nombre?: string | null;
   email: string | null;
   activo: boolean;
+  totp_habilitado?: boolean;
   roles: { id: number; nombre: string; descripcion?: string | null; activo?: boolean }[];
   modulos: ModuloAcceso[];
 }

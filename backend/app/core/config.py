@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://yeikar:yeikar123@localhost:5432/yeikar")
     SECRET_KEY: str = _secret_key()
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 15)
     REFRESH_TOKEN_EXPIRE_DAYS: int = os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 7)
     ALLOWED_ORIGINS: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     # "*" = confiar en el XFF que fija el edge de la plataforma (solo serverless
     # tipo Vercel, donde el cliente no puede alterar ese header).
     FORWARDED_ALLOW_IPS: str = os.getenv("FORWARDED_ALLOW_IPS", "")
+    # Captcha invisible (Cloudflare Turnstile): con clave vacía queda
+    # desactivado. En pruebas usar las claves dummy de Cloudflare
+    # (site 1x00000000000000000000AA, secret 1x0000000000000000000000000000000AA).
+    TURNSTILE_SITE_KEY: str = os.getenv("TURNSTILE_SITE_KEY", "")
+    TURNSTILE_SECRET_KEY: str = os.getenv("TURNSTILE_SECRET_KEY", "")
+    CAPTCHA_LUEGO_DE_FALLOS: int = int(os.getenv("CAPTCHA_LUEGO_DE_FALLOS", 3))
+    # Passkeys / huella (WebAuthn). rp_id = dominio bajo el que viven las
+    # credenciales: 'localhost' en dev, el dominio real en el VPS.
+    # expected_origin = el origen del FRONTEND que ejecuta la ceremonia.
+    WEBAUTHN_RP_ID: str = os.getenv("WEBAUTHN_RP_ID", "localhost")
+    WEBAUTHN_RP_NAME: str = os.getenv("WEBAUTHN_RP_NAME", "YEIKAR")
+    WEBAUTHN_EXPECTED_ORIGIN: str = os.getenv("WEBAUTHN_EXPECTED_ORIGIN", "http://localhost:5173")
 
 settings = Settings()
 

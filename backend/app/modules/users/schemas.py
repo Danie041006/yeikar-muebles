@@ -22,6 +22,7 @@ class UsuarioResponse(UsuarioBase):
     empleado_id: Optional[int] = None
     activo: bool
     ultimo_acceso: Optional[datetime] = None
+    totp_habilitado: bool = False
     created_at: datetime
     roles: List[RolResponse] = []
 
@@ -32,6 +33,52 @@ class Token(BaseModel):
     access_token: str
     token_type: str
     refresh_token: Optional[str] = None
+    # Último acceso ANTES de este login (para saludar/avisar en la UI).
+    ultimo_acceso_previo: Optional[datetime] = None
+
+class SesionResponse(BaseModel):
+    id: int
+    ip: Optional[str] = None
+    user_agent: Optional[str] = None
+    revocada: bool
+    creado_en: datetime
+    ultimo_uso: datetime
+    actual: bool = False
+
+class CambioPasswordRequest(BaseModel):
+    password_actual: str
+    password_nueva: str = Field(min_length=8, max_length=128)
+
+# ------------------------------------------------------------
+# 2FA con app (TOTP)
+# ------------------------------------------------------------
+class Codigo2FARequest(BaseModel):
+    codigo: str = Field(min_length=4, max_length=16)
+
+class Verificar2FARequest(BaseModel):
+    ticket: str
+    codigo: str = Field(min_length=4, max_length=16)
+    recordar_equipo: bool = False
+
+# ------------------------------------------------------------
+# Huella / passkeys (WebAuthn)
+# ------------------------------------------------------------
+class UsuarioHuellaRequest(BaseModel):
+    nombre_usuario: str
+
+class RegistroHuellaRequest(BaseModel):
+    dispositivo: Optional[str] = None
+    respuesta: dict
+
+class LoginHuellaRequest(BaseModel):
+    nombre_usuario: str
+    respuesta: dict
+
+class HuellaResponse(BaseModel):
+    id: int
+    dispositivo: Optional[str] = None
+    creado_en: datetime
+    ultimo_uso: Optional[datetime] = None
 
 class TokenData(BaseModel):
     nombre_usuario: Optional[str] = None

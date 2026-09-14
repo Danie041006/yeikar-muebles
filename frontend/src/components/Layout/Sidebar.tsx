@@ -16,6 +16,7 @@ import {
   Package,
   Receipt,
   ScrollText,
+  ShieldCheck,
   ShoppingBag,
   Truck,
   Users,
@@ -256,6 +257,21 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
               <p className="truncate font-headline text-xs font-bold text-white">{nombreUsuario}</p>
               <p className="mt-0.5 truncate font-mono text-[9px] uppercase tracking-wider text-white/40">{roles.join(', ') || 'Usuario'}</p>
             </div>
+          </div>
+          <div className="mb-2 space-y-1">
+            <button
+              type="button"
+              onClick={() => { navigate('/seguridad'); onClose(); }}
+              aria-current={location.pathname === '/seguridad' ? 'page' : undefined}
+              className={`flex w-full items-center justify-center gap-2 rounded-xl border py-2.5 text-xs font-bold transition-colors ${
+                location.pathname === '/seguridad'
+                  ? 'border-yeikar-primary/40 bg-yeikar-primary/10 text-yeikar-primary'
+                  : 'border-white/10 text-white/50 hover:bg-white/[0.06] hover:text-white'
+              }`}
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Mi seguridad
+            </button>
           </div>
           <button
             type="button"

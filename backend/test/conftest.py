@@ -124,6 +124,9 @@ ORDEN_LIMPIEZA = [
     "usuario_rol",
     "rol_modulo",
     "rol",
+    "sesion",
+    "credencial_webauthn",
+    "refresh_token",
     "usuario",
     "metodo_caja",
 ]
