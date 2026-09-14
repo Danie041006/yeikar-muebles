@@ -34,6 +34,8 @@ export interface DetalleVenta {
   precio: number;
   costo_unitario?: number;
   utilidad?: number;
+  /** Descripción del ítem cuando no hay producto ni material (a medida). */
+  descripcion_especifica?: string | null;
   producto?: ProductoInfo;
   material?: { id: number; nombre: string; costo_base: number; unidad_medida?: { abreviatura: string } };
 }
@@ -65,6 +67,9 @@ export interface Venta {
   observaciones?: string;
   cliente?: ClienteInfo;
   moneda?: MonedaInfo;
+  // Estado del pedido vinculado (ENTREGADO = ya recibido por el cliente):
+  // la página de cobros agrupa entregados vs. en proceso con este campo.
+  pedido_estado?: string | null;
 }
 
 export interface VentaDetalle extends Venta {
@@ -78,12 +83,14 @@ export interface VentaDetalle extends Venta {
 
 export interface CuentaPorCobrar {
   venta_id: number;
+  pedido_id: number;
   cliente_nombre: string;
   fecha: string;
   total: number;
   total_pagado: number;
   saldo_pendiente: number;
   moneda_codigo: string;
+  pedido_estado?: string | null;
 }
 
 export interface VentaCreate {

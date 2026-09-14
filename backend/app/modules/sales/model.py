@@ -42,8 +42,17 @@ class Venta(Base):
     def creador_nombre(self):
         return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
+    @property
+    def pedido_estado(self):
+        """Estado del pedido vinculado (ENTREGADO = ya despachado y recibido).
 
-from app.modules.productos.model import Producto, Material
+        La UI agrupa las cuentas por cobrar con esto: la ubicación del dinero
+        pendiente (entregado vs. en proceso) vive en el pedido, no en la venta.
+        """
+        return self.pedido.estado if self.pedido else None
+
+
+    from app.modules.productos.model import Producto, Material
 
 
 class DetalleVenta(Base):
@@ -62,6 +71,9 @@ class DetalleVenta(Base):
     utilidad = Column(Numeric(15, 2), nullable=True)
     # Descuento otorgado (opcional, precio ya refleja el descuento; este campo lo documenta)
     descuento = Column(Numeric(15, 2), nullable=True, default=0.0)
+    # Descripción del ítem cuando no hay producto (muebles a medida, notas
+    # históricas). Se copia del pedido al facturar; el catálogo manda si hay.
+    descripcion_especifica = Column(Text, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

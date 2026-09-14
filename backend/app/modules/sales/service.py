@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from datetime import date, datetime
 from decimal import Decimal
@@ -41,7 +41,7 @@ def obtener_ventas(
     buscar: str = None,
     usuario: Usuario | None = None,
 ):
-    query = db.query(Venta)
+    query = db.query(Venta).options(joinedload(Venta.pedido))
     if usuario is not None:
         query = filtrar_registros_propios(query, Venta.creado_por_id, usuario)
     if buscar:
@@ -167,6 +167,7 @@ def crear_venta_desde_pedido(
             porcentaje_ganancia=pct_ganancia,
             utilidad=round(float(dp.precio) - costo_unit_moneda, 2),
             descuento=0.0,
+            descripcion_especifica=dp.descripcion_especifica,
         )
         db.add(db_detalle)
         detalles_venta.append(db_detalle)
@@ -300,7 +301,7 @@ def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, us
         tasa_cambio=tasa_caja,
         monto_en_moneda_base=monto_cop,
         referencia=f"Pago #{db_pago.id}" + (f" · {db_pago.referencia}" if db_pago.referencia else ""),
-        observaciones=f"Venta #{venta.id}",
+        observaciones=f"Cobro de {venta.cliente.nombre} · Venta #{venta.id} · {cuenta.nombre}",
     ))
 
 
@@ -465,10 +466,14 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
 # Reporte de Cuentas por Cobrar
 # ------------------------------------------------------------
 def obtener_cuentas_por_cobrar(db: Session):
-    # Obtener todas las ventas pendientes o abonadas
-    ventas = db.query(Venta).filter(
-        Venta.estado.in_(["PENDIENTE", "ABONADA"])
-    ).all()
+    # Obtener todas las ventas pendientes o abonadas (pedido precargado para
+    # exponer su estado sin N+1: define si la cuenta está entregada o en proceso).
+    ventas = (
+        db.query(Venta)
+        .options(joinedload(Venta.pedido))
+        .filter(Venta.estado.in_(["PENDIENTE", "ABONADA"]))
+        .all()
+    )
 
     cuentas = []
     for v in ventas:
@@ -484,12 +489,14 @@ def obtener_cuentas_por_cobrar(db: Session):
 
             cuentas.append({
                 "venta_id": v.id,
+                "pedido_id": v.pedido_id,
                 "cliente_nombre": cliente_nombre,
                 "fecha": v.fecha,
                 "total": float(v.total),
                 "total_pagado": total_pagado,
                 "saldo_pendiente": saldo_pendiente,
-                "moneda_codigo": moneda_codigo
+                "moneda_codigo": moneda_codigo,
+                "pedido_estado": v.pedido_estado,
             })
 
     return cuentas

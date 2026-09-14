@@ -21,6 +21,7 @@ class DetalleVentaCreate(DetalleVentaBase):
     costo_unitario: Optional[float] = None
     porcentaje_ganancia: Optional[float] = None
     descuento: Optional[float] = 0.0
+    descripcion_especifica: Optional[str] = None
 
     @model_validator(mode="after")
     def _validate_item(self):
@@ -44,6 +45,7 @@ class DetalleVentaResponse(DetalleVentaBase):
     porcentaje_ganancia: Optional[float] = None
     utilidad: Optional[float] = None
     descuento: Optional[float] = None
+    descripcion_especifica: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     producto: Optional[ProductoResponse] = None
@@ -122,6 +124,9 @@ class VentaResponse(VentaBase):
     creador_nombre: Optional[str] = None
     cliente: Optional[ClientResponse] = None
     moneda: Optional[MonedaResponse] = None
+    # Estado del pedido vinculado (ENTREGADO = ya despachado): la UI de
+    # "Cuentas por cobrar" separa entregados de en-proceso con este campo.
+    pedido_estado: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -138,12 +143,14 @@ class VentaDetalleResponse(VentaResponse):
 # ------------------------------------------------------------
 class CuentaPorCobrarResponse(BaseModel):
     venta_id: int
+    pedido_id: int
     cliente_nombre: str
     fecha: date
     total: float
     total_pagado: float
     saldo_pendiente: float
     moneda_codigo: str
+    pedido_estado: Optional[str] = None
 
     class Config:
         from_attributes = True

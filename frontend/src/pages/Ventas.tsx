@@ -1,12 +1,13 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react';
 import api from '../services/api';
-import { useToast } from '../context/ToastContext';
-import { SearchInput, SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
+import { SearchInput, SearchSelect, ResponsiveDataTable, Button as UiButton, EmptyState, type DataColumn } from '../components/ui';
 import {
   ventaService,
   pagoService,
   Venta,
   VentaDetalle,
+  DetalleVenta,
+  CuentaPorCobrar,
   Pago,
   METODOS_PAGO,
   cargarMetodosPago,
@@ -19,34 +20,12 @@ import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
-interface Moneda {
-  id: number;
-  nombre: string;
-  codigo: string;
-  simbolo: string;
-}
-
-interface PedidoSinFactura {
-  id: number;
-  fecha: string;
-  estado: string;
-  cliente?: { nombre: string };
-  cotizacion?: { total_estimado: number; moneda_id?: number };
-}
-
 // ─── Badges helpers ───────────────────────────────────────────────────────────
 const ESTADO_VENTA_STYLE: Record<string, string> = {
   PENDIENTE: 'bg-amber-100 text-amber-800 border-amber-200',
   ABONADA: 'bg-blue-100 text-blue-800 border-blue-200',
   PAGADA: 'bg-green-100 text-green-800 border-green-200',
   CANCELADA: 'bg-red-100 text-red-800 border-red-200',
-};
-
-const ESTADO_PEDIDO_STYLE: Record<string, string> = {
-  APROBADO: 'bg-blue-100 text-blue-800',
-  PRODUCCION: 'bg-orange-100 text-orange-800',
-  TERMINADO: 'bg-purple-100 text-purple-800',
-  ENTREGADO: 'bg-gray-200 text-gray-800',
 };
 
 function Badge({ text, className }: { text: string; className: string }) {
@@ -57,12 +36,283 @@ function Badge({ text, className }: { text: string; className: string }) {
   );
 }
 
+// El catálogo manda para el nombre; si no hay producto ni material, el ítem
+// es a medida y se muestra su descripción guardada (nunca "Producto #null").
+function nombreItemVenta(d: DetalleVenta): string {
+  if (d.tipo_item === 'INSUMO') return d.material?.nombre ?? d.descripcion_especifica ?? 'Material';
+  return d.producto?.nombre ?? d.descripcion_especifica ?? 'Ítem personalizado';
+}
+
+function esItemAMedida(d: DetalleVenta): boolean {
+  return !d.producto && !d.material;
+}
+
 function Spinner() {
   return (
     <div className="flex flex-col items-center justify-center py-20 gap-3">
       <div className="w-10 h-10 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
       <p className="text-xs font-mono text-yeikar-neutral/50">Cargando...</p>
     </div>
+  );
+}
+
+// Los pendientes de cobro se tocan decenas de veces al día: cada uno es un
+// botón grande con su saldo a la vista, y el detalle (deuda + pedido) vive dentro.
+interface CobroPendiente {
+  venta: Venta;
+  total: number;
+  pagado: number;
+  saldo: number;
+  codigo: string;
+}
+
+function progresoCobro(total: number, pagado: number): number {
+  if (!total || total <= 0) return 0;
+  return Math.min(100, Math.max(0, (pagado / total) * 100));
+}
+
+function ChipPedido({ venta }: { venta: Venta }) {
+  const entregado = venta.pedido_estado === 'ENTREGADO';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] font-bold ${
+        entregado
+          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+          : 'border-yeikar-secondary-light/20 bg-yeikar-tertiary/25 text-yeikar-secondary'
+      }`}
+    >
+      Pedido #{venta.pedido_id} · {entregado ? 'Entregado' : 'En proceso'}
+    </span>
+  );
+}
+
+function ResumenCobro({
+  cobro,
+  buttonId,
+  panelId,
+  abierta,
+  onToggle,
+}: {
+  cobro: CobroPendiente;
+  buttonId: string;
+  panelId: string;
+  abierta: boolean;
+  onToggle: () => void;
+}) {
+  const { venta, total, pagado, saldo, codigo } = cobro;
+  const entregado = venta.pedido_estado === 'ENTREGADO';
+  const progreso = progresoCobro(total, pagado);
+
+  return (
+    <button
+      type="button"
+      id={buttonId}
+      aria-expanded={abierta}
+      aria-controls={panelId}
+      onClick={onToggle}
+      className={`block w-full p-4 text-left sm:p-5 ${
+        entregado ? 'bg-gradient-to-br from-amber-50/80 via-white to-white' : 'bg-white'
+      }`}
+    >
+      <span className="flex items-start justify-between gap-3">
+        <span className="min-w-0">
+          <span className="block truncate font-headline text-[15px] font-black tracking-tight text-yeikar-neutral">
+            {venta.cliente?.nombre ?? `Cliente #${venta.cliente_id}`}
+          </span>
+          <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <Badge text={venta.estado} className={ESTADO_VENTA_STYLE[venta.estado] ?? ''} />
+            <ChipPedido venta={venta} />
+          </span>
+        </span>
+        <svg
+          aria-hidden
+          className={`mt-1 h-5 w-5 shrink-0 text-yeikar-neutral/40 transition-transform ${abierta ? 'rotate-180' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+        </svg>
+      </span>
+
+      <span className="mt-3 block">
+        <span className="text-[11px] font-bold uppercase tracking-widest text-yeikar-neutral/45">
+          Saldo por cobrar
+        </span>
+        <span className="mt-0.5 block font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
+          {formatCurrency(saldo, codigo)}
+        </span>
+        <span className="mt-0.5 block font-mono text-xs text-yeikar-neutral/55">
+          Pagado {formatCurrency(pagado, codigo)} de {formatCurrency(total, codigo)} · Venta #{venta.id}
+        </span>
+      </span>
+
+      <span className="mt-3 block h-2 overflow-hidden rounded-full bg-yeikar-tertiary/40">
+        <span
+          className="block h-full rounded-full bg-gradient-to-r from-yeikar-primary via-amber-400 to-emerald-500 transition-all"
+          style={{ width: `${progreso}%` }}
+        />
+      </span>
+
+      <span className="mt-2 flex items-center justify-between text-[11px] font-bold text-yeikar-neutral/45">
+        <span>{new Date(venta.fecha).toLocaleDateString('es-ES')}</span>
+        <span>{abierta ? 'Ocultar detalle' : 'Toca para ver deuda y pedido'}</span>
+      </span>
+    </button>
+  );
+}
+
+function BloqueDeuda({
+  total,
+  pagado,
+  saldo,
+  codigo,
+}: {
+  total: number;
+  pagado: number;
+  saldo: number;
+  codigo: string;
+}) {
+  return (
+    <div className="rounded-xl bg-white/90 p-3">
+      <p className="font-headline text-xs font-black uppercase tracking-widest text-yeikar-secondary">
+        Lo que se debe
+      </p>
+      <dl className="mt-2 space-y-1 font-mono text-xs text-yeikar-neutral/70">
+        <div className="flex justify-between"><dt>Total</dt><dd className="font-bold">{formatCurrency(total, codigo)}</dd></div>
+        <div className="flex justify-between"><dt>Pagado</dt><dd className="font-bold text-emerald-700">{formatCurrency(pagado, codigo)}</dd></div>
+        <div className="flex justify-between border-t border-yeikar-secondary-light/10 pt-1"><dt>Saldo</dt><dd className="font-black text-yeikar-neutral">{formatCurrency(saldo, codigo)}</dd></div>
+      </dl>
+    </div>
+  );
+}
+
+function BloquePedido({ venta }: { venta: Venta }) {
+  return (
+    <div className="rounded-xl bg-white/90 p-3">
+      <p className="font-headline text-xs font-black uppercase tracking-widest text-yeikar-secondary">
+        Pedido
+      </p>
+      <p className="mt-2 font-mono text-xs font-bold text-yeikar-secondary">Pedido #{venta.pedido_id}</p>
+      <p className="mt-1 font-mono text-xs text-yeikar-neutral/60">
+        Estado: {venta.pedido_estado === 'ENTREGADO' ? 'Entregado al cliente' : 'Todavía en proceso'}
+      </p>
+      <p className="mt-1 font-mono text-xs text-yeikar-neutral/60">
+        Venta #{venta.id} · {new Date(venta.fecha).toLocaleDateString('es-ES')}
+      </p>
+    </div>
+  );
+}
+
+function PanelCobro({
+  cobro,
+  buttonId,
+  onCobrar,
+}: {
+  cobro: CobroPendiente;
+  buttonId: string;
+  onCobrar: () => void;
+}) {
+  const { venta, total, pagado, saldo, codigo } = cobro;
+  return (
+    <div
+      id={`panel-cobro-${venta.id}`}
+      role="region"
+      aria-labelledby={buttonId}
+      className="border-t border-yeikar-secondary-light/10 bg-yeikar-tertiary/15 p-4 sm:p-5"
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <BloqueDeuda total={total} pagado={pagado} saldo={saldo} codigo={codigo} />
+        <BloquePedido venta={venta} />
+      </div>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[11px] text-yeikar-neutral/50">El cobro se registra en el detalle, con recibo opcional.</p>
+        <UiButton size="sm" onClick={onCobrar}>Cobrar ahora</UiButton>
+      </div>
+    </div>
+  );
+}
+
+function TarjetaCobro({
+  cobro,
+  abierta,
+  onToggle,
+  onCobrar,
+}: {
+  cobro: CobroPendiente;
+  abierta: boolean;
+  onToggle: () => void;
+  onCobrar: () => void;
+}) {
+  const entregado = cobro.venta.pedido_estado === 'ENTREGADO';
+  const buttonId = `btn-cobro-${cobro.venta.id}`;
+  const panelId = `panel-cobro-${cobro.venta.id}`;
+
+  return (
+    <div
+      className={`relative overflow-hidden rounded-2xl border bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift ${
+        abierta ? 'border-yeikar-primary/50 ring-2 ring-yeikar-primary/15' : 'border-yeikar-secondary-light/15'
+      } ${entregado ? 'border-l-4 border-l-amber-400' : 'border-l-4 border-l-yeikar-secondary/50'}`}
+    >
+      <ResumenCobro cobro={cobro} buttonId={buttonId} panelId={panelId} abierta={abierta} onToggle={onToggle} />
+      {abierta && <PanelCobro cobro={cobro} buttonId={buttonId} onCobrar={onCobrar} />}
+    </div>
+  );
+}
+
+function SeccionCobros({
+  titulo,
+  descripcion,
+  icono,
+  tono,
+  hayPendientes,
+  vacio,
+  loading,
+  cobros,
+  abiertoId,
+  onToggle,
+  onCobrar,
+}: {
+  titulo: string;
+  descripcion: string;
+  icono: ReactNode;
+  tono: 'urgente' | 'proceso';
+  hayPendientes: boolean;
+  vacio: string;
+  loading: boolean;
+  cobros: CobroPendiente[];
+  abiertoId: number | null;
+  onToggle: (id: number) => void;
+  onCobrar: (id: number) => void;
+}) {
+  return (
+    <section>
+      <EncabezadoSeccion
+        titulo={titulo}
+        descripcion={descripcion}
+        icono={icono}
+        tono={tono}
+        hayPendientes={hayPendientes}
+        conteo={cobros.length}
+      />
+      {loading ? (
+        <Spinner />
+      ) : cobros.length === 0 ? (
+        <EmptyState title="Sin cobros aquí" description={vacio} compact />
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2">
+          {cobros.map((cobro) => (
+            <TarjetaCobro
+              key={cobro.venta.id}
+              cobro={cobro}
+              abierta={abiertoId === cobro.venta.id}
+              onToggle={() => onToggle(cobro.venta.id)}
+              onCobrar={() => onCobrar(cobro.venta.id)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -76,7 +326,6 @@ function ModalDetalle({
   onClose: () => void;
   onPagoRegistrado: () => void;
 }) {
-  const toast = useToast();
   const [detalle, setDetalle] = useState<VentaDetalle | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -94,8 +343,14 @@ function ModalDetalle({
   const [reciboPreview, setReciboPreview] = useState<string | null>(null);
   const [reciboVer, setReciboVer] = useState<{ id: number; mime: string } | null>(null);
   const [monedas, setMonedas] = useState<{ id: number; codigo: string; nombre: string; simbolo: string }[]>([]);
+  const cuerpoRef = useRef<HTMLDivElement>(null);
   // Métodos de pago: cuentas reales (metodo_caja) con fallback al estático.
   const [metodosPago, setMetodosPago] = useState<MetodoPagoOption[]>(METODOS_PAGO.map((m) => ({ ...m })));
+
+  // Al abrir el formulario de cobro, la vista enfocada arranca arriba
+  useEffect(() => {
+    if (showForm) cuerpoRef.current?.scrollTo({ top: 0 });
+  }, [showForm]);
 
   const cargar = useCallback(async () => {
     try {
@@ -164,7 +419,7 @@ function ModalDetalle({
       return;
     }
     if (necesitaTRM && (!tasaNaturalInput || tasaHumana <= 0)) {
-      setErrorPago(`La moneda del pago difiere de la de la factura. Ingresa la tasa de cambio (${parPago.label}).`);
+      setErrorPago(`La moneda del pago difiere de la de la venta. Ingresa la tasa de cambio (${parPago.label}).`);
       return;
     }
     try {
@@ -219,150 +474,183 @@ function ModalDetalle({
   const porcentajePagado = detalle
     ? Math.min(100, (detalle.total_pagado / detalle.total) * 100)
     : 0;
+  const tasaVenta = Number(detalle?.tasa_cambio ?? 0);
+  // El "≈ COP" solo aporta cuando hay conversión real: moneda extranjera con
+  // TRM mayor a 1 y base registrada. Así no sale "≈ $ 0" en históricas 1:1.
+  const muestraEquivalente = (base: number) =>
+    !!detalle && detalle.moneda?.codigo !== 'COP' && tasaVenta > 1 && Number.isFinite(base) && base > 0;
 
   return (
     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="bg-yeikar-neutral p-5 text-yeikar-tertiary flex items-center justify-between">
-          <div>
-            <h3 className="font-headline font-bold text-lg text-yeikar-primary">
-              Estado Financiero del pedido #{detalle?.id ?? '...'}
-            </h3>
-            {detalle && (
-              <p className="text-xs text-yeikar-tertiary/60 font-mono mt-0.5">
-                {detalle.cliente?.nombre} 
+        <div className="bg-yeikar-neutral p-5 text-yeikar-tertiary">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-yeikar-primary">
+                Estado de cobro
               </p>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            {detalle?.pedido_id && (
+              <h3 className="mt-0.5 font-headline text-xl font-black tracking-tight text-yeikar-tertiary">
+                Venta #{detalle?.id ?? '...'}
+              </h3>
+              {detalle && (
+                <p className="mt-0.5 truncate text-xs text-yeikar-tertiary/70">
+                  {detalle.cliente?.nombre} · {new Date(detalle.fecha).toLocaleDateString('es-ES')}
+                </p>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {detalle?.pedido_id && (
+                <button
+                  onClick={() => { window.location.href = `/historial?tipo=pedido&id=${detalle.pedido_id}`; }}
+                  className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-primary hover:bg-yeikar-secondary-light rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
+                  title="Ver expediente completo del pedido"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  </svg>
+                  Expediente
+                </button>
+              )}
               <button
-                onClick={() => { window.location.href = `/historial?tipo=pedido&id=${detalle.pedido_id}`; }}
-                className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-primary hover:bg-yeikar-secondary-light rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
-                title="Ver expediente completo del pedido"
+                onClick={onClose}
+                className="text-yeikar-tertiary/50 hover:text-yeikar-tertiary transition-colors"
+                aria-label="Cerrar"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
                 </svg>
-                Expediente
               </button>
-            )}
-            <button
-              onClick={onClose}
-              className="text-yeikar-tertiary/50 hover:text-yeikar-tertiary transition-colors"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            </div>
           </div>
+          {detalle && (
+            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+              <Badge text={detalle.estado} className={ESTADO_VENTA_STYLE[detalle.estado] ?? ''} />
+              {detalle.pedido_id && (
+                <span className="inline-flex items-center rounded-full border border-yeikar-tertiary/20 px-2.5 py-0.5 font-mono text-[11px] font-bold text-yeikar-tertiary/80">
+                  Pedido #{detalle.pedido_id}
+                  {detalle.pedido_estado === 'ENTREGADO' ? ' · Entregado' : ' · En proceso'}
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto flex-1 p-5 space-y-5">
+        <div ref={cuerpoRef} className="overflow-y-auto flex-1 p-5 space-y-5">
           {loading || !detalle ? (
             <Spinner />
           ) : (
             <>
-              {/* Resumen financiero */}
-              <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-3">
-                <div className="bg-yeikar-tertiary/20 rounded-xl p-3 text-center">
-                  <p className="text-xs text-yeikar-neutral/50 font-mono mb-1">
-                    Total Factura
-                    {detalle.moneda && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded bg-yeikar-secondary/20 text-yeikar-secondary font-bold text-[10px]">
-                        {detalle.moneda.codigo}
-                      </span>
-                    )}
-                  </p>
-                  <p className="font-headline font-bold text-yeikar-secondary">
-                    {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
-                  </p>
-                  {detalle.moneda?.codigo !== 'COP' && (
-                    <p className="text-[10px] font-mono text-yeikar-neutral/40 mt-0.5">
-                      ≈ {formatCurrency(Number(detalle.total_en_moneda_base), 'COP')}
+              {showForm ? (
+                /* Modo formulario: resumen compacto (sin contenido detrás que se pise) */
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-amber-700">
+                      Saldo pendiente
                     </p>
-                  )}
-                </div>
-                <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
-                  <p className="text-xs text-green-600 font-mono mb-1">
-                    Pagado
-                    {detalle.moneda && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded bg-green-200/60 text-green-800 font-bold text-[10px]">
-                        {detalle.moneda.codigo}
-                      </span>
-                    )}
-                  </p>
-                  <p className="font-headline font-bold text-green-700">
-                    {detalle.moneda?.simbolo}{Number(detalle.total_pagado).toLocaleString('es-ES')}
-                  </p>
-                  {detalle.moneda?.codigo !== 'COP' && (
-                    <p className="text-[10px] font-mono text-green-600/50 mt-0.5">
-                      ≈ {formatCurrency(Number(detalle.total_pagado) * Number(detalle.tasa_cambio), 'COP')}
+                    <p className="mt-0.5 font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
+                      {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
+                      {detalle.moneda && (
+                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 align-middle font-mono text-[10px] font-black text-amber-800">
+                          {detalle.moneda.codigo}
+                        </span>
+                      )}
                     </p>
-                  )}
+                  </div>
+                  <div className="shrink-0 text-right font-mono text-[11px] leading-relaxed text-yeikar-neutral/55">
+                    <p>
+                      Pagado <span className="font-bold text-emerald-700">{detalle.moneda?.simbolo}{Number(detalle.total_pagado).toLocaleString('es-ES')}</span>
+                      {' '}de {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
+                    </p>
+                    <p className="font-bold text-yeikar-neutral/70">
+                      {detalle.pagos.length} cobro{detalle.pagos.length !== 1 ? 's' : ''}
+                    </p>
+                  </div>
                 </div>
-                <div className="bg-amber-50 rounded-xl p-3 text-center border border-amber-100">
-                  <p className="text-xs text-amber-600 font-mono mb-1">
-                    Saldo
+              ) : (
+              <>
+              {/* Héroe del saldo */}
+              <div className="overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white">
+                <div className="p-4 sm:p-5">
+                  <div className="flex items-center justify-between">
+                    <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700">
+                      Saldo pendiente
+                    </p>
                     {detalle.moneda && (
-                      <span className="ml-1 px-1.5 py-0.5 rounded bg-amber-200/60 text-amber-800 font-bold text-[10px]">
+                      <span className="rounded-md bg-amber-100 px-2 py-0.5 font-mono text-[11px] font-black text-amber-800">
                         {detalle.moneda.codigo}
                       </span>
                     )}
-                  </p>
-                  <p className="font-headline font-bold text-amber-700">
+                  </div>
+                  <p className="mt-1 font-headline text-4xl font-black tracking-tight text-yeikar-neutral">
                     {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
                   </p>
-                  {detalle.moneda?.codigo !== 'COP' && (
-                    <p className="text-[10px] font-mono text-amber-600/50 mt-0.5">
-                      ≈ {formatCurrency(Number(detalle.saldo_pendiente) * Number(detalle.tasa_cambio), 'COP')}
+                  <p className="mt-1 font-mono text-xs text-yeikar-neutral/55">
+                    Pagado {detalle.moneda?.simbolo}{Number(detalle.total_pagado).toLocaleString('es-ES')} de {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
+                  </p>
+                  {muestraEquivalente(Number(detalle.saldo_pendiente) * tasaVenta) && (
+                    <p className="mt-0.5 font-mono text-[11px] text-amber-700/70">
+                      ≈ {formatCurrency(Number(detalle.saldo_pendiente) * tasaVenta, 'COP')}
                     </p>
                   )}
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-amber-100">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-yeikar-primary via-amber-400 to-emerald-500 transition-all duration-500"
+                      style={{ width: `${porcentajePagado}%` }}
+                    />
+                  </div>
+                  <div className="mt-1 flex justify-between font-mono text-[11px] text-yeikar-neutral/50">
+                    <span>Progreso de cobro</span>
+                    <span className="font-bold">{porcentajePagado.toFixed(1)}%</span>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between border-t border-amber-100 bg-white/60 px-4 py-2.5 sm:px-5">
+                  <span className="font-mono text-xs text-yeikar-neutral/55">
+                    Total {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
+                    {muestraEquivalente(Number(detalle.total_en_moneda_base)) && (
+                      <> · ≈ {formatCurrency(Number(detalle.total_en_moneda_base), 'COP')}</>
+                    )}
+                  </span>
+                  <span className="font-mono text-xs font-bold text-emerald-700">
+                    {detalle.pagos.length} cobro{detalle.pagos.length !== 1 ? 's' : ''}
+                  </span>
                 </div>
               </div>
 
-              {/* Barra de progreso */}
-              <div>
-                <div className="flex justify-between text-xs font-mono text-yeikar-neutral/50 mb-1">
-                  <span>Progreso de cobro</span>
-                  <span>{porcentajePagado.toFixed(1)}%</span>
-                </div>
-                <div className="h-2 bg-yeikar-tertiary/30 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-green-500 rounded-full transition-all duration-500"
-                    style={{ width: `${porcentajePagado}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Productos */}
+              {/* Qué incluye la venta */}
               <div>
                 <h4 className="font-headline font-bold text-sm text-yeikar-secondary mb-2 uppercase tracking-wider">
-                  Productos facturados
+                  Qué incluye la venta ({detalle.detalles.length})
                 </h4>
-                <div className="space-y-2">
-                  {detalle.detalles.map((d) => (
+                <div className="overflow-hidden rounded-2xl border border-yeikar-secondary-light/10">
+                  {detalle.detalles.map((d, i) => (
                     <div
                       key={d.id}
-                      className="flex justify-between items-center text-sm bg-yeikar-tertiary/10 rounded-lg px-3 py-2"
+                      className={`flex items-start justify-between gap-3 px-3.5 py-3 text-sm ${i % 2 ? 'bg-white' : 'bg-yeikar-tertiary/10'}`}
                     >
-                      <span className="font-medium text-yeikar-secondary">
-                        {d.tipo_item === 'INSUMO'
-                          ? d.material?.nombre ?? `Material #${d.material_id}`
-                          : d.producto?.nombre ?? `Producto #${d.producto_id}`}
-                        {d.tipo_item === 'INSUMO' && (
-                          <span className="ml-1.5 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Insumo</span>
-                        )}
-                        {d.tipo_item === 'REVENTA' && (
-                          <span className="ml-1.5 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">Reventa</span>
-                        )}
+                      <span className="min-w-0">
+                        <span className="block font-medium leading-snug text-yeikar-secondary">
+                          {nombreItemVenta(d)}
+                        </span>
+                        <span className="mt-1 flex flex-wrap gap-1">
+                          {d.tipo_item === 'INSUMO' && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Insumo</span>
+                          )}
+                          {d.tipo_item === 'REVENTA' && !esItemAMedida(d) && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">Reventa</span>
+                          )}
+                          {esItemAMedida(d) && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">A medida</span>
+                          )}
+                        </span>
                       </span>
-                      <span className="font-mono text-yeikar-neutral/70">
-                        {d.cantidad} × {detalle.moneda?.simbolo}{Number(d.precio).toLocaleString('es-ES')}
-                        <span className="ml-1 text-[10px] font-bold text-yeikar-neutral/40">
-                          {detalle.moneda?.codigo ?? ''}
+                      <span className="shrink-0 text-right">
+                        <span className="block font-mono text-xs text-yeikar-neutral/60">
+                          {d.cantidad} × {detalle.moneda?.simbolo}{Number(d.precio).toLocaleString('es-ES')}
+                        </span>
+                        <span className="block font-mono text-sm font-black text-yeikar-secondary">
+                          {detalle.moneda?.simbolo}{(Number(d.cantidad) * Number(d.precio)).toLocaleString('es-ES')}
                         </span>
                       </span>
                     </div>
@@ -370,27 +658,31 @@ function ModalDetalle({
                 </div>
               </div>
 
-              {/* Historial de pagos */}
+              {/* Cobros */}
               <div>
                 <h4 className="font-headline font-bold text-sm text-yeikar-secondary mb-2 uppercase tracking-wider">
-                  Historial de cobros ({detalle.pagos.length})
+                  Cobros ({detalle.pagos.length})
                 </h4>
                 {detalle.pagos.length === 0 ? (
-                  <p className="text-xs text-yeikar-neutral/40 italic text-center py-4">
-                    Sin cobros registrados aún.
-                  </p>
+                  <div className="rounded-2xl border border-dashed border-yeikar-secondary-light/25 bg-yeikar-tertiary/10 p-6 text-center">
+                    <p className="text-sm font-bold text-yeikar-secondary">Sin cobros todavía</p>
+                    <p className="mt-0.5 text-xs text-yeikar-neutral/50">
+                      Registra el primero con el botón dorado de abajo.
+                    </p>
+                  </div>
                 ) : (
-                  <div className="space-y-2">
+                  <ol className="ml-2 space-y-3 border-l-2 border-emerald-100 pl-5">
                     {detalle.pagos.map((p: Pago) => {
                       const metodoLabel = labelMetodoPago(metodosPago, p.metodo_pago);
                       const esMultimoneda = p.tasa_cambio && p.tasa_cambio !== 1;
                       const pagoCodigo = p.moneda?.codigo ?? '?';
                       const ventaCodigo = detalle.moneda?.codigo ?? '?';
                       return (
-                        <div
-                          key={p.id}
-                          className="text-xs bg-green-50 border border-green-100 rounded-lg px-3 py-2"
-                        >
+                        <li key={p.id} className="relative">
+                          <span className="absolute -left-[26px] top-3 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-50" />
+                          <div
+                            className="text-xs bg-green-50 border border-green-100 rounded-xl px-3 py-2"
+                          >
                           <div className="flex justify-between items-start">
                             <div>
                               <span className="font-bold text-green-700">{metodoLabel}</span>
@@ -431,27 +723,49 @@ function ModalDetalle({
                             </div>
                           </div>
                         </div>
+                        </li>
                       );
                     })}
-                  </div>
+                  </ol>
                 )}
               </div>
+              </>
+              )}
 
-              {/* Formulario de nuevo cobro */}
-              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && (
-                <div>
-                  {!showForm ? (
-                    <button
-                      onClick={() => setShowForm(true)}
-                      className="w-full py-2.5 bg-yeikar-primary text-yeikar-neutral font-bold font-headline rounded-xl hover:bg-yeikar-primary/90 transition-all text-sm"
-                    >
-                      + Registrar Cobro
-                    </button>
-                  ) : (
-                    <div className="border border-yeikar-primary/20 rounded-xl p-4 bg-yeikar-primary/5 space-y-3">
-                      <h5 className="font-headline font-bold text-sm text-yeikar-secondary">
-                        Nuevo Cobro
-                      </h5>
+              {/* Registrar cobro */}
+              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && !showForm && (
+                <div className="sticky bottom-0 -mx-1 bg-gradient-to-t from-white via-white to-transparent px-1 pb-1 pt-4">
+                  <button
+                    onClick={() => setShowForm(true)}
+                    className="w-full py-3 bg-gradient-to-r from-yeikar-primary to-amber-500 text-yeikar-neutral font-black font-headline rounded-2xl hover:brightness-105 active:scale-[0.99] transition-all shadow-lift"
+                  >
+                    + Registrar cobro
+                  </button>
+                </div>
+              )}
+
+              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && showForm && (
+                  <div className="rounded-2xl border border-yeikar-primary/25 bg-white p-4 space-y-3 shadow-card">
+                      <div className="flex items-center justify-between gap-2 border-b border-yeikar-secondary-light/10 pb-2.5">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => { setShowForm(false); setErrorPago(''); setTasaNaturalInput(''); }}
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-yeikar-neutral/50 transition-colors hover:bg-yeikar-tertiary/40 hover:text-yeikar-neutral"
+                            aria-label="Volver al resumen"
+                            title="Volver al resumen"
+                          >
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                            </svg>
+                          </button>
+                          <h5 className="font-headline font-black text-sm text-yeikar-secondary">
+                            Nuevo cobro
+                          </h5>
+                        </div>
+                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-mono text-[11px] font-bold text-amber-800">
+                          Saldo {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
+                        </span>
+                      </div>
 
                       {/* Fila 1: Método de pago + Moneda del pago */}
                       <div className="grid grid-cols-2 gap-3">
@@ -497,15 +811,17 @@ function ModalDetalle({
                             <button
                               type="button"
                               onClick={handleSetRestante}
-                              className="text-[10px] font-bold text-yeikar-primary hover:underline hover:text-yeikar-primary-light flex items-center gap-0.5"
+                              className="flex items-center gap-1 rounded-full border border-yeikar-primary/30 bg-amber-100/70 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-800 transition-colors hover:bg-amber-200"
                             >
-                               Pagar Restante
+                              Pagar restante
                             </button>
                           </div>
                           <input
                             type="number"
                             min="0"
                             step="0.0001"
+                            inputMode="decimal"
+                            autoFocus
                             value={monto}
                             onChange={(e) => setMonto(e.target.value)}
                             placeholder="0.00"
@@ -630,24 +946,22 @@ function ModalDetalle({
                         </p>
                       )}
 
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 pt-1">
                         <button
                           onClick={() => { setShowForm(false); setErrorPago(''); setTasaNaturalInput(''); }}
-                          className="flex-1 py-2 text-sm font-bold text-yeikar-neutral/60 border border-yeikar-secondary-light/20 rounded-xl hover:bg-yeikar-tertiary/20 transition-all"
+                          className="flex-1 py-2.5 text-sm font-bold text-yeikar-neutral/70 border border-yeikar-secondary-light/20 rounded-xl hover:bg-yeikar-tertiary/20 transition-all"
                         >
                           Cancelar
                         </button>
                         <button
                           onClick={handlePago}
                           disabled={submitting}
-                          className="flex-1 py-2 text-sm font-bold bg-yeikar-primary text-yeikar-neutral rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
+                          className="flex-1 py-2.5 text-sm font-black bg-yeikar-primary text-yeikar-neutral rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
                         >
-                          {submitting ? 'Guardando...' : 'Confirmar Cobro'}
+                          {submitting ? 'Guardando...' : 'Confirmar cobro'}
                         </button>
                       </div>
-                    </div>
-                  )}
-                </div>
+                  </div>
               )}
 
             </>
@@ -680,112 +994,141 @@ function ModalDetalle({
   );
 }
 
-// ─── Modal para crear factura ────────────────────────────────────────────────
-function ModalCrearFactura({
-  pedido,
-  monedas,
-  onClose,
-  onCreado,
+// ─── Encabezado compartido de secciones (título + contador + tono urgente) ───
+function EncabezadoSeccion({
+  titulo,
+  descripcion,
+  icono,
+  tono,
+  hayPendientes,
+  conteo,
 }: {
-  pedido: PedidoSinFactura;
-  monedas: Moneda[];
-  onClose: () => void;
-  onCreado: () => void;
+  titulo: string;
+  descripcion: string;
+  icono: ReactNode;
+  tono: 'urgente' | 'proceso';
+  hayPendientes: boolean;
+  conteo: number;
 }) {
-  const [monedaId, setMonedaId] = useState<number>(
-    pedido.cotizacion?.moneda_id ?? monedas[0]?.id ?? 0
-  );
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleCrear = async () => {
-    setError('');
-    if (!monedaId) { setError('Selecciona una moneda.'); return; }
-    try {
-      setSubmitting(true);
-      await ventaService.create({ pedido_id: pedido.id, moneda_id: monedaId });
-      onCreado();
-      onClose();
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Error al crear la factura.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
+  const esUrgente = tono === 'urgente' && hayPendientes;
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
-        <h3 className="font-headline font-bold text-lg text-yeikar-secondary">
-          Crear Factura — Pedido #{pedido.id}
-        </h3>
-        <p className="text-sm text-yeikar-neutral/70">
-          Cliente: <strong>{pedido.cliente?.nombre ?? '—'}</strong>
-        </p>
-        <div>
-          <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
-            Moneda de facturación
-          </label>
-          {pedido.cotizacion?.moneda_id && (
-            <p className="text-xs text-yeikar-neutral/50 mb-2">
-              Moneda sugerida de la cotización (puedes cambiarla).
-            </p>
-          )}
-          <SearchSelect
-            value={monedaId}
-            onChange={(v) => setMonedaId(Number(v))}
-            options={monedas.map((m) => ({
-              value: m.id,
-              label: `${m.nombre} (${m.codigo} ${m.simbolo})`,
-            }))}
-            placeholder="Seleccione moneda..."
-          />
-        </div>
-        {error && (
-          <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
-            {error}
-          </p>
-        )}
-        <div className="flex gap-2 pt-1">
-          <button
-            onClick={onClose}
-            className="flex-1 py-2.5 text-sm font-bold text-yeikar-neutral/60 border border-yeikar-secondary-light/20 rounded-xl hover:bg-yeikar-tertiary/20 transition-all"
+    <div className="mb-2.5 flex items-start gap-3 sm:items-center">
+      <span
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+          esUrgente ? 'bg-amber-100 text-amber-700' : 'bg-yeikar-tertiary/40 text-yeikar-secondary'
+        }`}
+      >
+        {icono}
+      </span>
+      <div className="min-w-0">
+        <h2 className="flex items-center gap-2 font-headline text-lg font-black leading-none tracking-tight text-yeikar-neutral">
+          {titulo}
+          <span
+            className={`rounded-full px-2 py-0.5 font-mono text-xs font-bold ${
+              hayPendientes ? 'bg-amber-100 text-amber-700' : 'bg-yeikar-tertiary/30 text-yeikar-neutral/60'
+            }`}
           >
-            Cancelar
-          </button>
-          <button
-            onClick={handleCrear}
-            disabled={submitting}
-            className="flex-1 py-2.5 text-sm font-bold bg-yeikar-primary text-yeikar-neutral rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
-          >
-            {submitting ? 'Creando...' : 'Crear Factura'}
-          </button>
-        </div>
+            {conteo}
+          </span>
+        </h2>
+        <p className="mt-0.5 text-xs text-yeikar-neutral/50">{descripcion}</p>
       </div>
     </div>
   );
 }
 
+// ─── Sección de grupo de cobros (Entregados / En proceso) ────────────────────
+function SeccionVentas({
+  titulo,
+  descripcion,
+  icono,
+  tono,
+  hayPendientes,
+  vacio,
+  loading,
+  rows,
+  columns,
+  acciones,
+}: {
+  titulo: string;
+  descripcion: string;
+  icono: ReactNode;
+  tono: 'urgente' | 'proceso';
+  hayPendientes: boolean;
+  vacio: string;
+  loading: boolean;
+  rows: Venta[];
+  columns: DataColumn<Venta>[];
+  acciones: (v: Venta) => ReactNode;
+}) {
+  const esUrgente = tono === 'urgente' && hayPendientes;
+  return (
+    <section>
+      <EncabezadoSeccion
+        titulo={titulo}
+        descripcion={descripcion}
+        icono={icono}
+        tono={tono}
+        hayPendientes={hayPendientes}
+        conteo={rows.length}
+      />
+      <div
+        className={`bg-white rounded-2xl border shadow-sm overflow-hidden ${
+          esUrgente ? 'border-amber-300 border-l-4' : 'border-yeikar-secondary-light/10'
+        }`}
+      >
+        {loading ? (
+          <Spinner />
+        ) : rows.length === 0 ? (
+          <div className="p-8 text-center text-yeikar-neutral/40 italic text-sm">{vacio}</div>
+        ) : (
+          <ResponsiveDataTable
+            columns={columns}
+            rows={rows}
+            rowKey={(v) => v.id}
+            cardBadge={(v) => <Badge text={v.estado} className={ESTADO_VENTA_STYLE[v.estado] ?? ''} />}
+            tableActions={acciones}
+            cardActions={acciones}
+            darkHeader
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Pill de filtro (misma píldora para estado y para grupo) ─────────────────
+function PillFiltro({ activo, onClick, children }: { activo: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
+        activo
+          ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+          : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/20 hover:border-yeikar-primary/40'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 // ─── Página principal ─────────────────────────────────────────────────────────
 export default function Ventas() {
-  const [activeTab, setActiveTab] = useState<'facturas' | 'pendientes'>('facturas');
-  const toast = useToast();
-
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [ventasLoading, setVentasLoading] = useState(false);
-
-  const [pedidosSinFactura, setPedidosSinFactura] = useState<PedidoSinFactura[]>([]);
-  const [pedidosLoading, setPedidosLoading] = useState(false);
-
-  const [monedas, setMonedas] = useState<Moneda[]>([]);
+  const [cuentas, setCuentas] = useState<CuentaPorCobrar[]>([]);
+  const [cobroAbiertoId, setCobroAbiertoId] = useState<number | null>(null);
 
   // Modales
   const [detalleVentaId, setDetalleVentaId] = useState<number | null>(null);
-  const [pedidoParaFactura, setPedidoParaFactura] = useState<PedidoSinFactura | null>(null);
 
   // Filtro de estado: por defecto solo cobros pendientes (PENDIENTE/ABONADA);
   // las pagadas/canceladas quedan en su pill o en 'Todas'.
   const [filtroEstado, setFiltroEstado] = useState<string>('COBROS');
+
+  // Filtro de grupo: qué secciones se ven. 'todos' apila Entregados y En proceso.
+  const [filtroGrupo, setFiltroGrupo] = useState<'todos' | 'entregados' | 'proceso'>('todos');
 
   // Búsqueda
   const [busqueda, setBusqueda] = useState('');
@@ -793,51 +1136,27 @@ export default function Ventas() {
   const cargarVentas = useCallback(async (termino?: string) => {
     try {
       setVentasLoading(true);
-      const data = await ventaService.getAll(termino ? { buscar: termino } : undefined);
+      const [data, cuentasData] = await Promise.all([
+        ventaService.getAll(termino ? { buscar: termino } : undefined),
+        // Si el endpoint de saldos falla, igual mostramos la lista usando el
+        // total como saldo (fallback visible en la tarjeta, no un vacío).
+        ventaService.getCuentasPorCobrar().catch(() => [] as CuentaPorCobrar[]),
+      ]);
       setVentas(data);
+      setCuentas(cuentasData);
     } finally {
       setVentasLoading(false);
     }
   }, []);
 
-  const cargarPedidosSinFactura = useCallback(async () => {
-    try {
-      setPedidosLoading(true);
-      // Pedidos en estados facturables
-      const res = await api.get<PedidoSinFactura[]>('/pedido/');
-      const facturables = ['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'];
-      const todos = res.data.filter((p) => facturables.includes(p.estado));
-      // Excluir los que ya tienen factura (cruzando con ventas cargadas)
-      // Cargamos ventas actuales para evitar llamada extra
-      const ventasRes = await ventaService.getAll();
-      const pedidosConFactura = new Set(ventasRes.map((v) => v.pedido_id));
-      setPedidosSinFactura(todos.filter((p) => !pedidosConFactura.has(p.id)));
-    } finally {
-      setPedidosLoading(false);
-    }
-  }, []);
-
-  const cargarMonedas = useCallback(async () => {
-    try {
-      const res = await api.get<Moneda[]>('/catalogos/moneda/');
-      setMonedas(res.data);
-    } catch {
-      setMonedas([]);
-    }
-  }, []);
-
   useEffect(() => {
-    cargarMonedas();
-    if (activeTab === 'pendientes') {
-      cargarPedidosSinFactura();
-    }
-  }, [activeTab, cargarPedidosSinFactura, cargarMonedas]);
-
-  useEffect(() => {
-    if (activeTab !== 'facturas') return;
     const t = setTimeout(() => cargarVentas(busqueda.trim() || undefined), 300);
     return () => clearTimeout(t);
-  }, [busqueda, activeTab, cargarVentas]);
+  }, [busqueda, cargarVentas]);
+
+  useEffect(() => {
+    setCobroAbiertoId(null);
+  }, [filtroEstado, filtroGrupo, busqueda]);
 
   const ventasFiltradas = filtroEstado === 'COBROS'
     ? ventas.filter((v) => v.estado === 'PENDIENTE' || v.estado === 'ABONADA')
@@ -845,14 +1164,32 @@ export default function Ventas() {
       ? ventas.filter((v) => v.estado === filtroEstado)
       : ventas;
 
+  // Ubicación del dinero pendiente: lo define el pedido (ya entregado vs. en
+  // proceso). El backend deriva pedido_estado del envío confirmado.
+  const esEntregada = (v: Venta) => v.pedido_estado === 'ENTREGADO';
+  const ventasEntregadas = ventasFiltradas.filter(esEntregada);
+  const ventasEnProceso = ventasFiltradas.filter((v) => !esEntregada(v));
+
+  const cuentasPorVenta = useMemo(() => new Map(cuentas.map((c) => [c.venta_id, c])), [cuentas]);
+  const combinarVentaConCuenta = (v: Venta): CobroPendiente => {
+    const cuenta = cuentasPorVenta.get(v.id);
+    const total = cuenta ? Number(cuenta.total) : Number(v.total);
+    const pagado = cuenta ? Number(cuenta.total_pagado) : 0;
+    const saldo = cuenta ? Number(cuenta.saldo_pendiente) : Math.max(total - pagado, 0);
+    const codigo = cuenta?.moneda_codigo ?? v.moneda?.codigo ?? 'USD';
+    return { venta: v, total, pagado, saldo, codigo };
+  };
+  const cobrosEntregados = ventasEntregadas.map(combinarVentaConCuenta);
+  const cobrosEnProceso = ventasEnProceso.map(combinarVentaConCuenta);
+
   const totalPendiente = ventas
     .filter((v) => v.estado !== 'PAGADA' && v.estado !== 'CANCELADA')
     .length;
 
-  const facturasColumns: DataColumn<Venta>[] = [
+  const ventasColumns: DataColumn<Venta>[] = [
     {
       key: 'id',
-      header: '# Factura',
+      header: '# Venta',
       render: (v) => <span className="font-mono font-bold text-yeikar-secondary">#{v.id}</span>,
       mobilePrimary: true,
     },
@@ -898,50 +1235,13 @@ export default function Ventas() {
     },
   ];
 
-  const renderAccionFactura = (v: Venta) => (
+  const renderAccionVenta = (v: Venta) => (
     <button
-      id={`btn-ver-factura-${v.id}`}
+      id={`btn-ver-venta-${v.id}`}
       onClick={() => setDetalleVentaId(v.id)}
       className="px-3 py-2 bg-yeikar-secondary text-yeikar-tertiary hover:bg-yeikar-secondary-light rounded-lg text-xs font-bold font-headline transition-colors"
     >
       {v.estado !== 'PAGADA' && v.estado !== 'CANCELADA' ? 'Ver / Cobrar' : 'Ver Detalle'}
-    </button>
-  );
-
-  const pendientesColumns: DataColumn<PedidoSinFactura>[] = [
-    {
-      key: 'id',
-      header: '# Pedido',
-      render: (p) => <span className="font-mono font-bold text-yeikar-secondary">#{p.id}</span>,
-      mobilePrimary: true,
-    },
-    {
-      key: 'cliente',
-      header: 'Cliente',
-      render: (p) => <span className="font-semibold text-yeikar-secondary">{p.cliente?.nombre ?? '—'}</span>,
-      mobileSecondary: true,
-    },
-    {
-      key: 'fecha',
-      header: 'Fecha',
-      render: (p) => <span className="font-mono text-yeikar-neutral/70">{p.fecha}</span>,
-      mobileLabel: 'Fecha',
-    },
-    {
-      key: 'estado',
-      header: 'Estado',
-      render: (p) => <Badge text={p.estado} className={`${ESTADO_PEDIDO_STYLE[p.estado] ?? ''} border border-transparent`} />,
-      mobileHidden: true,
-    },
-  ];
-
-  const renderCrearFactura = (p: PedidoSinFactura) => (
-    <button
-      id={`btn-crear-factura-${p.id}`}
-      onClick={() => setPedidoParaFactura(p)}
-      className="px-3 py-2 bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary/90 rounded-lg text-xs font-bold font-headline transition-colors"
-    >
-      Crear Factura
     </button>
   );
 
@@ -954,7 +1254,7 @@ export default function Ventas() {
             Ventas y Cobros
           </h1>
           <p className="text-yeikar-neutral/60 mt-1 text-sm">
-            Gestiona facturas, registra pagos y controla cuentas por cobrar.
+            Quién debe y en qué etapa está. Toca Ver / Cobrar para registrar un abono.
           </p>
         </div>
         {totalPendiente > 0 && (
@@ -962,116 +1262,127 @@ export default function Ventas() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            {totalPendiente} factura{totalPendiente !== 1 ? 's' : ''} por cobrar
+            {totalPendiente} cuenta{totalPendiente !== 1 ? 's' : ''} por cobrar
           </div>
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-yeikar-secondary-light/10 overflow-x-auto scroll-touch whitespace-nowrap">
-        <button
-          id="tab-facturas"
-          onClick={() => setActiveTab('facturas')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all ${
-            activeTab === 'facturas'
-              ? 'border-yeikar-primary text-yeikar-primary'
-              : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
-          }`}
-        >
-          Facturas Emitidas
-        </button>
-        <button
-          id="tab-pendientes"
-          onClick={() => setActiveTab('pendientes')}
-          className={`px-5 py-3 font-headline font-bold text-sm tracking-tight border-b-2 transition-all flex items-center gap-2 ${
-            activeTab === 'pendientes'
-              ? 'border-yeikar-primary text-yeikar-primary'
-              : 'border-transparent text-yeikar-neutral/60 hover:text-yeikar-secondary'
-          }`}
-        >
-          Pedidos sin Factura
-          {pedidosSinFactura.length > 0 && (
-            <span className="bg-yeikar-primary text-yeikar-neutral text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
-              {pedidosSinFactura.length}
-            </span>
-          )}
-        </button>
+      {/* Filtros: estado de cobro + qué grupo ver, y búsqueda */}
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-bold text-yeikar-neutral/50 font-mono">FILTRAR:</span>
+            {['COBROS', 'PAGADA', 'CANCELADA', ''].map((est) => (
+              <PillFiltro key={est} activo={filtroEstado === est} onClick={() => setFiltroEstado(est)}>
+                {est === '' ? 'Todas' : est === 'COBROS' ? 'Pendientes de cobro' : est}
+              </PillFiltro>
+            ))}
+          </div>
+          <SearchInput
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por cliente o estado..."
+            className="w-full sm:w-72"
+          />
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-bold text-yeikar-neutral/50 font-mono">VER:</span>
+          {([
+            { key: 'todos', label: 'Ambos' },
+            { key: 'entregados', label: 'Entregados' },
+            { key: 'proceso', label: 'En proceso' },
+          ] as const).map((g) => (
+            <PillFiltro key={g.key} activo={filtroGrupo === g.key} onClick={() => setFiltroGrupo(g.key)}>
+              {g.label}
+            </PillFiltro>
+          ))}
+        </div>
       </div>
 
-      {/* ── TAB: Facturas emitidas ── */}
-      {activeTab === 'facturas' && (
-        <div className="space-y-4">
-          {/* Filtro de estado + búsqueda */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-yeikar-neutral/50 font-mono">FILTRAR:</span>
-              {['COBROS', 'PAGADA', 'CANCELADA', ''].map((est) => (
-                <button
-                  key={est}
-                  onClick={() => setFiltroEstado(est)}
-                  className={`px-3 py-1 rounded-full text-xs font-bold border transition-all ${
-                    filtroEstado === est
-                      ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
-                      : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/20 hover:border-yeikar-primary/40'
-                  }`}
-                >
-                  {est === '' ? 'Todas' : est === 'COBROS' ? 'Pendientes de cobro' : est}
-                </button>
-              ))}
-            </div>
-            <SearchInput
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar factura por cliente o estado..."
-              className="w-full sm:w-72"
-            />
-          </div>
-
-          <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 shadow-sm overflow-hidden">
-            {ventasLoading ? (
-              <Spinner />
-            ) : ventasFiltradas.length === 0 ? (
-              <div className="p-10 text-center text-yeikar-neutral/40 italic text-sm">
-                No hay facturas para mostrar.
-              </div>
-            ) : (
-              <ResponsiveDataTable
-                columns={facturasColumns}
-                rows={ventasFiltradas}
-                rowKey={(v) => v.id}
-                cardBadge={(v) => <Badge text={v.estado} className={ESTADO_VENTA_STYLE[v.estado] ?? ''} />}
-                tableActions={renderAccionFactura}
-                cardActions={renderAccionFactura}
-                darkHeader
-              />
-            )}
-          </div>
-        </div>
+      {/* ── GRUPO: Entregados (dinero en la calle) ── */}
+      {filtroGrupo !== 'proceso' && (
+        filtroEstado === 'COBROS' ? (
+          <SeccionCobros
+            tono="urgente"
+            hayPendientes={ventasEntregadas.some((v) => v.estado === 'PENDIENTE' || v.estado === 'ABONADA')}
+            titulo="Entregados"
+            descripcion="El cliente ya recibió el mueble. Toca una tarjeta para ver la deuda y el pedido."
+            icono={
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+            }
+            vacio="No hay entregas pendientes de cobro. Todo cobrado."
+            loading={ventasLoading}
+            cobros={cobrosEntregados}
+            abiertoId={cobroAbiertoId}
+            onToggle={(id) => setCobroAbiertoId((abierto) => (abierto === id ? null : id))}
+            onCobrar={(id) => setDetalleVentaId(id)}
+          />
+        ) : (
+          <SeccionVentas
+            tono="urgente"
+            hayPendientes={ventasEntregadas.some((v) => v.estado === 'PENDIENTE' || v.estado === 'ABONADA')}
+            titulo="Entregados"
+            descripcion="El cliente ya recibió el mueble. Son las cobranzas más urgentes."
+            icono={
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+              </svg>
+            }
+            vacio={filtroEstado === 'COBROS'
+              ? 'No hay entregas pendientes de cobro. Todo cobrado.'
+              : 'Ninguna venta entregada con este filtro.'}
+            loading={ventasLoading}
+            rows={ventasEntregadas}
+            columns={ventasColumns}
+            acciones={renderAccionVenta}
+          />
+        )
       )}
 
-      {/* ── TAB: Pedidos sin factura ── */}
-      {activeTab === 'pendientes' && (
-        <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 shadow-sm overflow-hidden">
-          {pedidosLoading ? (
-            <Spinner />
-          ) : pedidosSinFactura.length === 0 ? (
-            <div className="p-10 text-center text-green-600 font-semibold italic text-sm">
-              Todos los pedidos activos ya tienen factura emitida.
-            </div>
-          ) : (
-            <ResponsiveDataTable
-              columns={pendientesColumns}
-              rows={pedidosSinFactura}
-              rowKey={(p) => p.id}
-              cardBadge={(p) => (
-                <Badge text={p.estado} className={`${ESTADO_PEDIDO_STYLE[p.estado] ?? ''} border border-transparent`} />
-              )}
-              tableActions={renderCrearFactura}
-              cardActions={renderCrearFactura}
-              darkHeader
-            />
-          )}
-        </div>
+      {/* ── GRUPO: En proceso (aún no entregados) ── */}
+      {filtroGrupo !== 'entregados' && (
+        filtroEstado === 'COBROS' ? (
+          <SeccionCobros
+            tono="proceso"
+            hayPendientes={ventasEnProceso.some((v) => v.estado === 'PENDIENTE' || v.estado === 'ABONADA')}
+            titulo="En proceso"
+            descripcion="En fabricación o listos para despacho. Al confirmarse la entrega pasan arriba, a Entregados."
+            icono={
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            }
+            vacio="No hay ventas en proceso pendientes de cobro."
+            loading={ventasLoading}
+            cobros={cobrosEnProceso}
+            abiertoId={cobroAbiertoId}
+            onToggle={(id) => setCobroAbiertoId((abierto) => (abierto === id ? null : id))}
+            onCobrar={(id) => setDetalleVentaId(id)}
+          />
+        ) : (
+          <SeccionVentas
+            tono="proceso"
+            hayPendientes={ventasEnProceso.some((v) => v.estado === 'PENDIENTE' || v.estado === 'ABONADA')}
+            titulo="En proceso"
+            descripcion="En fabricación o listos para despacho. Al confirmarse la entrega pasan arriba, a Entregados."
+            icono={
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            }
+            vacio={filtroEstado === 'COBROS'
+              ? 'No hay ventas en proceso pendientes de cobro.'
+              : 'Ninguna venta en proceso con este filtro.'}
+            loading={ventasLoading}
+            rows={ventasEnProceso}
+            columns={ventasColumns}
+            acciones={renderAccionVenta}
+          />
+        )
       )}
 
       {/* Modales */}
@@ -1079,19 +1390,7 @@ export default function Ventas() {
         <ModalDetalle
           ventaId={detalleVentaId}
           onClose={() => setDetalleVentaId(null)}
-          onPagoRegistrado={cargarVentas}
-        />
-      )}
-
-      {pedidoParaFactura && (
-        <ModalCrearFactura
-          pedido={pedidoParaFactura}
-          monedas={monedas}
-          onClose={() => setPedidoParaFactura(null)}
-          onCreado={() => {
-            cargarVentas();
-            cargarPedidosSinFactura();
-          }}
+          onPagoRegistrado={() => cargarVentas(busqueda.trim() || undefined)}
         />
       )}
     </div>
