@@ -24,7 +24,12 @@ from webauthn.helpers import (
     bytes_to_base64url,
     base64url_to_bytes,
 )
-from webauthn.helpers.structs import PublicKeyCredentialDescriptor
+from webauthn.helpers.structs import (
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
 from app.core.config import settings
 from app.modules.users import model, schemas
 
@@ -417,13 +422,24 @@ def huellas_activas(db: Session, usuario_id: int):
     ).order_by(model.CredencialWebauthn.creado_en.desc()).all()
 
 def opciones_registro_huella(db: Session, usuario: model.Usuario) -> dict:
-    """Opciones para que el navegador registre la huella de este equipo."""
+    """Opciones para que el navegador registre la huella de este equipo.
+
+    Se pide llave residente (discoverable) para que el login SIN usuario
+    funcione: el navegador guarda la cuenta dentro del autenticador y luego
+    la ofrece al tocar la huella. Las huellas viejas (no residentes) siguen
+    valiendo con el flujo clásico con usuario.
+    """
     opciones = generate_registration_options(
         rp_id=settings.WEBAUTHN_RP_ID,
         rp_name=settings.WEBAUTHN_RP_NAME,
         user_id=str(usuario.id).encode("utf-8"),
         user_name=usuario.nombre_usuario,
-        user_display_name=usuario.nombre or usuario.nombre_usuario,
+        user_display_name=usuario.display_name,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.REQUIRED,
+            require_resident_key=True,
+            user_verification=UserVerificationRequirement.PREFERRED,
+        ),
         exclude_credentials=[
             PublicKeyCredentialDescriptor(id=base64url_to_bytes(c.credential_id))
             for c in huellas_activas(db, usuario.id)
@@ -456,36 +472,43 @@ def registrar_credencial_huella(db: Session, usuario: model.Usuario, dispositivo
     db.refresh(credencial)
     return credencial
 
-def opciones_login_huella(db: Session, nombre_usuario: str) -> dict:
-    """Opciones de autenticación limitadas a las huellas del usuario."""
-    usuario = obtener_usuario_por_nombre(db, nombre_usuario)
-    huellas = huellas_activas(db, usuario.id) if usuario else []
-    if not usuario or not usuario.activo or not huellas:
-        raise ValueError("No hay huellas registradas para ese usuario.")
-    opciones = generate_authentication_options(
-        rp_id=settings.WEBAUTHN_RP_ID,
-        allow_credentials=[
-            PublicKeyCredentialDescriptor(id=base64url_to_bytes(c.credential_id))
-            for c in huellas
-        ],
-    )
-    _guardar_desafio(f"auth:{nombre_usuario.lower()}", opciones.challenge)
-    return json.loads(options_to_json(opciones))
+def _normalizar_credential_id(raw: str) -> str:
+    """Normaliza el id de credencial (base64url sin relleno) para comparar."""
+    return bytes_to_base64url(base64url_to_bytes(raw or ""))
 
-def verificar_login_huella(db: Session, nombre_usuario: str, respuesta: dict) -> model.Usuario:
-    """Valida la firma biométrica y devuelve el usuario. El contador de firmas
-    (lo lleva la librería) rechaza credenciales clonadas."""
-    usuario = obtener_usuario_por_nombre(db, nombre_usuario)
-    if not usuario or not usuario.activo:
-        raise ValueError("Usuario no encontrado.")
-    huellas = {c.credential_id: c for c in huellas_activas(db, usuario.id)}
-    credential_id = bytes_to_base64url(base64url_to_bytes(respuesta.get("id", "")))
-    credencial = huellas.get(credential_id)
-    if credencial is None:
-        raise ValueError("Esta huella no está registrada para el usuario.")
-    desafio = _tomar_desafio(f"auth:{nombre_usuario.lower()}")
-    if not desafio:
-        raise ValueError("El intento expiró; vuelve a intentar entrar con huella.")
+
+def opciones_login_huella(db: Session, nombre_usuario: str | None = None) -> dict:
+    """Opciones de autenticación, en modo híbrido.
+
+    - CON usuario: flujo clásico, `allowCredentials` limitado a las huellas
+      de esa cuenta (rápido y compatible con huellas viejas no residentes).
+    - SIN usuario: no se filtra nada; el navegador ofrece las passkeys de
+      este equipo y el usuario se descubre en `/fin` por la credencial.
+      El desafío se ata a un `sesion_huella` aleatorio que el front devuelve.
+    """
+    nombre = (nombre_usuario or "").strip()
+    if nombre:
+        usuario = obtener_usuario_por_nombre(db, nombre)
+        huellas = huellas_activas(db, usuario.id) if usuario else []
+        if not usuario or not usuario.activo or not huellas:
+            raise ValueError("No hay huellas registradas para ese usuario.")
+        opciones = generate_authentication_options(
+            rp_id=settings.WEBAUTHN_RP_ID,
+            allow_credentials=[
+                PublicKeyCredentialDescriptor(id=base64url_to_bytes(c.credential_id))
+                for c in huellas
+            ],
+        )
+        _guardar_desafio(f"auth:{nombre.lower()}", opciones.challenge)
+        return json.loads(options_to_json(opciones))
+    # Sin usuario: passkeys discoverables, sin enumerar cuentas.
+    opciones = generate_authentication_options(rp_id=settings.WEBAUTHN_RP_ID)
+    sesion_huella = uuid4().hex
+    _guardar_desafio(f"auth:anon:{sesion_huella}", opciones.challenge)
+    return {"options": json.loads(options_to_json(opciones)), "sesion_huella": sesion_huella}
+
+
+def _verificar_firma_huella(desafio, credencial: model.CredencialWebauthn, respuesta: dict) -> None:
     verificacion = verify_authentication_response(
         credential=respuesta,
         expected_challenge=desafio,
@@ -497,5 +520,56 @@ def verificar_login_huella(db: Session, nombre_usuario: str, respuesta: dict) ->
     )
     credencial.contador = verificacion.new_sign_count
     credencial.ultimo_uso = datetime.utcnow()
+
+
+def verificar_login_huella(
+    db: Session,
+    respuesta: dict,
+    nombre_usuario: str | None = None,
+    sesion_huella: str | None = None,
+) -> model.Usuario:
+    """Valida la firma biométrica y devuelve el usuario. El contador de firmas
+    (lo lleva la librería) rechaza credenciales clonadas.
+
+    Con `nombre_usuario` valida contra las huellas de esa cuenta; sin él
+    descubre al dueño por el `credential_id` (requiere `sesion_huella`).
+    """
+    nombre = (nombre_usuario or "").strip()
+    if nombre:
+        usuario = obtener_usuario_por_nombre(db, nombre)
+        if not usuario or not usuario.activo:
+            raise ValueError("Usuario no encontrado.")
+        huellas = {c.credential_id: c for c in huellas_activas(db, usuario.id)}
+        credential_id = _normalizar_credential_id((respuesta or {}).get("id", ""))
+        credencial = huellas.get(credential_id)
+        if credencial is None:
+            raise ValueError("Esta huella no está registrada para el usuario.")
+        desafio = _tomar_desafio(f"auth:{nombre.lower()}")
+        if not desafio:
+            raise ValueError("El intento expiró; vuelve a intentar entrar con huella.")
+        _verificar_firma_huella(desafio, credencial, respuesta)
+        db.commit()
+        return usuario
+    # Sin usuario: descubrir por credencial global (solo discoverables nuevas
+    # y cualquier llave cuya id coincida; las viejas no residentes también
+    # validan si el navegador las ofrece).
+    if not sesion_huella:
+        raise ValueError("La sesión de huella expiró; vuelve a intentarlo.")
+    desafio = _tomar_desafio(f"auth:anon:{sesion_huella}")
+    if not desafio:
+        raise ValueError("El intento expiró; vuelve a intentar entrar con huella.")
+    credential_id = _normalizar_credential_id((respuesta or {}).get("id", ""))
+    if not credential_id:
+        raise ValueError("Respuesta de huella inválida.")
+    credencial = db.query(model.CredencialWebauthn).filter(
+        model.CredencialWebauthn.credential_id == credential_id,
+        model.CredencialWebauthn.activa == True,  # noqa: E712
+    ).first()
+    if credencial is None:
+        raise ValueError("Esta huella no está registrada en este equipo.")
+    usuario = obtener_usuario_por_id(db, credencial.usuario_id)
+    if not usuario or not usuario.activo:
+        raise ValueError("Usuario no encontrado.")
+    _verificar_firma_huella(desafio, credencial, respuesta)
     db.commit()
     return usuario

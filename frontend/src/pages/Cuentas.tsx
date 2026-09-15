@@ -348,7 +348,7 @@ export default function Cuentas() {
     {
       key: 'responsable',
       header: 'Responsable',
-      render: (m) => <span>{m.usuario?.nombre_usuario ?? '-'}</span>,
+      render: (m) => <span>{m.usuario?.nombre || m.usuario?.nombre_usuario || '-'}</span>,
       mobileLabel: 'Responsable',
     },
   ];
@@ -809,7 +809,7 @@ export default function Cuentas() {
                   : '—'}
               </DetalleFila>
               <DetalleFila label="Responsable">
-                {detalleMov.usuario?.nombre_usuario ?? (detalleMov.usuario_id ? `Usuario #${detalleMov.usuario_id}` : 'Sistema')}
+                {detalleMov.usuario?.nombre || detalleMov.usuario?.nombre_usuario || (detalleMov.usuario_id ? `Usuario #${detalleMov.usuario_id}` : 'Sistema')}
               </DetalleFila>
               <DetalleFila label="Referencia">
                 {detalleMov.referencia || '—'}

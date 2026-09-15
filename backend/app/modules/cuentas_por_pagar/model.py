@@ -40,6 +40,11 @@ class CuentaPorPagar(Base):
     gasto = relationship("Gasto")
     tipo_gasto = relationship("TipoGasto")
     moneda = relationship("Moneda")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+
+    @property
+    def creador_nombre(self) -> str | None:
+        return self.creador.display_name if self.creador else None
     detalles = relationship("DetalleCuentaPorPagar", back_populates="cuenta_por_pagar",
                              cascade="all, delete-orphan", order_by="DetalleCuentaPorPagar.orden")
     pagos = relationship("PagoCuentaPorPagar", back_populates="cuenta_por_pagar", cascade="all, delete-orphan")
@@ -102,6 +107,11 @@ class PagoCuentaPorPagar(Base):
 
     cuenta_por_pagar = relationship("CuentaPorPagar", back_populates="pagos")
     metodo_caja = relationship("MetodoCaja")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+
+    @property
+    def creador_nombre(self) -> str | None:
+        return self.creador.display_name if self.creador else None
 
     @property
     def metodo_caja_nombre(self) -> str | None:

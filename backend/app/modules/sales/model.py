@@ -32,6 +32,7 @@ class Venta(Base):
     # Relaciones
     detalles = relationship("DetalleVenta", back_populates="venta", cascade="all, delete-orphan")
     pagos = relationship("Pago", back_populates="venta")
+    descuentos = relationship("DescuentoVenta", back_populates="venta")
     cliente = relationship("Client")
     pedido = relationship("Pedido")
     moneda = relationship("Moneda")
@@ -81,6 +82,44 @@ class DetalleVenta(Base):
     venta = relationship("Venta", back_populates="detalles")
     producto = relationship("Producto")
     material = relationship("Material")
+
+
+class DescuentoVenta(Base):
+    """Rebaja otorgada al cobrar (p. ej. el dueño deja una deuda de 1.150.000
+    en 1.000.000): resta del saldo pendiente igual que un pago, pero NO mueve
+    dinero a ninguna cuenta de caja (no genera MovimientoCaja).
+
+    Replica la lógica multimoneda de Pago: `tasa_cambio` convierte a la moneda
+    de la venta y `monto_en_moneda_base` es lo que realmente descuenta del saldo.
+    """
+
+    __tablename__ = "descuento_venta"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    venta_id = Column(BigInteger, ForeignKey("venta.id", ondelete="RESTRICT"), nullable=False)
+    moneda_id = Column(BigInteger, ForeignKey("moneda.id", ondelete="RESTRICT"), nullable=False)
+    fecha = Column(DateTime, nullable=False)
+    monto = Column(Numeric(15, 2), nullable=False)
+    # Tasa de cambio usada para convertir a la moneda de la venta.
+    # Si la moneda del descuento es igual a la de la venta, tasa_cambio = 1.0
+    tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
+    # Monto equivalente en la moneda de la venta ya convertido.
+    monto_en_moneda_base = Column(Numeric(15, 2), nullable=False)
+    # Motivo opcional (p. ej. "acuerdo con el dueño").
+    motivo = Column(Text, nullable=True)
+    observaciones = Column(Text, nullable=True)
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    venta = relationship("Venta", back_populates="descuentos")
+    moneda = relationship("Moneda")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+
+    @property
+    def creador_nombre(self):
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
 
 class Pago(Base):

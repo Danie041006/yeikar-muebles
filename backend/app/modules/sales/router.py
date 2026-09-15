@@ -55,8 +55,10 @@ def ver_factura_venta(
     # Calcular y asignar campos acumulados para la respuesta
     # Usar monto_en_moneda_base para reflejar correctamente abonos en otra moneda
     total_pagado = sum(float(p.monto_en_moneda_base) for p in db_obj.pagos)
+    total_descontado = sum(float(d.monto_en_moneda_base) for d in db_obj.descuentos)
     db_obj.total_pagado = total_pagado
-    db_obj.saldo_pendiente = float(db_obj.total) - total_pagado
+    db_obj.total_descontado = total_descontado
+    db_obj.saldo_pendiente = float(db_obj.total) - total_pagado - total_descontado
     return db_obj
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -87,3 +89,33 @@ def registrar_pago(
         return service.crear_pago(db, esquema, usuario=usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ------------------------------------------------------------
+# Endpoints de Descuentos de cobro (rebaja sin movimiento de caja)
+# ------------------------------------------------------------
+@pago_router.post("/descuento/", response_model=schemas.DescuentoResponse, status_code=status.HTTP_201_CREATED)
+def registrar_descuento(
+    esquema: schemas.DescuentoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        return service.crear_descuento(db, esquema, usuario=usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@pago_router.delete("/descuento/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def anular_descuento(
+    id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        exito = service.anular_descuento(db, id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not exito:
+        raise HTTPException(status_code=404, detail="Descuento no encontrado")
+    return None

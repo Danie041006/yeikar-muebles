@@ -14,6 +14,7 @@ export interface MetodoCaja {
 export interface Responsable {
   id: number;
   nombre_usuario: string;
+  nombre?: string | null;
   email?: string | null;
 }
 

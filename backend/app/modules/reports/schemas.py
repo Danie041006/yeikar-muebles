@@ -115,9 +115,14 @@ class MetodoCajaResponse(MetodoCajaBase):
 
 
 class ResponsableResponse(BaseModel):
-    """Usuario responsable de haber registrado un movimiento de caja."""
+    """Usuario responsable de haber registrado un movimiento de caja.
+
+    `nombre` es el nombre real (display_name); `nombre_usuario` queda por
+    compatibilidad pero la UI debe mostrar `nombre` con fallback.
+    """
     id: int
     nombre_usuario: str
+    nombre: Optional[str] = None
     email: Optional[str] = None
 
     class Config:
@@ -240,10 +245,30 @@ class LineaMonedaDiaria(BaseModel):
     monto_cop: Decimal = Decimal("0.0")
 
 class SaldoCuentaDiaria(BaseModel):
+    """Saldo de una cuenta en el día, desglosado por moneda.
+
+    `saldo_inicial/final` van en la moneda nativa (`moneda_codigo`); los
+    `*_cop` son solo referencia convertida. Una cuenta puede tener varias
+    filas (una por moneda con movimiento).
+    """
     metodo_caja_id: int
     cuenta_nombre: str
+    moneda_codigo: str = "?"
+    moneda_simbolo: str = "?"
+    saldo_inicial: Decimal = Decimal("0.0")
+    saldo_final: Decimal = Decimal("0.0")
     saldo_inicial_cop: Decimal = Decimal("0.0")
     saldo_final_cop: Decimal = Decimal("0.0")
+
+
+class MonedaVistaDiaria(BaseModel):
+    """Una moneda con movimiento en el día, ofrecida como vista (tab).
+
+    Sin conversión: cada vista muestra su moneda en valor nativo.
+    """
+    moneda_id: int
+    codigo: str
+    simbolo: str
 
 class ResumenDiarioResponse(BaseModel):
     fecha: date
@@ -251,6 +276,16 @@ class ResumenDiarioResponse(BaseModel):
     total_ingresos_cop: Decimal = Decimal("0.0")
     total_egresos_cop: Decimal = Decimal("0.0")
     saldo_final_cop: Decimal = Decimal("0.0")
+    # Vista en la moneda pedida (?moneda=USD): mismos totales pero SOLO con
+    # movimientos de esa moneda, en su valor nativo. Sin conversión ni tasas.
+    moneda_vista: str = "COP"
+    moneda_vista_simbolo: str = "$"
+    saldo_inicial_vista: Decimal = Decimal("0.0")
+    total_ingresos_vista: Decimal = Decimal("0.0")
+    total_egresos_vista: Decimal = Decimal("0.0")
+    saldo_final_vista: Decimal = Decimal("0.0")
+    # Monedas con movimiento en el día (tabs de la UI). COP siempre va.
+    monedas: List[MonedaVistaDiaria] = []
     movimientos: List[MovimientoDiarioResponse] = []
     por_moneda: List[LineaMonedaDiaria] = []
     saldos_por_cuenta: List[SaldoCuentaDiaria] = []
@@ -303,8 +338,11 @@ class LineaIngresoInforme(BaseModel):
     precio_venta: Decimal
     descuento: Decimal
     moneda: str
-    tasa_cambio: Decimal
-    precio_venta_en_base: Decimal
+    # TRM de referencia moneda → COP. None cuando no hay tasa confiable
+    # (ni la congelada de la venta ni TRM registrada en el catálogo): mostrar
+    # el equivalente en COP fabricado (1 USD = 1 COP) descuadraba el informe.
+    tasa_cambio: Optional[Decimal] = None
+    precio_venta_en_base: Optional[Decimal] = None
     es_devolucion: bool
 
 class TotalesIngresoInforme(BaseModel):
@@ -314,19 +352,46 @@ class TotalesIngresoInforme(BaseModel):
     precio_venta_en_base: Decimal
     descuentos: Decimal
 
+class TotalesPorMonedaInforme(BaseModel):
+    """TOTALES de la sección 1 separados por moneda: sumar costos/ventas de
+    monedas distintas en una sola cifra mezclaba USD con COP."""
+    moneda: str
+    precio_costo: Decimal = Decimal("0.0")
+    utilidad: Decimal = Decimal("0.0")
+    precio_venta: Decimal = Decimal("0.0")
+    # Equivalente COP solo para la fila COP (nativo); en monedas extranjeras
+    # queda None si no hay TRM confiable.
+    precio_venta_en_base: Optional[Decimal] = None
+    descuentos: Decimal = Decimal("0.0")
+
 class ControlInternoIngresos(BaseModel):
     lineas: List[LineaIngresoInforme]
     totales: TotalesIngresoInforme
+    totales_por_moneda: List[TotalesPorMonedaInforme] = []
+
+class ResumenMoneda(BaseModel):
+    """Ingresos/egresos/dispodible de UNA moneda, en su moneda nativa."""
+    moneda: str
+    ingresos: Decimal = Decimal("0.0")
+    egresos: Decimal = Decimal("0.0")
+    disponible: Decimal = Decimal("0.0")
 
 class ResumenMes(BaseModel):
     ingresos: Decimal
     egresos: Decimal
     disponible: Decimal
+    # Desglose por moneda (cifras nativas, sin conversiones). Es la fuente
+    # de verdad; ingresos/egresos/disponible planos quedan por compatibilidad
+    # y reflejan solo el renglón COP.
+    por_moneda: List[ResumenMoneda] = []
 
 class LineaValorConcepto(BaseModel):
     concepto_id: int
     nombre: str
     valor: Decimal
+    # Código de la moneda en que el valor es nativo (inventarios manuales
+    # pueden registrarse en moneda distinta de COP).
+    moneda: Optional[str] = None
 
 class VentasEstadoResultados(BaseModel):
     contado: Decimal
@@ -372,6 +437,22 @@ class EstadoResultados(BaseModel):
     gastos: GastosEstadoResultados
     utilidad_periodo: Decimal
 
+class EstadoPorMoneda(BaseModel):
+    """Estado de resultados desglosado por moneda, todo en cifras nativas
+    (sin conversiones): las equivalencias en COP con TRM mezclada descuadran
+    el informe cuando las ventas conviven en varias monedas."""
+    moneda: str
+    ventas: VentasEstadoResultados
+    inventarios_iniciales: List[LineaValorConcepto] = []
+    total_inventarios_iniciales: Decimal = Decimal("0.0")
+    compras: ComprasEstadoResultados
+    inventarios_finales: List[LineaValorConcepto] = []
+    total_inventarios_finales: Decimal = Decimal("0.0")
+    compras_netas: Decimal = Decimal("0.0")
+    utilidad_bruta: Decimal = Decimal("0.0")
+    gastos: GastosEstadoResultados
+    utilidad_periodo: Decimal = Decimal("0.0")
+
 class PendientePagoLinea(BaseModel):
     pedido_id: int
     venta_id: Optional[int] = None
@@ -384,10 +465,27 @@ class PendientePagoLinea(BaseModel):
     total_en_base: Decimal
     pagado_en_base: Decimal
     saldo_en_base: Decimal
+    # Saldo en la moneda nativa del pedido/venta (sin conversión). Es la
+    # cifra confiable; *_en_base es solo referencia COP.
+    total_en_moneda: Optional[Decimal] = None
+    pagado_en_moneda: Optional[Decimal] = None
+    saldo_en_moneda: Optional[Decimal] = None
+
+class SaldoPorMoneda(BaseModel):
+    moneda: str
+    saldo: Decimal = Decimal("0.0")
 
 class PendientesDePagoInforme(BaseModel):
     lineas: List[PendientePagoLinea]
     total_pendiente: Decimal
+    total_pendiente_por_moneda: List[SaldoPorMoneda] = []
+
+class LineaSaldoCajaInforme(BaseModel):
+    """Saldo de una cuenta de caja al cierre, en su moneda nativa."""
+    metodo_caja_id: int
+    nombre: str
+    moneda: str
+    saldo: Decimal = Decimal("0.0")
 
 class InformeMensualResponse(BaseModel):
     mes: str
@@ -395,9 +493,12 @@ class InformeMensualResponse(BaseModel):
     resumen: ResumenMes
     estado_resultados: EstadoResultados
     pendientes_de_pago: PendientesDePagoInforme
-    # Saldos de caja al cierre (COP). Antes se mezclaban con los inventarios
-    # finales fabricando utilidad ficticia; ahora van por separado.
-    saldos_caja: List[LineaValorConcepto] = []
+    # Saldos de caja al cierre por cuenta, en la moneda de la cuenta. Antes se
+    # mezclaban con los inventarios finales fabricando utilidad ficticia y se
+    # consolidaban en COP con tasas históricas mezcladas.
+    saldos_caja: List[LineaSaldoCajaInforme] = []
+    # Desglose completo del estado de resultados por moneda (nativo).
+    estado_resultados_por_moneda: List[EstadoPorMoneda] = []
 
 
 # Rebuilds para referencias circulares

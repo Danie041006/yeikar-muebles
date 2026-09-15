@@ -25,6 +25,7 @@ class AbonoResponse(AbonoBase):
     tasa_cambio: Decimal = Decimal("1.0")
     monto_en_moneda_base: Decimal
     creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     metodo_caja_nombre: Optional[str] = None
     created_at: datetime
 
@@ -78,6 +79,7 @@ class CuentaPorPagarResponse(CuentaPorPagarBase):
     origen_tipo: Optional[str] = None
     origen_id: Optional[int] = None
     creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     proveedor: Optional[ProveedorResponse] = None

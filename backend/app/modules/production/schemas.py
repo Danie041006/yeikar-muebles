@@ -24,6 +24,13 @@ class ConsumoMaterialCreate(ConsumoMaterialBase):
     # que salen del depósito AHORA (costo provisional N × costo_base) y el
     # consumo queda PENDIENTE hasta confirmar por cortes cuánto se usó.
     es_lamina_completa: Optional[bool] = False
+    # --- PEDIDO de material general (madera y demás: confirmar uso después) ---
+    # Si es True, `cantidad` = cantidad ENTREGADA hoy (obligatoria, en la
+    # unidad que se digite: admite captura en cm/por pieza) que sale del
+    # depósito AHORA con costo provisional, y el consumo queda PENDIENTE hasta
+    # confirmar cuánto se usó de verdad. Híbrido: si es False se registra el
+    # uso directo como siempre (CONFIRMADO inmediato).
+    es_pedido: Optional[bool] = False
     # --- Consumo por CORTE (materiales laminares) ---
     # Si se envían las dos medidas, `cantidad` = NÚMERO de cortes de ese tamaño.
     ancho_corte_cm: Optional[float] = Field(None, gt=0)
@@ -58,21 +65,32 @@ class ConsumoMaterialUpdate(BaseModel):
     observaciones: Optional[str] = None
 
 class ConsumoConfirmarCreate(BaseModel):
-    """Confirmación de uso de una lámina pedida completa: cuántos cortes de qué
-    tamaño salieron de las láminas. Recalcula el costo real (proporcional al
-    área), devuelve/descarta láminas según corresponda y genera el sobrante."""
-    cantidad_cortes: float = Field(gt=0)
-    largo_corte_cm: float = Field(gt=0)
-    ancho_corte_cm: float = Field(gt=0)
+    """Confirmación de uso de un material pedido (PENDIENTE → CONFIRMADO).
+
+    Dos modos excluyentes:
+    - Láminas: `cantidad_cortes` + medidas → costo proporcional al área,
+      devuelve láminas sin abrir y genera el sobrante reutilizable.
+    - General (madera y demás): `cantidad_usada` en la unidad base del
+      material → lo que sobró vuelve solo al depósito; si se usó de más se
+      descuenta del stock (validando disponibilidad). El gasto se ajusta al
+      costo real en ambos modos.
+    """
+    cantidad_cortes: Optional[float] = Field(None, gt=0)
+    largo_corte_cm: Optional[float] = Field(None, gt=0)
+    ancho_corte_cm: Optional[float] = Field(None, gt=0)
     # Opcional: medidas reales del pedazo restante que el operario editó.
     sobrante_largo_cm: Optional[float] = Field(None, gt=0)
     sobrante_ancho_cm: Optional[float] = Field(None, gt=0)
+    # Modo general: cuánto se usó de verdad (unidad base del material).
+    cantidad_usada: Optional[float] = Field(None, gt=0)
 
 class ConsumoMaterialResponse(ConsumoMaterialBase):
     id: int
     etapa_produccion_id: int
     material_id: int
     estado: Optional[str] = None
+    # Lo que se ENTREGÓ al pedir (unidad base). NULL = uso directo sin pedido.
+    cantidad_pedida: Optional[float] = None
     costo_unitario: Optional[float] = None
     solicitante_empleado_id: Optional[int] = None
     solicitante_nombre: Optional[str] = None
@@ -301,6 +319,8 @@ class OrdenProduccionResponse(OrdenProduccionBase):
     es_stock: bool = False
     # Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK.
     tipo: str = "PEDIDO"
+    creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     # Transitorio (no es columna): True si al finalizar se generó la
     # estructura de costes del producto desde la producción.
     estructura_generada: Optional[bool] = None

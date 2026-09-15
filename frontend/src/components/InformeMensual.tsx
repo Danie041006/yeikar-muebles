@@ -7,6 +7,7 @@ import {
   MetodoCaja,
   MovimientoCaja,
   DevolucionVenta,
+  EstadoPorMoneda,
 } from '../services/reportesService';
 import { ventaService, Venta } from '../services/ventaService';
 import { getMonedas, Moneda } from '../services/gastoService';
@@ -311,17 +312,20 @@ export default function InformeMensual() {
     }
   };
 
-  // ---- Saldos de caja (por método) ----
+  // ---- Saldos de caja (por método, en la moneda de la cuenta) ----
   const saldosCaja = useMemo(() => {
     return metodosCaja.map((met) => {
-      const movs = movimientos.filter((m) => m.metodo_caja_id === met.id);
-      const apertura = movs.filter((m) => m.tipo === 'APERTURA').reduce((a, m) => a + m.monto_en_moneda_base, 0);
-      const entradas = movs.filter((m) => m.tipo === 'ENTRADA').reduce((a, m) => a + m.monto_en_moneda_base, 0);
-      const salidas = movs.filter((m) => m.tipo === 'SALIDA').reduce((a, m) => a + m.monto_en_moneda_base, 0);
-      const ajustes = movs.filter((m) => m.tipo === 'AJUSTE').reduce((a, m) => a + m.monto_en_moneda_base, 0);
-      return { metodo: met, apertura, entradas, salidas, ajustes, saldo: apertura + entradas - salidas + ajustes };
+      // Saldo NATIVO de la cuenta: solo movimientos en la moneda propia de
+      // la cuenta (los equivalentes en COP guardados mezclaban tasas).
+      const movs = movimientos.filter((m) => m.metodo_caja_id === met.id && (!met.moneda_id || m.moneda_id === met.moneda_id));
+      const apertura = movs.filter((m) => m.tipo === 'APERTURA').reduce((a, m) => a + Number(m.monto), 0);
+      const entradas = movs.filter((m) => m.tipo === 'ENTRADA').reduce((a, m) => a + Number(m.monto), 0);
+      const salidas = movs.filter((m) => m.tipo === 'SALIDA').reduce((a, m) => a + Number(m.monto), 0);
+      const ajustes = movs.filter((m) => m.tipo === 'AJUSTE').reduce((a, m) => a + Number(m.monto), 0);
+      const codigoMoneda = monedas.find((mn) => mn.id === met.moneda_id)?.codigo ?? 'COP';
+      return { metodo: met, moneda: codigoMoneda, apertura, entradas, salidas, ajustes, saldo: apertura + entradas - salidas + ajustes };
     });
-  }, [metodosCaja, movimientos]);
+  }, [metodosCaja, movimientos, monedas]);
 
   const panelBtn = (key: string, titulo: string, desc: string) => (    <button
       onClick={() => setPanelAbierto(panelAbierto === key ? null : key)}
@@ -385,7 +389,7 @@ export default function InformeMensual() {
         </div>
         <div className="text-right">
           <p className="font-headline font-bold text-yeikar-secondary">Informe Mensual</p>
-          <p className="text-xs font-mono text-yeikar-neutral/50">Todas las cifras en COP</p>
+          <p className="text-xs font-mono text-yeikar-neutral/50">Cada cifra en la moneda de su operación</p>
         </div>
       </div>
 
@@ -399,7 +403,7 @@ export default function InformeMensual() {
           <div className="text-right">
             <p className="font-headline font-black text-xl text-yeikar-neutral uppercase tracking-tight">Informe Mensual</p>
             <p className="text-sm font-semibold text-yeikar-neutral/80">{nombreMes(mes)}</p>
-            <p className="text-xs text-yeikar-neutral/60">Generado el {new Date().toLocaleDateString('es-CO')} · Todas las cifras en COP</p>
+            <p className="text-xs text-yeikar-neutral/60">Generado el {new Date().toLocaleDateString('es-CO')} · Cada cifra en la moneda de su operación</p>
           </div>
         </div>
       </div>
@@ -438,7 +442,7 @@ export default function InformeMensual() {
               <div className="p-5 border-b border-yeikar-secondary-light/5 flex items-center justify-between print:px-0 print:border-b print:border-gray-400 print:bg-gray-100 print-color-adjust">
                 <div>
                   <h3 className="text-lg font-black font-headline text-yeikar-neutral tracking-tight">1. CONTROL INTERNO DE INGRESOS</h3>
-                  <p className="text-xs text-yeikar-neutral/50 mt-0.5">{nombreMes(mes)}</p>
+                  <p className="text-xs text-yeikar-neutral/50 mt-0.5">{nombreMes(mes)} · Ventas facturadas en el mes, cada una en su moneda</p>
                 </div>
               </div>
               <div className="overflow-x-auto">
@@ -477,121 +481,79 @@ export default function InformeMensual() {
                           <td className={`p-3 text-right font-mono font-semibold ${l.es_devolucion ? 'text-red-500' : 'text-green-600'}`}>{fmtCop(l.utilidad)}</td>
                           <td className="p-3 text-right font-mono font-bold text-yeikar-neutral">{fmtCop(l.precio_venta)}</td>
                           <td className="p-3 text-center font-mono text-xs text-yeikar-neutral/50">{l.moneda}</td>
-                          <td className="p-3 text-right font-mono text-xs text-yeikar-neutral/50">{l.tasa_cambio ? Number(l.tasa_cambio).toLocaleString('es-CO') : '—'}</td>
-                          <td className={`p-3 text-right font-mono font-bold ${l.es_devolucion ? 'text-red-500' : 'text-yeikar-primary'}`}>{fmtCop(l.precio_venta_en_base)}</td>
+                          <td className="p-3 text-right font-mono text-xs text-yeikar-neutral/50">{l.tasa_cambio != null ? Number(l.tasa_cambio).toLocaleString('es-CO') : '—'}</td>
+                          <td className={`p-3 text-right font-mono font-bold ${l.es_devolucion ? 'text-red-500' : 'text-yeikar-primary'}`}>{l.precio_venta_en_base != null ? fmtCop(l.precio_venta_en_base) : '—'}</td>
                         </tr>
                       ))
                     )}
                   </tbody>
                   <tfoot>
-                    <tr className="bg-yeikar-tertiary/30 font-headline font-bold text-sm print:bg-gray-200 print:text-black print-color-adjust">
-                      <td colSpan={4} className="p-3 text-yeikar-secondary uppercase tracking-wide print:border-t print:border-gray-400">TOTALES</td>
-                      <td className="p-3 text-right font-mono text-yeikar-neutral/70 print:border-t print:border-gray-400">{fmtCop(informe.control_interno_ingresos.totales.precio_costo)}</td>
-                      <td className="print:border-t print:border-gray-400"></td>
-                      <td className="p-3 text-right font-mono text-green-700 print:border-t print:border-gray-400">{fmtCop(informe.control_interno_ingresos.totales.utilidad)}</td>
-                      <td className="p-3 text-right font-mono text-yeikar-neutral print:border-t print:border-gray-400">{fmtCop(informe.control_interno_ingresos.totales.precio_venta)}</td>
-                      <td className="print:border-t print:border-gray-400"></td>
-                      <td className="print:border-t print:border-gray-400"></td>
-                      <td className="p-3 text-right font-mono text-yeikar-primary text-base print:border-t print:border-gray-400">{fmtCop(informe.control_interno_ingresos.totales.precio_venta_en_base)}</td>
-                    </tr>
+                    {(informe.control_interno_ingresos.totales_por_moneda?.length
+                      ? informe.control_interno_ingresos.totales_por_moneda
+                      : [{
+                          moneda: '—',
+                          precio_costo: informe.control_interno_ingresos.totales.precio_costo,
+                          utilidad: informe.control_interno_ingresos.totales.utilidad,
+                          precio_venta: informe.control_interno_ingresos.totales.precio_venta,
+                          precio_venta_en_base: informe.control_interno_ingresos.totales.precio_venta_en_base,
+                          descuentos: informe.control_interno_ingresos.totales.descuentos,
+                        }]
+                    ).map((t) => (
+                      <tr key={t.moneda} className="bg-yeikar-tertiary/30 font-headline font-bold text-sm print:bg-gray-200 print:text-black print-color-adjust">
+                        <td colSpan={4} className="p-3 text-yeikar-secondary uppercase tracking-wide print:border-t print:border-gray-400">
+                          TOTALES {t.moneda !== '—' ? `· ${t.moneda}` : ''}
+                        </td>
+                        <td className="p-3 text-right font-mono text-yeikar-neutral/70 print:border-t print:border-gray-400">{fmtCop(t.precio_costo)}</td>
+                        <td className="print:border-t print:border-gray-400"></td>
+                        <td className="p-3 text-right font-mono text-green-700 print:border-t print:border-gray-400">{fmtCop(t.utilidad)}</td>
+                        <td className="p-3 text-right font-mono text-yeikar-neutral print:border-t print:border-gray-400">{fmtCop(t.precio_venta)}</td>
+                        <td className="print:border-t print:border-gray-400"></td>
+                        <td className="print:border-t print:border-gray-400"></td>
+                        <td className="p-3 text-right font-mono text-yeikar-primary text-base print:border-t print:border-gray-400">{t.precio_venta_en_base != null ? fmtCop(t.precio_venta_en_base) : '—'}</td>
+                      </tr>
+                    ))}
                   </tfoot>
                 </table>
               </div>
             </div>
 
-            {/* ── Sección 2: Resumen del Mes ── */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 print:grid-cols-3 print:gap-3 print:mt-2">
-              <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl p-5 shadow-sm print:border-gray-400 print:rounded-none print:shadow-none print:p-3">
-                <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-neutral/50 print:text-black">INGRESOS (+)</p>
-                <p className="text-2xl font-black font-mono text-green-600 mt-1 print:text-xl">{fmtCop(informe.resumen.ingresos)}</p>
-              </div>
-              <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl p-5 shadow-sm print:border-gray-400 print:rounded-none print:shadow-none print:p-3">
-                <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-neutral/50 print:text-black">EGRESOS (−)</p>
-                <p className="text-2xl font-black font-mono text-red-500 mt-1 print:text-xl">{fmtCop(informe.resumen.egresos)}</p>
-              </div>
-              <div className="bg-white border border-yeikar-primary/30 rounded-2xl p-5 shadow-sm print:border-gray-400 print:rounded-none print:shadow-none print:p-3">
-                <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary print:text-black">DISPONIBLE</p>
-                <p className={`text-2xl font-black font-mono mt-1 print:text-xl ${informe.resumen.disponible >= 0 ? 'text-yeikar-primary' : 'text-red-500'}`}>{fmtCop(informe.resumen.disponible)}</p>
-              </div>
-            </div>
-
-            {/* ── Sección 3: Estado de Resultados ── */}
-            <div className="print:break-before-page">
-              <h4 className="hidden print:block font-headline font-black text-lg text-yeikar-neutral uppercase tracking-tight pb-2 mb-4 border-b-2 border-yeikar-neutral">3. Estado de Resultados</h4>
-            </div>
-            <div className="bg-white border border-yeikar-secondary-light/10 rounded-3xl shadow-sm overflow-hidden print:border-gray-400 print:rounded-none print:shadow-none">
-              <div className="p-5 border-b border-yeikar-secondary-light/5 print:hidden">
-                <h3 className="text-lg font-black font-headline text-yeikar-neutral tracking-tight">ESTADO DE RESULTADOS</h3>
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 print:grid-cols-1 print:gap-4">
-                {/* Columna izquierda */}
-                <div className="p-5 space-y-6 border-b lg:border-b-0 lg:border-r border-yeikar-secondary-light/5 print:p-0 print:border-0">
-                  {/* Ventas */}
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Ventas</p>
-                    <Row label="Contado" valor={informe.estado_resultados.ventas.contado} />
-                    <Row label="Crédito" valor={informe.estado_resultados.ventas.credito} />
-                    <Row label="(−) Devoluciones" valor={-informe.estado_resultados.ventas.devoluciones} negative />
-                    <Row label="(−) Descuentos" valor={-informe.estado_resultados.ventas.descuentos} negative />
-                    <Row label="Total Ventas Netas" valor={informe.estado_resultados.ventas.total_ventas_netas} strong />
+            {/* ── Sección 2: Resumen del Mes (desglose por moneda) ── */}
+            <div className="space-y-3 print:mt-2">
+              <p className="text-xs font-mono text-yeikar-neutral/50 print:hidden">Dinero realmente cobrado y pagado en el mes (caja), por moneda.</p>
+              {(informe.resumen.por_moneda?.length
+                ? informe.resumen.por_moneda
+                : [{ moneda: 'COP', ingresos: informe.resumen.ingresos, egresos: informe.resumen.egresos, disponible: informe.resumen.disponible }]
+              ).map((r) => (
+                <div key={r.moneda} className="grid grid-cols-1 md:grid-cols-3 gap-4 print:grid-cols-3 print:gap-3">
+                  <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl p-5 shadow-sm print:border-gray-400 print:rounded-none print:shadow-none print:p-3">
+                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-neutral/50 print:text-black">
+                      INGRESOS (+) <span className="text-yeikar-primary font-mono">· {r.moneda}</span>
+                    </p>
+                    <p className="text-2xl font-black font-mono text-green-600 mt-1 print:text-xl">{fmtCop(r.ingresos)}</p>
                   </div>
-
-                  {/* Inventario inicial */}
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Inventario Inicial</p>
-                    {informe.estado_resultados.inventarios_iniciales.map((l) => (
-                      <Row key={l.concepto_id} label={l.nombre} valor={l.valor} />
-                    ))}
-                    <Row label="Total Inventario Inicial" valor={informe.estado_resultados.total_inventarios_iniciales} strong />
+                  <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl p-5 shadow-sm print:border-gray-400 print:rounded-none print:shadow-none print:p-3">
+                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-neutral/50 print:text-black">
+                      EGRESOS (−) <span className="text-yeikar-primary font-mono">· {r.moneda}</span>
+                    </p>
+                    <p className="text-2xl font-black font-mono text-red-500 mt-1 print:text-xl">{fmtCop(r.egresos)}</p>
                   </div>
-
-                  {/* Compras */}
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Compras</p>
-                    <Row label="Contado" valor={informe.estado_resultados.compras.contado} />
-                    <Row label="Crédito" valor={informe.estado_resultados.compras.credito} />
-                    <Row label="Total Mercancía" valor={informe.estado_resultados.compras.total_mercancia} strong />
-                  </div>
-
-                  {/* Inventario final + caja */}
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Inventario Final</p>
-                    {informe.estado_resultados.inventarios_finales.map((l) => (
-                      <Row key={l.concepto_id} label={l.nombre} valor={l.valor} />
-                    ))}
-                    <Row label="Total Inventario Final" valor={informe.estado_resultados.total_inventarios_finales} strong />
+                  <div className="bg-white border border-yeikar-primary/30 rounded-2xl p-5 shadow-sm print:border-gray-400 print:rounded-none print:shadow-none print:p-3">
+                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary print:text-black">
+                      DISPONIBLE <span className="font-mono">· {r.moneda}</span>
+                    </p>
+                    <p className={`text-2xl font-black font-mono mt-1 print:text-xl ${r.disponible >= 0 ? 'text-yeikar-primary' : 'text-red-500'}`}>{fmtCop(r.disponible)}</p>
                   </div>
                 </div>
-
-                {/* Columna derecha */}
-                <div className="p-5 space-y-6 print:p-0">
-                  <div className="space-y-1.5">
-                    <Row label="Compras Netas" valor={informe.estado_resultados.compras_netas} strong label2="Inv. Inicial + Mercancía − Inv. Final" />
-                    <Row label="Utilidad Bruta" valor={informe.estado_resultados.utilidad_bruta} strong highlight />
-                  </div>
-
-                  {/* Gastos */}
-                  <div className="space-y-1.5">
-                    <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Gastos del Periodo</p>
-                    <GastoGrupo titulo="Operativos" lineas={informe.estado_resultados.gastos.operativos} total={informe.estado_resultados.gastos.total_gastos_operativos} />
-                    <GastoGrupo titulo="Administrativos" lineas={informe.estado_resultados.gastos.administrativos} total={informe.estado_resultados.gastos.total_gastos_administrativos} />
-                    <GastoGrupo titulo="Financieros" lineas={informe.estado_resultados.gastos.financieros} total={informe.estado_resultados.gastos.total_financieros} />
-                    <GastoGrupo titulo="Impuestos" lineas={informe.estado_resultados.gastos.impuestos} total={informe.estado_resultados.gastos.total_impuestos} />
-                    <GastoGrupo titulo="Producción" lineas={informe.estado_resultados.gastos.produccion ?? []} total={informe.estado_resultados.gastos.total_gastos_produccion ?? 0} />
-                    <Row label="Total Gastos" valor={informe.estado_resultados.gastos.total_gastos} strong negative />
-                  </div>
-
-                  <div className="border-t-2 border-yeikar-primary/40 pt-4">
-                    <div className="flex justify-between items-end">
-                      <span className="font-headline font-black text-lg text-yeikar-neutral uppercase tracking-tight">Utilidad del Periodo</span>
-                      <span className={`font-mono font-black text-2xl ${informe.estado_resultados.utilidad_periodo >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                        {fmtCop(informe.estado_resultados.utilidad_periodo)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              ))}
             </div>
+
+            {/* ── Sección 3: Estado de Resultados (desglose por moneda) ── */}
+            {(informe.estado_resultados_por_moneda?.length
+              ? informe.estado_resultados_por_moneda
+              : [{ moneda: 'COP', ...informe.estado_resultados }]
+            ).map((er, idx) => (
+              <EstadoBloque key={er.moneda} er={er} esPrimero={idx === 0} />
+            ))}
 
             {/* ── Sección 4: Pendientes de Pago ── */}
             <div className="print:break-before-page">
@@ -606,7 +568,16 @@ export default function InformeMensual() {
                   </div>
                   <div className="text-right">
                     <p className="text-[11px] font-headline font-bold uppercase tracking-wider text-yeikar-neutral/50">Total pendiente</p>
-                    <p className="font-mono font-black text-xl text-red-500">{fmtCop(informe.pendientes_de_pago.total_pendiente)}</p>
+                    <div className="flex items-baseline justify-end gap-3">
+                      {(informe.pendientes_de_pago.total_pendiente_por_moneda?.length
+                        ? informe.pendientes_de_pago.total_pendiente_por_moneda
+                        : [{ moneda: 'COP', saldo: informe.pendientes_de_pago.total_pendiente }]
+                      ).map((t) => (
+                        <p key={t.moneda} className="font-mono font-black text-lg text-red-500">
+                          {t.moneda} {fmtCop(t.saldo)}
+                        </p>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -622,7 +593,7 @@ export default function InformeMensual() {
                       <th className="p-3 border-b border-yeikar-secondary-light/5 text-center print:border-gray-400">Mon.</th>
                       <th className="p-3 border-b border-yeikar-secondary-light/5 text-right print:border-gray-400">Total</th>
                       <th className="p-3 border-b border-yeikar-secondary-light/5 text-right print:border-gray-400">Pagado</th>
-                      <th className="p-3 border-b border-yeikar-secondary-light/5 text-right print:border-gray-400">Saldo (COP)</th>
+                      <th className="p-3 border-b border-yeikar-secondary-light/5 text-right print:border-gray-400">Saldo</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-yeikar-secondary-light/5 print:divide-gray-300">
@@ -660,18 +631,25 @@ export default function InformeMensual() {
                             )}
                           </td>
                           <td className="p-3 text-center font-mono text-xs text-yeikar-neutral/50">{l.moneda}</td>
-                          <td className="p-3 text-right font-mono text-yeikar-neutral/70">{fmtCop(l.total_en_base)}</td>
-                          <td className="p-3 text-right font-mono text-green-600">{fmtCop(l.pagado_en_base)}</td>
-                          <td className="p-3 text-right font-mono font-bold text-red-500">{fmtCop(l.saldo_en_base)}</td>
+                          <td className="p-3 text-right font-mono text-yeikar-neutral/70">{fmtCop(l.total_en_moneda ?? l.total_en_base)}</td>
+                          <td className="p-3 text-right font-mono text-green-600">{fmtCop(l.pagado_en_moneda ?? l.pagado_en_base)}</td>
+                          <td className="p-3 text-right font-mono font-bold text-red-500">{fmtCop(l.saldo_en_moneda ?? l.saldo_en_base)}</td>
                         </tr>
                       ))
                     )}
                   </tbody>
                   <tfoot>
-                    <tr className="bg-yeikar-tertiary/30 font-headline font-bold text-sm print:bg-gray-200 print:text-black print-color-adjust">
-                      <td colSpan={8} className="p-3 text-yeikar-secondary uppercase tracking-wide print:border-t print:border-gray-400">TOTAL PENDIENTE DE PAGO</td>
-                      <td className="p-3 text-right font-mono text-red-500 print:border-t print:border-gray-400">{fmtCop(informe.pendientes_de_pago.total_pendiente)}</td>
-                    </tr>
+                    {(informe.pendientes_de_pago.total_pendiente_por_moneda?.length
+                      ? informe.pendientes_de_pago.total_pendiente_por_moneda
+                      : [{ moneda: 'COP', saldo: informe.pendientes_de_pago.total_pendiente }]
+                    ).map((t, i) => (
+                      <tr key={t.moneda} className="bg-yeikar-tertiary/30 font-headline font-bold text-sm print:bg-gray-200 print:text-black print-color-adjust">
+                        <td colSpan={8} className="p-3 text-yeikar-secondary uppercase tracking-wide print:border-t print:border-gray-400">
+                          {i === 0 ? 'TOTAL PENDIENTE DE PAGO ' : ''}· {t.moneda}
+                        </td>
+                        <td className="p-3 text-right font-mono text-red-500 print:border-t print:border-gray-400">{fmtCop(t.saldo)}</td>
+                      </tr>
+                    ))}
                   </tfoot>
                 </table>
               </div>
@@ -772,7 +750,9 @@ export default function InformeMensual() {
                       {saldosCaja.map((s) => (
                         <div key={s.metodo.id} className="border border-yeikar-secondary-light/10 rounded-xl p-3 bg-yeikar-tertiary/10">
                           <p className="text-[10px] font-bold uppercase tracking-wider text-yeikar-neutral/50 truncate">{s.metodo.nombre}</p>
-                          <p className={`font-mono font-bold text-sm ${s.saldo >= 0 ? 'text-yeikar-primary' : 'text-red-500'}`}>{fmtCop(s.saldo)}</p>
+                          <p className={`font-mono font-bold text-sm ${s.saldo >= 0 ? 'text-yeikar-primary' : 'text-red-500'}`}>
+                            {s.moneda} {fmtCop(s.saldo)}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -954,6 +934,94 @@ export default function InformeMensual() {
         )
       }
     </div>
+  );
+}
+
+function EstadoBloque({ er, esPrimero }: { er: EstadoPorMoneda; esPrimero?: boolean }) {
+  return (
+    <>
+      <div className={esPrimero ? 'print:break-before-page' : 'print:break-before-page'}>
+        <h4 className="hidden print:block font-headline font-black text-lg text-yeikar-neutral uppercase tracking-tight pb-2 mb-4 border-b-2 border-yeikar-neutral">
+          3. Estado de Resultados · {er.moneda}
+        </h4>
+      </div>
+      <div className="bg-white border border-yeikar-secondary-light/10 rounded-3xl shadow-sm overflow-hidden print:border-gray-400 print:rounded-none print:shadow-none">
+        <div className="p-5 border-b border-yeikar-secondary-light/5 print:px-0 print:bg-gray-100 print-color-adjust print:border-b print:border-gray-400">
+          <h3 className="text-lg font-black font-headline text-yeikar-neutral tracking-tight">
+            ESTADO DE RESULTADOS <span className="text-yeikar-primary font-mono">· {er.moneda}</span>
+          </h3>
+          <p className="text-xs text-yeikar-neutral/50 mt-0.5">Todas las cifras de este bloque en {er.moneda} (moneda nativa)</p>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 print:grid-cols-1 print:gap-4">
+          {/* Columna izquierda */}
+          <div className="p-5 space-y-6 border-b lg:border-b-0 lg:border-r border-yeikar-secondary-light/5 print:p-0 print:border-0">
+            {/* Ventas */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Ventas</p>
+              <Row label="Contado" valor={er.ventas.contado} />
+              <Row label="Crédito" valor={er.ventas.credito} />
+              <Row label="(−) Devoluciones" valor={-er.ventas.devoluciones} negative />
+              <Row label="(−) Descuentos" valor={-er.ventas.descuentos} negative />
+              <Row label="Total Ventas Netas" valor={er.ventas.total_ventas_netas} strong />
+            </div>
+
+            {/* Inventario inicial */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Inventario Inicial</p>
+              {er.inventarios_iniciales.map((l) => (
+                <Row key={l.concepto_id} label={l.nombre} valor={l.valor} />
+              ))}
+              <Row label="Total Inventario Inicial" valor={er.total_inventarios_iniciales} strong />
+            </div>
+
+            {/* Compras */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Compras</p>
+              <Row label="Contado" valor={er.compras.contado} />
+              <Row label="Crédito" valor={er.compras.credito} />
+              <Row label="Total Mercancía" valor={er.compras.total_mercancia} strong />
+            </div>
+
+            {/* Inventario final */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Inventario Final</p>
+              {er.inventarios_finales.map((l) => (
+                <Row key={l.concepto_id} label={l.nombre} valor={l.valor} />
+              ))}
+              <Row label="Total Inventario Final" valor={er.total_inventarios_finales} strong />
+            </div>
+          </div>
+
+          {/* Columna derecha */}
+          <div className="p-5 space-y-6 print:p-0">
+            <div className="space-y-1.5">
+              <Row label="Compras Netas" valor={er.compras_netas} strong label2="Inv. Inicial + Mercancía − Inv. Final" />
+              <Row label="Utilidad Bruta" valor={er.utilidad_bruta} strong highlight />
+            </div>
+
+            {/* Gastos */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-headline font-bold uppercase tracking-wider text-yeikar-secondary border-b border-yeikar-secondary-light/10 pb-1.5">Gastos del Periodo</p>
+              <GastoGrupo titulo="Operativos" lineas={er.gastos.operativos} total={er.gastos.total_gastos_operativos} />
+              <GastoGrupo titulo="Administrativos" lineas={er.gastos.administrativos} total={er.gastos.total_gastos_administrativos} />
+              <GastoGrupo titulo="Financieros" lineas={er.gastos.financieros} total={er.gastos.total_financieros} />
+              <GastoGrupo titulo="Impuestos" lineas={er.gastos.impuestos} total={er.gastos.total_impuestos} />
+              <GastoGrupo titulo="Producción" lineas={er.gastos.produccion ?? []} total={er.gastos.total_gastos_produccion ?? 0} />
+              <Row label="Total Gastos" valor={er.gastos.total_gastos} strong negative />
+            </div>
+
+            <div className="border-t-2 border-yeikar-primary/40 pt-4">
+              <div className="flex justify-between items-end">
+                <span className="font-headline font-black text-lg text-yeikar-neutral uppercase tracking-tight">Utilidad del Periodo</span>
+                <span className={`font-mono font-black text-2xl ${er.utilidad_periodo >= 0 ? 'text-green-600' : 'text-red-500'}`}>
+                  {fmtCop(er.utilidad_periodo)}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
 

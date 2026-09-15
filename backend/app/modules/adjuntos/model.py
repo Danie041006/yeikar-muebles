@@ -34,3 +34,7 @@ class Adjunto(Base):
     created_at = Column(DateTime, server_default=func.now())
 
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
+
+    @property
+    def creador_nombre(self) -> str | None:
+        return self.creador.display_name if self.creador else None

@@ -126,6 +126,9 @@ export default function Cotizaciones() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  // Error del formulario de cotización (y sus sub-modales): se muestra DENTRO
+  // del modal; el `error` de página queda para fallos de carga/listado.
+  const [errorForm, setErrorForm] = useState('');
 
   // Modals state
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -678,6 +681,7 @@ export default function Cotizaciones() {
     setTasaCambio(1);
     setTasasDia({});
     setItems([]);
+    setErrorForm('');
     setIsFormOpen(true);
   };
 
@@ -695,6 +699,7 @@ export default function Cotizaciones() {
     setTasasDia({});
     setItems(itemsDesdeCotizacion(quote, quote.moneda?.codigo || 'COP'));
     setError('');
+    setErrorForm('');
     setIsFormOpen(true);
   };
 
@@ -748,8 +753,9 @@ export default function Cotizaciones() {
   // ── Cliente nuevo desde la cotización ──
   const handleCrearClienteDesdeCotizacion = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorForm('');
     if (!ncForm.nombre.trim() || !ncForm.telefono.trim()) {
-      setError('Indica el nombre y el teléfono del cliente.');
+      setErrorForm('Indica el nombre y el teléfono del cliente.');
       return;
     }
     setSavingNc(true);
@@ -769,7 +775,7 @@ export default function Cotizaciones() {
       setNcForm({ nombre: '', telefono: '', cedula: '', direccion: '', ciudad: '', estado: '', observaciones: '' });
       toast.success(`Cliente "${creado.nombre}" seleccionado.`);
     } catch (err: any) {
-      setError(String(err?.response?.data?.detail || 'No se pudo crear el cliente.'));
+      setErrorForm(String(err?.response?.data?.detail || 'No se pudo crear el cliente.'));
     } finally {
       setSavingNc(false);
     }
@@ -785,6 +791,7 @@ export default function Cotizaciones() {
     setNpForm({ nombre: '', tipo_producto_id: '', ancho: '', largo: '', precio: '', moneda_id: '1' });
     setFotoNp(null);
     setFotoNpPreview(null);
+    setErrorForm('');
     setShowNuevoProductoModal(true);
   };
 
@@ -803,13 +810,14 @@ export default function Cotizaciones() {
 
   const handleCrearProductoDesdeCotizacion = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorForm('');
     if (!npForm.nombre.trim() || !npForm.tipo_producto_id) {
-      setError('Indica el nombre y el tipo del producto.');
+      setErrorForm('Indica el nombre y el tipo del producto.');
       return;
     }
     const precio = parseFloat(npForm.precio || '0');
     if (!(precio > 0)) {
-      setError('Indica el precio estimado de venta (lo cotizas tal cual).');
+      setErrorForm('Indica el precio estimado de venta (lo cotizas tal cual).');
       return;
     }
     setSavingNp(true);
@@ -840,7 +848,7 @@ export default function Cotizaciones() {
       toast.success(`Producto "${creado.nombre}" creado y agregado al renglón.`);
     } catch (err: any) {
       const detail = String(err?.response?.data?.detail || err?.message || '');
-      setError(detail.includes('permiso') ? 'No tienes permiso para crear productos. Pídelo a un administrador.' : detail || 'No se pudo crear el producto.');
+      setErrorForm(detail.includes('permiso') ? 'No tienes permiso para crear productos. Pídelo a un administrador.' : detail || 'No se pudo crear el producto.');
     } finally {
       setSavingNp(false);
     }
@@ -851,13 +859,15 @@ export default function Cotizaciones() {
     setDefinirPrecioProd(p);
     setDpPrecio(String(p.precio_venta_base ?? ''));
     setDpMoneda(String(p.moneda_id ?? 1));
+    setErrorForm('');
   };
   const guardarDefinirPrecio = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorForm('');
     if (!definirPrecioProd) return;
     const precio = parseFloat(dpPrecio || '0');
     if (!(precio > 0)) {
-      setError('El precio debe ser mayor a 0.');
+      setErrorForm('El precio debe ser mayor a 0.');
       return;
     }
     setSavingDp(true);
@@ -878,7 +888,7 @@ export default function Cotizaciones() {
       }
       toast.success('Precio estimado guardado. El renglón se recalculó.');
     } catch (err: any) {
-      setError(String(err?.response?.data?.detail || err?.message || 'No se pudo guardar el precio.'));
+      setErrorForm(String(err?.response?.data?.detail || err?.message || 'No se pudo guardar el precio.'));
     } finally {
       setSavingDp(false);
     }
@@ -886,13 +896,14 @@ export default function Cotizaciones() {
 
   const handleSaveQuote = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorForm('');
     if (!selectedClientId) {
-      setError('Por favor selecciona un cliente.');
+      setErrorForm('Por favor selecciona un cliente.');
       return;
     }
 
     if (!items.length) {
-      setError('Agrega al menos un renglón con + Mueble, + Insumo o + Producto nuevo.');
+      setErrorForm('Agrega al menos un renglón con + Mueble, + Insumo o + Producto nuevo.');
       return;
     }
 
@@ -901,7 +912,7 @@ export default function Cotizaciones() {
       item.tipo_item === 'INSUMO' ? !item.material_id : !item.producto_id
     );
     if (hasInvalidItem) {
-      setError('Por favor selecciona el producto o material de todos los renglones.');
+      setErrorForm('Por favor selecciona el producto o material de todos los renglones.');
       return;
     }
 
@@ -915,9 +926,9 @@ export default function Cotizaciones() {
     });
     if (itemSinPrecio) {
       if (itemSinPrecio.tipo_item === 'INSUMO') {
-        setError('Falta el precio de venta del insumo. Escríbelo manualmente en el renglón (debe ser mayor que 0).');
+        setErrorForm('Falta el precio de venta del insumo. Escríbelo manualmente en el renglón (debe ser mayor que 0).');
       } else {
-        setError(
+        setErrorForm(
           'Hay un renglón sin precio calculado o sin tasa de cambio del día. Ingresa/confirmar la tasa en "Tasas del día" del formulario.',
         );
       }
@@ -999,7 +1010,9 @@ export default function Cotizaciones() {
       estado: editingQuote ? editingQuote.estado : 'BORRADOR',
       total_estimado: totalEstimado,
       moneda_id: selectedMonedaId,
-      tasa_cambio: tasaCambio,
+      // Sin renglones que convertir, la tasa es neutra (1): guarda la cotización
+      // en su moneda pura (ej. reventa USD cotizada en USD).
+      tasa_cambio: necesitaTasaCotizacion ? tasaCambio : 1,
       observaciones: finalObs,
       detalles
     };
@@ -1014,7 +1027,7 @@ export default function Cotizaciones() {
       fetchQuotes(search);
     } catch (err) {
       console.error(err);
-      setError(String((err as any)?.response?.data?.detail || 'Error al guardar la cotización.'));
+      setErrorForm(String((err as any)?.response?.data?.detail || 'Error al guardar la cotización.'));
     }
   };
 
@@ -1288,6 +1301,21 @@ export default function Cotizaciones() {
     });
     return Array.from(set).sort();
   }, [items, products, currencyCode]);
+
+  // La tasa de cotización (1 [moneda] = X COP) SOLO hace falta cuando algún
+  // renglón llega en una moneda distinta a la de la cotización (fabricados e
+  // insumos vienen en COP; reventas en la suya). Una cotización 100% en la
+  // moneda de sus productos no necesita conversión: no se pide la tasa.
+  const necesitaTasaCotizacion = useMemo(() => {
+    if (selectedMonedaId === 1) return false;
+    return items.some((it) => {
+      const code =
+        it.calcResult?.moneda_codigo ||
+        products.find((p) => p.id === Number(it.producto_id))?.moneda?.codigo ||
+        'COP';
+      return code !== currencyCode;
+    });
+  }, [items, products, currencyCode, selectedMonedaId]);
 
   // Prellenar cada moneda nueva con su última tasa registrada (visible y
   // editable: el usuario siempre confirma el valor).
@@ -1668,7 +1696,7 @@ export default function Cotizaciones() {
                 />
                 <button
                   type="button"
-                  onClick={() => setShowNuevoClienteModal(true)}
+                  onClick={() => { setErrorForm(''); setShowNuevoClienteModal(true); }}
                   title="Crear cliente nuevo"
                   className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-yeikar-primary/60 bg-yeikar-primary/10 px-3 py-2 text-xs font-bold text-yeikar-primary transition-colors hover:bg-yeikar-primary hover:text-yeikar-neutral"
                 >
@@ -1699,7 +1727,7 @@ export default function Cotizaciones() {
                   />
                 </div>
 
-                {selectedMonedaId !== 1 && (
+                {selectedMonedaId !== 1 && necesitaTasaCotizacion && (
                   <div>
                     <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
                       Tasa de Cambio (1 {currencyCode} = X COP) *
@@ -2205,6 +2233,12 @@ export default function Cotizaciones() {
                   placeholder="Observaciones generales para toda la cotización/orden..."
                 />
               </div>
+
+              {errorForm && (
+                <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+                  {errorForm}
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-yeikar-secondary-light/10">
                 <button
@@ -3220,6 +3254,9 @@ export default function Cotizaciones() {
                   <button type="button" onClick={quitarNpFoto} className="mt-1.5 text-[10px] font-bold text-red-600 hover:underline">Quitar foto</button>
                 )}
               </div>
+              {errorForm && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2" role="alert">{errorForm}</p>
+              )}
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowNuevoProductoModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" disabled={savingNp} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingNp ? 'Creando...' : 'Crear y agregar'}</button>
@@ -3327,6 +3364,9 @@ export default function Cotizaciones() {
               <p className="text-[11px] text-yeikar-neutral/50">
                 Si el teléfono ya existe, se selecciona el cliente actual (no se duplica).
               </p>
+              {errorForm && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2" role="alert">{errorForm}</p>
+              )}
               <div className="flex gap-3 pt-2 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowNuevoClienteModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" disabled={savingNc} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingNc ? 'Guardando...' : 'Crear y seleccionar'}</button>
@@ -3364,6 +3404,9 @@ export default function Cotizaciones() {
                   />
                 </div>
               </div>
+              {errorForm && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2" role="alert">{errorForm}</p>
+              )}
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setDefinirPrecioProd(null)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" disabled={savingDp} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingDp ? 'Guardando...' : 'Guardar y recalcular'}</button>

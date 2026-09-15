@@ -426,13 +426,11 @@ export default function Usuarios() {
           </div>
           <div className="min-w-0">
             <div className="font-bold text-yeikar-secondary font-headline truncate">
-              {u.nombre_usuario}
+              {u.nombre || u.nombre_usuario}
             </div>
-            {u.nombre && (
-              <div className="text-[10px] text-yeikar-neutral/50 font-mono truncate">
-                {u.nombre}
-              </div>
-            )}
+            <div className="text-[10px] text-yeikar-neutral/50 font-mono truncate">
+              @{u.nombre_usuario}
+            </div>
           </div>
         </div>
       ),

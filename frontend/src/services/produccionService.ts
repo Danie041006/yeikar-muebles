@@ -38,8 +38,10 @@ export interface ConsumoMaterial {
   cantidad: number;
   costo_unitario?: number;
   seccion?: string;
-  /** PENDIENTE = lámina pedida completa sin confirmar uso; CONFIRMADO = costo final. */
+  /** PENDIENTE = pedido sin confirmar uso (lámina o general); CONFIRMADO = costo final. */
   estado?: 'PENDIENTE' | 'CONFIRMADO';
+  /** Lo que se ENTREGÓ al pedir (unidad base). NULL = uso directo sin pedido. */
+  cantidad_pedida?: number | null;
   // --- Captura flexible de madera (cantidad ya está en la unidad base) ---
   unidad_captura?: 'M' | 'CM' | null;
   pieza_largo?: number | null;
@@ -127,6 +129,8 @@ export interface OrdenProduccion {
   /** Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK. */
   tipo?: 'PEDIDO' | 'EXHIBICION' | 'STOCK';
   estado: 'PENDIENTE' | 'EN_PRODUCCION' | 'PAUSADA' | 'FINALIZADA' | 'CANCELADA';
+  creado_por_id?: number | null;
+  creador_nombre?: string | null;
   fecha_inicio?: string;
   fecha_fin?: string;
   ancho?: number;
@@ -313,6 +317,11 @@ export const produccionService = {
     // True + material laminar: `cantidad` = N.º de láminas enteras que salen
     // hoy; el consumo queda PENDIENTE hasta confirmar los cortes reales.
     es_lamina_completa?: boolean;
+    // --- PEDIDO general (madera y demás: confirmar uso después) ---
+    // True: `cantidad` = cantidad ENTREGADA hoy (sale del depósito con costo
+    // provisional); el consumo queda PENDIENTE hasta confirmar cuánto se usó.
+    // Híbrido: si es False se registra el uso directo (CONFIRMADO inmediato).
+    es_pedido?: boolean;
     // --- Consumo por corte (materiales laminares) ---
     ancho_corte_cm?: number;
     largo_corte_cm?: number;
@@ -324,17 +333,18 @@ export const produccionService = {
     return response.data;
   },
 
-  /** Confirma el uso real de una lámina pedida completa: cuántos cortes de qué
-   *  tamaño salieron. Recalcula el costo, devuelve/descarta láminas y crea el
-   *  sobrante. El consumo pasa de PENDIENTE a CONFIRMADO. */
+  /** Confirma el uso real de un pedido (PENDIENTE → CONFIRMADO).
+   *  Dos modos excluyentes: por cortes (láminas) o por cantidad usada
+   *  en la unidad base del material (madera y demás). */
   confirmarConsumo: async (
     id: number,
     payload: {
-      cantidad_cortes: number;
-      largo_corte_cm: number;
-      ancho_corte_cm: number;
+      cantidad_cortes?: number;
+      largo_corte_cm?: number;
+      ancho_corte_cm?: number;
       sobrante_largo_cm?: number;
       sobrante_ancho_cm?: number;
+      cantidad_usada?: number;
     },
   ): Promise<ConsumoMaterial> => {
     const response = await api.put<ConsumoMaterial>(`/produccion/consumo/${id}/confirmar`, payload);
@@ -623,6 +633,9 @@ export interface CostosEnVivoSeccion {
     es_excedente: boolean;
     es_retrabajo: boolean;
     motivo: string | null;
+    /** Pedido sin confirmar uso: el costo es provisional (entregado, no usado). */
+    es_pendiente?: boolean;
+    cantidad_pedida?: number | null;
   }[];
   produccion: {
     nombre: string;

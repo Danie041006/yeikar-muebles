@@ -17,6 +17,7 @@ export interface Abono {
   tasa_cambio: number;
   monto_en_moneda_base: number;
   creado_por_id?: number | null;
+  creador_nombre?: string | null;
   created_at: string;
 }
 
@@ -52,6 +53,7 @@ export interface CuentaPorPagar {
   origen_tipo?: string | null;
   origen_id?: number | null;
   creado_por_id?: number | null;
+  creador_nombre?: string | null;
   created_at: string;
   updated_at?: string | null;
   proveedor?: Proveedor | null;

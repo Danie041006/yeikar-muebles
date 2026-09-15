@@ -94,6 +94,11 @@ export default function CostosOrdenEnVivo({ data, loading, compacto = false }: {
                     <tr key={`${sec.nombre}-ins-${i}`} className={ins.es_excedente || ins.es_retrabajo ? 'bg-red-50' : ''}>
                       <td className={`${BORDE} px-3 py-1`}>
                         {ins.nombre}
+                        {ins.es_pendiente && (
+                          <span className="ml-2 text-[10px] font-bold text-amber-600 uppercase">
+                            PEDIDO · PROVISIONAL
+                          </span>
+                        )}
                         {ins.es_excedente && (
                           <span className="ml-2 text-[10px] font-bold text-red-500 uppercase">
                             EXCEDENTE{ins.motivo ? ` · ${ins.motivo}` : ''}

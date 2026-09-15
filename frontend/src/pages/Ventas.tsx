@@ -4,6 +4,7 @@ import { SearchInput, SearchSelect, ResponsiveDataTable, Button as UiButton, Emp
 import {
   ventaService,
   pagoService,
+  descuentoService,
   Venta,
   VentaDetalle,
   DetalleVenta,
@@ -13,6 +14,7 @@ import {
   cargarMetodosPago,
   labelMetodoPago,
   type PagoCreate,
+  type DescuentoCreate,
   type MetodoPagoOption,
 } from '../services/ventaService';
 import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, extractErrorMessage } from '../utils/format';
@@ -62,6 +64,7 @@ interface CobroPendiente {
   venta: Venta;
   total: number;
   pagado: number;
+  descontado: number;
   saldo: number;
   codigo: string;
 }
@@ -139,8 +142,13 @@ function ResumenCobro({
         <span className="text-[11px] font-bold uppercase tracking-widest text-yeikar-neutral/45">
           Saldo por cobrar
         </span>
-        <span className="mt-0.5 block font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
-          {formatCurrency(saldo, codigo)}
+        <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+          <span className="font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
+            {formatCurrency(saldo, codigo)}
+          </span>
+          <span className="font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
+            {nombreMoneda(codigo).toLowerCase()}
+          </span>
         </span>
         <span className="mt-0.5 block font-mono text-xs text-yeikar-neutral/55">
           Pagado {formatCurrency(pagado, codigo)} de {formatCurrency(total, codigo)} · Venta #{venta.id}
@@ -165,11 +173,13 @@ function ResumenCobro({
 function BloqueDeuda({
   total,
   pagado,
+  descontado,
   saldo,
   codigo,
 }: {
   total: number;
   pagado: number;
+  descontado: number;
   saldo: number;
   codigo: string;
 }) {
@@ -181,6 +191,9 @@ function BloqueDeuda({
       <dl className="mt-2 space-y-1 font-mono text-xs text-yeikar-neutral/70">
         <div className="flex justify-between"><dt>Total</dt><dd className="font-bold">{formatCurrency(total, codigo)}</dd></div>
         <div className="flex justify-between"><dt>Pagado</dt><dd className="font-bold text-emerald-700">{formatCurrency(pagado, codigo)}</dd></div>
+        {descontado > 0 && (
+          <div className="flex justify-between"><dt>Descontado</dt><dd className="font-bold text-amber-700">−{formatCurrency(descontado, codigo)}</dd></div>
+        )}
         <div className="flex justify-between border-t border-yeikar-secondary-light/10 pt-1"><dt>Saldo</dt><dd className="font-black text-yeikar-neutral">{formatCurrency(saldo, codigo)}</dd></div>
       </dl>
     </div>
@@ -213,7 +226,7 @@ function PanelCobro({
   buttonId: string;
   onCobrar: () => void;
 }) {
-  const { venta, total, pagado, saldo, codigo } = cobro;
+  const { venta, total, pagado, descontado, saldo, codigo } = cobro;
   return (
     <div
       id={`panel-cobro-${venta.id}`}
@@ -222,7 +235,7 @@ function PanelCobro({
       className="border-t border-yeikar-secondary-light/10 bg-yeikar-tertiary/15 p-4 sm:p-5"
     >
       <div className="grid gap-3 sm:grid-cols-2">
-        <BloqueDeuda total={total} pagado={pagado} saldo={saldo} codigo={codigo} />
+        <BloqueDeuda total={total} pagado={pagado} descontado={descontado} saldo={saldo} codigo={codigo} />
         <BloquePedido venta={venta} />
       </div>
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -342,15 +355,23 @@ function ModalDetalle({
   const [reciboArchivo, setReciboArchivo] = useState<File | null>(null);
   const [reciboPreview, setReciboPreview] = useState<string | null>(null);
   const [reciboVer, setReciboVer] = useState<{ id: number; mime: string } | null>(null);
-  const [monedas, setMonedas] = useState<{ id: number; codigo: string; nombre: string; simbolo: string }[]>([]);
-  const cuerpoRef = useRef<HTMLDivElement>(null);
+  // ── Formulario de descuento (rebaja sin movimiento de caja) ───────────────
+  const [showDescForm, setShowDescForm] = useState(false);
+  const [descMonedaId, setDescMonedaId] = useState<number | null>(null);
+  const [descMonto, setDescMonto] = useState('');
+  const [descTasaInput, setDescTasaInput] = useState('');
+  const [descMotivo, setDescMotivo] = useState('');
+  const [descSubmitting, setDescSubmitting] = useState(false);
+  const [descError, setDescError] = useState('');
+  const [anulandoDescId, setAnulandoDescId] = useState<number | null>(null);
+  const [monedas, setMonedas] = useState<{ id: number; codigo: string; nombre: string; simbolo: string }[]>([]);  const cuerpoRef = useRef<HTMLDivElement>(null);
   // Métodos de pago: cuentas reales (metodo_caja) con fallback al estático.
   const [metodosPago, setMetodosPago] = useState<MetodoPagoOption[]>(METODOS_PAGO.map((m) => ({ ...m })));
 
-  // Al abrir el formulario de cobro, la vista enfocada arranca arriba
+  // Al abrir cualquier formulario, la vista enfocada arranca arriba
   useEffect(() => {
-    if (showForm) cuerpoRef.current?.scrollTo({ top: 0 });
-  }, [showForm]);
+    if (showForm || showDescForm) cuerpoRef.current?.scrollTo({ top: 0 });
+  }, [showForm, showDescForm]);
 
   const cargar = useCallback(async () => {
     try {
@@ -406,6 +427,27 @@ function ModalDetalle({
     ? convertirMonedaHumana(montoNum, monedaPago?.codigo, monedaVenta?.codigo, tasaHumana)
     : montoNum;
   const saldoRestante = detalle ? Number(detalle.saldo_pendiente) : 0;
+
+  // ── Descuento: misma conversión multimoneda que el cobro ──────────────────
+  const necesitaTRMDesc = descMonedaId !== null && monedaVentaId !== null && descMonedaId !== monedaVentaId;
+  const monedaDesc = monedas.find(m => m.id === descMonedaId);
+  const parDesc = resolverParMonedas(monedaVenta?.codigo, monedaDesc?.codigo);
+  const tasaHumanaDesc = parseFloat(descTasaInput) || 0;
+  const tasaAlmDesc = tasaHumanaDesc > 0
+    ? calcularTasaAlmacenadaPago(monedaDesc?.codigo, monedaVenta?.codigo, tasaHumanaDesc)
+    : 0;
+  const descMontoNum = parseFloat(descMonto) || 0;
+  const descEquivalente = necesitaTRMDesc && tasaHumanaDesc > 0
+    ? convertirMonedaHumana(descMontoNum, monedaDesc?.codigo, monedaVenta?.codigo, tasaHumanaDesc)
+    : descMontoNum;
+
+  const abrirDescForm = () => {
+    setShowDescForm(true);
+    setShowForm(false);
+    setDescError('');
+    // Por defecto el descuento se expresa en la moneda de la venta.
+    if (descMonedaId === null && detalle) setDescMonedaId(detalle.moneda_id);
+  };
 
   const handlePago = async () => {
     if (!detalle) return;
@@ -469,6 +511,74 @@ function ModalDetalle({
       setMonto(saldoRestante.toString());
     }
     setErrorPago('');
+  };
+
+  const handleDescuento = async () => {
+    if (!detalle) return;
+    setDescError('');
+    if (!descMonto || isNaN(parseFloat(descMonto)) || parseFloat(descMonto) <= 0) {
+      setDescError('Ingresa un monto válido mayor a 0.');
+      return;
+    }
+    if (!descMonedaId) {
+      setDescError('Selecciona la moneda del descuento.');
+      return;
+    }
+    if (necesitaTRMDesc && (!descTasaInput || tasaHumanaDesc <= 0)) {
+      setDescError(`La moneda del descuento difiere de la de la venta. Ingresa la tasa de cambio (${parDesc.label}).`);
+      return;
+    }
+    try {
+      setDescSubmitting(true);
+      const payload: DescuentoCreate = {
+        venta_id: detalle.id,
+        moneda_id: descMonedaId,
+        fecha: new Date().toISOString(),
+        monto: parseFloat(descMonto),
+        motivo: descMotivo || undefined,
+        ...(necesitaTRMDesc ? { tasa_cambio: tasaAlmDesc } : {}),
+      };
+      await descuentoService.registrar(payload);
+      setDescMonto('');
+      setDescMotivo('');
+      setDescTasaInput('');
+      setShowDescForm(false);
+      await cargar();
+      onPagoRegistrado();
+    } catch (err: any) {
+      setDescError(extractErrorMessage(err, 'Error al registrar el descuento.'));
+    } finally {
+      setDescSubmitting(false);
+    }
+  };
+
+  const handleSetDescRestante = () => {
+    if (!detalle) return;
+    if (necesitaTRMDesc) {
+      if (tasaHumanaDesc <= 0) {
+        setDescError(`Ingresa primero la tasa de cambio (${parDesc.label}) para calcular el monto restante.`);
+        return;
+      }
+      const montoCalc = convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaDesc?.codigo, tasaHumanaDesc);
+      setDescMonto(montoCalc.toFixed(2));
+    } else {
+      setDescMonto(saldoRestante.toString());
+    }
+    setDescError('');
+  };
+
+  const handleAnularDescuento = async (id: number) => {
+    if (!window.confirm('¿Anular este descuento? El saldo pendiente volverá a subir.')) return;
+    try {
+      setAnulandoDescId(id);
+      await descuentoService.anular(id);
+      await cargar();
+      onPagoRegistrado();
+    } catch (err: any) {
+      setDescError(extractErrorMessage(err, 'Error al anular el descuento.'));
+    } finally {
+      setAnulandoDescId(null);
+    }
   };
 
   const porcentajePagado = detalle
@@ -542,7 +652,7 @@ function ModalDetalle({
             <Spinner />
           ) : (
             <>
-              {showForm ? (
+              {showForm || showDescForm ? (
                 /* Modo formulario: resumen compacto (sin contenido detrás que se pise) */
                 <div className="flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
                   <div className="min-w-0">
@@ -551,6 +661,9 @@ function ModalDetalle({
                     </p>
                     <p className="mt-0.5 font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
                       {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
+                      <span className="ml-1.5 align-middle font-body text-xs font-semibold tracking-normal text-yeikar-neutral/50">
+                        {nombreMoneda(detalle.moneda?.codigo).toLowerCase()}
+                      </span>
                       {detalle.moneda && (
                         <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 align-middle font-mono text-[10px] font-black text-amber-800">
                           {detalle.moneda.codigo}
@@ -585,9 +698,17 @@ function ModalDetalle({
                   </div>
                   <p className="mt-1 font-headline text-4xl font-black tracking-tight text-yeikar-neutral">
                     {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
+                    <span className="ml-2 align-middle font-body text-sm font-semibold tracking-normal text-yeikar-neutral/50">
+                      {nombreMoneda(detalle.moneda?.codigo).toLowerCase()}
+                    </span>
                   </p>
                   <p className="mt-1 font-mono text-xs text-yeikar-neutral/55">
                     Pagado {detalle.moneda?.simbolo}{Number(detalle.total_pagado).toLocaleString('es-ES')} de {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
+                    {Number(detalle.total_descontado ?? 0) > 0 && (
+                      <span className="text-amber-700">
+                        {' '}· Descontado {detalle.moneda?.simbolo}{Number(detalle.total_descontado).toLocaleString('es-ES')}
+                      </span>
+                    )}
                   </p>
                   {muestraEquivalente(Number(detalle.saldo_pendiente) * tasaVenta) && (
                     <p className="mt-0.5 font-mono text-[11px] text-amber-700/70">
@@ -671,75 +792,151 @@ function ModalDetalle({
                     </p>
                   </div>
                 ) : (
-                  <ol className="ml-2 space-y-3 border-l-2 border-emerald-100 pl-5">
-                    {detalle.pagos.map((p: Pago) => {
+                  <div className="overflow-hidden rounded-2xl border border-yeikar-secondary-light/10">
+                    {detalle.pagos.map((p: Pago, i: number) => {
                       const metodoLabel = labelMetodoPago(metodosPago, p.metodo_pago);
                       const esMultimoneda = p.tasa_cambio && p.tasa_cambio !== 1;
                       const pagoCodigo = p.moneda?.codigo ?? '?';
                       const ventaCodigo = detalle.moneda?.codigo ?? '?';
                       return (
-                        <li key={p.id} className="relative">
-                          <span className="absolute -left-[26px] top-3 h-2.5 w-2.5 rounded-full bg-emerald-500 ring-4 ring-emerald-50" />
-                          <div
-                            className="text-xs bg-green-50 border border-green-100 rounded-xl px-3 py-2"
-                          >
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <span className="font-bold text-green-700">{metodoLabel}</span>
+                        <div
+                          key={p.id}
+                          className={`flex items-start justify-between gap-3 px-3.5 py-3 text-sm ${i % 2 ? 'bg-white' : 'bg-yeikar-tertiary/10'}`}
+                        >
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1.5 font-medium leading-snug text-yeikar-secondary">
+                              <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                              {metodoLabel}
                               {p.referencia && (
-                                <span className="ml-2 text-green-600/70 font-mono">#{p.referencia}</span>
+                                <span className="font-mono text-[11px] text-yeikar-neutral/50">#{p.referencia}</span>
                               )}
-                              <p className="text-green-600/60 font-mono mt-0.5">
-                                {new Date(p.fecha).toLocaleDateString('es-ES')}
-                              </p>
-                              {/* Recibos del cobro (comprobantes digitales) */}
-                              {p.recibos && p.recibos.length > 0 && (
-                                <div className="flex gap-1.5 mt-1.5">
-                                  {p.recibos.map((r) => (
-                                    <AdjuntoImagen
-                                      key={r.id}
-                                      adjunto={r}
-                                      alt="recibo"
-                                      className="h-10 w-10 rounded border border-green-200 hover:border-green-400 transition-colors"
-                                      onClick={() => setReciboVer({ id: r.id, mime: r.mime })}
-                                    />
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-right">
-                              <span className="font-mono font-bold text-green-700">
-                                {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
-                                {p.moneda && <span className="ml-1 font-semibold">{p.moneda.codigo}</span>}
+                            </span>
+                            <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
+                              {new Date(p.fecha).toLocaleDateString('es-ES')}
+                            </span>
+                            {/* Recibos del cobro (comprobantes digitales) */}
+                            {p.recibos && p.recibos.length > 0 && (
+                              <span className="mt-1.5 flex gap-1.5">
+                                {p.recibos.map((r) => (
+                                  <AdjuntoImagen
+                                    key={r.id}
+                                    adjunto={r}
+                                    alt="recibo"
+                                    className="h-10 w-10 rounded-lg border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
+                                    onClick={() => setReciboVer({ id: r.id, mime: r.mime })}
+                                  />
+                                ))}
                               </span>
-                              {esMultimoneda && (
-                                <p className="text-green-600/60 font-mono mt-0.5">
-                                  ≈ {fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}
-                                  <span className="ml-1 opacity-60">
-                                    (1 {pagoCodigo} = {Number(p.tasa_cambio).toLocaleString('es-ES')} {nombreMoneda(ventaCodigo)})
-                                  </span>
-                                </p>
-                              )}
-                            </div>
-                          </div>
+                            )}
+                            {esMultimoneda && (
+                              <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
+                                ≈ {fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}
+                                <span className="opacity-70">
+                                  {' '}(1 {pagoCodigo} = {Number(p.tasa_cambio).toLocaleString('es-ES')} {nombreMoneda(ventaCodigo)})
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                          <span className="shrink-0 text-right">
+                            <span className="block font-mono text-sm font-black text-yeikar-secondary">
+                              {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
+                            </span>
+                            {p.moneda && (
+                              <span className="mt-1 inline-block rounded bg-emerald-100/70 px-1.5 py-0.5 font-mono text-[10px] font-black text-emerald-800">
+                                {p.moneda.codigo}
+                              </span>
+                            )}
+                          </span>
                         </div>
-                        </li>
                       );
                     })}
-                  </ol>
+                  </div>
                 )}
               </div>
+              {/* Descuentos otorgados al cobrar (no mueven caja) */}
+              {(detalle.descuentos ?? []).length > 0 && (
+                <div>
+                  <h4 className="font-headline font-bold text-sm text-yeikar-secondary mb-2 uppercase tracking-wider">
+                    Descuentos ({(detalle.descuentos ?? []).length})
+                  </h4>
+                  <div className="overflow-hidden rounded-2xl border border-yeikar-secondary-light/10">
+                    {(detalle.descuentos ?? []).map((d, i) => {
+                      const esMulti = d.tasa_cambio && d.tasa_cambio !== 1;
+                      const descCodigo = d.moneda?.codigo ?? '?';
+                      const ventaCodigo = detalle.moneda?.codigo ?? '?';
+                      return (
+                        <div
+                          key={d.id}
+                          className={`flex items-start justify-between gap-3 px-3.5 py-3 text-sm ${i % 2 ? 'bg-white' : 'bg-yeikar-tertiary/10'}`}
+                        >
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1.5 font-medium leading-snug text-yeikar-secondary">
+                              <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                              Descuento
+                            </span>
+                            {d.motivo && (
+                              <span className="mt-0.5 block break-words text-xs text-yeikar-neutral/60">{d.motivo}</span>
+                            )}
+                            <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
+                              {new Date(d.fecha).toLocaleDateString('es-ES')} · sin movimiento de caja
+                            </span>
+                            {esMulti && (
+                              <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
+                                ≈ {fmtMoneda(Number(d.monto_en_moneda_base), ventaCodigo)}
+                                <span className="opacity-70">
+                                  {' '}(1 {descCodigo} = {Number(d.tasa_cambio).toLocaleString('es-ES')} {nombreMoneda(ventaCodigo)})
+                                </span>
+                              </span>
+                            )}
+                          </span>
+                          <span className="shrink-0 text-right">
+                            <span className="block font-mono text-sm font-black text-amber-700">
+                              −{d.moneda?.simbolo ?? ''}{Number(d.monto).toLocaleString('es-ES')}
+                            </span>
+                            {d.moneda && (
+                              <span className="mt-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-black text-amber-800">
+                                {d.moneda.codigo}
+                              </span>
+                            )}
+                            <span className="block">
+                              <button
+                                type="button"
+                                onClick={() => handleAnularDescuento(d.id)}
+                                disabled={anulandoDescId === d.id}
+                                className="mt-1 text-[11px] font-bold text-red-500 hover:underline disabled:opacity-50"
+                              >
+                                {anulandoDescId === d.id ? 'Anulando...' : 'Anular'}
+                              </button>
+                            </span>
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              {descError && !showDescForm && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                  {descError}
+                </p>
+              )}
               </>
               )}
 
-              {/* Registrar cobro */}
-              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && !showForm && (
-                <div className="sticky bottom-0 -mx-1 bg-gradient-to-t from-white via-white to-transparent px-1 pb-1 pt-4">
+              {/* Registrar cobro / descuento */}
+              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && !showForm && !showDescForm && (
+                <div className="sticky bottom-0 -mx-1 bg-gradient-to-t from-white via-white to-transparent px-1 pb-1 pt-4 space-y-2">
                   <button
                     onClick={() => setShowForm(true)}
                     className="w-full py-3 bg-gradient-to-r from-yeikar-primary to-amber-500 text-yeikar-neutral font-black font-headline rounded-2xl hover:brightness-105 active:scale-[0.99] transition-all shadow-lift"
                   >
                     + Registrar cobro
+                  </button>
+                  <button
+                    onClick={abrirDescForm}
+                    className="w-full py-2.5 text-sm font-bold text-amber-800 border border-amber-300 bg-amber-50 rounded-2xl hover:bg-amber-100 active:scale-[0.99] transition-all"
+                  >
+                    Aplicar descuento (no mueve caja)
                   </button>
                 </div>
               )}
@@ -964,6 +1161,144 @@ function ModalDetalle({
                   </div>
               )}
 
+              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && showDescForm && (
+                  <div className="rounded-2xl border border-amber-300 bg-amber-50/50 p-4 space-y-3 shadow-card">
+                      <div className="flex items-center justify-between gap-2 border-b border-amber-200 pb-2.5">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => { setShowDescForm(false); setDescError(''); setDescTasaInput(''); }}
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-yeikar-neutral/50 transition-colors hover:bg-amber-100 hover:text-yeikar-neutral"
+                            aria-label="Volver al resumen"
+                            title="Volver al resumen"
+                          >
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                            </svg>
+                          </button>
+                          <h5 className="font-headline font-black text-sm text-yeikar-secondary">
+                            Aplicar descuento
+                          </h5>
+                        </div>
+                        <span className="rounded-full bg-amber-100 px-2.5 py-0.5 font-mono text-[11px] font-bold text-amber-800">
+                          Saldo {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-amber-700/80 bg-amber-100/70 border border-amber-200 rounded-lg px-3 py-2">
+                        Lo descontado resta del saldo pero <strong>no entra a ninguna cuenta de caja</strong>.
+                      </p>
+
+                      {/* Fila 1: Moneda + Monto */}
+                      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                            Moneda del descuento
+                          </label>
+                          <SearchSelect
+                            value={descMonedaId}
+                            onChange={(v) => setDescMonedaId(Number(v))}
+                            options={monedas.map((m) => ({
+                              value: m.id,
+                              label: `${m.codigo} — ${m.nombre}`,
+                            }))}
+                            placeholder="Seleccione moneda..."
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="text-xs font-bold text-yeikar-neutral/60 block">
+                              Monto ({monedaDesc?.codigo ?? '...'})
+                            </label>
+                            <button
+                              type="button"
+                              onClick={handleSetDescRestante}
+                              className="flex items-center gap-1 rounded-full border border-amber-300 bg-amber-100/70 px-2.5 py-1 text-[10px] font-black uppercase tracking-wide text-amber-800 transition-colors hover:bg-amber-200"
+                            >
+                              Descontar restante
+                            </button>
+                          </div>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            inputMode="decimal"
+                            autoFocus
+                            value={descMonto}
+                            onChange={(e) => setDescMonto(e.target.value)}
+                            placeholder="0.00"
+                            className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                          />
+                        </div>
+                      </div>
+
+                      {necesitaTRMDesc && (
+                        <div>
+                          <label className="text-xs font-bold text-amber-600 block mb-1">
+                            Tasa: {parDesc.label}
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={descTasaInput}
+                            onChange={(e) => setDescTasaInput(e.target.value)}
+                            placeholder={`Ej: ${parDesc.placeholder}`}
+                            className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-amber-50"
+                          />
+                        </div>
+                      )}
+
+                      {/* Preview de conversión */}
+                      {necesitaTRMDesc && descMontoNum > 0 && tasaHumanaDesc > 0 && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                          <p className="text-sm font-bold text-amber-800 font-mono">
+                            ≈ {descEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {nombreMoneda(monedaVenta?.codigo)}
+                          </p>
+                          {descEquivalente > saldoRestante + (monedaVenta?.codigo === 'COP' ? 1000 : 0.01) && (
+                            <p className="text-xs text-red-600 font-bold mt-1">
+                              El equivalente excede el saldo pendiente ({saldoRestante.toLocaleString('es-ES')} {nombreMoneda(monedaVenta?.codigo)})
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                          Motivo (opcional)
+                        </label>
+                        <input
+                          type="text"
+                          value={descMotivo}
+                          onChange={(e) => setDescMotivo(e.target.value)}
+                          placeholder="Ej: acuerdo con el dueño"
+                          className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
+                        />
+                      </div>
+
+                      {descError && (
+                        <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                          {descError}
+                        </p>
+                      )}
+
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          onClick={() => { setShowDescForm(false); setDescError(''); setDescTasaInput(''); }}
+                          className="flex-1 py-2.5 text-sm font-bold text-yeikar-neutral/70 border border-yeikar-secondary-light/20 rounded-xl hover:bg-yeikar-tertiary/20 transition-all"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          onClick={handleDescuento}
+                          disabled={descSubmitting}
+                          className="flex-1 py-2.5 text-sm font-black bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all disabled:opacity-50"
+                        >
+                          {descSubmitting ? 'Guardando...' : 'Confirmar descuento'}
+                        </button>
+                      </div>
+                  </div>
+              )}
+
             </>
           )}
         </div>
@@ -1175,9 +1510,10 @@ export default function Ventas() {
     const cuenta = cuentasPorVenta.get(v.id);
     const total = cuenta ? Number(cuenta.total) : Number(v.total);
     const pagado = cuenta ? Number(cuenta.total_pagado) : 0;
+    const descontado = cuenta ? Number(cuenta.total_descontado ?? 0) : 0;
     const saldo = cuenta ? Number(cuenta.saldo_pendiente) : Math.max(total - pagado, 0);
     const codigo = cuenta?.moneda_codigo ?? v.moneda?.codigo ?? 'USD';
-    return { venta: v, total, pagado, saldo, codigo };
+    return { venta: v, total, pagado, descontado, saldo, codigo };
   };
   const cobrosEntregados = ventasEntregadas.map(combinarVentaConCuenta);
   const cobrosEnProceso = ventasEnProceso.map(combinarVentaConCuenta);

@@ -47,6 +47,8 @@ def subir_adjunto(
         mime=adj.mime,
         tamano=adj.tamano,
         url=f"/api/v1/adjunto/publico/{adj.uuid}/contenido" if publico else None,
+        creado_por_id=adj.creado_por_id,
+        creador_nombre=usuario_actual.display_name,
         created_at=adj.created_at,
     )
 
@@ -71,6 +73,8 @@ def listar_adjuntos(
                 mime=adj.mime,
                 tamano=adj.tamano,
                 url=f"/api/v1/adjunto/publico/{adj.uuid}/contenido" if publico else None,
+                creado_por_id=adj.creado_por_id,
+                creador_nombre=adj.creador_nombre,
                 created_at=adj.created_at,
             )
         )

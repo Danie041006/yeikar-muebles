@@ -75,7 +75,9 @@ export interface Venta {
 export interface VentaDetalle extends Venta {
   detalles: DetalleVenta[];
   pagos: Pago[];
+  descuentos: Descuento[];
   total_pagado: number;
+  total_descontado: number;
   saldo_pendiente: number;
   total_en_moneda_base?: number;
   tasa_cambio?: number;
@@ -88,6 +90,7 @@ export interface CuentaPorCobrar {
   fecha: string;
   total: number;
   total_pagado: number;
+  total_descontado: number;
   saldo_pendiente: number;
   moneda_codigo: string;
   pedido_estado?: string | null;
@@ -107,6 +110,33 @@ export interface PagoCreate {
   monto: number;
   metodo_pago: string;
   referencia?: string;
+  observaciones?: string;
+  /** TRM / tasa de conversión. Requerido cuando moneda_id difiere de la moneda de la venta. */
+  tasa_cambio?: number;
+}
+
+// ─── Descuento de cobro ───────────────────────────────────────────────────────
+// Rebaja otorgada al cobrar: resta del saldo igual que un pago pero NO mueve
+// dinero a ninguna cuenta de caja.
+export interface Descuento {
+  id: number;
+  venta_id: number;
+  moneda_id: number;
+  fecha: string;
+  monto: number;
+  tasa_cambio: number;
+  monto_en_moneda_base: number;
+  motivo?: string | null;
+  observaciones?: string | null;
+  moneda?: MonedaInfo;
+}
+
+export interface DescuentoCreate {
+  venta_id: number;
+  moneda_id: number;
+  fecha: string;
+  monto: number;
+  motivo?: string;
   observaciones?: string;
   /** TRM / tasa de conversión. Requerido cuando moneda_id difiere de la moneda de la venta. */
   tasa_cambio?: number;
@@ -192,5 +222,18 @@ export const pagoService = {
   registrar: async (data: PagoCreate): Promise<Pago> => {
     const res = await api.post<Pago>('/pago/', data);
     return res.data;
+  },
+};
+
+export const descuentoService = {
+  /** Registrar una rebaja al cobrar (resta del saldo, sin mover caja) */
+  registrar: async (data: DescuentoCreate): Promise<Descuento> => {
+    const res = await api.post<Descuento>('/pago/descuento/', data);
+    return res.data;
+  },
+
+  /** Anular un descuento (el saldo vuelve a subir) */
+  anular: async (id: number): Promise<void> => {
+    await api.delete(`/pago/descuento/${id}`);
   },
 };

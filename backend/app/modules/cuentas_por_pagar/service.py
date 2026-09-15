@@ -100,9 +100,11 @@ def obtener_cuenta(db: Session, cxp_id: int, usuario: Optional[Usuario] = None):
         joinedload(model.CuentaPorPagar.proveedor),
         joinedload(model.CuentaPorPagar.moneda),
         joinedload(model.CuentaPorPagar.tipo_gasto),
+        joinedload(model.CuentaPorPagar.creador),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.material),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.cliente),
         joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.metodo_caja),
+        joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.creador),
     ).filter(model.CuentaPorPagar.id == cxp_id)
     if usuario is not None:
         query = filtrar_registros_propios(query, model.CuentaPorPagar.creado_por_id, usuario)
@@ -121,9 +123,11 @@ def obtener_cuentas(
         joinedload(model.CuentaPorPagar.proveedor),
         joinedload(model.CuentaPorPagar.moneda),
         joinedload(model.CuentaPorPagar.tipo_gasto),
+        joinedload(model.CuentaPorPagar.creador),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.material),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.cliente),
         joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.metodo_caja),
+        joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.creador),
     )
     if usuario is not None:
         query = filtrar_registros_propios(query, model.CuentaPorPagar.creado_por_id, usuario)

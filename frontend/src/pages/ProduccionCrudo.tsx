@@ -679,7 +679,7 @@ export default function ProduccionCrudo() {
                               </span>
                             </div>
                             <div className="flex items-center gap-3 text-[11px] text-yeikar-neutral/50 shrink-0">
-                              <span>Solicitó: <span className="font-semibold text-yeikar-neutral/70">{c.solicitante_nombre || nombreEmpleado(c.solicitante_empleado_id)}</span></span>
+                              <span>Pide: <span className="font-semibold text-yeikar-neutral/70">{c.solicitante_nombre || nombreEmpleado(c.solicitante_empleado_id)}</span></span>
                               {c.seccion && <span className="font-mono">{c.seccion}</span>}
                               {c.costo_unitario != null && (
                                 <span className="font-mono font-bold">${fmtMoney(c.costo_unitario * c.cantidad)}</span>

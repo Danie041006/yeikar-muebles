@@ -131,6 +131,8 @@ export default function EtapaModal({
     largo_corte_cm: '',
     origen_sobrante_id: '' as '',
     es_lamina_completa: false,
+    // Pedido general (madera y demás): entrega hoy, uso se confirma después.
+    es_pedido: false,
   });
   const [materialSearch, setMaterialSearch] = useState('');
   const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
@@ -141,6 +143,8 @@ export default function EtapaModal({
   const [confirmarForm, setConfirmarForm] = useState({
     cantidad_cortes: '', largo_corte_cm: '', ancho_corte_cm: '',
     sobrante_largo_cm: '', sobrante_ancho_cm: '',
+    // Modo general (madera y demás): cuánto se usó en la unidad base.
+    cantidad_usada: '',
   });
   const [confirmarSubmitting, setConfirmarSubmitting] = useState(false);
 
@@ -262,7 +266,7 @@ export default function EtapaModal({
       unidad_captura: '', modo_pieza: false,
       pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
       ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
-      es_lamina_completa: false,
+      es_lamina_completa: false, es_pedido: false,
     }));
     const mat = materiales.find((m) => m.id === materialId);
     setMaterialSearch(mat?.nombre || '');
@@ -286,6 +290,13 @@ export default function EtapaModal({
     }
     const esCorte = esMaterialLaminar(materialConsumo) && !!newConsumo.ancho_corte_cm && !!newConsumo.largo_corte_cm;
     const esLaminaCompleta = esMaterialLaminar(materialConsumo) && newConsumo.es_lamina_completa;
+    // Pedido general: solo no-laminares (las láminas ya tienen su modo de
+    // pedido) y sin cortes. Híbrido: o pedido o uso directo.
+    const esPedido = newConsumo.es_pedido && !esCorte && !esLaminaCompleta;
+    if (newConsumo.es_pedido && (esCorte || esLaminaCompleta)) {
+      toast.error('El pedido general no aplica a láminas ni cortes: usa lámina completa o corte directo.');
+      return;
+    }
     if (esLaminaCompleta && esCorte) {
       toast.error('Elige un modo: lámina completa (confirmar después) o corte directo.');
       return;
@@ -343,6 +354,9 @@ export default function EtapaModal({
                 ? { unidad_captura: newConsumo.unidad_captura }
                 : {}),
         ...(newConsumo.componente.trim() ? { componente: newConsumo.componente.trim() } : {}),
+        // Pedido general: la cantidad digitada es lo ENTREGADO; el uso real
+        // se confirma después (el backend deja el consumo PENDIENTE).
+        ...(esPedido ? { es_pedido: true } : {}),
         ...(newConsumo.es_excedente
           ? { es_excedente: true, motivo_exceso: newConsumo.motivo_exceso || 'OTRO' }
           : {}),
@@ -354,14 +368,16 @@ export default function EtapaModal({
         unidad_captura: '', modo_pieza: false, pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
         componente: '', es_excedente: false, motivo_exceso: '',
         ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
-        es_lamina_completa: false,
+        es_lamina_completa: false, es_pedido: false,
       }));
       setMaterialSearch('');
       await onRecargarSobrantes();
       toast.success(
         esLaminaCompleta
           ? `Lámina completa pedida: ${fmtNum(cantidad)} lámina(s) descontada(s) del depósito. Costo provisional — confirma el uso por cortes cuando el trabajador diga cuánto se usó.`
-          : esCorte
+          : esPedido
+            ? `Pedido registrado: ${fmtNum(cantidadConvertida)} ${materialConsumo?.unidad_medida?.abreviatura || ''} entregadas (costo provisional). Confirma el uso cuando digan cuánto se usó — lo que sobre vuelve solo al depósito.`
+            : esCorte
             ? `Consumo por cortes registrado${newConsumo.origen_sobrante_id ? ' desde sobrante' : ' — lámina(s) descontada(s) y sobrante actualizado'}.`
             : stockAntes !== undefined
               ? `Material registrado. Descontado: ${fmtNum(cantidadConvertida)} ${materialConsumo?.unidad_medida?.abreviatura || ''} — Stock restante: ${fmtNum(Math.max(0, stockAntes - cantidadConvertida))}`
@@ -390,16 +406,25 @@ export default function EtapaModal({
 
   const ejecutarConfirmarConsumo = async () => {
     if (!consumoAConfirmar) return;
-    const cortes = parseFloat(confirmarForm.cantidad_cortes);
-    const lc = parseFloat(confirmarForm.largo_corte_cm);
-    const ac = parseFloat(confirmarForm.ancho_corte_cm);
-    if (!(cortes > 0) || !(lc > 0) || !(ac > 0)) {
-      toast.error('Indica la cantidad de cortes y sus medidas (largo × ancho en cm).');
-      return;
-    }
-    setConfirmarSubmitting(true);
-    try {
-      await produccionService.confirmarConsumo(consumoAConfirmar.id, {
+    // Pedido general (no-laminar): se confirma con la cantidad usada.
+    const esLaminar = !!(consumoAConfirmar.material?.largo_cm && consumoAConfirmar.material?.ancho_cm);
+    let payload: Parameters<typeof produccionService.confirmarConsumo>[1];
+    if (!esLaminar) {
+      const usada = parseFloat(confirmarForm.cantidad_usada);
+      if (!(usada > 0)) {
+        toast.error('Indica cuánto se usó (cantidad mayor a 0).');
+        return;
+      }
+      payload = { cantidad_usada: usada };
+    } else {
+      const cortes = parseFloat(confirmarForm.cantidad_cortes);
+      const lc = parseFloat(confirmarForm.largo_corte_cm);
+      const ac = parseFloat(confirmarForm.ancho_corte_cm);
+      if (!(cortes > 0) || !(lc > 0) || !(ac > 0)) {
+        toast.error('Indica la cantidad de cortes y sus medidas (largo × ancho en cm).');
+        return;
+      }
+      payload = {
         cantidad_cortes: cortes,
         largo_corte_cm: lc,
         ancho_corte_cm: ac,
@@ -409,13 +434,19 @@ export default function EtapaModal({
               sobrante_ancho_cm: parseFloat(confirmarForm.sobrante_ancho_cm),
             }
           : {}),
-      });
+      };
+    }
+    setConfirmarSubmitting(true);
+    try {
+      await produccionService.confirmarConsumo(consumoAConfirmar.id, payload);
       setConsumoAConfirmar(null);
       await onRefrescarEtapa();
       await onRecargarSobrantes();
-      toast.success('Uso confirmado: costo real aplicado, láminas ajustadas y sobrante registrado.');
+      toast.success(esLaminar
+        ? 'Uso confirmado: costo real aplicado, láminas ajustadas y sobrante registrado.'
+        : 'Uso confirmado: lo que sobró volvió al depósito y el costo quedó en lo usado.');
     } catch (error: any) {
-      toast.error(error.response?.data?.detail || 'Error al confirmar el uso de la lámina.');
+      toast.error(error.response?.data?.detail || 'Error al confirmar el uso del material.');
     } finally {
       setConfirmarSubmitting(false);
     }
@@ -844,6 +875,7 @@ export default function EtapaModal({
                                     unidad_captura: '', modo_pieza: false,
                                     pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
                                     ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
+                                    es_pedido: false,
                                   }));
                                   setMaterialSearch(m.nombre);
                                   setShowMaterialDropdown(false);
@@ -881,7 +913,9 @@ export default function EtapaModal({
                     {/* Cantidad */}
                     <div className="sm:col-span-3">
                       <label className="block text-[10px] font-headline font-bold uppercase tracking-wider text-yeikar-secondary/70 mb-1">
-                        {esMaterialLaminar(materialConsumo) && newConsumo.es_lamina_completa
+                        {newConsumo.es_pedido && !esMaterialLaminar(materialConsumo)
+                          ? 'Cantidad entregada'
+                          : esMaterialLaminar(materialConsumo) && newConsumo.es_lamina_completa
                           ? 'N.º de láminas'
                           : dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza
                             ? 'N.º de piezas'
@@ -920,6 +954,43 @@ export default function EtapaModal({
                       </button>
                     </div>
                   </div>
+
+                  {/* Modo híbrido (no-laminares): uso directo o pedido para confirmar después */}
+                  {materialConsumo && !esMaterialLaminar(materialConsumo) && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-semibold text-yeikar-neutral/50 uppercase">Modo:</span>
+                        <button
+                          type="button"
+                          onClick={() => setNewConsumo(prev => ({ ...prev, es_pedido: false }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+                            !newConsumo.es_pedido
+                              ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                              : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+                          }`}
+                        >
+                          Uso directo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewConsumo(prev => ({ ...prev, es_pedido: true }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+                            newConsumo.es_pedido
+                              ? 'bg-amber-500 text-white border-amber-500'
+                              : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-amber-400'
+                          }`}
+                        >
+                          Pedir (confirmar uso después)
+                        </button>
+                      </div>
+                      {newConsumo.es_pedido && (
+                        <p className="text-[10px] font-mono text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                          Sale del depósito hoy con costo provisional (aparece en costos). Cuando digan cuánto
+                          se usó se confirma: lo que sobre vuelve solo al depósito y el costo queda en lo usado.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   {/* Captura flexible de madera: el modo depende de la unidad del material. */}
                   {materialConsumo && dimConsumo === 'LONGITUD' && (
@@ -1170,7 +1241,9 @@ export default function EtapaModal({
                               <p className="font-bold text-yeikar-secondary text-sm">{c.material?.nombre}</p>
                               {c.estado === 'PENDIENTE' && (
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 border border-amber-300 uppercase">
-                                  PENDIENTE · {c.cantidad} lámina(s)
+                                  {c.material?.largo_cm && c.material?.ancho_cm
+                                    ? `PENDIENTE · ${c.cantidad} lámina(s)`
+                                    : `PEDIDO · ${c.cantidad} ${c.material?.unidad_medida?.abreviatura ?? ''} por confirmar`}
                                 </span>
                               )}
                               {c.es_excedente && (
@@ -1194,6 +1267,9 @@ export default function EtapaModal({
                               {etiquetaCaptura(c) && <span className="text-yeikar-neutral/40"> · {etiquetaCaptura(c)}</span>}
                               {' '}| Unit: <span className="font-bold">${costo.toLocaleString('es-CO')}</span>
                               {c.estado === 'PENDIENTE' && <span className="text-amber-600/80"> · provisional</span>}
+                              {c.estado === 'CONFIRMADO' && c.cantidad_pedida != null && Number(c.cantidad_pedida) !== Number(c.cantidad) && (
+                                <span className="text-amber-600/80"> · pedidas {c.cantidad_pedida}</span>
+                              )}
                             </p>
                             <p className="text-[10px] text-yeikar-neutral/40 mt-0.5">
                               {c.solicitante_nombre && <span className="font-semibold text-yeikar-secondary/70">Pide: {c.solicitante_nombre}</span>}
@@ -1211,11 +1287,14 @@ export default function EtapaModal({
                                   setConfirmarForm({
                                     cantidad_cortes: '', largo_corte_cm: '', ancho_corte_cm: '',
                                     sobrante_largo_cm: '', sobrante_ancho_cm: '',
+                                    cantidad_usada: '',
                                   });
                                   setConsumoAConfirmar(c);
                                 }}
                                 className="text-amber-700 hover:text-amber-900 font-bold text-xs p-1 transition-colors bg-amber-50 border border-amber-200 rounded-lg px-2"
-                                title="Confirmar cuánto se usó de la lámina (por cortes)"
+                                title={c.material?.largo_cm && c.material?.ancho_cm
+                                  ? 'Confirmar cuánto se usó de la lámina (por cortes)'
+                                  : 'Confirmar cuánto se usó de verdad'}
                               >
                                 Confirmar uso
                               </button>
@@ -1526,6 +1605,77 @@ export default function EtapaModal({
       />
       {consumoAConfirmar && (() => {
         const mat = consumoAConfirmar.material;
+        // Pedido general (madera y demás): modal simple de cantidad usada.
+        const esLaminar = !!(mat?.largo_cm && mat?.ancho_cm);
+        if (!esLaminar) {
+          const pedidas = consumoAConfirmar.cantidad_pedida ?? consumoAConfirmar.cantidad;
+          const unidad = mat?.unidad_medida?.abreviatura ?? '';
+          const usada = parseFloat(confirmarForm.cantidad_usada);
+          const dif = usada > 0 ? Number(pedidas) - usada : null;
+          return (
+            <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+              <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
+                <h3 className="text-xl font-headline font-black text-yeikar-secondary">¿Cuánto se usó?</h3>
+                <p className="text-xs text-yeikar-neutral/60">
+                  Se entregaron <b>{pedidas} {unidad}</b> de{' '}
+                  <span className="font-bold text-yeikar-secondary">{mat?.nombre}</span>
+                  {consumoAConfirmar.solicitante_nombre && (
+                    <> a <span className="font-bold text-yeikar-secondary">{consumoAConfirmar.solicitante_nombre}</span></>
+                  )}. Escribe cuánto se usó de verdad:
+                </p>
+                <form
+                  onSubmit={(e) => { e.preventDefault(); ejecutarConfirmarConsumo(); }}
+                  className="space-y-3"
+                >
+                  <div>
+                    <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">
+                      Cantidad usada ({unidad || 'unidad base'})
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="Ej. 2.5"
+                      value={confirmarForm.cantidad_usada}
+                      onChange={(e) => setConfirmarForm(prev => ({ ...prev, cantidad_usada: e.target.value }))}
+                      required
+                      autoFocus
+                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                    />
+                  </div>
+                  {dif !== null && (
+                    <p className="text-[10px] font-mono bg-yeikar-primary/5 border border-yeikar-primary/20 rounded-lg px-2 py-1 text-yeikar-secondary">
+                      Pediste {pedidas}, usas {usada}:{' '}
+                      {dif > 0 ? (
+                        <span className="font-bold text-emerald-700">sobran {dif} y vuelven solos al depósito</span>
+                      ) : dif < 0 ? (
+                        <span className="font-bold text-red-600">faltan {-dif} — se descontarán del inventario</span>
+                      ) : (
+                        <span className="font-bold text-emerald-700">justo lo que pediste ✓</span>
+                      )}
+                    </p>
+                  )}
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setConsumoAConfirmar(null)}
+                      className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={confirmarSubmitting}
+                      className="bg-yeikar-secondary text-white px-5 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {confirmarSubmitting ? 'Confirmando…' : 'Confirmar uso'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          );
+        }
         const L = parseFloat(String(mat?.largo_cm ?? 0));
         const A = parseFloat(String(mat?.ancho_cm ?? 0));
         const pedidas = consumoAConfirmar.cantidad;

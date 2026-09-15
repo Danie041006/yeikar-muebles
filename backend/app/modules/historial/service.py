@@ -49,7 +49,7 @@ def _dt(v):
 
 
 def _nombre_usuario(u):
-    return (u.nombre or u.nombre_usuario) if u else None
+    return u.display_name if u else None
 
 
 def _nombre_item(det):
@@ -278,6 +278,7 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
         }
 
     from app.modules.adjuntos.service import adjuntos_info
+    from app.modules.sales.model import DescuentoVenta
 
     pagos = []
     for p in venta.pagos:
@@ -296,6 +297,21 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
         })
 
     total_pagado = sum(float(p.monto_en_moneda_base) for p in venta.pagos)
+    descuentos_db = db.query(DescuentoVenta).filter(DescuentoVenta.venta_id == venta.id).all()
+    descuentos = [
+        {
+            "id": d.id,
+            "fecha": _dt(d.fecha),
+            "moneda": d.moneda.codigo if d.moneda else None,
+            "monto": _f(d.monto),
+            "tasa_cambio": _f(d.tasa_cambio),
+            "monto_en_moneda_base": _f(d.monto_en_moneda_base),
+            "motivo": d.motivo,
+            "observaciones": d.observaciones,
+        }
+        for d in descuentos_db
+    ]
+    total_descontado = sum(float(d.monto_en_moneda_base) for d in descuentos_db)
     return {
         "id": venta.id,
         "fecha": _d(venta.fecha),
@@ -307,7 +323,8 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
         "creado_por": _nombre_usuario(venta.creador),
         "observaciones": venta.observaciones,
         "total_pagado": total_pagado,
-        "saldo_pendiente": float(venta.total) - total_pagado,
+        "total_descontado": total_descontado,
+        "saldo_pendiente": float(venta.total) - total_pagado - total_descontado,
         "detalles": [
             {
                 "producto_id": d.producto_id,
@@ -324,6 +341,7 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
             for d in venta.detalles
         ],
         "pagos": pagos,
+        "descuentos": descuentos,
     }
 
 

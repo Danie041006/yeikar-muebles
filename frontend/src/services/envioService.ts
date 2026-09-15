@@ -27,6 +27,7 @@ export interface EnvioUbicacion {
   envio_id: number;
   empleado_id?: number | null;
   reportado_por_id?: number | null;
+  reportado_por_nombre?: string | null;
   latitud: number;
   longitud: number;
   precision_m?: number | null;

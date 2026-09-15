@@ -64,15 +64,20 @@ class Verificar2FARequest(BaseModel):
 # Huella / passkeys (WebAuthn)
 # ------------------------------------------------------------
 class UsuarioHuellaRequest(BaseModel):
-    nombre_usuario: str
+    # Opcional: si viene vacío se hace login sin usuario (passkey
+    # discoverable: el navegador ofrece las cuentas de este equipo).
+    nombre_usuario: Optional[str] = None
 
 class RegistroHuellaRequest(BaseModel):
     dispositivo: Optional[str] = None
     respuesta: dict
 
 class LoginHuellaRequest(BaseModel):
-    nombre_usuario: str
+    # Híbrido: con nombre_usuario se usa el flujo filtrado clásico;
+    # sin él se descubre el usuario por la credencial + sesion_huella.
+    nombre_usuario: Optional[str] = None
     respuesta: dict
+    sesion_huella: Optional[str] = None
 
 class HuellaResponse(BaseModel):
     id: int

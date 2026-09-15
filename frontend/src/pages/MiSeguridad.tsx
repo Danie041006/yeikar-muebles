@@ -443,7 +443,8 @@ export default function MiSeguridad() {
               Huella / Face ID / PIN del equipo
             </h2>
             <p className="text-xs text-yeikar-neutral/50">
-              Entra con tu biometría: sustituye contraseña y código de la app en este equipo.
+              Entra con tu biometría: sustituye contraseña y código de la app en este equipo. Sin escribir nada en el login, eliges tu cuenta ahí mismo.
+              Las huellas registradas antes de este cambio siguen pidiendo tu usuario: quítalas y vuelve a registrarlas para entrar sin escribir nada.
             </p>
           </div>
         </div>

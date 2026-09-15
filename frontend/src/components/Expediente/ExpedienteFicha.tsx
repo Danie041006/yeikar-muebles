@@ -139,7 +139,7 @@ function SeccionPedido({ exp }: { exp: Expediente }) {
     <CardSeccion titulo={`Pedido #${ped.id}`} icono={<ShoppingCart className="w-4 h-4 text-white" />} estado={ped.estado} dominio="pedido">
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
         <Fila k="Fecha" v={fmtFecha(ped.fecha)} />
-        <Fila k="Entregado por" v={ped.creado_por} />
+        <Fila k="Registrado por" v={ped.creado_por} />
         <Fila k="Entrega estimada" v={fmtFecha(ped.fecha_entrega_estimada)} />
         <Fila k="Cotización origen" v={`#${ped.cotizacion_id ?? '—'}`} />
       </div>

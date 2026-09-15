@@ -37,7 +37,7 @@ export interface ReportAlertaStockResponse {
 // ---------------- Estado del día (reporte diario) ----------------
 export interface MovimientoDiario {
   id: number;
-  tipo: string; // APERTURA | ENTRADA | SALIDA | AJUSTE
+  tipo: string; // APERTURA | ENTRADA | SALIDA | AJUSTE | EGRESO
   moneda_codigo: string;
   moneda_simbolo: string;
   monto: number;
@@ -60,8 +60,18 @@ export interface LineaMonedaDiaria {
 export interface SaldoCuentaDiaria {
   metodo_caja_id: number;
   cuenta_nombre: string;
+  moneda_codigo: string;
+  moneda_simbolo: string;
+  saldo_inicial: number;
+  saldo_final: number;
   saldo_inicial_cop: number;
   saldo_final_cop: number;
+}
+
+export interface MonedaVistaDiaria {
+  moneda_id: number;
+  codigo: string;
+  simbolo: string;
 }
 
 export interface ResumenDiario {
@@ -70,6 +80,14 @@ export interface ResumenDiario {
   total_ingresos_cop: number;
   total_egresos_cop: number;
   saldo_final_cop: number;
+  // Vista filtrada a esta moneda, todo en valor nativo (sin conversión).
+  moneda_vista: string;
+  moneda_vista_simbolo: string;
+  saldo_inicial_vista: number;
+  total_ingresos_vista: number;
+  total_egresos_vista: number;
+  saldo_final_vista: number;
+  monedas: MonedaVistaDiaria[];
   movimientos: MovimientoDiario[];
   por_moneda: LineaMonedaDiaria[];
   saldos_por_cuenta: SaldoCuentaDiaria[];
@@ -102,8 +120,11 @@ export const reportesService = {
   },
 
   // ---------------- Estado del día ----------------
-  getResumenDiario: async (fecha?: string): Promise<ResumenDiario> => {
-    const response = await api.get<ResumenDiario>('/reports/diario', { params: fecha ? { fecha } : {} });
+  getResumenDiario: async (fecha?: string, moneda?: string): Promise<ResumenDiario> => {
+    const params: Record<string, string> = {};
+    if (fecha) params.fecha = fecha;
+    if (moneda) params.moneda = moneda;
+    const response = await api.get<ResumenDiario>('/reports/diario', { params });
     return response.data;
   },
 
@@ -202,8 +223,10 @@ export interface LineaIngresoInforme {
   precio_venta: number;
   descuento: number;
   moneda: string;
-  tasa_cambio: number;
-  precio_venta_en_base: number;
+  // TRM de referencia (moneda → COP). null cuando no hay tasa confiable:
+  // no se fabrica el equivalente 1 USD = 1 COP.
+  tasa_cambio: number | null;
+  precio_venta_en_base: number | null;
   es_devolucion: boolean;
 }
 
@@ -215,21 +238,40 @@ export interface TotalesIngresoInforme {
   descuentos: number;
 }
 
+export interface TotalesPorMonedaInforme {
+  moneda: string;
+  precio_costo: number;
+  utilidad: number;
+  precio_venta: number;
+  precio_venta_en_base: number | null;
+  descuentos: number;
+}
+
 export interface ControlInternoIngresos {
   lineas: LineaIngresoInforme[];
   totales: TotalesIngresoInforme;
+  totales_por_moneda?: TotalesPorMonedaInforme[];
+}
+
+export interface ResumenMoneda {
+  moneda: string;
+  ingresos: number;
+  egresos: number;
+  disponible: number;
 }
 
 export interface ResumenMes {
   ingresos: number;
   egresos: number;
   disponible: number;
+  por_moneda?: ResumenMoneda[];
 }
 
 export interface LineaValorConcepto {
   concepto_id: number;
   nombre: string;
   valor: number;
+  moneda?: string | null;
 }
 
 export interface VentasEstadoResultados {
@@ -281,13 +323,41 @@ export interface EstadoResultados {
   utilidad_periodo: number;
 }
 
+// Estado de resultados desglosado por moneda (cifras nativas)
+export interface EstadoPorMoneda {
+  moneda: string;
+  ventas: VentasEstadoResultados;
+  inventarios_iniciales: LineaValorConcepto[];
+  total_inventarios_iniciales: number;
+  compras: ComprasEstadoResultados;
+  inventarios_finales: LineaValorConcepto[];
+  total_inventarios_finales: number;
+  compras_netas: number;
+  utilidad_bruta: number;
+  gastos: GastosEstadoResultados;
+  utilidad_periodo: number;
+}
+
+export interface SaldoPorMoneda {
+  moneda: string;
+  saldo: number;
+}
+
+export interface LineaSaldoCajaInforme {
+  metodo_caja_id: number;
+  nombre: string;
+  moneda: string;
+  saldo: number;
+}
+
 export interface InformeMensualResponse {
   mes: string;
   control_interno_ingresos: ControlInternoIngresos;
   resumen: ResumenMes;
   estado_resultados: EstadoResultados;
   pendientes_de_pago: PendientesDePagoInforme;
-  saldos_caja?: LineaValorConcepto[];
+  saldos_caja?: LineaSaldoCajaInforme[];
+  estado_resultados_por_moneda?: EstadoPorMoneda[];
 }
 
 export interface PendientePagoLinea {
@@ -302,11 +372,15 @@ export interface PendientePagoLinea {
   total_en_base: number;
   pagado_en_base: number;
   saldo_en_base: number;
+  total_en_moneda?: number | null;
+  pagado_en_moneda?: number | null;
+  saldo_en_moneda?: number | null;
 }
 
 export interface PendientesDePagoInforme {
   lineas: PendientePagoLinea[];
   total_pendiente: number;
+  total_pendiente_por_moneda?: SaldoPorMoneda[];
 }
 
 export interface ConceptoReporte {
@@ -334,6 +408,7 @@ export interface MetodoCaja {
   codigo: string;
   activo: boolean;
   orden: number;
+  moneda_id?: number | null;
 }
 
 export interface MovimientoCaja {

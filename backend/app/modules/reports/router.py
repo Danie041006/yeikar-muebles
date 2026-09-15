@@ -31,11 +31,15 @@ def get_pnl(
 @router.get("/diario", response_model=schemas.ResumenDiarioResponse)
 def get_resumen_diario(
     fecha: Optional[date] = Query(None, description="Fecha del día (YYYY-MM-DD). Por defecto, hoy"),
+    moneda: str = Query("COP", description="Moneda de vista: COP, USD, VES, EUR… (tabs)"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
     """Estado del día: saldo inicial, ingresos, egresos, quién los hizo y saldo final."""
-    return service.resumen_diario(db, fecha or date.today())
+    try:
+        return service.resumen_diario(db, fecha or date.today(), moneda)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/informe-mensual", response_model=schemas.InformeMensualResponse)
 def get_informe_mensual(

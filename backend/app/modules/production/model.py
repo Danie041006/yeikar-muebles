@@ -112,6 +112,12 @@ class ConsumoMaterial(Base):
     # se usó (confirmación por cortes recalcula costo real, ajusta láminas y
     # genera el sobrante). Default CONFIRMADO = flujo inmediato tradicional.
     estado = Column(String(20), nullable=False, server_default="CONFIRMADO", default="CONFIRMADO", index=True)
+    # --- Pedido de material (entrega hoy, uso real después) ---
+    # `cantidad` = lo que se USÓ (costo final); `cantidad_pedida` conserva lo
+    # que se ENTREGÓ al pedir (unidad base). NULL = registro directo de uso
+    # (flujo inmediato tradicional, sin pedido previo). Permite que el registro
+    # diga cuánto pidieron y cuánto usaron de verdad.
+    cantidad_pedida = Column(Numeric(12, 2), nullable=True)
     # --- Consumo por CORTE (materiales laminares) ---
     # Si ancho_corte_cm/largo_corte_cm están definidos, `cantidad` = NÚMERO de
     # cortes de ese tamaño y costo_unitario = costo proporcional al área del

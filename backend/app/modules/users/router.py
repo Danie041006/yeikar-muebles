@@ -556,9 +556,13 @@ def huella_login_inicio(
     esquema: schemas.UsuarioHuellaRequest,
     db: Session = Depends(get_db),
 ):
-    """Opciones de autenticación biométrica (público: aún no hay sesión)."""
+    """Opciones de autenticación biométrica (público: aún no hay sesión).
+
+    Con `nombre_usuario` filtra las huellas de esa cuenta; sin él devuelve
+    opciones discoverables + `sesion_huella` para el modo sin usuario.
+    """
     try:
-        return service.opciones_login_huella(db, esquema.nombre_usuario.strip())
+        return service.opciones_login_huella(db, (esquema.nombre_usuario or "").strip() or None)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -570,7 +574,8 @@ def huella_login_fin(
 ):
     """Login con huella: la firma biométrica sustituye contraseña + 2FA."""
     try:
-        user = service.verificar_login_huella(db, esquema.nombre_usuario.strip(), esquema.respuesta)
+        nombre = (esquema.nombre_usuario or "").strip() or None
+        user = service.verificar_login_huella(db, esquema.respuesta, nombre, esquema.sesion_huella)
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     tokens = _emitir_sesion(db, user, request)

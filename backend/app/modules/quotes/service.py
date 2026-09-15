@@ -1,13 +1,61 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from datetime import date
+from decimal import Decimal
 from app.modules.quotes import model, schemas
 from app.modules.clients.model import Client
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import tiene_alcance_total
 from app.modules.users.model import Usuario
+from app.modules.tasas_cambio.model import TasaCambio
 
 MONEDA_BASE_ID = 1  # COP
+
+
+def _trm_registrada(db: Session, moneda_id: int, fecha: date) -> Decimal | None:
+    """Última TRM moneda → COP registrada a la fecha (o la más próxima).
+    None si el catálogo no tiene ninguna: a diferencia del fallback de
+    `obtener_tasa_moneda_a_cop`, aquí NO se asume 1.0 (1 USD = 1 COP
+    fabricaba dinero en el libro)."""
+    tasa = (
+        db.query(TasaCambio)
+        .filter(TasaCambio.moneda_origen_id == moneda_id, TasaCambio.moneda_destino_id == 1, TasaCambio.fecha <= fecha)
+        .order_by(TasaCambio.fecha.desc())
+        .first()
+    )
+    if not tasa:
+        tasa = (
+            db.query(TasaCambio)
+            .filter(TasaCambio.moneda_origen_id == moneda_id, TasaCambio.moneda_destino_id == 1)
+            .order_by(TasaCambio.fecha.asc())
+            .first()
+        )
+    valor = Decimal(str(tasa.valor)) if tasa else None
+    return valor if valor and valor > 0 else None
+
+
+def _trm_cotizacion(db: Session, moneda_id: int, fecha: date, tasa_indicada) -> Decimal:
+    """Tasa moneda → COP de una cotización no-COP.
+
+    Guarda: una cotización USD guardada con tasa 1.0 (el default del
+    formulario) heredaba la equivalencia 1 USD = 1 COP a la venta, a los
+    pagos y a la caja. Si la tasa llega 1.0 (o vacía) se sustituye por la
+    TRM registrada en el catálogo; si el catálogo no tiene ninguna, se
+    rechaza: sin TRM real no hay forma de valorar la cotización en COP.
+    """
+    tasa = Decimal(str(tasa_indicada)) if tasa_indicada else Decimal("0.0")
+    if tasa > 0 and tasa != Decimal("1.0"):
+        return tasa
+    # Tasa vacía o 1.0 (default del formulario): sustituir por la TRM
+    # registrada; sin catálogo no hay forma de valorar la cotización en COP.
+    trm = _trm_registrada(db, moneda_id, fecha)
+    if not trm:
+        raise ValueError(
+            "No hay una TRM registrada para esta moneda. Regístrala en el catálogo "
+            "de tasas de cambio (o indícala en el formulario) antes de cotizar "
+            "en esta moneda."
+        )
+    return trm
 
 
 def _exigir_escritura_propia(cotizacion: model.Cotizacion, usuario: Usuario | None) -> None:
@@ -208,7 +256,10 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
     detalles_datos = esquema.detalles
 
     if datos.get("moneda_id", MONEDA_BASE_ID) != MONEDA_BASE_ID:
-        datos["total_en_moneda_base"] = float(datos.get("total_estimado", 0)) * float(datos.get("tasa_cambio", 1))
+        datos["tasa_cambio"] = _trm_cotizacion(
+            db, datos["moneda_id"], datos.get("fecha") or date.today(), datos.get("tasa_cambio")
+        )
+        datos["total_en_moneda_base"] = float(datos.get("total_estimado", 0)) * float(datos["tasa_cambio"])
     else:
         datos["tasa_cambio"] = 1.0
         datos["total_en_moneda_base"] = datos.get("total_estimado", 0)
@@ -270,6 +321,11 @@ def actualizar_cotizacion(
             db_obj.tasa_cambio = 1.0
             db_obj.total_en_moneda_base = db_obj.total_estimado
         else:
+            # La tasa 1.0 (default del formulario) en moneda extranjera
+            # fabricaba 1 USD = 1 COP: se sustituye por la TRM registrada.
+            db_obj.tasa_cambio = _trm_cotizacion(
+                db, db_obj.moneda_id, db_obj.fecha or date.today(), db_obj.tasa_cambio
+            )
             if not db_obj.tasa_cambio or float(db_obj.tasa_cambio) <= 0:
                 raise ValueError("La cotización en moneda extranjera requiere una tasa de cambio mayor que cero.")
             db_obj.total_en_moneda_base = float(db_obj.total_estimado or 0) * float(db_obj.tasa_cambio)

@@ -23,6 +23,8 @@ class AdjuntoResponse(BaseModel):
     mime: str
     tamano: int
     url: Optional[str] = None
+    creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:

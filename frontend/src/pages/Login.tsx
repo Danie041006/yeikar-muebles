@@ -48,6 +48,19 @@ export default function Login() {
   // Entrada con huella / Face ID / PIN del equipo (passkeys).
   const [cargandoHuella, setCargandoHuella] = useState(false);
 
+  // Recuerda el último usuario para prellenarlo (solo comodidad: la huella
+  // funciona también sin escribir nada).
+  useEffect(() => {
+    try {
+      const ultimo = localStorage.getItem('yeikar_ultimo_usuario') ?? '';
+      if (ultimo && !username) setUsername(ultimo);
+    } catch {
+      /* almacenamiento no disponible: se ignora */
+    }
+    // Solo al montar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Carga del script de Turnstile y render del widget solo cuando hace falta
   useEffect(() => {
     if (!captchaRequerido) return;
@@ -112,6 +125,11 @@ export default function Login() {
 
       localStorage.setItem('token', response.data.access_token);
       if (response.data.refresh_token) localStorage.setItem('refresh_token', response.data.refresh_token);
+      try {
+        localStorage.setItem('yeikar_ultimo_usuario', username.trim());
+      } catch {
+        /* almacenamiento no disponible: se ignora */
+      }
       await refresh();
       navigate(destination, { replace: true });
     } catch (err: unknown) {
@@ -141,22 +159,23 @@ export default function Login() {
   };
 
   // Login biométrico: la huella del equipo sustituye contraseña y 2FA.
-  // Requiere el usuario escrito (para saber qué huellas pedir) y un navegador
-  // que soporte WebAuthn (Chrome/Edge/Safari, localhost cuenta como seguro).
+  // Híbrido: si escribiste tu usuario entra directo con tus huellas; si no,
+  // el navegador te deja elegir entre las cuentas de este equipo.
   const handleLoginHuella = async () => {
-    if (!username.trim()) {
-      setError('Escribe tu usuario y luego toca huella.');
-      return;
-    }
     setError('');
     setCargandoHuella(true);
     try {
-      const inicio = await axios.post(`${API_URL}/api/auth/webauthn/login/inicio`, {
-        nombre_usuario: username.trim(),
-      });
-      const respuesta = await startAuthentication({ optionsJSON: inicio.data });
+      const nombre = username.trim();
+      const inicio = await axios.post(`${API_URL}/api/auth/webauthn/login/inicio`, nombre ? {
+        nombre_usuario: nombre,
+      } : {});
+      const datos = inicio.data as { options?: unknown; sesion_huella?: string };
+      const optionsJSON = (datos.options ?? datos) as Parameters<typeof startAuthentication>[0]['optionsJSON'];
+      const sesionHuella = datos.sesion_huella;
+      const respuesta = await startAuthentication({ optionsJSON });
       const fin = await axios.post(`${API_URL}/api/auth/webauthn/login/fin`, {
-        nombre_usuario: username.trim(),
+        ...(nombre ? { nombre_usuario: nombre } : {}),
+        ...(sesionHuella ? { sesion_huella: sesionHuella } : {}),
         respuesta,
       });
       if (!fin.data.access_token) {
@@ -166,6 +185,11 @@ export default function Login() {
       localStorage.setItem('token', fin.data.access_token);
       if (fin.data.refresh_token) localStorage.setItem('refresh_token', fin.data.refresh_token);
       await refresh();
+      try {
+        if (nombre) localStorage.setItem('yeikar_ultimo_usuario', nombre);
+      } catch {
+        /* almacenamiento no disponible: se ignora */
+      }
       navigate(destination, { replace: true });
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
@@ -463,7 +487,7 @@ export default function Login() {
                   onClick={handleLoginHuella}
                   disabled={cargandoHuella || loading}
                   className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl border border-yeikar-secondary-light/20 bg-white/60 font-headline text-sm font-bold text-yeikar-neutral/70 transition-all hover:border-yeikar-primary/40 hover:text-yeikar-neutral disabled:cursor-not-allowed disabled:opacity-60"
-                  title="Entrar con la huella o PIN de este equipo (si ya la registraste)"
+                  title="Entrar con la huella, Face ID o PIN de este equipo. Sin escribir nada te deja elegir la cuenta; con tu usuario escrito entra directo."
                 >
                   {cargandoHuella ? (
                     <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-yeikar-neutral/25 border-t-yeikar-neutral" /> Esperando huella...</span>
@@ -471,6 +495,9 @@ export default function Login() {
                     <><Fingerprint className="h-[18px] w-[18px]" strokeWidth={1.8} /> Entrar con huella</>
                   )}
                 </button>
+                <p className="text-center text-[11px] leading-relaxed text-yeikar-neutral/45">
+                  Toca y entra: sin escribir nada eliges tu cuenta aquí mismo. Si escribes tu usuario primero, entra directo.
+                </p>
               </form>
 
               <div className="mt-8 flex items-center gap-3 border-t border-yeikar-secondary-light/10 pt-5 text-[11px] text-yeikar-neutral/45">

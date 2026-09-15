@@ -3,8 +3,8 @@ from sqlalchemy import or_
 from datetime import date, datetime
 from decimal import Decimal
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
-from app.modules.sales.model import Venta, DetalleVenta, Pago
-from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate
+from app.modules.sales.model import Venta, DetalleVenta, Pago, DescuentoVenta
+from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, DescuentoCreate
 from app.modules.orders.model import Pedido, DetallePedido
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
@@ -226,12 +226,12 @@ def eliminar_venta(db: Session, id_venta: int, usuario: Usuario | None = None):
     db_venta = obtener_venta(db, id_venta, usuario)
     if not db_venta:
         return False
-    # No permitir eliminar una factura con abonos: el FK pago.venta_id es
-    # NOT NULL y SQLAlchemy intentaría anularlo (500). Exigir su anulación previa.
-    if db_venta.pagos:
+    # No permitir eliminar una factura con abonos o descuentos: los FK son
+    # NOT NULL/RESTRICT. Exigir su anulación previa.
+    if db_venta.pagos or db_venta.descuentos:
         raise ValueError(
-            "No se puede eliminar una factura con pagos registrados. "
-            "Anula o elimina los pagos asociados primero."
+            "No se puede eliminar una factura con pagos o descuentos registrados. "
+            "Anula o elimina los pagos y descuentos asociados primero."
         )
     # Devolver al inventario lo descontado al facturar (insumos y reventa)
     # ANTES de borrar: la reversión busca los movimientos SALIDA de esta venta.
@@ -256,6 +256,98 @@ def eliminar_venta(db: Session, id_venta: int, usuario: Usuario | None = None):
 # ------------------------------------------------------------
 def obtener_pago(db: Session, id_pago: int):
     return db.query(Pago).filter(Pago.id == id_pago).first()
+
+
+def _totales_cobro(db: Session, venta_id: int) -> tuple[float, float]:
+    """Devuelve (total_pagado_base, total_descontado_base) en la moneda de la venta."""
+    pagos = db.query(Pago).filter(Pago.venta_id == venta_id).all()
+    descuentos = db.query(DescuentoVenta).filter(DescuentoVenta.venta_id == venta_id).all()
+    total_pagado = sum(float(p.monto_en_moneda_base) for p in pagos)
+    total_descontado = sum(float(d.monto_en_moneda_base) for d in descuentos)
+    return total_pagado, total_descontado
+
+
+def _saldo_pendiente(db: Session, venta: Venta) -> float:
+    """Saldo real por cobrar: total − pagado − descontado (moneda de la venta)."""
+    total_pagado, total_descontado = _totales_cobro(db, venta.id)
+    return float(venta.total) - total_pagado - total_descontado
+
+
+def _recalcular_estado_venta(db: Session, venta: Venta, margen_saldo: float = 0.01) -> None:
+    """PAGADA cuando pagado + descontado cubre el total (con margen de redondeo)."""
+    total_pagado, total_descontado = _totales_cobro(db, venta.id)
+    if total_pagado + total_descontado >= float(venta.total) - margen_saldo:
+        venta.estado = "PAGADA"
+    elif total_pagado + total_descontado > 0.0:
+        venta.estado = "ABONADA"
+    else:
+        venta.estado = "PENDIENTE"
+
+
+def _convertir_a_moneda_venta(
+    db: Session, moneda_id: int, monto: float, tasa_cambio: float | None, venta: Venta
+) -> tuple[float, float, float]:
+    """Convierte un monto (pago o descuento) a la moneda de la venta.
+
+    Misma regla que los cobros: misma moneda → tasa 1:1; moneda distinta →
+    tasa obligatoria con validaciones anti-TRM-inventada y redondeo al millar
+    cuando la factura es en COP. Devuelve (tasa, monto_en_moneda_base, margen).
+    """
+    misma_moneda = moneda_id == venta.moneda_id
+    if misma_moneda:
+        return 1.0, float(monto), 0.01
+    if not tasa_cambio or float(tasa_cambio) <= 0:
+        raise ValueError(
+            "La moneda difiere de la moneda de la factura. "
+            "Debes proporcionar la tasa de cambio (TRM) para realizar la conversión."
+        )
+    tasa = float(tasa_cambio)
+    monto_base = round(float(monto) * tasa, 2)
+    margen_saldo = 0.01
+    # Solo cuando la FACTURA es en COP el libro base queda al millar (la
+    # moneda mínima en Colombia es 50 COP; el paso YEIKAR es 1.000). La
+    # diferencia del redondeo (máx. ±500 COP) se absorbe como ajuste y por
+    # eso el margen de saldo sube al paso completo. En facturas USD/VES la
+    # base tiene centavos normales (moneda legal) y no se redondea.
+    if venta.moneda_id == 1:
+        monto_base = float(
+            redondear_a_multiplo(
+                Decimal(str(monto)) * Decimal(str(tasa)),
+                PASO_PRECIO_COP,
+                "half_up",
+            )
+        )
+        margen_saldo = float(PASO_PRECIO_COP)
+
+    # Tasa de cambio: validar que no sea absurda. El piso 0.0001 permite
+    # tasas invertidas legítimas (COP→USD ≈ 1/3900 = 0.0002564); lo que se
+    # bloquea es el monto en moneda base quedando en ~0 (dinero que
+    # desaparece del libro) y desviaciones >50% contra la tasa registrada.
+    if tasa < 0.0001:
+        raise ValueError(
+            f"La tasa de cambio ({tasa}) no es válida para un monto en moneda extranjera. "
+            "Indica la TRM real del día (COP por unidad de la moneda del pago)."
+        )
+    if round(monto_base, 2) <= 0:
+        raise ValueError(
+            "El monto en moneda base queda en 0 con la tasa indicada. "
+            "Revisa la TRM."
+        )
+    # Si el sistema tiene una tasa registrada para esa moneda, la tasa no
+    # puede desviarse más de 50% (anti "cobrar en cero" con TRM inventadas
+    # mientras exista una real en el catálogo).
+    tasa_registrada = db.query(TasaCambio).filter(
+        TasaCambio.moneda_origen_id == moneda_id,
+        TasaCambio.moneda_destino_id == 1,
+    ).order_by(TasaCambio.fecha.desc()).first()
+    if tasa_registrada and tasa_registrada.valor > 0:
+        vigente = float(tasa_registrada.valor)
+        if abs(tasa - vigente) / vigente > 0.5:
+            raise ValueError(
+                f"La tasa ({tasa}) difiere más de 50% de la tasa registrada "
+                f"del día ({vigente}). Usa la TRM real."
+            )
+    return tasa, monto_base, margen_saldo
 
 
 def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, usuario_id: int | None = None) -> None:
@@ -322,37 +414,10 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
         raise ValueError("La venta ya se encuentra totalmente pagada.")
 
     # 3. Determinar tasa de cambio y calcular monto en moneda base
-    misma_moneda = esquema.moneda_id == venta.moneda_id
-    if misma_moneda:
-        # Mismo tipo de moneda: tasa 1:1, no se requiere TRM
-        tasa_cambio = 1.0
-        monto_en_moneda_base = float(esquema.monto)
-        # Pagos en la misma moneda de la factura: el monto es exacto, no se redondea.
-        margen_saldo = 0.01
-    else:
-        # Moneda diferente: la tasa_cambio es obligatoria
-        if not esquema.tasa_cambio or float(esquema.tasa_cambio) <= 0:
-            raise ValueError(
-                "La moneda del pago difiere de la moneda de la factura. "
-                "Debes proporcionar la tasa de cambio (TRM) para realizar la conversión."
-            )
-        tasa_cambio = float(esquema.tasa_cambio)
-        monto_en_moneda_base = round(float(esquema.monto) * tasa_cambio, 2)
-        margen_saldo = 0.01
-        # Solo cuando la FACTURA es en COP el libro base queda al millar (la
-        # moneda mínima en Colombia es 50 COP; el paso YEIKAR es 1.000). La
-        # diferencia del redondeo (máx. ±500 COP) se absorbe como ajuste y por
-        # eso el margen de saldo sube al paso completo. En facturas USD/VES la
-        # base tiene centavos normales (moneda legal) y no se redondea.
-        if venta.moneda_id == 1:
-            monto_en_moneda_base = float(
-                redondear_a_multiplo(
-                    Decimal(str(esquema.monto)) * Decimal(str(tasa_cambio)),
-                    PASO_PRECIO_COP,
-                    "half_up",
-                )
-            )
-            margen_saldo = float(PASO_PRECIO_COP)
+    #    (misma regla para pagos y descuentos; el saldo resta ambos).
+    tasa_cambio, monto_en_moneda_base, margen_saldo = _convertir_a_moneda_venta(
+        db, esquema.moneda_id, float(esquema.monto), esquema.tasa_cambio, venta
+    )
 
     # 4. Validar metodo de pago valido y su coherencia con la moneda del pago.
     #    Un pago en USD no puede entrar a la caja de pesos: el arqueo físico
@@ -373,40 +438,12 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
             "Usa un método compatible (p. ej. ZELLE o EFECTIVO_USD para pagos en USD)."
         )
 
-    # 4b. Tasa de cambio: validar que no sea absurda. El piso 0.0001 permite
-    #     tasas invertidas legítimas (COP→USD ≈ 1/3900 = 0.0002564); lo que se
-    #     bloquea es el monto en moneda base quedando en ~0 (dinero recibido que
-    #     desaparece del libro) y desviaciones >50% contra la tasa registrada.
-    if not misma_moneda:
-        if tasa_cambio < 0.0001:
-            raise ValueError(
-                f"La tasa de cambio ({tasa_cambio}) no es válida para un pago en moneda extranjera. "
-                "Indica la TRM real del día (COP por unidad de la moneda del pago)."
-            )
-        if round(monto_en_moneda_base, 2) <= 0:
-            raise ValueError(
-                "El monto del pago en moneda base queda en 0 COP con la tasa indicada. "
-                "Revisa la TRM."
-            )
-        # Si el sistema tiene una tasa registrada para esa moneda, la tasa del
-        # pago no puede desviarse más de 50% (anti "cobrar en cero" con TRM
-        # inventadas mientras exista una real en el catálogo).
-        tasa_registrada = db.query(TasaCambio).filter(
-            TasaCambio.moneda_origen_id == esquema.moneda_id,
-            TasaCambio.moneda_destino_id == 1,
-        ).order_by(TasaCambio.fecha.desc()).first()
-        if tasa_registrada and tasa_registrada.valor > 0:
-            vigente = float(tasa_registrada.valor)
-            if abs(tasa_cambio - vigente) / vigente > 0.5:
-                raise ValueError(
-                    f"La tasa del pago ({tasa_cambio}) difiere más de 50% de la tasa registrada "
-                    f"del día ({vigente}). Usa la TRM real."
-                )
+    # 4b. (validación de tasa absurda y ±50% contra la registrada: ya aplicada
+    #     dentro de _convertir_a_moneda_venta para pagos y descuentos por igual)
 
     # 5. Validar que el monto (en moneda base) no supere el saldo pendiente
-    pagos_previos = db.query(Pago).filter(Pago.venta_id == venta.id).all()
-    total_ya_pagado_base = sum(float(p.monto_en_moneda_base) for p in pagos_previos)
-    saldo_pendiente_base = float(venta.total) - total_ya_pagado_base
+    #    (el saldo resta pagos Y descuentos: lo perdonado ya no se puede cobrar).
+    saldo_pendiente_base = _saldo_pendiente(db, venta)
 
     if monto_en_moneda_base > saldo_pendiente_base + margen_saldo:
         raise ValueError(
@@ -432,17 +469,8 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
     # 6b. Registrar el cobro en la cuenta de caja del método de pago (mismo commit)
     _registrar_movimiento_caja_pago(db, db_pago, venta, usuario.id if usuario else None)
 
-    # 7. Recalcular estado de la venta usando monto_en_moneda_base
-    todos_pagos = db.query(Pago).filter(Pago.venta_id == venta.id).all()
-    total_pagado_base = sum(float(p.monto_en_moneda_base) for p in todos_pagos)
-    total_venta = float(venta.total)
-
-    if total_pagado_base >= total_venta - margen_saldo:  # margen de redondeo (1 centavo COP; 1.000 en moneda extranjera)
-        venta.estado = "PAGADA"
-    elif total_pagado_base > 0.0:
-        venta.estado = "ABONADA"
-    else:
-        venta.estado = "PENDIENTE"
+    # 7. Recalcular estado de la venta usando pagado + descontado
+    _recalcular_estado_venta(db, venta, margen_saldo)
 
     if usuario is not None:
         venta.actualizado_por_id = usuario.id
@@ -463,6 +491,111 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
 
 
 # ------------------------------------------------------------
+# Descuentos de cobro (rebaja sin movimiento de caja)
+# ------------------------------------------------------------
+def obtener_descuento(db: Session, id_descuento: int):
+    return db.query(DescuentoVenta).filter(DescuentoVenta.id == id_descuento).first()
+
+
+def crear_descuento(db: Session, esquema: DescuentoCreate, commit: bool = True, usuario: Usuario | None = None):
+    """Registra una rebaja otorgada al cobrar: resta del saldo pendiente con la
+    misma lógica multimoneda de los pagos, pero NO genera MovimientoCaja."""
+    # 1. Venta con FOR UPDATE: un cobro y un descuento simultáneos no pueden
+    #    validar el saldo al mismo tiempo.
+    venta_query = db.query(Venta).filter(Venta.id == esquema.venta_id)
+    if usuario is not None:
+        venta_query = filtrar_registros_propios(venta_query, Venta.creado_por_id, usuario)
+    venta = venta_query.with_for_update().first()
+    if not venta:
+        raise ValueError("La venta especificada no existe.")
+
+    # 2. Validar que la venta no este cancelada ni pagada
+    if venta.estado == "CANCELADA":
+        raise ValueError("No se pueden registrar descuentos en una venta cancelada.")
+    if venta.estado == "PAGADA":
+        raise ValueError("La venta ya se encuentra totalmente pagada.")
+
+    # 3. Conversión a la moneda de la venta (misma regla que los pagos).
+    tasa_cambio, monto_en_moneda_base, margen_saldo = _convertir_a_moneda_venta(
+        db, esquema.moneda_id, float(esquema.monto), esquema.tasa_cambio, venta
+    )
+
+    # 4. El descuento no puede exceder el saldo pendiente (pagos + descuentos
+    #    previos ya restan).
+    saldo_pendiente_base = _saldo_pendiente(db, venta)
+    if monto_en_moneda_base > saldo_pendiente_base + margen_saldo:
+        raise ValueError(
+            f"El descuento ({monto_en_moneda_base:,.2f} en moneda base) excede el saldo "
+            f"pendiente de la factura ({saldo_pendiente_base:,.2f}). Revisa el monto o la tasa de cambio."
+        )
+
+    # 5. Crear el descuento (SIN movimiento de caja: lo perdonado no es ingreso).
+    db_descuento = DescuentoVenta(
+        venta_id=esquema.venta_id,
+        moneda_id=esquema.moneda_id,
+        fecha=esquema.fecha,
+        monto=esquema.monto,
+        tasa_cambio=tasa_cambio,
+        monto_en_moneda_base=monto_en_moneda_base,
+        motivo=esquema.motivo,
+        observaciones=esquema.observaciones,
+        creado_por_id=usuario.id if usuario is not None else None,
+    )
+    db.add(db_descuento)
+    db.flush()
+
+    # 6. Recalcular estado (un descuento puede cerrar la venta: PAGADA).
+    _recalcular_estado_venta(db, venta, margen_saldo)
+
+    if usuario is not None:
+        venta.actualizado_por_id = usuario.id
+    record_event(
+        db,
+        actor=usuario,
+        action="CREATE",
+        entity_type="descuento_venta",
+        entity_id=db_descuento.id,
+        after={"venta_id": db_descuento.venta_id, "monto": db_descuento.monto, "motivo": db_descuento.motivo},
+    )
+
+    if commit:
+        db.commit()
+    db.refresh(db_descuento)
+    return db_descuento
+
+
+def anular_descuento(db: Session, id_descuento: int, usuario: Usuario | None = None):
+    """Anula un descuento de cobro: el saldo vuelve a subir y el estado de la
+    venta se recalcula (puede volver de PAGADA a ABONADA)."""
+    db_descuento = db.query(DescuentoVenta).filter(DescuentoVenta.id == id_descuento).first()
+    if not db_descuento:
+        return False
+    venta_query = db.query(Venta).filter(Venta.id == db_descuento.venta_id)
+    if usuario is not None:
+        venta_query = filtrar_registros_propios(venta_query, Venta.creado_por_id, usuario)
+    venta = venta_query.with_for_update().first()
+    if not venta:
+        raise ValueError("La venta del descuento no existe o no tienes acceso a ella.")
+    if venta.estado == "CANCELADA":
+        raise ValueError("No se puede anular un descuento en una venta cancelada.")
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="descuento_venta",
+        entity_id=db_descuento.id,
+        before={"venta_id": db_descuento.venta_id, "monto": db_descuento.monto, "motivo": db_descuento.motivo},
+    )
+    db.delete(db_descuento)
+    db.flush()
+    _recalcular_estado_venta(db, venta)
+    if usuario is not None:
+        venta.actualizado_por_id = usuario.id
+    db.commit()
+    return True
+
+
+# ------------------------------------------------------------
 # Reporte de Cuentas por Cobrar
 # ------------------------------------------------------------
 def obtener_cuentas_por_cobrar(db: Session):
@@ -477,10 +610,9 @@ def obtener_cuentas_por_cobrar(db: Session):
 
     cuentas = []
     for v in ventas:
-        pagos = db.query(Pago).filter(Pago.venta_id == v.id).all()
-        # Usar monto_en_moneda_base para calcular el total pagado en la moneda base de la venta
-        total_pagado = sum(float(p.monto_en_moneda_base) for p in pagos)
-        saldo_pendiente = float(v.total) - total_pagado
+        # Usar monto_en_moneda_base para calcular pagado y descontado en la moneda de la venta
+        total_pagado, total_descontado = _totales_cobro(db, v.id)
+        saldo_pendiente = float(v.total) - total_pagado - total_descontado
 
         if saldo_pendiente > 0.0:
             # Obtener nombre de cliente y codigo de moneda
@@ -494,6 +626,7 @@ def obtener_cuentas_por_cobrar(db: Session):
                 "fecha": v.fecha,
                 "total": float(v.total),
                 "total_pagado": total_pagado,
+                "total_descontado": total_descontado,
                 "saldo_pendiente": saldo_pendiente,
                 "moneda_codigo": moneda_codigo,
                 "pedido_estado": v.pedido_estado,

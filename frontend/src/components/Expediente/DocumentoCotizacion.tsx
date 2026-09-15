@@ -147,7 +147,7 @@ export default function DocumentoCotizacion({
             <table className="w-full border-collapse text-[9.5px]">
               <thead>
                 <tr className="bg-stone-900 text-stone-100">
-                  {['Modelo', 'Cant.', 'Descripción / Medidas', 'P. Unitario', `Total (${moneda})`].map((h, i) => (
+                  {['Modelo', 'Cant.', 'Descripción / Medidas', 'P. Unitario', 'Total'].map((h, i) => (
                     <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[8px]
                       ${i === 0 ? 'text-left w-[20%]' : i === 1 ? 'text-center w-[8%]' : i === 2 ? 'text-left' : 'text-right w-[13%]'}`}>{h}</th>
                   ))}

@@ -91,6 +91,39 @@ class PagoResponse(PagoBase):
 
 
 # ------------------------------------------------------------
+# Descuento de cobro (rebaja que resta del saldo sin mover caja)
+# ------------------------------------------------------------
+class DescuentoBase(BaseModel):
+    fecha: datetime
+    monto: float = Field(..., gt=0)
+    motivo: Optional[str] = None
+    observaciones: Optional[str] = None
+
+class DescuentoCreate(DescuentoBase):
+    venta_id: int
+    moneda_id: int
+    # Tasa de cambio respecto a la moneda de la venta.
+    # Debe indicarse cuando la moneda del descuento difiere de la moneda de la venta
+    # (misma regla que en PagoCreate). Si coinciden, se puede omitir (se asume 1.0).
+    tasa_cambio: Optional[float] = Field(None, gt=0, description="TRM/tasa de conversión. Requerido si moneda_id difiere de la moneda de la venta.")
+
+class DescuentoResponse(DescuentoBase):
+    id: int
+    venta_id: int
+    moneda_id: int
+    tasa_cambio: float
+    monto_en_moneda_base: float
+    creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    moneda: Optional[MonedaResponse] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ------------------------------------------------------------
 # Venta (Factura)
 # ------------------------------------------------------------
 class VentaBase(BaseModel):
@@ -134,7 +167,9 @@ class VentaResponse(VentaBase):
 class VentaDetalleResponse(VentaResponse):
     detalles: List[DetalleVentaResponse] = []
     pagos: List[PagoResponse] = []
+    descuentos: List[DescuentoResponse] = []
     total_pagado: float = 0.0
+    total_descontado: float = 0.0
     saldo_pendiente: float = 0.0
 
 
@@ -148,6 +183,7 @@ class CuentaPorCobrarResponse(BaseModel):
     fecha: date
     total: float
     total_pagado: float
+    total_descontado: float = 0.0
     saldo_pendiente: float
     moneda_codigo: str
     pedido_estado: Optional[str] = None

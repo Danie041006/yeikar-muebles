@@ -1,7 +1,7 @@
 import io
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.modules.adjuntos import model
 from app.modules.adjuntos.schemas import AdjuntoInfo
@@ -117,6 +117,7 @@ def guardar_adjunto(
 def listar_adjuntos(db: Session, entidad_tipo: str, entidad_id: int):
     return (
         db.query(model.Adjunto)
+        .options(joinedload(model.Adjunto.creador))
         .filter(model.Adjunto.entidad_tipo == entidad_tipo, model.Adjunto.entidad_id == entidad_id)
         .order_by(model.Adjunto.id.desc())
         .all()

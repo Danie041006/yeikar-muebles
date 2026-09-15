@@ -40,6 +40,15 @@ class Usuario(Base):
     roles = relationship("Rol", secondary=usuario_rol, backref="usuarios")
     empleado = relationship("Empleado", foreign_keys=[empleado_id])
 
+    @property
+    def display_name(self) -> str:
+        """Nombre real para auditoría/UI, con fallback al login.
+
+        Fuente única de verdad: todo "quién registró" debe usar esto,
+        nunca `nombre_usuario` directo.
+        """
+        return self.nombre or self.nombre_usuario
+
 class LoginIntento(Base):
     __tablename__ = "login_intento"
 

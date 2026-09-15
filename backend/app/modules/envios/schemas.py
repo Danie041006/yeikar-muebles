@@ -126,6 +126,7 @@ class EnvioUbicacionResponse(EnvioUbicacionCreate):
     envio_id: int
     empleado_id: Optional[int] = None
     reportado_por_id: Optional[int] = None
+    reportado_por_nombre: Optional[str] = None
     recibida_en: datetime
 
     class Config:

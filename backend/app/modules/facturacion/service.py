@@ -129,7 +129,8 @@ def pedidos_facturables(db: Session, usuario: Usuario | None = None):
                 "nombre": (
                     dp.producto.nombre if dp.producto
                     else (dp.material.nombre if dp.material else None)
-                ) or f"Producto #{dp.producto_id}",
+                ) or (dp.descripcion_especifica if dp.descripcion_especifica else None)
+                or (f"Producto #{dp.producto_id}" if dp.producto_id else "Ítem a medida"),
                 "cantidad": float(dp.cantidad),
                 "precio_referencia": float(dp.precio),
                 "moneda_codigo": moneda_codigo,

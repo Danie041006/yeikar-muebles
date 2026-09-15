@@ -80,6 +80,7 @@ def db():
 # ---------------------------------------------------------------------------
 ORDEN_LIMPIEZA = [
     "devolucion_venta",
+    "descuento_venta",
     "pago",
     "detalle_venta",
     "venta",
@@ -339,6 +340,24 @@ def crear_pago(client, cleaner, venta_id, moneda_id, monto, metodo_pago="EFECTIV
     return r, body
 
 
+def crear_descuento(client, cleaner, venta_id, moneda_id, monto,
+                    tasa_cambio=None, motivo=None) -> dict:
+    payload = {
+        "venta_id": venta_id,
+        "moneda_id": moneda_id,
+        "fecha": datetime.utcnow().isoformat(),
+        "monto": monto,
+        "motivo": motivo,
+    }
+    if tasa_cambio is not None:
+        payload["tasa_cambio"] = tasa_cambio
+    r = client.post("/api/v1/pago/descuento/", json=payload, headers=ADMIN_HEADERS)
+    body = r.json() if r.status_code in (200, 201) else r.text
+    if r.status_code in (200, 201):
+        cleaner.registrar("descuento_venta", body["id"])
+    return r, body
+
+
 def crear_movimiento(client, cleaner, material_id, tipo, cantidad, ubicacion_id=1) -> (tuple):
     r = client.post("/api/v1/inventario/movimiento", json={
         "material_id": material_id,
@@ -438,3 +457,5 @@ def registrar_venta_de_pedido(client, cleaner, pedido_id):
             cleaner.registrar("detalle_venta", d["id"])
         for p in det.json().get("pagos", []):
             cleaner.registrar("pago", p["id"])
+        for x in det.json().get("descuentos", []):
+            cleaner.registrar("descuento_venta", x["id"])

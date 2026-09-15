@@ -1,4 +1,4 @@
-import { InformeMensualResponse } from '../services/reportesService';
+import { InformeMensualResponse, EstadoPorMoneda } from '../services/reportesService';
 
 const NOMBRES_MESES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -76,7 +76,8 @@ function seccion1(informe: InformeMensualResponse): string {
       : ci.lineas
           .map((l) => {
             const pct = l.porcentaje_ganancia != null ? `${l.porcentaje_ganancia.toFixed(1)}%` : '—';
-            const tasa = l.tasa_cambio ? l.tasa_cambio.toLocaleString('es-CO') : '—';
+            const tasa = l.tasa_cambio != null ? l.tasa_cambio.toLocaleString('es-CO') : '—';
+            const base = l.precio_venta_en_base != null ? fmtCop(l.precio_venta_en_base) : '—';
             return `<tr class="${l.es_devolucion ? 'dev' : ''}">
               <td>${esc(l.fecha.slice(0, 10))}</td>
               <td>${esc(l.cliente)}</td>
@@ -88,10 +89,31 @@ function seccion1(informe: InformeMensualResponse): string {
               <td class="num">${fmtCop(l.precio_venta)}</td>
               <td class="num">${esc(l.moneda)}</td>
               <td class="num">${esc(tasa)}</td>
-              <td class="num">${fmtCop(l.precio_venta_en_base)}</td>
+              <td class="num">${esc(base)}</td>
             </tr>`;
           })
           .join('');
+  const filasTotales = (ci.totales_por_moneda?.length
+    ? ci.totales_por_moneda
+    : [{
+        moneda: '—',
+        precio_costo: ci.totales.precio_costo,
+        utilidad: ci.totales.utilidad,
+        precio_venta: ci.totales.precio_venta,
+        precio_venta_en_base: ci.totales.precio_venta_en_base,
+        descuentos: ci.totales.descuentos,
+      }]
+  ).map((t) => `
+    <tr class="total-row">
+      <td colspan="4">TOTALES${t.moneda !== '—' ? ` · ${esc(t.moneda)}` : ''}</td>
+      <td class="num">${fmtCop(t.precio_costo)}</td>
+      <td></td>
+      <td class="num">${fmtCop(t.utilidad)}</td>
+      <td class="num">${fmtCop(t.precio_venta)}</td>
+      <td></td>
+      <td></td>
+      <td class="num">${t.precio_venta_en_base != null ? fmtCop(t.precio_venta_en_base) : '—'}</td>
+    </tr>`).join('');
   return `
     <h2>1. Control Interno de Ingresos</h2>
     <table class="grid">
@@ -99,37 +121,27 @@ function seccion1(informe: InformeMensualResponse): string {
         <tr>
           <th>Fecha</th><th>Cliente</th><th class="num">Cant.</th><th>Detalle Producto</th>
           <th class="num">Precio Costo</th><th class="num">% Gan.</th><th class="num">Utilidad</th>
-          <th class="num">Precio de Venta</th><th class="num">Mon.</th><th class="num">Tasa</th><th class="num">Valor en COP</th>
+          <th class="num">Precio de Venta</th><th class="num">Mon.</th><th class="num">Tasa</th><th class="num">Eq. ref. COP</th>
         </tr>
       </thead>
       <tbody>${filas}</tbody>
-      <tfoot>
-        <tr class="total-row">
-          <td colspan="4">TOTALES</td>
-          <td class="num">${fmtCop(ci.totales.precio_costo)}</td>
-          <td></td>
-          <td class="num">${fmtCop(ci.totales.utilidad)}</td>
-          <td class="num">${fmtCop(ci.totales.precio_venta)}</td>
-          <td></td>
-          <td></td>
-          <td class="num">${fmtCop(ci.totales.precio_venta_en_base)}</td>
-        </tr>
-      </tfoot>
+      <tfoot>${filasTotales}</tfoot>
     </table>`;
 }
 
 function seccion2(informe: InformeMensualResponse): string {
-  const r = informe.resumen;
-  const dispCls = r.disponible < 0 ? 'neg' : '';
+  const filas = (informe.resumen.por_moneda?.length
+    ? informe.resumen.por_moneda
+    : [{ moneda: 'COP', ingresos: informe.resumen.ingresos, egresos: informe.resumen.egresos, disponible: informe.resumen.disponible }]
+  ).map((r) => `
+    <tr>
+      <td><span class="label">Ingresos (+) · ${esc(r.moneda)}</span><span class="valor" style="color:#0a7d2c">${fmtCop(r.ingresos)}</span></td>
+      <td><span class="label">Egresos (−) · ${esc(r.moneda)}</span><span class="valor neg">${fmtCop(r.egresos)}</span></td>
+      <td><span class="label">Disponible · ${esc(r.moneda)}</span><span class="valor ${r.disponible < 0 ? 'neg' : ''}">${fmtCop(r.disponible)}</span></td>
+    </tr>`).join('');
   return `
-    <h2>2. Resumen del Mes</h2>
-    <table class="resumen">
-      <tr>
-        <td><span class="label">Ingresos (+)</span><span class="valor" style="color:#0a7d2c">${fmtCop(r.ingresos)}</span></td>
-        <td><span class="label">Egresos (−)</span><span class="valor neg">${fmtCop(r.egresos)}</span></td>
-        <td><span class="label">Disponible</span><span class="valor ${dispCls}">${fmtCop(r.disponible)}</span></td>
-      </tr>
-    </table>`;
+    <h2>2. Resumen del Mes (por moneda)</h2>
+    <table class="resumen">${filas}</table>`;
 }
 
 function filaDetalle(label: string, valor: number, total?: boolean, nota?: string): string {
@@ -161,12 +173,19 @@ function bloqueGastos(titulo: string, lineas: LineaGasto[], subtotal: number): s
 }
 
 function seccion3(informe: InformeMensualResponse): string {
-  const er = informe.estado_resultados;
+  const bloques: EstadoPorMoneda[] = informe.estado_resultados_por_moneda?.length
+    ? informe.estado_resultados_por_moneda
+    : [{ moneda: 'COP', ...informe.estado_resultados }];
+  return bloques.map((er) => seccion3Moneda(er)).join('');
+}
+
+function seccion3Moneda(er: EstadoPorMoneda): string {
   const g = er.gastos;
   const utilCls = er.utilidad_periodo < 0 ? 'neg' : '';
   return `
     <div class="page-break"></div>
-    <h2>3. Estado de Resultados</h2>
+    <h2>3. Estado de Resultados · ${esc(er.moneda)}</h2>
+    <p class="estado-sub" style="margin: 0 0 6px;">Todas las cifras de este bloque en ${esc(er.moneda)} (moneda nativa)</p>
     <table class="er-table"><tr>
       <td class="er-left">
         <table class="detalle">
@@ -197,6 +216,7 @@ function seccion3(informe: InformeMensualResponse): string {
           ${bloqueGastos('Administrativos', g.administrativos, g.total_gastos_administrativos)}
           ${bloqueGastos('Financieros', g.financieros, g.total_financieros)}
           ${bloqueGastos('Impuestos', g.impuestos, g.total_impuestos)}
+          ${bloqueGastos('Producción', g.produccion ?? [], g.total_gastos_produccion ?? 0)}
           <tr class="total"><td>Total Gastos</td><td class="num">${fmtCop(g.total_gastos)}</td></tr>
         </table>
         <div class="utilidad">
@@ -224,12 +244,20 @@ function seccion4(informe: InformeMensualResponse): string {
               <td>${esc(l.producto)}</td>
               <td>${estado}</td>
               <td class="num">${esc(l.moneda)}</td>
-              <td class="num">${fmtCop(l.total_en_base)}</td>
-              <td class="num">${fmtCop(l.pagado_en_base)}</td>
-              <td class="num" style="font-weight:bold">${fmtCop(l.saldo_en_base)}</td>
+              <td class="num">${fmtCop(l.total_en_moneda ?? l.total_en_base)}</td>
+              <td class="num">${fmtCop(l.pagado_en_moneda ?? l.pagado_en_base)}</td>
+              <td class="num" style="font-weight:bold">${fmtCop(l.saldo_en_moneda ?? l.saldo_en_base)}</td>
             </tr>`;
           })
           .join('');
+  const filasTotales = (pp.total_pendiente_por_moneda?.length
+    ? pp.total_pendiente_por_moneda
+    : [{ moneda: 'COP', saldo: pp.total_pendiente }]
+  ).map((t) => `
+    <tr class="total-row">
+      <td colspan="8">TOTAL PENDIENTE DE PAGO · ${esc(t.moneda)}</td>
+      <td class="num">${fmtCop(t.saldo)}</td>
+    </tr>`).join('');
   return `
     <div class="page-break"></div>
     <h2>4. Pendientes de Pago al Cierre</h2>
@@ -241,12 +269,7 @@ function seccion4(informe: InformeMensualResponse): string {
         </tr>
       </thead>
       <tbody>${filas}</tbody>
-      <tfoot>
-        <tr class="total-row">
-          <td colspan="8">TOTAL PENDIENTE DE PAGO</td>
-          <td class="num">${fmtCop(pp.total_pendiente)}</td>
-        </tr>
-      </tfoot>
+      <tfoot>${filasTotales}</tfoot>
     </table>`;
 }
 
@@ -265,7 +288,7 @@ export function buildInformePrintHtml(informe: InformeMensualResponse, mes: stri
     <div class="der">
       <div class="titulo">Informe Mensual</div>
       <div class="mes">${esc(nombreMes(mes))}</div>
-      <div class="gen">Generado el ${esc(fecha)} · Todas las cifras en COP</div>
+      <div class="gen">Generado el ${esc(fecha)} · Cada cifra en la moneda de su operación</div>
     </div>
   </div>
   <div class="divisor"></div>

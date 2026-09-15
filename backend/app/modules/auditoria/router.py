@@ -34,7 +34,7 @@ def listar_eventos(
     return [
         schemas.AuditEventResponse(
             **schemas.AuditEventResponse.model_validate(event).model_dump(exclude={"actor_name"}),
-            actor_name=event.actor.nombre_usuario if event.actor else None,
+            actor_name=event.actor.display_name if event.actor else None,
         )
         for event in events
     ]

@@ -341,7 +341,9 @@ def obtener_ubicaciones(db: Session, id_envio: int, usuario: Usuario):
     envio = obtener_envio(db, id_envio, usuario)
     if not envio:
         return None, []
-    ubicaciones = db.query(EnvioUbicacion).filter(
+    ubicaciones = db.query(EnvioUbicacion).options(
+        joinedload(EnvioUbicacion.reportado_por)
+    ).filter(
         EnvioUbicacion.envio_id == id_envio
     ).order_by(EnvioUbicacion.recibida_en.desc()).limit(500).all()
     return envio, ubicaciones

@@ -17,6 +17,7 @@ from app.modules.reports import schemas, model
 from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
 from app.modules.tasas_cambio.model import TasaCambio
 from app.modules.auditoria.service import record_event
+from app.modules.cuentas_por_pagar.model import CuentaPorPagar, PagoCuentaPorPagar
 from app.modules.users.model import Usuario
 
 def obtener_pnl(db: Session, mes: str) -> schemas.PnLResponse:
@@ -260,6 +261,94 @@ def _venta_en_cop(db: Session, venta: Venta) -> Decimal:
     return Decimal(str(venta.total)) * tasa
 
 
+def _trm_referencia(db: Session, moneda_id: Optional[int], fecha, tasa_guardada=None) -> Optional[Decimal]:
+    """TRM confiable moneda → COP para la columna de referencia del informe.
+
+    - COP: 1.0 (nativo).
+    - Con tasa congelada distinta de 1.0 (la TRM fijada al cotizar): esa.
+    - Si la guardada es 1.0 (o no hay): TRM registrada en el catálogo a la fecha.
+    - Sin ninguna: None. Mostrar el equivalente asumiendo 1 USD = 1 COP
+      fabricaba cifras en COP falsas (y descuadraba los totales).
+    """
+    if moneda_id in (None, 1):
+        return Decimal("1.0")
+    if tasa_guardada is not None:
+        try:
+            tasa = Decimal(str(tasa_guardada))
+        except Exception:
+            tasa = Decimal("0.0")
+        if tasa > 0 and tasa != Decimal("1.0"):
+            return tasa
+    return _tasa_registrada_a_cop(db, moneda_id, fecha)
+
+
+def _nombre_detalle(det) -> Optional[str]:
+    """Nombre legible de una línea (pedido/venta/cotización) sin nunca
+    interpolar 'None'.
+
+    Orden de precedencia:
+      1. Producto del catálogo (FABRICADO/REVENTA con referencia).
+      2. Material del catálogo (INSUMO).
+      3. Descripción personalizada guardada: los muebles a medida y las
+         notas históricas (importadas desde cotizaciones del Cotizador IA
+         o notas de entrega) NO tienen producto/material y viven en
+         `descripcion_especifica` (detalle_pedido/detalle_venta) o en
+         `observaciones` (detalle_cotizacion).
+      4. Ids numéricos como último recurso, SOLO si no son nulos.
+    """
+    if getattr(det, "producto", None) and det.producto.nombre:
+        return det.producto.nombre
+    if getattr(det, "material", None) and getattr(det.material, "nombre", None):
+        return det.material.nombre
+    desc = getattr(det, "descripcion_especifica", None) or getattr(det, "observaciones", None)
+    if desc and str(desc).strip():
+        return str(desc).strip()
+    if getattr(det, "producto_id", None):
+        return f"Producto #{det.producto_id}"
+    if getattr(det, "material_id", None):
+        return f"Material #{det.material_id}"
+    return None
+
+
+def _texto_productos(origen) -> str:
+    """Concatena las líneas de un origen (detalles de venta, pedido o
+    cotización) como 'Nombre xcantidad'. Nunca emite 'None'."""
+    partes = []
+    for det in origen:
+        nombre = _nombre_detalle(det) or "Ítem a medida"
+        partes.append(f"{nombre} x{det.cantidad}")
+    return ", ".join(partes) if partes else "—"
+
+
+def _primer_texto_productos(*fuentes) -> str:
+    """Primera fuente (venta → pedido → cotización) con nombres reales.
+
+    Una fuente compuesta solo por líneas anónimas ('Ítem a medida') no sirve:
+    se sigue buscando en la siguiente. Las notas históricas pueden no tener
+    detalle_pedido: el nombre original vive en la cotización, que es la fuente
+    literal a mostrar.
+    """
+    primero = "—"
+    for fuente in fuentes:
+        if not fuente:
+            continue
+        partes = []
+        reales = 0
+        for det in fuente:
+            nombre = _nombre_detalle(det)
+            if nombre:
+                reales += 1
+            else:
+                nombre = "Ítem a medida"
+            partes.append(f"{nombre} x{det.cantidad}")
+        texto = ", ".join(partes)
+        if primero == "—":
+            primero = texto
+        if reales:
+            return texto
+    return primero
+
+
 def _saldo_caja_en_cop(db: Session, metodo_id: int, hasta: date) -> Decimal:
     """Saldo de un método de caja sumando movimientos hasta la fecha (en COP)."""
     movs = (
@@ -281,6 +370,8 @@ def _saldo_caja_en_cop(db: Session, metodo_id: int, hasta: date) -> Decimal:
 
 def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResponse:
     start_dt, end_dt, start_date, end_date = _mes_a_rango(mes)
+    # Catálogo de monedas (id → código), una sola query para todo el informe
+    monedas_catalogo = {m.id: m.codigo for m in db.query(Moneda).all()}
 
     # ============================================================
     # 1. CONTROL INTERNO DE INGRESOS
@@ -320,31 +411,54 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     )
 
     for venta in ventas_mes:
-        tasa_venta = Decimal(str(venta.tasa_cambio or 1.0)) if venta.moneda_id != 1 else Decimal("1.0")
-        if venta.moneda_id != 1 and tasa_venta == Decimal("1.0"):
-            tasa_venta = obtener_tasa_moneda_a_cop(db, venta.moneda_id, venta.fecha)
-        for dv in detalle_por_venta.get(venta.id, []):
+        tasa_venta = _trm_referencia(db, venta.moneda_id, venta.fecha, venta.tasa_cambio)
+        detalles_venta = detalle_por_venta.get(venta.id, [])
+        if not detalles_venta:
+            # Venta sin renglones (facturación directa / histórica): sin línea
+            # su total era invisible en la tabla aunque sus pagos sí contaban
+            # en el resumen → el informe no cuadraba consigo mismo.
+            precio_linea = Decimal(str(venta.total))
+            lineas.append(
+                schemas.LineaIngresoInforme(
+                    fecha=venta.fecha,
+                    cliente=venta.cliente.nombre if venta.cliente else "—",
+                    cantidad=Decimal("1"),
+                    producto="(Venta sin detalle de producto)",
+                    costo_unitario=Decimal("0.0"),
+                    precio_costo=Decimal("0.0"),
+                    porcentaje_ganancia=None,
+                    utilidad=Decimal("0.0"),
+                    precio_venta=precio_linea,
+                    descuento=Decimal("0.0"),
+                    moneda=venta.moneda.codigo if venta.moneda else "COP",
+                    tasa_cambio=tasa_venta,
+                    precio_venta_en_base=precio_linea * tasa_venta if tasa_venta is not None else None,
+                    es_devolucion=False,
+                )
+            )
+        for dv in detalles_venta:
             costo_unit = Decimal(str(dv.costo_unitario or 0.0))
             pct = Decimal(str(dv.porcentaje_ganancia or 0.0)) if dv.porcentaje_ganancia is not None else None
             precio = Decimal(str(dv.precio))
             cantidad = Decimal(str(dv.cantidad))
             utilidad = Decimal(str(dv.utilidad or (precio - costo_unit))) * cantidad
             descuento = Decimal(str(dv.descuento or 0.0)) * cantidad
+            precio_linea = precio * cantidad
             lineas.append(
                 schemas.LineaIngresoInforme(
                     fecha=venta.fecha,
                     cliente=venta.cliente.nombre if venta.cliente else "—",
                     cantidad=cantidad,
-                    producto=dv.producto.nombre if dv.producto else "—",
+                    producto=dv.producto.nombre if dv.producto else (_nombre_detalle(dv) or "—"),
                     costo_unitario=costo_unit,
                     precio_costo=costo_unit * cantidad,
                     porcentaje_ganancia=pct,
                     utilidad=utilidad,
-                    precio_venta=precio * cantidad,
+                    precio_venta=precio_linea,
                     descuento=descuento,
                     moneda=venta.moneda.codigo if venta.moneda else "COP",
                     tasa_cambio=tasa_venta,
-                    precio_venta_en_base=(precio * cantidad) * tasa_venta,
+                    precio_venta_en_base=precio_linea * tasa_venta if tasa_venta is not None else None,
                     es_devolucion=False,
                 )
             )
@@ -352,8 +466,13 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     # Devoluciones del mes como líneas negativas
     for dev in devoluciones_mes:
         venta = dev.venta
-        tasa_dev = Decimal(str(dev.tasa_cambio or 1.0))
-        base = Decimal(str(dev.monto_en_moneda_base or (dev.monto_devuelto * tasa_dev)))
+        dev_moneda_id = dev.moneda.id if dev.moneda else 1
+        tasa_dev = _trm_referencia(db, dev_moneda_id, dev.fecha, dev.tasa_cambio)
+        base_dev = (
+            Decimal(str(dev.monto_en_moneda_base or (dev.monto_devuelto * tasa_dev)))
+            if tasa_dev is not None
+            else None
+        )
         lineas.append(
             schemas.LineaIngresoInforme(
                 fecha=dev.fecha,
@@ -368,7 +487,7 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
                 descuento=Decimal("0.0"),
                 moneda=dev.moneda.codigo if dev.moneda else "COP",
                 tasa_cambio=tasa_dev,
-                precio_venta_en_base=-base,
+                precio_venta_en_base=-base_dev if base_dev is not None else None,
                 es_devolucion=True,
             )
         )
@@ -377,9 +496,25 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
         precio_costo=sum(l.precio_costo for l in lineas),
         utilidad=sum(l.utilidad for l in lineas),
         precio_venta=sum(l.precio_venta for l in lineas),
-        precio_venta_en_base=sum(l.precio_venta_en_base for l in lineas),
+        precio_venta_en_base=sum(l.precio_venta_en_base or Decimal("0.0") for l in lineas),
         descuentos=sum(l.descuento for l in lineas),
     )
+
+    # TOTALES separados por moneda: una cifra que suma USD con COP no significa
+    # nada contable (era exactamente el descuadre del informe).
+    def _total_moneda(cod: str) -> schemas.TotalesPorMonedaInforme:
+        ls = [l for l in lineas if l.moneda == cod]
+        return schemas.TotalesPorMonedaInforme(
+            moneda=cod,
+            precio_costo=sum(l.precio_costo for l in ls),
+            utilidad=sum(l.utilidad for l in ls),
+            precio_venta=sum(l.precio_venta for l in ls),
+            precio_venta_en_base=sum(l.precio_venta_en_base or Decimal("0.0") for l in ls) if cod == "COP" else None,
+            descuentos=sum(l.descuento for l in ls),
+        )
+
+    orden_monedas = sorted({l.moneda for l in lineas}, key=lambda c: (c != "COP", c))
+    totales_por_moneda = [_total_moneda(cod) for cod in orden_monedas]
 
     # ============================================================
     # 2. RESUMEN DEL MES
@@ -435,26 +570,38 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     # ============================================================
     # 3. ESTADO DE RESULTADOS
     # ============================================================
-    # Ventas contado / crédito
+    # Ventas contado / crédito (legacy en COP con TRM + desglose nativo por moneda)
     contado = Decimal("0.0")
     credito = Decimal("0.0")
+    ventas_por_moneda: Dict[str, Dict[str, Decimal]] = {}
     for venta in ventas_mes:
         pagos = pagos_por_venta.get(venta.id, [])
         total_pagado = sum(Decimal(str(p.monto_en_moneda_base or p.monto)) for p in pagos)
         total_venta = Decimal(str(venta.total))
-        if len(pagos) == 1 and total_pagado >= total_venta:
+        es_contado = len(pagos) == 1 and total_pagado >= total_venta
+        if es_contado:
             contado += _venta_en_cop(db, venta)
         else:
             credito += _venta_en_cop(db, venta)
+        cod_v = venta.moneda.codigo if venta.moneda else "COP"
+        agg_v = ventas_por_moneda.setdefault(
+            cod_v, {"contado": Decimal("0.0"), "credito": Decimal("0.0"), "devoluciones": Decimal("0.0"), "descuentos": Decimal("0.0")}
+        )
+        agg_v["contado" if es_contado else "credito"] += total_venta
+        agg_v["descuentos"] += sum(
+            Decimal(str(dv.descuento or 0.0)) * Decimal(str(dv.cantidad))
+            for dv in detalle_por_venta.get(venta.id, [])
+        )
 
     devoluciones_total = sum(
         Decimal(str(d.monto_en_moneda_base or (d.monto_devuelto * d.tasa_cambio)))
         for d in devoluciones_mes
     )
-    descuentos_total = sum(
-        Decimal(str(dv.descuento or 0.0)) * Decimal(str(dv.cantidad))
-        for venta in ventas_mes for dv in detalle_por_venta.get(venta.id, [])
-    )
+    for d in devoluciones_mes:
+        cod_d = d.moneda.codigo if d.moneda else "COP"
+        ventas_por_moneda.setdefault(
+            cod_d, {"contado": Decimal("0.0"), "credito": Decimal("0.0"), "devoluciones": Decimal("0.0"), "descuentos": Decimal("0.0")}
+        )["devoluciones"] += Decimal(str(d.monto_devuelto))
     descuentos_total_cop = Decimal("0.0")
     for venta in ventas_mes:
         tasa_v = _venta_en_cop(db, venta) / Decimal(str(venta.total)) if venta.total else Decimal("0.0")
@@ -487,24 +634,47 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     inventarios_finales = []
     total_inicial = Decimal("0.0")
     total_final = Decimal("0.0")
+    # Corte de inventario desglosado por la moneda en que se registró cada valor
+    inventarios_por_moneda: Dict[str, Dict[str, Decimal | List[schemas.LineaValorConcepto]]] = {}
     for c in conceptos:
         val = valores.get(c.id)
         v_inicial = Decimal(str(val.valor_inicial)) if val else Decimal("0.0")
         v_final = Decimal(str(val.valor_final)) if val else Decimal("0.0")
-        inventarios_iniciales.append(schemas.LineaValorConcepto(concepto_id=c.id, nombre=c.nombre, valor=v_inicial))
-        inventarios_finales.append(schemas.LineaValorConcepto(concepto_id=c.id, nombre=c.nombre, valor=v_final))
+        moneda_val = monedas_catalogo.get(val.moneda_id, "COP") if val else "COP"
+        inventarios_iniciales.append(schemas.LineaValorConcepto(concepto_id=c.id, nombre=c.nombre, valor=v_inicial, moneda=moneda_val))
+        inventarios_finales.append(schemas.LineaValorConcepto(concepto_id=c.id, nombre=c.nombre, valor=v_final, moneda=moneda_val))
         total_inicial += v_inicial
         total_final += v_final
+        inv_m = inventarios_por_moneda.setdefault(
+            moneda_val, {"total_inicial": Decimal("0.0"), "total_final": Decimal("0.0"), "iniciales": [], "finales": []}
+        )
+        inv_m["iniciales"].append(schemas.LineaValorConcepto(concepto_id=c.id, nombre=c.nombre, valor=v_inicial, moneda=moneda_val))
+        inv_m["finales"].append(schemas.LineaValorConcepto(concepto_id=c.id, nombre=c.nombre, valor=v_final, moneda=moneda_val))
+        inv_m["total_inicial"] += v_inicial
+        inv_m["total_final"] += v_final
 
-    # Saldos de caja a fin de mes (en COP). NO forman parte del inventario:
-    # sumarlos a inventarios_finales fabricaba una utilidad ficticia (el costo
-    # de ventas salía negativo por decenas de millones). Se exponen aparte en
-    # el informe (campo saldos_caja al final de la respuesta).
+    # Saldos de caja a fin de mes, EN LA MONEDA PROPIA de cada cuenta. NO
+    # forman parte del inventario (sumarlos fabricaba utilidad ficticia) y NO
+    # se consolidan en COP: los movimientos históricos guardan equivalentes
+    # con tasas mezcladas (algunos fabricados 1:1), así que el saldo nativo es
+    # la única cifra fiable.
     metodos_caja = db.query(model.MetodoCaja).filter(model.MetodoCaja.activo == True).order_by(model.MetodoCaja.orden).all()
-    saldos_caja = []
+    saldos_caja: List[schemas.LineaSaldoCajaInforme] = []
     for mc in metodos_caja:
-        saldo = _saldo_caja_en_cop(db, mc.id, end_date)
-        saldos_caja.append(schemas.LineaValorConcepto(concepto_id=-mc.id, nombre=mc.nombre, valor=saldo))
+        movs_mc = (
+            db.query(model.MovimientoCaja)
+            .filter(model.MovimientoCaja.metodo_caja_id == mc.id, model.MovimientoCaja.fecha <= end_date)
+            .all()
+        )
+        por_moneda_mc: Dict[str, Decimal] = {}
+        for m in movs_mc:
+            cod_mc = monedas_catalogo.get(m.moneda_id, "COP")
+            signo = Decimal("-1") if m.tipo == "SALIDA" else Decimal("1")
+            por_moneda_mc[cod_mc] = por_moneda_mc.get(cod_mc, Decimal("0.0")) + signo * Decimal(str(m.monto))
+        for cod_mc, saldo_mc in sorted(por_moneda_mc.items(), key=lambda kv: (kv[0] != "COP", kv[0])):
+            saldos_caja.append(
+                schemas.LineaSaldoCajaInforme(metodo_caja_id=mc.id, nombre=mc.nombre, moneda=cod_mc, saldo=saldo_mc)
+            )
 
     # Compras del mes (recibidas)
     compras_mes = (
@@ -615,25 +785,18 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     pagos_por_venta_cierre: Dict[int, List[Pago]] = {}
     for p in pagos_de_ventas:
         pagos_por_venta_cierre.setdefault(p.venta_id, []).append(p)
+    # Descuentos de cobro: restan del saldo igual que los pagos (sin mover caja).
+    from app.modules.sales.model import DescuentoVenta
+    descuentos_de_ventas = (
+        db.query(DescuentoVenta).filter(DescuentoVenta.venta_id.in_([v.id for v in ventas_de_pedidos])).all()
+    ) if ventas_de_pedidos else []
+    descuentos_por_venta_cierre: Dict[int, List[DescuentoVenta]] = {}
+    for d in descuentos_de_ventas:
+        descuentos_por_venta_cierre.setdefault(d.venta_id, []).append(d)
 
     for pedido in pedidos_cierre:
         venta = venta_por_pedido.get(pedido.id)
         productos: str = "—"
-
-        def _texto_productos(origen) -> str:
-            partes = []
-            for det in origen:
-                # FABRICADO/REVENTA → producto; INSUMO (producto_id NULL) → material.
-                if det.producto and det.producto.nombre:
-                    nombre = det.producto.nombre
-                elif getattr(det, "material", None) and det.material.nombre:
-                    nombre = det.material.nombre
-                elif det.producto_id:
-                    nombre = f"Producto #{det.producto_id}"
-                else:
-                    nombre = f"Material #{det.material_id}"
-                partes.append(f"{nombre} x{det.cantidad}")
-            return ", ".join(partes) if partes else "—"
 
         if venta:
             if venta.estado not in ("PENDIENTE", "ABONADA"):
@@ -643,12 +806,22 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
                 Decimal(str(p.monto_en_moneda_base or p.monto))
                 for p in pagos_por_venta_cierre.get(venta.id, [])
             )
-            saldo = total_base - pagado_base
+            descontado_base = sum(
+                Decimal(str(d.monto_en_moneda_base or d.monto))
+                for d in descuentos_por_venta_cierre.get(venta.id, [])
+            )
+            saldo = total_base - pagado_base - descontado_base
             if saldo <= Decimal("1.0"):  # ignora residuos de centavos por redondeo
                 continue
-            productos = _texto_productos(detalle_por_venta.get(venta.id, []))
-            if productos == "—":
-                productos = _texto_productos(pedido.detalles)
+            productos = _primer_texto_productos(
+                detalle_por_venta.get(venta.id, []),
+                pedido.detalles,
+                pedido.cotizacion.detalles if pedido.cotizacion else [],
+            )
+            # Cifras nativas en la moneda de la venta (monto_en_moneda_base de
+            # los pagos y descuentos ya vive en esa moneda): la referencia fiable.
+            total_nat = Decimal(str(venta.total))
+            saldo_nat = total_nat - pagado_base - descontado_base
             pedidos_pendientes.append(
                 schemas.PendientePagoLinea(
                     pedido_id=pedido.id,
@@ -662,6 +835,9 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
                     total_en_base=total_base,
                     pagado_en_base=pagado_base,
                     saldo_en_base=saldo,
+                    total_en_moneda=total_nat,
+                    pagado_en_moneda=pagado_base,
+                    saldo_en_moneda=saldo_nat,
                 )
             )
             continue
@@ -693,28 +869,184 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
                 venta_id=None,
                 fecha=pedido.fecha,
                 cliente=pedido.cliente.nombre if pedido.cliente else "—",
-                producto=_texto_productos(pedido.detalles),
+                producto=_primer_texto_productos(
+                    pedido.detalles,
+                    pedido.cotizacion.detalles if pedido.cotizacion else [],
+                ),
                 estado_pedido=pedido.estado,
                 estado_venta=None,
                 moneda=moneda_pedido,
                 total_en_base=total_base,
                 pagado_en_base=Decimal("0.0"),
                 saldo_en_base=total_base,
+                total_en_moneda=total_pedido,
+                pagado_en_moneda=Decimal("0.0"),
+                saldo_en_moneda=total_pedido,
             )
         )
 
     total_pendiente = sum(l.saldo_en_base for l in pedidos_pendientes)
+    pendientes_por_moneda: Dict[str, Decimal] = {}
+    for l in pedidos_pendientes:
+        cod_l = l.moneda
+        pendientes_por_moneda[cod_l] = pendientes_por_moneda.get(cod_l, Decimal("0.0")) + (
+            l.saldo_en_moneda if l.saldo_en_moneda is not None else l.saldo_en_base
+        )
+    total_pendiente_por_moneda = [
+        schemas.SaldoPorMoneda(moneda=cod, saldo=pendientes_por_moneda[cod])
+        for cod in sorted(pendientes_por_moneda, key=lambda c: (c != "COP", c))
+    ]
+
+    # ============================================================
+    # 5. DESGLOSE POR MONEDA (cifras nativas, sin conversiones)
+    #    Resumen y estado de resultados en la moneda de cada operación:
+    #    sumar USD con COP fabricaba balances que no correspondían a ninguna
+    #    de las dos monedas.
+    # ============================================================
+    ingresos_m: Dict[str, Decimal] = {}
+    egresos_m: Dict[str, Decimal] = {}
+    # Ingresos: TODO el dinero cobrado en el mes (pagos), en su moneda física.
+    # Las devoluciones del mes son dinero que sale: restan.
+    pagos_cobrados_mes = (
+        db.query(Pago).filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt).all()
+    )
+    for p in pagos_cobrados_mes:
+        cod_p = monedas_catalogo.get(p.moneda_id, "COP")
+        ingresos_m[cod_p] = ingresos_m.get(cod_p, Decimal("0.0")) + Decimal(str(p.monto))
+    for d in devoluciones_mes:
+        cod_d = monedas_catalogo.get(d.moneda_id, "COP")
+        ingresos_m[cod_d] = ingresos_m.get(cod_d, Decimal("0.0")) - Decimal(str(d.monto_devuelto))
+
+    for g in gastos_mes:
+        cod_g = monedas_catalogo.get(g.moneda_id, "COP")
+        egresos_m[cod_g] = egresos_m.get(cod_g, Decimal("0.0")) + Decimal(str(g.monto))
+    for c in compras_mes:
+        cod_c = monedas_catalogo.get(c.moneda_id, "COP")
+        egresos_m[cod_c] = egresos_m.get(cod_c, Decimal("0.0")) + Decimal(str(c.total))
+    # Mano de obra: se paga SIEMPRE en pesos (COP nativo).
+    mano_obra_cop = Decimal("0.0")
+    for mo, _moneda_id_mo in mano_obra_list:
+        recargo_mo = Decimal(str(mo.porcentaje_recargo or 0.0)) / Decimal("100.0")
+        mano_obra_cop += Decimal(str(mo.monto)) * (Decimal("1.0") + recargo_mo)
+    egresos_m["COP"] = egresos_m.get("COP", Decimal("0.0")) + mano_obra_cop
+
+    resumen_por_moneda: List[schemas.ResumenMoneda] = []
+    for cod_rm in sorted(set(ingresos_m) | set(egresos_m), key=lambda c: (c != "COP", c)):
+        ing_rm = ingresos_m.get(cod_rm, Decimal("0.0"))
+        egr_rm = egresos_m.get(cod_rm, Decimal("0.0"))
+        resumen_por_moneda.append(
+            schemas.ResumenMoneda(moneda=cod_rm, ingresos=ing_rm, egresos=egr_rm, disponible=ing_rm - egr_rm)
+        )
+    resumen.por_moneda = resumen_por_moneda
+
+    # ── Estado de resultados por moneda ──
+    compras_por_moneda: Dict[str, Dict[str, Decimal]] = {}
+    for c in compras_mes:
+        cod_c = monedas_catalogo.get(c.moneda_id, "COP")
+        agg_c = compras_por_moneda.setdefault(cod_c, {"contado": Decimal("0.0"), "credito": Decimal("0.0")})
+        total_c = Decimal(str(c.total))
+        if c.tipo_pago == "CONTADO":
+            agg_c["contado"] += total_c
+        else:
+            agg_c["credito"] += total_c
+
+    gastos_por_moneda: Dict[str, Dict[int, Dict]] = {}
+    for g in gastos_mes:
+        cod_g = monedas_catalogo.get(g.moneda_id, "COP")
+        info_g = gastos_por_moneda.setdefault(cod_g, {}).setdefault(
+            g.tipo_gasto_id, {"nombre": g.tipo_gasto.nombre, "categoria": g.tipo_gasto.categoria, "monto": Decimal("0.0")}
+        )
+        info_g["monto"] += Decimal(str(g.monto))
+
+    def _gastos_de_moneda(cod: str) -> schemas.GastosEstadoResultados:
+        gmap = gastos_por_moneda.get(cod, {})
+
+        def _cat(cat: str) -> List[schemas.LineaGastoInforme]:
+            return [
+                schemas.LineaGastoInforme(tipo_id=tid, nombre=info["nombre"], monto=info["monto"])
+                for tid, info in gmap.items() if info["categoria"] == cat
+            ]
+
+        op_m, adm_m, fin_m, imp_m, prod_m = (
+            _cat("OPERATIVO"), _cat("ADMINISTRATIVO"), _cat("FINANCIERO"),
+            _cat("IMPUESTO"), _cat("PRODUCCION"),
+        )
+        return schemas.GastosEstadoResultados(
+            operativos=op_m,
+            administrativos=adm_m,
+            financieros=fin_m,
+            impuestos=imp_m,
+            produccion=prod_m,
+            total_gastos_operativos=sum(l.monto for l in op_m),
+            total_gastos_administrativos=sum(l.monto for l in adm_m),
+            total_financieros=sum(l.monto for l in fin_m),
+            total_impuestos=sum(l.monto for l in imp_m),
+            total_gastos_produccion=sum(l.monto for l in prod_m),
+            total_gastos=sum(l.monto for l in op_m + adm_m + fin_m + imp_m + prod_m),
+        )
+
+    CEROS_VENTAS = {"contado": Decimal("0.0"), "credito": Decimal("0.0"), "devoluciones": Decimal("0.0"), "descuentos": Decimal("0.0")}
+    estado_por_moneda: List[schemas.EstadoPorMoneda] = []
+    cods_estado = sorted(
+        set(ventas_por_moneda) | set(compras_por_moneda) | set(inventarios_por_moneda) | set(gastos_por_moneda),
+        key=lambda c: (c != "COP", c),
+    )
+    for cod_e in cods_estado:
+        agg_ve = CEROS_VENTAS | ventas_por_moneda.get(cod_e, {})
+        agg_co = compras_por_moneda.get(cod_e, {"contado": Decimal("0.0"), "credito": Decimal("0.0")})
+        inv_me = inventarios_por_moneda.get(cod_e, {})
+        total_inicial_m = inv_me.get("total_inicial", Decimal("0.0"))
+        total_final_m = inv_me.get("total_final", Decimal("0.0"))
+        compras_tot_m = agg_co["contado"] + agg_co["credito"]
+        mercancia_m = total_inicial_m + compras_tot_m
+        compras_netas_m = mercancia_m - total_final_m
+        ventas_netas_m = agg_ve["contado"] + agg_ve["credito"] - agg_ve["devoluciones"] - agg_ve["descuentos"]
+        utilidad_bruta_m = ventas_netas_m - compras_netas_m
+        gastos_m = _gastos_de_moneda(cod_e)
+        estado_por_moneda.append(
+            schemas.EstadoPorMoneda(
+                moneda=cod_e,
+                ventas=schemas.VentasEstadoResultados(
+                    contado=agg_ve["contado"],
+                    credito=agg_ve["credito"],
+                    extraordinarias=Decimal("0.0"),
+                    devoluciones=agg_ve["devoluciones"],
+                    descuentos=agg_ve["descuentos"],
+                    total_ventas_netas=ventas_netas_m,
+                ),
+                inventarios_iniciales=list(inv_me.get("iniciales", [])),
+                total_inventarios_iniciales=total_inicial_m,
+                compras=schemas.ComprasEstadoResultados(
+                    contado=agg_co["contado"],
+                    credito=agg_co["credito"],
+                    total_compras_brutas=compras_tot_m,
+                    total_mercancia=mercancia_m,
+                ),
+                inventarios_finales=list(inv_me.get("finales", [])),
+                total_inventarios_finales=total_final_m,
+                compras_netas=compras_netas_m,
+                utilidad_bruta=utilidad_bruta_m,
+                gastos=gastos_m,
+                utilidad_periodo=utilidad_bruta_m - gastos_m.total_gastos,
+            )
+        )
 
     return schemas.InformeMensualResponse(
         mes=mes,
-        control_interno_ingresos=schemas.ControlInternoIngresos(lineas=lineas, totales=totales),
+        control_interno_ingresos=schemas.ControlInternoIngresos(
+            lineas=lineas,
+            totales=totales,
+            totales_por_moneda=totales_por_moneda,
+        ),
         resumen=resumen,
         estado_resultados=estado,
         pendientes_de_pago=schemas.PendientesDePagoInforme(
             lineas=pedidos_pendientes,
             total_pendiente=total_pendiente,
+            total_pendiente_por_moneda=total_pendiente_por_moneda,
         ),
         saldos_caja=saldos_caja,
+        estado_resultados_por_moneda=estado_por_moneda,
     )
 
 
@@ -989,7 +1321,8 @@ def _mov_caja_response(m: model.MovimientoCaja) -> schemas.MovimientoCajaRespons
             id=m.moneda.id, codigo=m.moneda.codigo, nombre=m.moneda.nombre, simbolo=m.moneda.simbolo,
         ) if m.moneda else None,
         usuario=schemas.ResponsableResponse(
-            id=m.usuario.id, nombre_usuario=m.usuario.nombre_usuario, email=m.usuario.email,
+            id=m.usuario.id, nombre_usuario=m.usuario.nombre_usuario,
+            nombre=m.usuario.display_name, email=m.usuario.email,
         ) if m.usuario else None,
     )
 
@@ -1182,7 +1515,7 @@ def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
     "Compra #N") para enriquecerlo con el nombre real; queda NULL quien no
     aplica o si el registro original ya no existe.
     """
-    quien = (m.usuario.nombre or m.usuario.nombre_usuario) if m.usuario else None
+    quien = m.usuario.display_name if m.usuario else None
     ref = (m.referencia or "").strip()
     if ref.startswith("Gasto #"):
         try:
@@ -1193,7 +1526,7 @@ def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
             nombre_tipo = g.tipo_gasto.nombre if g.tipo_gasto else "Gasto"
             desc = g.descripcion or ""
             concepto = f"Gasto: {nombre_tipo}" + (f" — {desc}" if desc else "")
-            return concepto, ((g.creador.nombre or g.creador.nombre_usuario) if g.creador else quien)
+            return concepto, (g.creador.display_name if g.creador else quien)
         return "Gasto", quien
     if ref.startswith("Pago #"):
         try:
@@ -1213,16 +1546,72 @@ def _concepto_movimiento(db: Session, m: "model.MovimientoCaja"):
         return "Compra", quien
     if ref.startswith("Transferencia #"):
         return "Transferencia entre cuentas", quien
+    if ref.startswith("CxP #"):
+        # "CxP #102 abono #65" → concepto corto (la referencia va aparte y
+        # la UI la muestra como chip; antes se duplicaba el texto).
+        try:
+            partes = ref.split("#")
+            cxp_id = int(partes[1].split(" ")[0])
+            abono_id = int(partes[2].split(" ")[0]) if len(partes) > 2 else None
+        except (IndexError, ValueError):
+            return "Abono deuda", quien
+        pago = (
+            db.query(PagoCuentaPorPagar)
+            .options(
+                sa_orm.joinedload(PagoCuentaPorPagar.creador),
+                sa_orm.joinedload(PagoCuentaPorPagar.cuenta_por_pagar).joinedload(
+                    CuentaPorPagar.proveedor
+                ),
+            )
+            .filter(PagoCuentaPorPagar.id == abono_id)
+            .first()
+            if abono_id is not None
+            else None
+        )
+        cxp = pago.cuenta_por_pagar if pago and pago.cuenta_por_pagar else None
+        if cxp is None:
+            cxp = (
+                db.query(CuentaPorPagar)
+                .options(sa_orm.joinedload(CuentaPorPagar.proveedor))
+                .filter(CuentaPorPagar.id == cxp_id)
+                .first()
+            )
+        proveedor = cxp.proveedor.nombre if cxp and cxp.proveedor else None
+        concepto = f"Abono deuda #{cxp_id}" + (f" — {proveedor}" if proveedor else "")
+        quien_pago = (
+            pago.creador.display_name
+            if pago and pago.creador
+            else quien
+        )
+        return concepto, quien_pago
     return ref or "Movimiento", quien
 
 
-def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
+def resumen_diario(
+    db: Session, dia: date, moneda_vista: str = "COP"
+) -> schemas.ResumenDiarioResponse:
     """Estado del día: saldo inicial, ingresos, egresos y quién los hizo.
 
     Se construye desde `movimiento_caja` (la bitácora única de caja). La
     convención es la misma que _saldo_caja_en_cop: SALIDA resta; el resto
-    suma (AJUSTE lleva su signo en el monto). Todo se expresa en COP.
+    suma (AJUSTE lleva su signo en el monto).
+
+    `moneda_vista` (p. ej. "USD") NO convierte nada: filtra la vista a esa
+    moneda y totaliza en su valor nativo. Cada moneda se muestra según su
+    moneda, sin tasa de cambio. `por_moneda` trae el resumen multimoneda y
+    `monedas` las vistas disponibles (tabs); los totales `*_cop` quedan como
+    referencia compatible.
     """
+    codigo_vista = (moneda_vista or "COP").upper()
+    mon_vista = (
+        db.query(Moneda).filter(func.upper(Moneda.codigo) == codigo_vista).first()
+    )
+    if mon_vista is None:
+        raise ValueError(f"Moneda desconocida: {moneda_vista}")
+    vista_id = mon_vista.id
+
+    def es_vista(moneda_id) -> bool:
+        return (moneda_id or 1) == vista_id
     movs = (
         db.query(model.MovimientoCaja)
         .options(
@@ -1243,18 +1632,59 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
     def signo(m) -> Decimal:
         return Decimal("-1") if m.tipo == "SALIDA" else Decimal("1")
 
-    # Saldo inicial (antes del día) por cuenta
+    # Saldo por cuenta Y moneda, en la moneda nativa de cada movimiento.
+    # Antes se sumaba todo convertido a COP por cuenta, mezclando USD con
+    # COP en la misma cifra. El COP queda solo como referencia.
+    nativo: Dict[tuple, dict] = {}
+
+    def _linea_nativa(m) -> dict:
+        key = (m.metodo_caja_id, m.moneda_id)
+        lin = nativo.get(key)
+        if lin is None:
+            lin = nativo[key] = {
+                "metodo_caja_id": m.metodo_caja_id,
+                "cuenta_nombre": (
+                    m.metodo_caja.nombre if m.metodo_caja else f"Cuenta #{m.metodo_caja_id}"
+                ),
+                "moneda_id": m.moneda_id,
+                "codigo": m.moneda.codigo if m.moneda else "?",
+                "simbolo": m.moneda.simbolo if m.moneda else "?",
+                "inicial": Decimal("0"),
+                "final": Decimal("0"),
+                "inicial_cop": Decimal("0"),
+                "final_cop": Decimal("0"),
+            }
+        return lin
+
+    # Saldo inicial (antes del día). AJUSTE lleva su signo en el monto.
     inicial_por_cuenta: Dict[int, Decimal] = {}
+    inicial_vista = Decimal("0")
     for m in movs:
         if m.fecha < dia:
+            delta_cop = signo(m) * cop(m)
             inicial_por_cuenta[m.metodo_caja_id] = (
-                inicial_por_cuenta.get(m.metodo_caja_id, Decimal("0")) + signo(m) * cop(m)
+                inicial_por_cuenta.get(m.metodo_caja_id, Decimal("0")) + delta_cop
             )
+            lin = _linea_nativa(m)
+            delta_nat = signo(m) * Decimal(str(m.monto))
+            lin["inicial"] += delta_nat
+            lin["final"] += delta_nat
+            lin["inicial_cop"] += delta_cop
+            lin["final_cop"] += delta_cop
+            if es_vista(m.moneda_id):
+                inicial_vista += delta_nat
+    # Las cuentas con movimiento solo el día actual también aparecen.
+    for m in movs:
+        if m.fecha == dia:
+            _linea_nativa(m)
 
-    # Movimientos del día + totales COP + desglose por moneda
+    # Movimientos del día + totales COP + desglose por moneda.
+    # Los totales *_vista y las líneas/saldos solo cubren la moneda vista.
     movimientos: List[schemas.MovimientoDiarioResponse] = []
     total_ingresos_cop = Decimal("0.0")
     total_egresos_cop = Decimal("0.0")
+    ingresos_vista = Decimal("0")
+    egresos_vista = Decimal("0")
     por_moneda: Dict[int, dict] = {}
     final_por_cuenta: Dict[int, Decimal] = dict(inicial_por_cuenta)
 
@@ -1264,6 +1694,9 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
         montocop = cop(m)
         val_cuenta = final_por_cuenta.get(m.metodo_caja_id, Decimal("0"))
         final_por_cuenta[m.metodo_caja_id] = val_cuenta + signo(m) * montocop
+        lin = _linea_nativa(m)
+        lin["final"] += signo(m) * Decimal(str(m.monto))
+        lin["final_cop"] += signo(m) * montocop
         # Las patas de una transferencia NO son ingreso ni egreso del negocio:
         # solo redistribuyen saldo entre cuentas. Se listan, pero no suman a
         # los totales del día (igual que los "Gasto #", que vienen de la tabla).
@@ -1275,6 +1708,8 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
             if not es_salida_de_gasto:
                 if not es_transferencia:
                     total_egresos_cop += montocop
+                    if es_vista(m.moneda_id):
+                        egresos_vista += Decimal(str(m.monto))
                     meta = por_moneda.setdefault(
                         m.moneda_id,
                         {"moneda_id": m.moneda_id,
@@ -1303,6 +1738,8 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
         else:
             if not es_transferencia:
                 total_ingresos_cop += montocop
+                if es_vista(m.moneda_id):
+                    ingresos_vista += Decimal(str(m.monto))
                 meta = por_moneda.setdefault(
                     m.moneda_id,
                     {"moneda_id": m.moneda_id,
@@ -1346,6 +1783,15 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
         .all()
     )
     if gastos_dia:
+        # Gastos que nacieron de una deuda (fiado): nunca tocaron caja, por
+        # eso su cuenta queda vacía. Se marcan para no confundirlos.
+        ids_fiado = {
+            r[0]
+            for r in db.query(CuentaPorPagar.gasto_id).filter(
+                CuentaPorPagar.gasto_id.in_([g.id for g in gastos_dia])
+            ).all()
+            if r[0] is not None
+        }
         refs = {f"Gasto #{g.id}": g for g in gastos_dia}
         movs_gasto = (
             db.query(model.MovimientoCaja)
@@ -1364,6 +1810,8 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
                 else Decimal(str(g.monto)) * Decimal(str(g.tasa_cambio or 1.0))
             )
             total_egresos_cop += montocop
+            if es_vista(g.moneda_id):
+                egresos_vista += Decimal(str(g.monto))
             meta = por_moneda.setdefault(
                 g.moneda_id,
                 {"moneda_id": g.moneda_id,
@@ -1376,6 +1824,8 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
             meta["monto_cop"] += montocop
 
             concepto = g.tipo_gasto.nombre if g.tipo_gasto else "Egreso"
+            if g.id in ids_fiado:
+                concepto += " (fiado)"
             if g.area and g.area.nombre:
                 concepto += f" · {g.area.nombre}"
             desc = (g.descripcion or "").strip()
@@ -1398,22 +1848,72 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
                     cuenta_nombre=cuenta_por_ref.get(f"Gasto #{g.id}"),
                     referencia=f"Gasto #{g.id}",
                     concepto=concepto,
-                    quien=((g.creador.nombre or g.creador.nombre_usuario) if g.creador else "Sistema"),
+                    quien=(g.creador.display_name if g.creador else "Sistema"),
                 )
             )
 
     saldo_inicial_cop = sum(inicial_por_cuenta.values(), Decimal("0"))
     saldo_final_cop = sum(final_por_cuenta.values(), Decimal("0"))
 
+    # La vista solo muestra su moneda: líneas y saldos de otras monedas
+    # quedan fuera (el resumen multimoneda vive en `por_moneda`).
+    movimientos = [mv for mv in movimientos if mv.moneda_codigo == codigo_vista]
+    saldo_final_vista = sum(
+        (lin["final"] for lin in nativo.values() if es_vista(lin["moneda_id"])),
+        Decimal("0"),
+    )
+
+    # Una fila por (cuenta, moneda) de la vista, en valor nativo + COP ref.
     saldos_por_cuenta = [
         schemas.SaldoCuentaDiaria(
-            metodo_caja_id=mid,
-            cuenta_nombre=mc.nombre,
-            saldo_inicial_cop=inicial_por_cuenta.get(mid, Decimal("0")),
-            saldo_final_cop=final_por_cuenta.get(mid, Decimal("0")),
+            metodo_caja_id=lin["metodo_caja_id"],
+            cuenta_nombre=lin["cuenta_nombre"],
+            moneda_codigo=lin["codigo"],
+            moneda_simbolo=lin["simbolo"],
+            saldo_inicial=lin["inicial"],
+            saldo_final=lin["final"],
+            saldo_inicial_cop=lin["inicial_cop"],
+            saldo_final_cop=lin["final_cop"],
         )
-        for mid, mc in {mm.metodo_caja_id: mm.metodo_caja for mm in movs if mm.metodo_caja}.items()
+        for lin in sorted(nativo.values(), key=lambda l: (l["cuenta_nombre"], l["codigo"]))
+        if es_vista(lin["moneda_id"])
     ]
+
+    por_moneda_resp = [
+        schemas.LineaMonedaDiaria(
+            moneda_id=data["moneda_id"],
+            codigo=data["codigo"],
+            simbolo=data["simbolo"],
+            monto_ingresos=data["monto_ingresos"],
+            monto_egresos=data["monto_egresos"],
+            monto_cop=data["monto_cop"],
+        )
+        for data in por_moneda.values()
+    ]
+
+    # Monedas con movimiento en el día (tabs de la UI). COP siempre va.
+    vistas: Dict[int, dict] = {1: {"codigo": "COP", "simbolo": "$"}}
+    for data in por_moneda.values():
+        if data["moneda_id"] and data["codigo"] != "?":
+            vistas.setdefault(
+                data["moneda_id"],
+                {"codigo": data["codigo"], "simbolo": data["simbolo"]},
+            )
+    for lin in nativo.values():
+        if lin["moneda_id"] and lin["codigo"] != "?":
+            vistas.setdefault(
+                lin["moneda_id"],
+                {"codigo": lin["codigo"], "simbolo": lin["simbolo"]},
+            )
+    monedas = [
+        schemas.MonedaVistaDiaria(
+            moneda_id=mid_v,
+            codigo=info["codigo"],
+            simbolo=info["simbolo"],
+        )
+        for mid_v, info in vistas.items()
+    ]
+    monedas.sort(key=lambda m: (m.codigo != "COP", m.codigo))
 
     return schemas.ResumenDiarioResponse(
         fecha=dia,
@@ -1421,8 +1921,15 @@ def resumen_diario(db: Session, dia: date) -> schemas.ResumenDiarioResponse:
         total_ingresos_cop=total_ingresos_cop,
         total_egresos_cop=total_egresos_cop,
         saldo_final_cop=saldo_final_cop,
+        moneda_vista=codigo_vista,
+        moneda_vista_simbolo=mon_vista.simbolo if mon_vista.simbolo else "?",
+        saldo_inicial_vista=inicial_vista,
+        total_ingresos_vista=ingresos_vista,
+        total_egresos_vista=egresos_vista,
+        saldo_final_vista=saldo_final_vista,
+        monedas=monedas,
         movimientos=movimientos,
-        por_moneda=[schemas.LineaMonedaDiaria(**data) for data in por_moneda.values()],
+        por_moneda=por_moneda_resp,
         saldos_por_cuenta=saldos_por_cuenta,
     )
 

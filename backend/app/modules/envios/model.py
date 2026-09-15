@@ -72,6 +72,10 @@ class EnvioUbicacion(Base):
     empleado = relationship("Empleado")
     reportado_por = relationship("Usuario", foreign_keys=[reportado_por_id])
 
+    @property
+    def reportado_por_nombre(self) -> str | None:
+        return self.reportado_por.display_name if self.reportado_por else None
+
     __table_args__ = (
         UniqueConstraint("envio_id", "reportado_por_id", "secuencia", name="uq_envio_ubicacion_secuencia"),
         Index("ix_envio_ubicacion_envio_recibida", "envio_id", "recibida_en"),
