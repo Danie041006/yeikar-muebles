@@ -89,6 +89,7 @@ def obtener_productos(
     limite: int = 100,
     buscar: str = None,
     es_reventa: bool = None,
+    es_exhibicion: bool = None,
 ):
     query = db.query(model.Producto).options(
         # Precarga en 2 queries: evita que la serialización de cada producto
@@ -106,7 +107,12 @@ def obtener_productos(
         )
     if es_reventa is not None:
         query = query.filter(model.Producto.es_reventa == es_reventa)
-    return query.order_by(model.Producto.id).offset(salto).limit(limite).all()
+    if es_exhibicion is not None:
+        query = query.filter(model.Producto.es_exhibicion == es_exhibicion)
+    # NUEVOS PRIMERO: con el catálogo pasado de 1000 ítems, el orden por id
+    # ASC truncaba la página en los más viejos y los recién creados (piezas
+    # de exhibición, productos nuevos) nunca aparecían en ningún listado.
+    return query.order_by(model.Producto.id.desc()).offset(salto).limit(limite).all()
 
 def crear_producto(db: Session, esquema: schemas.ProductoCreate):
     db_obj = model.Producto(**esquema.model_dump())

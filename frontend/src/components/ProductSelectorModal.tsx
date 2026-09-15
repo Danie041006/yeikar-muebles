@@ -16,8 +16,10 @@ interface ProductSelectorModalProps {
   selectedMonedaId?: number;
   title?: string;
   // Modo del catálogo: 'todos' mezcla muebles y reventa (con chips de filtro);
-  // 'fabricados' y 'reventa' BLOQUEAN la lista a esa clase de producto.
-  modo?: 'todos' | 'fabricados' | 'reventa';
+  // 'fabricados', 'reventa' y 'exhibicion' BLOQUEAN la lista a esa clase.
+  // ('reventa' incluye piezas de exhibición por compatibilidad: ambas son
+  // stock; 'exhibicion' muestra SOLO piezas del showroom.)
+  modo?: 'todos' | 'fabricados' | 'reventa' | 'exhibicion';
 }
 
 // "De stock": se vende tal cual, sin fabricarse. Una pieza de exhibición se
@@ -40,7 +42,8 @@ export default function ProductSelectorModal({
   const [selectedCategory, setSelectedCategory] = useState<string>('TODOS');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const esModoBloqueado = modo !== 'todos';
-  const categoriaBloqueada = modo === 'reventa' ? 'REVENTA' : 'FABRICADOS';
+  const categoriaBloqueada =
+    modo === 'reventa' ? 'REVENTA' : modo === 'exhibicion' ? 'EXHIBICION' : 'FABRICADOS';
   const categoriaActiva = esModoBloqueado ? categoriaBloqueada : selectedCategory;
 
   // Reset search and category when opened
@@ -100,10 +103,12 @@ export default function ProductSelectorModal({
       // Category filter (en modo bloqueado la categoría es fija)
       if (categoriaActiva === 'FABRICADOS' && esItemStock(p)) return false;
       if (categoriaActiva === 'REVENTA' && !esItemStock(p)) return false;
+      if (categoriaActiva === 'EXHIBICION' && !p.es_exhibicion) return false;
       if (
         categoriaActiva !== 'TODOS' &&
         categoriaActiva !== 'FABRICADOS' &&
-        categoriaActiva !== 'REVENTA'
+        categoriaActiva !== 'REVENTA' &&
+        categoriaActiva !== 'EXHIBICION'
       ) {
         const cat = p.tipo_producto?.nombre || p.categoria || 'Sin clasificar';
         if (cat !== categoriaActiva) return false;
@@ -146,6 +151,8 @@ export default function ProductSelectorModal({
               <p className="text-xs text-stone-500 font-body">
                 {modo === 'reventa'
                   ? 'Selecciona un producto de stock (colchones, exhibición…) para agregarlo al presupuesto'
+                  : modo === 'exhibicion'
+                  ? 'Selecciona una pieza del showroom: se vende del stock, sin fabricarse'
                   : modo === 'fabricados'
                   ? 'Haga clic sobre un mueble o presione “Seleccionar” para agregarlo al presupuesto'
                   : 'Haga clic sobre un mueble o producto y presione “Seleccionar” para agregarlo al presupuesto'}
@@ -329,12 +336,14 @@ export default function ProductSelectorModal({
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span
                             className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider ${
-                              p.es_reventa
+                              p.es_exhibicion
+                                ? 'bg-violet-100 text-violet-800 border border-violet-200'
+                                : p.es_reventa
                                 ? 'bg-sky-100 text-sky-800 border border-sky-200'
                                 : 'bg-amber-100 text-amber-900 border border-amber-200/60'
                             }`}
                           >
-                            {esItemStock(p) ? 'Reventa' : 'Fabricado'}
+                            {p.es_exhibicion ? 'Exhibición' : esItemStock(p) ? 'Reventa' : 'Fabricado'}
                           </span>
                           <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-md">
                             {catName}
@@ -470,12 +479,14 @@ export default function ProductSelectorModal({
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span
                               className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                                p.es_reventa
+                                p.es_exhibicion
+                                  ? 'bg-violet-100 text-violet-800'
+                                  : p.es_reventa
                                   ? 'bg-sky-100 text-sky-800'
                                   : 'bg-amber-100 text-amber-900'
                               }`}
                             >
-                              {esItemStock(p) ? 'Reventa' : 'Fabricado'}
+                              {p.es_exhibicion ? 'Exhibición' : esItemStock(p) ? 'Reventa' : 'Fabricado'}
                             </span>
                             <span className="text-stone-600">{catName}</span>
                           </div>

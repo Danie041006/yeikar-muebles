@@ -34,13 +34,17 @@ def listar_productos(
     limite: int = Query(100, ge=1, le=1000),
     buscar: Optional[str] = Query(None, description="Buscar por nombre, codigo o descripcion"),
     es_reventa: Optional[bool] = Query(None, description="Filtrar solo productos de reventa"),
+    es_exhibicion: Optional[bool] = Query(None, description="Filtrar solo piezas de exhibición"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     # Precios SIEMPRE desde lo persistido (se calculan al crear/editar el
     # producto o con POST /producto/recalcular-precios). El recálculo oculto
     # aquí ejecutaba el motor de costeo 60+ veces POR CARGA del listado.
-    productos = service.obtener_productos(db, salto=salto, limite=limite, buscar=buscar, es_reventa=es_reventa)
+    productos = service.obtener_productos(
+        db, salto=salto, limite=limite, buscar=buscar,
+        es_reventa=es_reventa, es_exhibicion=es_exhibicion,
+    )
     # Fotos de toda la página en UNA query (evita el N+1 al serializar).
     if productos:
         fotos_por_producto = adjuntos_service.adjuntos_info_batch(

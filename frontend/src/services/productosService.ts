@@ -154,10 +154,11 @@ export interface GrupoDuplicados {
 }
 
 export const productosService = {
-  getProductos: async (search?: string, options?: { es_reventa?: boolean; limite?: number }): Promise<Product[]> => {
+  getProductos: async (search?: string, options?: { es_reventa?: boolean; es_exhibicion?: boolean; limite?: number }): Promise<Product[]> => {
     const params: Record<string, unknown> = {};
     if (search) params.buscar = search;
     if (options?.es_reventa !== undefined) params.es_reventa = options.es_reventa;
+    if (options?.es_exhibicion !== undefined) params.es_exhibicion = options.es_exhibicion;
     if (options?.limite !== undefined) params.limite = options.limite;
     const response = await api.get<Product[]>('/producto/', { params });
     return response.data;

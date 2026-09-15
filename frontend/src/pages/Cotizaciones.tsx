@@ -176,7 +176,7 @@ export default function Cotizaciones() {
   const [observaciones, setObservaciones] = useState('');
   const [items, setItems] = useState<CotizacionItemForm[]>([]);
   const [isProductSelectorOpen, setIsProductSelectorOpen] = useState(false);
-  const [productSelectorModo, setProductSelectorModo] = useState<'todos' | 'fabricados' | 'reventa'>('todos');
+  const [productSelectorModo, setProductSelectorModo] = useState<'todos' | 'fabricados' | 'reventa' | 'exhibicion'>('todos');
   const [productSelectorTargetIndex, setProductSelectorTargetIndex] = useState<number | null>(null);
 
   // ── "Producto nuevo" desde la cotización (nombre + tipo + foto + precio) ──
@@ -613,7 +613,7 @@ export default function Cotizaciones() {
     ]);
   };
 
-  const handleOpenProductSelector = (index?: number, modo: 'todos' | 'fabricados' | 'reventa' = 'fabricados') => {
+  const handleOpenProductSelector = (index?: number, modo: 'todos' | 'fabricados' | 'reventa' | 'exhibicion' = 'fabricados') => {
     if (index !== undefined) {
       setProductSelectorTargetIndex(index);
       // Editar un renglón existente: bloquear el catálogo a SU clase de
@@ -903,7 +903,7 @@ export default function Cotizaciones() {
     }
 
     if (!items.length) {
-      setErrorForm('Agrega al menos un renglón con + Mueble, + Insumo o + Producto nuevo.');
+      setErrorForm('Agrega al menos un renglón con + Mueble, + Reventa, + Exhibición, + Insumo o + Producto nuevo.');
       return;
     }
 
@@ -1852,6 +1852,15 @@ export default function Cotizaciones() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => handleOpenProductSelector(undefined, 'exhibicion')}
+                      className="bg-violet-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-violet-600 transition-all flex items-center gap-1.5 shadow-sm"
+                      title="Agregar una pieza del showroom (se vende del stock, sin fabricarse)"
+                    >
+                      <Package className="w-3.5 h-3.5" />
+                      <span>+ Exhibición</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={addItemInsumo}
                       className="bg-white text-emerald-700 border border-emerald-600 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-all flex items-center gap-1.5 shadow-sm"
                       title="Añadir insumo de inventario (lámina, tela, etc.)"
@@ -2252,8 +2261,8 @@ export default function Cotizaciones() {
                       </h5>
                       <p className="text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
                         Usá los botones de arriba para armar la cotización:{' '}
-                        <b>+ Mueble</b> (catálogo), <b>+ Insumo</b> (material suelto) o{' '}
-                        <b>+ Producto nuevo</b> (crear y cotizar al instante).
+                        <b>+ Mueble</b> (catálogo), <b>+ Reventa</b> (stock), <b>+ Exhibición</b> (showroom),{' '}
+                        <b>+ Insumo</b> (material suelto) o <b>+ Producto nuevo</b> (crear y cotizar al instante).
                       </p>
                     </div>
                   )}
@@ -3208,6 +3217,8 @@ export default function Cotizaciones() {
               : `Seleccionar Mueble para Renglón ${productSelectorTargetIndex + 1}`
             : productSelectorModo === 'reventa'
             ? 'Catálogo de Productos de Reventa'
+            : productSelectorModo === 'exhibicion'
+            ? 'Catálogo de Piezas de Exhibición'
             : 'Catálogo de Modelos y Muebles'
         }
       />

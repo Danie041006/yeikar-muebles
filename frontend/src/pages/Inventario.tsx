@@ -204,6 +204,9 @@ export default function Inventario() {
   // Todas las filas de producto_inventario se filtran por ubicación con
   // nombre tipo "EXHIBIC..." (client-side: la ubicación es dato, no código).
   const [productosTodos, setProductosTodos] = useState<Product[]>([]);
+  // Piezas de exhibición con fetch PROPIO: el listado general está truncado
+  // (limite 1000) y una pieza recién creada puede quedar fuera de él.
+  const [productosExh, setProductosExh] = useState<Product[]>([]);
   const [tiposProducto, setTiposProducto] = useState<{ id: number; nombre: string }[]>([]);
   const [searchExhibicion, setSearchExhibicion] = useState('');
   // Modal "Nueva Pieza": alta de una pieza de exhibición con solo nombre,
@@ -356,16 +359,18 @@ export default function Inventario() {
     try {
       // Stock COMPLETO (todas las ubicaciones): la tab de reventa agrupa por
       // producto y la de exhibición filtra por ubicación "EXHIBIC...".
-      const [invData, alertsData, prodData, todosData] = await Promise.all([
+      const [invData, alertsData, prodData, todosData, exhData] = await Promise.all([
         inventarioService.getInventarioProductos(),
         inventarioService.getAlertasProductos(8.0),
         productosService.getProductos(undefined, { es_reventa: true, limite: 1000 }),
         productosService.getProductos(undefined, { limite: 1000 }),
+        productosService.getProductos(undefined, { es_exhibicion: true, limite: 1000 }),
       ]);
       setInvProductos(invData);
       setAlertasProductos(alertsData);
       setProductos(prodData);
       setProductosTodos(todosData);
+      setProductosExh(exhData);
     } catch (error) {
       console.error('Error fetching product inventory:', error);
     }
@@ -997,7 +1002,7 @@ export default function Inventario() {
   });
   const filasExhibicion: FilaExhibicion[] = [];
   const vistosExh = new Set<number>();
-  for (const p of productosTodos) {
+  for (const p of productosExh) {
     if (!p.es_exhibicion) continue;
     const filas = stockExhPorProducto.get(p.id) ?? [];
     filasExhibicion.push(buildFilaExhibicion(p, filas.reduce((a, f) => a + (parseFloat(String(f.cantidad)) || 0), 0)));
@@ -1005,7 +1010,7 @@ export default function Inventario() {
   }
   for (const [pid, filas] of stockExhPorProducto) {
     if (vistosExh.has(pid)) continue;
-    const p = productosTodos.find(x => x.id === pid);
+    const p = productosExh.find(x => x.id === pid) ?? productosTodos.find(x => x.id === pid);
     if (!p) continue;
     filasExhibicion.push(buildFilaExhibicion(p, filas.reduce((a, f) => a + (parseFloat(String(f.cantidad)) || 0), 0)));
   }
@@ -1018,6 +1023,7 @@ export default function Inventario() {
   const materialSeleccionado = materiales.find(m => m.id === selectedMaterialId);
   const productoSeleccionado =
     productosTodos.find(p => p.id === selectedProductoId) ??
+    productosExh.find(p => p.id === selectedProductoId) ??
     productos.find(p => p.id === selectedProductoId);
 
   const inputCls = "w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono";
