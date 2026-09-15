@@ -815,15 +815,26 @@ export default function Inventario() {
   const handleCreatePieza = async (e: React.FormEvent) => {
     e.preventDefault();
     const nombre = newPieza.nombre.trim();
-    if (!nombre) return;
+    if (!nombre) {
+      toast.error('Escribe el nombre de la pieza.');
+      return;
+    }
     const precioUsd = parseFloat(newPieza.precio_usd || '0');
     if (!(precioUsd > 0)) {
       toast.error('Indica el precio de la pieza en dólares.');
       return;
     }
+    if (tiposProducto.length === 0) {
+      toast.error('Aún no cargan los tipos de producto. Espera unos segundos y reintenta.');
+      return;
+    }
     const idTipo = tiposProducto.find(t => quitarAcentos(t.nombre).toUpperCase().includes('PIEZA UNICA'))?.id;
     if (!idTipo) {
       toast.error('No existe el tipo de producto "PIEZA ÚNICA". Ejecuta las migraciones de Alembic.');
+      return;
+    }
+    if (ubicaciones.length === 0) {
+      toast.error('Aún no cargan las ubicaciones. Espera unos segundos y reintenta.');
       return;
     }
     const ubi = ubicacionesExhibicion[0];
@@ -870,6 +881,7 @@ export default function Inventario() {
       toast.success('Pieza de exhibición registrada.');
       fetchProductos();
     } catch (error: any) {
+      console.error('[Nueva Pieza] fallo al crear:', error);
       toast.error(extractErrorMessage(error, 'Error al crear la pieza.'));
     } finally {
       setSavingPieza(false);
