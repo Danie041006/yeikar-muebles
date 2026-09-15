@@ -167,6 +167,8 @@ export interface MovimientoProductoCreate {
   cliente_id?: number;
   /** Nombre libre del cliente (misma mecánica que el proveedor). */
   cliente_nombre?: string;
+  /** "Fiar": ENTRADA sin pagar → cuenta por pagar (igual que en insumos). */
+  fiar?: boolean;
 }
 
 export interface MovimientoProductoResponse {

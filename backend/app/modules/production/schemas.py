@@ -407,6 +407,13 @@ class CrudoCreate(BaseModel):
     cantidad: Optional[float] = Field(0.0, ge=0)
 
 
+class CrudoUpdate(BaseModel):
+    nombre: Optional[str] = Field(None, min_length=1, max_length=200)
+    area_id: Optional[int] = None
+    ubicacion_id: Optional[int] = None
+    activo: Optional[bool] = None
+
+
 class CrudoResponse(BaseModel):
     id: int
     nombre: str
@@ -418,6 +425,33 @@ class CrudoResponse(BaseModel):
     foto_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CrudoMovimientoCreate(BaseModel):
+    """Movimiento manual de crudo (misma semántica que el kardex de
+    productos: ENTRADA/DEVOLUCION suman, SALIDA/DAÑO restan validando
+    stock, AJUSTE fija el stock). Sin ubicación (el crudo vive en una
+    sola) ni costo (el crudo no lleva costeo por movimiento)."""
+    tipo: str = Field(pattern="^(ENTRADA|SALIDA|AJUSTE|DAÑO|DANO|DEVOLUCION)$")
+    cantidad: float = Field(gt=0)
+    observaciones: Optional[str] = None
+
+
+class CrudoMovimientoResponse(BaseModel):
+    id: int
+    crudo_id: int
+    tipo: str
+    cantidad: float
+    referencia_tipo: Optional[str] = None
+    referencia_id: Optional[int] = None
+    observaciones: Optional[str] = None
+    creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
+    fecha: Optional[datetime] = None
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

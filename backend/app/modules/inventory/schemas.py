@@ -131,6 +131,8 @@ class MovimientoProductoCreate(BaseModel):
     cliente_id: Optional[int] = None
     proveedor_nombre: Optional[str] = None
     cliente_nombre: Optional[str] = None
+    # "Fiar": ENTRADA sin pagar → cuenta por pagar (igual que en insumos).
+    fiar: Optional[bool] = False
 
 
 class MovimientoProductoResponse(MovimientoProductoCreate):

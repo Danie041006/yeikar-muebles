@@ -413,6 +413,20 @@ export interface CrudoCreate {
   cantidad?: number;
 }
 
+export interface CrudoMovimiento {
+  id: number;
+  crudo_id: number;
+  tipo: 'ENTRADA' | 'SALIDA' | 'AJUSTE' | 'DAÑO' | 'DEVOLUCION';
+  cantidad: number;
+  referencia_tipo?: string | null;
+  referencia_id?: number | null;
+  observaciones?: string | null;
+  creado_por_id?: number | null;
+  creador_nombre?: string | null;
+  fecha?: string | null;
+  created_at?: string | null;
+}
+
 export interface CrudoConsumo {
   id: number;
   produccion_crudo_id: number;
@@ -531,6 +545,27 @@ export const crudoService = {
   },
   crearCrudo: async (payload: CrudoCreate): Promise<Crudo> => {
     const response = await api.post<Crudo>('/produccion/crudo/', payload);
+    return response.data;
+  },
+  /** Kardex del ítem en crudo (misma UI de movimientos que insumos). */
+  getKardex: async (id: number): Promise<CrudoMovimiento[]> => {
+    const response = await api.get<CrudoMovimiento[]>(`/produccion/crudo/${id}/kardex`);
+    return response.data;
+  },
+  /** Registrar movimiento manual (ENTRADA/SALIDA/AJUSTE/DAÑO/DEVOLUCION). */
+  registrarMovimiento: async (
+    id: number,
+    payload: { tipo: string; cantidad: number; observaciones?: string },
+  ): Promise<CrudoMovimiento> => {
+    const response = await api.post<CrudoMovimiento>(`/produccion/crudo/${id}/movimiento`, payload);
+    return response.data;
+  },
+  /** Editar nombre, ubicación o estado del ítem en crudo. */
+  actualizarCrudo: async (
+    id: number,
+    payload: { nombre?: string; area_id?: number | null; ubicacion_id?: number; activo?: boolean },
+  ): Promise<Crudo> => {
+    const response = await api.put<Crudo>(`/produccion/crudo/${id}`, payload);
     return response.data;
   },
   // Producciones de crudo

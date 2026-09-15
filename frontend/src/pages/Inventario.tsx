@@ -2,13 +2,14 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, SobranteLamina, CategoriaInventario } from '../services/inventarioService';
 import { productosService, type MonedaInfo } from '../services/productosService';
-import { crudoService, produccionService, type Crudo } from '../services/produccionService';
-import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
+import { crudoService, produccionService, type Crudo, type CrudoMovimiento } from '../services/produccionService';
+import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO, type AdjuntoInfo } from '../services/adjuntosService';
 import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { motion } from 'framer-motion';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
+import AdjuntoImagen from '../components/AdjuntoImagen';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
 
 interface Ubicacion {
@@ -36,6 +37,7 @@ interface Material {
   id: number;
   nombre: string;
   codigo?: string;
+  activo?: boolean;
   stock_minimo?: number;
   es_reventa?: boolean;
   es_exhibicion?: boolean;
@@ -44,7 +46,7 @@ interface Material {
   categoria_inventario_id?: number | null;
   precio_costo_base?: number | null;
   precio_venta_base?: number | null;
-  fotos?: { url?: string }[];
+  fotos?: { id?: number; mime?: string; url?: string }[];
 }
 
 type Tab = 'insumos' | 'sobrantes' | 'productos' | 'exhibicion' | 'crudo';
@@ -199,6 +201,22 @@ export default function Inventario() {
     cliente_nombre: '',  // comprado para un cliente específico (texto libre, opcional)
   });
   const [savingMovProd, setSavingMovProd] = useState(false);
+  // Tab del modal de producto (movimiento / editar / historial).
+  const [detalleTabProducto, setDetalleTabProducto] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
+  // Edición inline del producto (tab EDITAR del modal).
+  const [editProducto, setEditProducto] = useState({ nombre: '', precio_venta_base: '', precio_costo_base: '', stock_minimo: '', categoria_inventario_id: '' });
+  const [savingEditProd, setSavingEditProd] = useState(false);
+
+  // ---- Crudo: panel de detalle con movimientos (misma UI que insumos) ----
+  const [selectedCrudoId, setSelectedCrudoId] = useState<number | null>(null);
+  const [kardexCrudo, setKardexCrudo] = useState<CrudoMovimiento[]>([]);
+  const [loadingKardexCrudo, setLoadingKardexCrudo] = useState(false);
+  const [movCrudo, setMovCrudo] = useState({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
+  const [savingMovCrudo, setSavingMovCrudo] = useState(false);
+  // Tab del modal de crudo (movimiento / editar / historial).
+  const [detalleTabCrudo, setDetalleTabCrudo] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
+  const [editCrudo, setEditCrudo] = useState({ nombre: '', ubicacion_id: '', activo: true });
+  const [savingEditCrudo, setSavingEditCrudo] = useState(false);
 
   // ---- Exhibición (piezas mostradas, no rotan como venta normal) ----
   // Todas las filas de producto_inventario se filtran por ubicación con
@@ -213,16 +231,25 @@ export default function Inventario() {
   // precio en dólares y cantidad. El resto (producción, nómina, costos) se
   // gestiona desde Producción.
   const [showPiezaModal, setShowPiezaModal] = useState(false);
-  const [newPieza, setNewPieza] = useState({ nombre: '', precio_usd: '', cantidad: '1' });
+  const [newPieza, setNewPieza] = useState({ nombre: '', precio_usd: '', costo_usd: '' });
   const [fotoPieza, setFotoPieza] = useState<File | null>(null);
   const [fotoPiezaPreview, setFotoPiezaPreview] = useState<string | null>(null);
   const [savingPieza, setSavingPieza] = useState(false);
+  // Editar pieza existente: nombre, precios USD y foto (agregar/quitar).
+  // El STOCK NO se edita aquí: se mueve con movimientos/producción.
+  const [editarPieza, setEditarPieza] = useState<Product | null>(null);
+  const [epForm, setEpForm] = useState({ nombre: '', precio_usd: '', costo_usd: '' });
+  const [fotoEp, setFotoEp] = useState<File | null>(null);
+  const [fotoEpPreview, setFotoEpPreview] = useState<string | null>(null);
+  const [quitarFotoEp, setQuitarFotoEp] = useState(false);
+  const [savingEp, setSavingEp] = useState(false);
   // Modal "Orden de Producción": fabricar la pieza (etapas, consumos, nómina).
   const [producirPieza, setProducirPieza] = useState<{ producto_id: number; nombre: string } | null>(null);
   const [savingProducir, setSavingProducir] = useState(false);
 
   // ---- Productos en Crudo (ítem libre de inventario) ----
   const [crudo, setCrudo] = useState<Crudo[]>([]);
+  const crudoSeleccionado = crudo.find((c) => c.id === selectedCrudoId) ?? null;
   const [loadingCrudo, setLoadingCrudo] = useState(false);
   // Alta manual de ítem en crudo.
   const [showCrudoModal, setShowCrudoModal] = useState(false);
@@ -442,10 +469,13 @@ export default function Inventario() {
     setAsignando(true);
     try {
       await crudoService.asignarCrudo(asignarCrudoTarget.id, detalleId);
+      const asignadoId = asignarCrudoTarget.id;
       setAsignarCrudoTarget(null);
       setDetallePedidoInput('');
       toast.success('Pieza de crudo asignada al pedido. Se descontó del stock.');
       fetchCrudo();
+      // Si el panel del ítem está abierto, su historial también cambia.
+      if (selectedCrudoId === asignadoId) refrescarKardexCrudo(asignadoId);
     } catch (error: any) {
       toast.error(extractErrorMessage(error, 'No se pudo asignar el crudo al pedido.'));
     } finally {
@@ -619,6 +649,81 @@ export default function Inventario() {
     }
   };
 
+  // ---- Abrir panel de crudo (kardex + movimiento, misma UI que insumos) ----
+  const refrescarKardexCrudo = async (id: number) => {
+    try {
+      setLoadingKardexCrudo(true);
+      setKardexCrudo(await crudoService.getKardex(id));
+    } catch (error) {
+      console.error('Error fetching kardex crudo:', error);
+    } finally {
+      setLoadingKardexCrudo(false);
+    }
+  };
+
+  const handleOpenCrudo = (c: Crudo) => {
+    setSelectedCrudoId(c.id);
+    setDetalleTabCrudo('movimiento');
+    setMovCrudo({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
+    setEditCrudo({ nombre: c.nombre ?? '', ubicacion_id: c.ubicacion_id != null ? String(c.ubicacion_id) : '', activo: c.activo !== false });
+    refrescarKardexCrudo(c.id);
+  };
+
+  // Cerrar el modal de crudo con la tecla Escape
+  useEffect(() => {
+    if (!selectedCrudoId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedCrudoId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedCrudoId]);
+
+  // ---- Guardar edición del crudo (tab EDITAR del modal) ----
+  const handleSaveCrudo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCrudoId) return;
+    if (!editCrudo.nombre.trim()) {
+      toast.error('El nombre no puede quedar vacío.');
+      return;
+    }
+    try {
+      setSavingEditCrudo(true);
+      await crudoService.actualizarCrudo(selectedCrudoId, {
+        nombre: editCrudo.nombre.trim(),
+        ubicacion_id: editCrudo.ubicacion_id ? parseInt(editCrudo.ubicacion_id) : undefined,
+        activo: editCrudo.activo,
+      });
+      toast.success('Ítem en crudo actualizado.');
+      fetchCrudo();
+    } catch (error: any) {
+      toast.error(extractErrorMessage(error, 'Error al guardar el ítem.'));
+    } finally {
+      setSavingEditCrudo(false);
+    }
+  };
+
+  // ---- Registrar movimiento de crudo (desde el panel) ----
+  const handleRegisterMovementCrudo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedCrudoId || !movCrudo.cantidad) return;
+    try {
+      setSavingMovCrudo(true);
+      await crudoService.registrarMovimiento(selectedCrudoId, {
+        tipo: movCrudo.tipo,
+        cantidad: parseFloat(movCrudo.cantidad),
+        observaciones: movCrudo.observaciones || undefined,
+      });
+      setMovCrudo({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
+      await Promise.all([fetchCrudo(), refrescarKardexCrudo(selectedCrudoId)]);
+      toast.success('Movimiento de crudo registrado.');
+    } catch (error: any) {
+      toast.error(error.response?.data?.detail || 'Error al registrar el movimiento.');
+    } finally {
+      setSavingMovCrudo(false);
+    }
+  };
+
   // ---- Abrir panel de material (kardex + edición + movimiento) ----
   const handleOpenMaterial = async (mat: Material) => {
     setSelectedMaterialId(mat.id);
@@ -754,13 +859,59 @@ export default function Inventario() {
   // ---- Abrir panel de producto ----
   const handleOpenProducto = (p: { id: number }) => {
     setSelectedProductoId(p.id);
+    setDetalleTabProducto('movimiento');
+    const prod = productosTodos.find(x => x.id === p.id) ?? productosExh.find(x => x.id === p.id) ?? productos.find(x => x.id === p.id);
+    setEditProducto({
+      nombre: prod?.nombre ?? '',
+      precio_venta_base: prod?.precio_venta_base != null ? String(prod.precio_venta_base) : '',
+      precio_costo_base: prod?.precio_costo_base != null ? String(prod.precio_costo_base) : '',
+      stock_minimo: prod?.stock_minimo != null ? String(prod.stock_minimo) : '8',
+      categoria_inventario_id: (prod as any)?.categoria_inventario_id != null ? String((prod as any).categoria_inventario_id) : '',
+    });
     // En exhibición, el movimiento típico es ENTRADA a la ubicación de exhibición.
     const ubiExh = tab === 'exhibicion' ? ubicaciones.find(u => esNombreExhibicion(u.nombre)) : undefined;
     setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
     refrescarKardexProducto(p.id);
   };
 
+  // Cerrar el modal de producto con la tecla Escape
+  useEffect(() => {
+    if (!selectedProductoId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedProductoId(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedProductoId]);
+
+  // ---- Guardar edición del producto (tab EDITAR del modal) ----
+  const handleSaveProducto = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProductoId) return;
+    if (!editProducto.nombre.trim()) {
+      toast.error('El nombre no puede quedar vacío.');
+      return;
+    }
+    try {
+      setSavingEditProd(true);
+      await productosService.actualizarProducto(selectedProductoId, {
+        nombre: editProducto.nombre.toUpperCase().trim(),
+        precio_venta_base: editProducto.precio_venta_base ? parseFloat(editProducto.precio_venta_base) : undefined,
+        precio_costo_base: editProducto.precio_costo_base ? parseFloat(editProducto.precio_costo_base) : undefined,
+        stock_minimo: editProducto.stock_minimo ? parseFloat(editProducto.stock_minimo) : undefined,
+        categoria_inventario_id: editProducto.categoria_inventario_id ? parseInt(editProducto.categoria_inventario_id) : null,
+      } as any);
+      toast.success('Producto actualizado.');
+      fetchProductos();
+    } catch (error: any) {
+      toast.error(extractErrorMessage(error, 'Error al guardar el producto.'));
+    } finally {
+      setSavingEditProd(false);
+    }
+  };
+
   // ---- Registrar movimiento de producto (desde el panel) ----
+  // En exhibición el formulario ni se muestra (nada de entradas manuales).
   const handleRegisterMovementProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProductoId || !movProducto.ubicacion_id || !movProducto.cantidad) return;
@@ -781,6 +932,13 @@ export default function Inventario() {
     const costoNeto = costoBruto !== undefined && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
       : costoBruto;
+    // "Fiar": ENTRADA sin cuenta de pago → la deuda queda registrada con el
+    // proveedor (obligatorio). Igual que en insumos.
+    const fiandoProd = movProducto.tipo === 'ENTRADA' && !pago.cuentaId;
+    if (fiandoProd && !movProducto.proveedor_nombre) {
+      toast.error('Al fiar debes indicar el proveedor (campo Proveedor del movimiento).');
+      return;
+    }
     const notaDesc = costoBruto !== undefined && pctDesc > 0
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${codMonedaDe(productoSeleccionado?.moneda_id)} ${costoBruto.toLocaleString('es-CO')} → Neto: ${costoNeto?.toLocaleString('es-CO')})`
       : '';
@@ -803,6 +961,7 @@ export default function Inventario() {
         llevada: movProducto.tipo === 'ENTRADA' && movProducto.llevada ? parseFloat(movProducto.llevada) : undefined,
         proveedor_nombre: movProducto.tipo === 'ENTRADA' && movProducto.proveedor_nombre ? movProducto.proveedor_nombre.trim() : undefined,
         cliente_nombre: movProducto.tipo === 'ENTRADA' && movProducto.cliente_nombre ? movProducto.cliente_nombre.trim() : undefined,
+        fiar: fiandoProd || undefined,
         observaciones: [movProducto.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
@@ -816,7 +975,9 @@ export default function Inventario() {
     }
   };
 
-  // ---- Nueva Pieza de Exhibición: nombre + precio (USD) + cantidad ----
+  // ---- Nueva Pieza de Exhibición: nombre + precio venta + costo (sin entradas) ----
+  // La pieza es única: se vende por el cotizador con su costo y al venderse
+  // se da de baja sola. Nada de entradas manuales de inventario.
   const handleCreatePieza = async (e: React.FormEvent) => {
     e.preventDefault();
     const nombre = newPieza.nombre.trim();
@@ -826,7 +987,12 @@ export default function Inventario() {
     }
     const precioUsd = parseFloat(newPieza.precio_usd || '0');
     if (!(precioUsd > 0)) {
-      toast.error('Indica el precio de la pieza en dólares.');
+      toast.error('Indica el precio de venta de la pieza en dólares.');
+      return;
+    }
+    const costoUsd = parseFloat(newPieza.costo_usd || '0');
+    if (!(costoUsd > 0)) {
+      toast.error('Indica cuánto costó producir la pieza (costo en dólares).');
       return;
     }
     if (tiposProducto.length === 0) {
@@ -838,15 +1004,7 @@ export default function Inventario() {
       toast.error('No existe el tipo de producto "PIEZA ÚNICA". Ejecuta las migraciones de Alembic.');
       return;
     }
-    if (ubicaciones.length === 0) {
-      toast.error('Aún no cargan las ubicaciones. Espera unos segundos y reintenta.');
-      return;
-    }
-    const ubi = ubicacionesExhibicion[0];
-    if (!ubi) {
-      toast.error('Primero crea la ubicación "EXHIBICIÓN" en Catálogos (o ejecuta las migraciones).');
-      return;
-    }
+    // La pieza manual no toca inventario (sin entradas): no exige ubicación.
     const usd = monedas.find(m => m.codigo === 'USD');
     setSavingPieza(true);
     try {
@@ -860,26 +1018,16 @@ export default function Inventario() {
         es_reventa: false,
         es_exhibicion: true,
         moneda_id: usd?.id ?? 1,
-        // El precio en dólares ES el de venta (se sugiere en el cotizador)
-        precio_costo_base: precioUsd,
+        // Venta: lo que se pide al cliente. Costo: lo que costó producirla
+        // (antes se guardaba el precio de venta como costo).
+        precio_costo_base: costoUsd,
         precio_venta_base: precioUsd,
       });
-      const cant = parseFloat(newPieza.cantidad || '0') || 0;
-      if (cant > 0 && creado.id) {
-        await inventarioService.crearMovimientoProducto({
-          producto_id: creado.id,
-          ubicacion_id: ubi.id,
-          tipo: 'ENTRADA',
-          cantidad: cant,
-          costo_unitario: precioUsd,
-          observaciones: 'Alta de pieza de exhibición',
-        });
-      }
       if (fotoPieza && creado.id) {
         await subirAdjunto(fotoPieza, TIPO_ADJUNTO.PRODUCTO, creado.id);
       }
       setShowPiezaModal(false);
-      setNewPieza({ nombre: '', precio_usd: '', cantidad: '1' });
+      setNewPieza({ nombre: '', precio_usd: '', costo_usd: '' });
       setFotoPieza(null);
       if (fotoPiezaPreview) URL.revokeObjectURL(fotoPiezaPreview);
       setFotoPiezaPreview(null);
@@ -934,6 +1082,74 @@ export default function Inventario() {
     if (fotoPiezaPreview) URL.revokeObjectURL(fotoPiezaPreview);
     setFotoPieza(null);
     setFotoPiezaPreview(null);
+  };
+
+  // ---- Editar pieza de exhibición: abrir + foto + guardar ----
+  const abrirEditarPieza = (p: Product) => {
+    setEditarPieza(p);
+    setEpForm({
+      nombre: p.nombre,
+      precio_usd: p.precio_venta_base != null ? String(p.precio_venta_base) : '',
+      costo_usd: p.precio_costo_base != null ? String(p.precio_costo_base) : '',
+    });
+    setFotoEp(null);
+    if (fotoEpPreview) URL.revokeObjectURL(fotoEpPreview);
+    setFotoEpPreview(null);
+    setQuitarFotoEp(false);
+  };
+
+  const epCameraRef = useRef<HTMLInputElement>(null);
+  const epGalleryRef = useRef<HTMLInputElement>(null);
+  const handleFotoEp = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (fotoEpPreview) URL.revokeObjectURL(fotoEpPreview);
+    setFotoEp(file);
+    setFotoEpPreview(file ? URL.createObjectURL(file) : null);
+    setQuitarFotoEp(false);
+    e.target.value = '';
+  };
+  const quitarFotoEpArchivo = () => {
+    if (fotoEpPreview) URL.revokeObjectURL(fotoEpPreview);
+    setFotoEp(null);
+    setFotoEpPreview(null);
+  };
+
+  const handleEditarPieza = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editarPieza) return;
+    const nombre = epForm.nombre.trim();
+    if (!nombre) {
+      toast.error('Escribe el nombre de la pieza.');
+      return;
+    }
+    const precio = parseFloat(epForm.precio_usd || '0');
+    if (!(precio > 0)) {
+      toast.error('Indica el precio de venta en dólares.');
+      return;
+    }
+    const costo = parseFloat(epForm.costo_usd || '0');
+    setSavingEp(true);
+    try {
+      await productosService.actualizarProducto(editarPieza.id, {
+        nombre: nombre.toUpperCase(),
+        precio_venta_base: precio,
+        precio_costo_base: costo > 0 ? costo : null,
+      });
+      if (quitarFotoEp && editarPieza.fotos?.[0]?.id) {
+        await eliminarAdjunto(editarPieza.fotos[0].id);
+      }
+      if (fotoEp) {
+        await subirAdjunto(fotoEp, TIPO_ADJUNTO.PRODUCTO, editarPieza.id);
+      }
+      toast.success('Pieza actualizada.');
+      setEditarPieza(null);
+      fetchProductos();
+    } catch (error: any) {
+      console.error('[Editar Pieza] fallo:', error);
+      toast.error(extractErrorMessage(error, 'No se pudo actualizar la pieza.'));
+    } finally {
+      setSavingEp(false);
+    }
   };
 
   // ---- Vistas derivadas ----
@@ -1003,7 +1219,8 @@ export default function Inventario() {
   const filasExhibicion: FilaExhibicion[] = [];
   const vistosExh = new Set<number>();
   for (const p of productosExh) {
-    if (!p.es_exhibicion) continue;
+    // Las dadas de baja (vendidas/agotadas) desaparecen del listado.
+    if (!p.es_exhibicion || p.activo === false) continue;
     const filas = stockExhPorProducto.get(p.id) ?? [];
     filasExhibicion.push(buildFilaExhibicion(p, filas.reduce((a, f) => a + (parseFloat(String(f.cantidad)) || 0), 0)));
     vistosExh.add(p.id);
@@ -1636,7 +1853,7 @@ export default function Inventario() {
                   <div className="p-8 text-center text-sm italic text-yeikar-neutral/40">
                     {searchExhibicion
                       ? `Sin resultados para "${searchExhibicion}"`
-                      : 'No hay piezas en exhibición. Usa "Nueva Pieza" para registrar una (nombre, precio en dólares y cantidad).'}
+                      : 'No hay piezas en exhibición. Usa "Nueva Pieza" para registrar una (nombre, precio y costo en dólares).'}
                   </div>
                 }
               />
@@ -1649,6 +1866,7 @@ export default function Inventario() {
               cardBadge={(c) => (
                 <span className="font-mono text-xs font-bold text-yeikar-secondary">{c.cantidad.toLocaleString('es-ES')}</span>
               )}
+              onRowClick={(c) => handleOpenCrudo(c)}
               empty={
                 <div className="p-8 text-center text-sm italic text-yeikar-neutral/40">
                   No hay ítems en crudo. Crea uno con "Nuevo en Crudo"". Luego usa "Nueva Producción" para registrar su fabricación y consumos.
@@ -2123,71 +2341,195 @@ export default function Inventario() {
           );
         })()}
 
-        {/* ================= PANEL LATERAL (Producto: movimiento + historial) ================= */}
-        {(tab === 'productos' || tab === 'exhibicion') && selectedProductoId && productoSeleccionado && (
-          <div className="w-full lg:w-[28rem] bg-white border border-yeikar-secondary-light/10 rounded-3xl p-5 shadow-sm space-y-5 flex flex-col max-h-[800px] overflow-hidden">
-            <div className="flex items-start justify-between border-b border-yeikar-secondary-light/5 pb-3">
-              <div>
-                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">DETALLE DE PRODUCTO</span>
-                <h3 className="font-headline font-black text-yeikar-secondary text-base truncate max-w-[240px]" title={productoSeleccionado.nombre}>
+        {/* ================= MODAL DETALLE DE PRODUCTO (misma UI que insumos) ================= */}
+        {(tab === 'productos' || tab === 'exhibicion') && selectedProductoId && productoSeleccionado && (() => {
+          const { c: stockProd, low: stockLow } = productoStock(productoSeleccionado);
+          const esExh = tab === 'exhibicion';
+          const monCod = productoSeleccionado?.moneda?.codigo ?? 'COP';
+          const tabsProd = (
+            esExh
+              ? [{ key: 'movimiento', label: 'Movimiento' }, { key: 'historial', label: 'Historial' }]
+              : [{ key: 'movimiento', label: 'Movimiento' }, { key: 'editar', label: 'Editar producto' }, { key: 'historial', label: 'Historial' }]
+          ) as { key: 'movimiento' | 'editar' | 'historial'; label: string }[];
+          return (
+          <div
+            className="fixed inset-0 z-50 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+            onClick={() => setSelectedProductoId(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl shadow-xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10"
+            >
+              {/* Encabezado con resumen del producto */}
+              <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 pt-5 pb-4 relative">
+                <button
+                  onClick={() => setSelectedProductoId(null)}
+                  className="absolute right-4 top-4 p-1.5 rounded-lg hover:bg-white/15 transition-colors"
+                  aria-label="Cerrar"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+                <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-white/60">
+                  {esExh ? 'Detalle de pieza' : 'Detalle de producto'}
+                </span>
+                <h3 className="font-headline font-black text-xl truncate pr-10" title={productoSeleccionado.nombre}>
                   {productoSeleccionado.nombre}
                 </h3>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                    <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Stock actual</p>
+                    <p className={`font-mono font-bold text-lg leading-tight ${stockLow ? 'text-amber-300' : 'text-white'}`}>
+                      {stockProd.toLocaleString('es-ES')}
+                    </p>
+                  </div>
+                  <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                    <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Precio</p>
+                    <p className="font-mono font-bold text-lg leading-tight text-white">
+                      {simboloMonedaProducto(productoSeleccionado)}{Number(productoSeleccionado.precio_venta_base ?? 0).toLocaleString('es-ES')}
+                      <span className="text-xs font-normal text-white/70"> {monCod}</span>
+                    </p>
+                  </div>
+                  <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                    {esExh ? (
+                      <>
+                        <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Costo</p>
+                        <p className="font-mono font-bold text-lg leading-tight text-white">
+                          {simboloMonedaProducto(productoSeleccionado)}{Number(productoSeleccionado.precio_costo_base ?? 0).toLocaleString('es-ES')}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Stock mín.</p>
+                        <p className="font-mono font-bold text-lg leading-tight text-white">
+                          {Number(productoSeleccionado.stock_minimo ?? 8).toLocaleString('es-ES')}
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-              <button
-                onClick={() => setSelectedProductoId(null)}
-                className="p-1 hover:bg-yeikar-tertiary rounded-lg text-yeikar-neutral/40 hover:text-yeikar-neutral/70 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+
+              {/* Tabs */}
+              <div className="px-6 pt-4">
+                <div className="flex gap-1 p-1 bg-yeikar-tertiary/40 rounded-2xl">
+                  {tabsProd.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setDetalleTabProducto(t.key)}
+                      className={`flex-1 py-2 rounded-xl text-[11px] font-headline font-black uppercase tracking-wider transition-all ${
+                        detalleTabProducto === t.key
+                          ? 'bg-white shadow text-yeikar-secondary'
+                          : 'text-yeikar-neutral/45 hover:text-yeikar-secondary'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cuerpo */}
+              <div className="flex-1 overflow-y-auto p-6">
 
             {tab === 'exhibicion' && (
-              <div className="flex gap-2">
+              <div className="grid grid-cols-2 gap-2 mb-4">
                 <button
                   onClick={() => setProducirPieza({ producto_id: productoSeleccionado.id, nombre: productoSeleccionado.nombre })}
-                  className="flex-1 py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-xs transition-colors"
+                  className="py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-xs transition-colors"
                 >
                   Orden de Producción
                 </button>
                 <button
                   onClick={() => venderPieza(productoSeleccionado.id)}
-                  className="flex-1 py-2 bg-white hover:bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/20 rounded-xl font-bold font-headline text-xs transition-colors"
+                  className="py-2 bg-white hover:bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/20 rounded-xl font-bold font-headline text-xs transition-colors"
                 >
                   Vender
+                </button>
+                <button
+                  onClick={() => abrirEditarPieza(productoSeleccionado)}
+                  className="py-2 bg-white hover:bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/20 rounded-xl font-bold font-headline text-xs transition-colors"
+                  title="Editar nombre, precio, costo y foto (el stock se mueve con producción/ventas)"
+                >
+                  Editar
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!window.confirm(`¿Dar de baja "${productoSeleccionado.nombre}"? Desaparecerá del listado (el historial de ventas queda intacto).`)) return;
+                    try {
+                      await productosService.actualizarProducto(productoSeleccionado.id, { activo: false });
+                      setSelectedProductoId(null);
+                      fetchProductos();
+                      toast.success('Pieza dada de baja.');
+                    } catch (error: any) {
+                      toast.error(extractErrorMessage(error, 'No se pudo dar de baja la pieza.'));
+                    }
+                  }}
+                  className="py-2 bg-white hover:bg-red-50 text-red-500 border border-red-200 rounded-xl font-bold font-headline text-xs transition-colors"
+                  title="Quitar la pieza del listado sin borrar su historial"
+                >
+                  Borrar
                 </button>
               </div>
             )}
 
-            <div className="flex-1 overflow-y-auto space-y-5 pr-1">
-              <form onSubmit={handleRegisterMovementProducto} className="space-y-3 bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-2xl p-4">
-                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-primary">Registrar Movimiento</span>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Tipo Movimiento</label>
-                  <select value={movProducto.tipo} onChange={(e) => setMovProducto(p => ({ ...p, tipo: e.target.value }))} className={selectCls}>
-                    {TIPOS_MOVIMIENTO.map(t => (
-                      <option key={t} value={t}>
-                        {t === 'ENTRADA' ? 'ENTRADA (Compra/Carga)' : t === 'SALIDA' ? 'SALIDA (Despacho)' : t === 'AJUSTE' ? 'AJUSTE (Inventario físico)' : t === 'DAÑO' ? 'DAÑO (Mermas)' : 'DEVOLUCION'}
-                      </option>
-                    ))}
-                  </select>
+            {/* ── TAB: Registrar movimiento ── */}
+            {detalleTabProducto === 'movimiento' && (
+              esExh ? (
+                <p className="text-[11px] text-yeikar-neutral/60 bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl px-4 py-3">
+                  Las piezas de exhibición no llevan movimientos manuales: entran solas al producirse y salen con la venta (al agotarse se dan de baja solas). El historial abajo muestra esos movimientos.
+                </p>
+              ) : (
+              <form onSubmit={handleRegisterMovementProducto} className="space-y-4">
+                {/* Tipo de movimiento (botones, igual que insumos) */}
+                <div>
+                  <label className="text-xs font-bold text-yeikar-secondary mb-1.5 block">Tipo de movimiento</label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {TIPOS_MOVIMIENTO.map((t) => {
+                      const activo = movProducto.tipo === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          title={HINTS_TIPO[t] || t}
+                          onClick={() => setMovProducto((p) => ({ ...p, tipo: t }))}
+                          className={`py-2 rounded-xl border text-[10px] font-headline font-black uppercase tracking-wide transition-all ${
+                            activo
+                              ? `${TIPO_BTN_ACTIVO[t] || 'bg-yeikar-secondary border-yeikar-secondary'} text-white shadow-sm`
+                              : 'bg-white border-yeikar-secondary-light/15 text-yeikar-neutral/50 hover:border-yeikar-secondary-light/40 hover:text-yeikar-secondary'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movProducto.tipo]}</p>
                 </div>
+                <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
                   <SearchSelect
                     value={movProducto.ubicacion_id}
                     onChange={(v) => setMovProducto(p => ({ ...p, ubicacion_id: String(v) }))}
                     options={ubicaciones.map((u) => ({ value: u.id, label: u.nombre }))}
-                    placeholder="Seleccione una ubicación"
+                    placeholder="Seleccione..."
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
                   <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movProducto.cantidad} onChange={(e) => setMovProducto(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
                 </div>
+                </div>
                 {(movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION') && (
-                  <div className="space-y-3 bg-white/40 p-3 rounded-xl border border-yeikar-secondary-light/10">
+                  <div className="space-y-3 bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-2xl p-4">
+                    <p className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-yeikar-neutral/45">Datos de la compra · opcional</p>
+                    <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
                         {productoSeleccionado?.es_reventa
@@ -2200,37 +2542,40 @@ export default function Inventario() {
                     {/* "La llevada": flete/aduana */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
-                        La Llevada (flete/aduana) <span className="text-yeikar-neutral/40 font-normal">(opcional — genera gasto desde la cuenta)</span>
+                        La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete — genera gasto)</span>
                       </label>
                       <input type="number" step="0.01" min="0" placeholder="0.00" value={movProducto.llevada} onChange={(e) => setMovProducto(p => ({ ...p, llevada: e.target.value }))} className={inputCls} />
                     </div>
+                    </div>
 
+                    <div className="grid grid-cols-2 gap-3">
                     {/* Proveedor: dónde se compró (opcional, texto libre) */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
-                        Proveedor <span className="text-yeikar-neutral/40 font-normal">(dónde se compró — opcional)</span>
+                        Proveedor <span className="text-yeikar-neutral/40 font-normal">(dónde compró)</span>
                       </label>
                       <input
                         type="text"
                         value={movProducto.proveedor_nombre}
                         onChange={(e) => setMovProducto(p => ({ ...p, proveedor_nombre: e.target.value }))}
                         placeholder="Ej. Distribuidora Maderas C.A."
-                        className={inputCls}
+                        className={inputCls.replace('font-mono', '')}
                       />
                     </div>
 
                     {/* Cliente: producto comprado para un cliente específico (opcional, texto libre) */}
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">
-                        Cliente <span className="text-yeikar-neutral/40 font-normal">(comprado para un cliente — opcional)</span>
+                        Cliente <span className="text-yeikar-neutral/40 font-normal">(comprado para)</span>
                       </label>
                       <input
                         type="text"
                         value={movProducto.cliente_nombre}
                         onChange={(e) => setMovProducto(p => ({ ...p, cliente_nombre: e.target.value }))}
                         placeholder="Ej. Cliente sin registrar"
-                        className={inputCls}
+                        className={inputCls.replace('font-mono', '')}
                       />
+                    </div>
                     </div>
 
                     {movProducto.tipo === 'ENTRADA' && parseFloat(movProducto.costo_unitario || '0') > 0 && (
@@ -2303,18 +2648,31 @@ export default function Inventario() {
                     <>
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">
-                          ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — genera el egreso)</span>
+                          ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — vacío = fiado al proveedor)</span>
                         </label>
                         <SearchSelect
                           value={movProducto.pagado_desde_metodo_caja_id}
                           onChange={(v) => setMovProducto(p => ({ ...p, pagado_desde_metodo_caja_id: String(v), tasa_pago: '' }))}
                           options={[
-                            { value: '', label: 'A crédito (no descuenta caja)' },
+                            { value: '', label: 'Fiar (registrar deuda)' },
                             ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
                           ]}
-                          placeholder="Contado desde... (vacío = a crédito)"
+                          placeholder="Contado desde... (vacío = fiado)"
                         />
                       </div>
+                      {!cuentaId && parseFloat(movProducto.cantidad || '0') > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
+                            Se registrará una deuda de ≈ <b>${(totalRef + (parseFloat(movProducto.llevada || '0') || 0)).toLocaleString('es-CO')} {refCod}</b>
+                            {' '}(compra + llevada) en <b>Egresos y Gastos → Por Pagar</b>.
+                          </p>
+                          {!movProducto.proveedor_nombre && (
+                            <p className="text-[11px] font-bold text-red-600">
+                              Al fiar es obligatorio indicar el proveedor (campo de arriba).
+                            </p>
+                          )}
+                        </div>
+                      )}
                       {cuentaId && necesitaTasa && (
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-yeikar-secondary">
@@ -2339,12 +2697,57 @@ export default function Inventario() {
                 <button
                   type="submit"
                   disabled={savingMovProd}
-                  className="w-full py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                  className="w-full py-3 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50 shadow-gold"
                 >
                   {savingMovProd ? 'Registrando...' : 'Registrar Movimiento'}
                 </button>
               </form>
+              ))}
 
+              {/* ── TAB: Editar producto ── */}
+              {detalleTabProducto === 'editar' && (
+                <form onSubmit={handleSaveProducto} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Nombre</label>
+                    <input type="text" required value={editProducto.nombre} onChange={(e) => setEditProducto((p) => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '')} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-yeikar-secondary">Precio venta ({monCod})</label>
+                      <input type="number" min="0" step="0.01" value={editProducto.precio_venta_base} onChange={(e) => setEditProducto((p) => ({ ...p, precio_venta_base: e.target.value }))} className={inputCls} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-yeikar-secondary">Costo ({monCod})</label>
+                      <input type="number" min="0" step="0.01" value={editProducto.precio_costo_base} onChange={(e) => setEditProducto((p) => ({ ...p, precio_costo_base: e.target.value }))} className={inputCls} />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-yeikar-secondary">Stock Mínimo</label>
+                      <input type="number" min="0" step="1" value={editProducto.stock_minimo} onChange={(e) => setEditProducto((p) => ({ ...p, stock_minimo: e.target.value }))} className={inputCls} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-yeikar-secondary">Categoría</label>
+                      <SearchSelect
+                        value={editProducto.categoria_inventario_id}
+                        onChange={(v) => setEditProducto((p) => ({ ...p, categoria_inventario_id: String(v) }))}
+                        options={[{ value: '', label: 'Sin categoría' }, ...categoriasProducto.map((c) => ({ value: c.id, label: c.nombre }))]}
+                        placeholder="Sin categoría..."
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={savingEditProd}
+                    className="w-full py-2.5 bg-yeikar-secondary hover:bg-yeikar-secondary-light text-white rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                  >
+                    {savingEditProd ? 'Guardando...' : 'Guardar Cambios'}
+                  </button>
+                </form>
+              )}
+
+              {/* ── TAB: Historial (kardex) ── */}
+              {detalleTabProducto === 'historial' && (
               <div>
                 <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-secondary">Historial</span>
                 {loadingKardexProducto ? (
@@ -2407,9 +2810,240 @@ export default function Inventario() {
                   </div>
                 )}
               </div>
+              )}
             </div>
+            </motion.div>
           </div>
-        )}
+          );
+        })()}
+        {/* ================= MODAL DETALLE DE CRUDO (misma UI que insumos) ================= */}
+        {tab === 'crudo' && selectedCrudoId && crudoSeleccionado && (() => {
+          const ubiCrudo = ubicaciones.find(u => u.id === crudoSeleccionado.ubicacion_id)?.nombre ?? '—';
+          const tabsCrudo = [
+            { key: 'movimiento', label: 'Movimiento' },
+            { key: 'editar', label: 'Editar ítem' },
+            { key: 'historial', label: 'Historial' },
+          ] as const;
+          return (
+          <div
+            className="fixed inset-0 z-50 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
+            onClick={() => setSelectedCrudoId(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-3xl shadow-xl max-w-2xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10"
+            >
+              {/* Encabezado con resumen del ítem */}
+              <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 pt-5 pb-4 relative">
+                <button
+                  onClick={() => setSelectedCrudoId(null)}
+                  className="absolute right-4 top-4 p-1.5 rounded-lg hover:bg-white/15 transition-colors"
+                  aria-label="Cerrar"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+                <span className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-white/60">Detalle de crudo</span>
+                <h3 className="font-headline font-black text-xl truncate pr-10" title={crudoSeleccionado.nombre}>
+                  {crudoSeleccionado.nombre}
+                </h3>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                    <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Stock actual</p>
+                    <p className="font-mono font-bold text-lg leading-tight text-white">{Number(crudoSeleccionado.cantidad).toLocaleString('es-ES')}</p>
+                  </div>
+                  <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
+                    <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Ubicación</p>
+                    <p className="font-headline font-bold text-sm leading-tight text-white truncate pt-1">{ubiCrudo}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="px-6 pt-4">
+                <div className="flex gap-1 p-1 bg-yeikar-tertiary/40 rounded-2xl">
+                  {tabsCrudo.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => setDetalleTabCrudo(t.key)}
+                      className={`flex-1 py-2 rounded-xl text-[11px] font-headline font-black uppercase tracking-wider transition-all ${
+                        detalleTabCrudo === t.key
+                          ? 'bg-white shadow text-yeikar-secondary'
+                          : 'text-yeikar-neutral/45 hover:text-yeikar-secondary'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cuerpo */}
+              <div className="flex-1 overflow-y-auto p-6">
+              {/* ── TAB: Registrar movimiento ── */}
+              {detalleTabCrudo === 'movimiento' && (
+              <form onSubmit={handleRegisterMovementCrudo} className="space-y-4">
+                {/* Tipo de movimiento (botones, igual que insumos) */}
+                <div>
+                  <label className="text-xs font-bold text-yeikar-secondary mb-1.5 block">Tipo de movimiento</label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {TIPOS_MOVIMIENTO.map((t) => {
+                      const activo = movCrudo.tipo === t;
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          title={HINTS_TIPO[t] || t}
+                          onClick={() => setMovCrudo((p) => ({ ...p, tipo: t }))}
+                          className={`py-2 rounded-xl border text-[10px] font-headline font-black uppercase tracking-wide transition-all ${
+                            activo
+                              ? `${TIPO_BTN_ACTIVO[t] || 'bg-yeikar-secondary border-yeikar-secondary'} text-white shadow-sm`
+                              : 'bg-white border-yeikar-secondary-light/15 text-yeikar-neutral/50 hover:border-yeikar-secondary-light/40 hover:text-yeikar-secondary'
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movCrudo.tipo]}</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
+                  <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movCrudo.cantidad} onChange={(e) => setMovCrudo(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
+                </div>
+                {movCrudo.tipo === 'AJUSTE' && (
+                  <p className="text-[11px] text-yeikar-neutral/60 bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
+                    El ajuste fija el stock al valor digitado (inventario físico).
+                  </p>
+                )}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
+                  <textarea rows={2} placeholder="Detalle o referencia..." value={movCrudo.observaciones} onChange={(e) => setMovCrudo(p => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
+                </div>
+                <button
+                  type="submit"
+                  disabled={savingMovCrudo}
+                  className="w-full py-3 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50 shadow-gold"
+                >
+                  {savingMovCrudo ? 'Registrando...' : 'Registrar Movimiento'}
+                </button>
+              </form>
+              )}
+
+              {/* ── TAB: Editar ítem ── */}
+              {detalleTabCrudo === 'editar' && (
+                <form onSubmit={handleSaveCrudo} className="space-y-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Nombre</label>
+                    <input type="text" required value={editCrudo.nombre} onChange={(e) => setEditCrudo((p) => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '')} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
+                    <SearchSelect
+                      value={editCrudo.ubicacion_id}
+                      onChange={(v) => setEditCrudo((p) => ({ ...p, ubicacion_id: String(v) }))}
+                      options={ubicaciones.map((u) => ({ value: u.id, label: u.nombre }))}
+                      placeholder="Seleccione..."
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-semibold text-yeikar-neutral/50 uppercase">Estado:</span>
+                    {([['activo', 'Activo'], ['inactivo', 'Inactivo']] as const).map(([valor, etiqueta]) => {
+                      const esActivo = valor === 'activo';
+                      const sel = editCrudo.activo === esActivo;
+                      return (
+                        <button
+                          key={valor}
+                          type="button"
+                          onClick={() => setEditCrudo((p) => ({ ...p, activo: esActivo }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+                            sel
+                              ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                              : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+                          }`}
+                        >
+                          {etiqueta}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={savingEditCrudo}
+                    className="w-full py-2.5 bg-yeikar-secondary hover:bg-yeikar-secondary-light text-white rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                  >
+                    {savingEditCrudo ? 'Guardando...' : 'Guardar Cambios'}
+                  </button>
+                </form>
+              )}
+
+              {/* ── TAB: Historial (kardex) ── */}
+              {detalleTabCrudo === 'historial' && (
+              <div>
+                <span className="text-xs font-headline font-black uppercase tracking-wider text-yeikar-secondary">Historial</span>
+                {loadingKardexCrudo ? (
+                  <div className="flex flex-col items-center justify-center py-8 space-y-3">
+                    <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando historial...</p>
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {kardexCrudo.length === 0 ? (
+                      <p className="text-xs text-yeikar-neutral/40 italic text-center py-4">No se registran movimientos para este ítem.</p>
+                    ) : (
+                      kardexCrudo.map((mov) => {
+                        const isEntry = mov.tipo === 'ENTRADA' || mov.tipo === 'DEVOLUCION';
+                        const isAdjustment = mov.tipo === 'AJUSTE';
+                        return (
+                          <div key={mov.id} className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/5 rounded-xl p-3 text-xs space-y-1">
+                            <div className="flex items-center justify-between">
+                              <span className={`font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded border ${
+                                isAdjustment ? 'bg-slate-50 text-slate-700 border-slate-200' : isEntry ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'
+                              }`}>
+                                {mov.tipo}
+                              </span>
+                              <span className="font-mono text-[10px] text-yeikar-neutral/40">
+                                {mov.fecha ? new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                              </span>
+                            </div>
+                            <div className="flex items-baseline justify-between mt-1.5">
+                              <span className="text-yeikar-neutral/60 font-medium">Cantidad:</span>
+                              <span className={`font-mono font-bold text-sm ${isEntry ? 'text-green-600' : 'text-yeikar-secondary'}`}>
+                                {isEntry ? '+' : isAdjustment ? '' : '-'}{parseFloat(String(mov.cantidad)).toLocaleString('es-ES')}
+                              </span>
+                            </div>
+                            {mov.referencia_tipo && (
+                              <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
+                                {mov.referencia_tipo === 'PRODUCCION' ? <>Producción de crudo <span className="font-semibold text-yeikar-secondary">#{mov.referencia_id}</span></> : <>Asignado al pedido <span className="font-semibold text-yeikar-secondary">(detalle #{mov.referencia_id})</span></>}
+                              </p>
+                            )}
+                            {mov.creador_nombre && (
+                              <p className="text-[10px] text-yeikar-neutral/40 mt-0.5">Registrado por {mov.creador_nombre}</p>
+                            )}
+                            {mov.observaciones && (
+                              <p className="text-[11px] text-yeikar-neutral/50 italic mt-1 bg-white/40 p-1.5 rounded border border-yeikar-secondary-light/5">
+                                {mov.observaciones}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+              )}
+            </div>
+            </motion.div>
+          </div>
+          );
+        })()}
       </div>
 
       {/* Modal para Crear Material/Insumo */}
@@ -2826,7 +3460,7 @@ export default function Inventario() {
           <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10">
             <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
               <h3 className="font-headline font-black text-lg">Nueva Pieza de Exhibición</h3>
-              <p className="text-xs text-white/70">Solo nombre, precio en dólares y cuántas hay. La producción (inventario, costos, nómina) se gestiona desde Producción.</p>
+              <p className="text-xs text-white/70">Nombre, precio de venta y costo de producción. Pieza única: sin entradas de inventario — se vende por el cotizador y al venderse se da de baja sola.</p>
             </div>
             <form onSubmit={handleCreatePieza} className="p-6 space-y-4 font-body">
               <div>
@@ -2835,13 +3469,31 @@ export default function Inventario() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio (USD) *</label>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio venta (USD) *</label>
                   <input type="number" min="0" step="0.01" required placeholder="Ej. 1500" value={newPieza.precio_usd} onChange={(e) => setNewPieza(prev => ({ ...prev, precio_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad</label>
-                  <input type="number" min="0" step="1" placeholder="Ej. 1 (0 si aún no existe y la vas a fabricar)" value={newPieza.cantidad} onChange={(e) => setNewPieza(prev => ({ ...prev, cantidad: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo de producir (USD) *</label>
+                  <input type="number" min="0" step="0.01" required placeholder="Ej. 900" value={newPieza.costo_usd} onChange={(e) => setNewPieza(prev => ({ ...prev, costo_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
+              </div>
+              {parseFloat(newPieza.precio_usd || '0') > 0 && parseFloat(newPieza.costo_usd || '0') > 0 && (() => {
+                const p = parseFloat(newPieza.precio_usd);
+                const c = parseFloat(newPieza.costo_usd);
+                const g = p - c;
+                const pct = c > 0 ? (g / c) * 100 : 0;
+                return (
+                  <p className={`text-[11px] font-mono rounded-lg px-3 py-1.5 ${g >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
+                    Ganancia: ${g.toLocaleString('es-CO')} ({pct.toFixed(1)}% sobre el costo)
+                    {g < 0 && ' · se vende por debajo del costo'}
+                  </p>
+                );
+              })()}
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad</label>
+                <p className="text-xs text-yeikar-neutral/50 bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5">
+                  Pieza única: entra sin stock y sale con la venta. Si la vas a fabricar, usa "Orden de Producción" en su detalle.
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de la pieza <span className="text-yeikar-neutral/40 font-normal">(opcional · se comprime sola)</span></label>
@@ -2879,11 +3531,111 @@ export default function Inventario() {
                 )}
               </div>
               <p className="text-[11px] text-yeikar-neutral/50">
-                Se registrará en {ubicacionesExhibicion[0]?.nombre || 'la ubicación de exhibición'} como pieza única. El precio en dólares es el de venta (lo sugiere el cotizador).
+                Se registrará como pieza única (sin entradas de inventario). El precio es el de venta (lo sugiere el cotizador) y el costo es lo que costó producirla — así la utilidad de la venta refleja lo que dejó el mueble.
               </p>
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowPiezaModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" disabled={savingPieza} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingPieza ? 'Registrando...' : 'Registrar'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Editar Pieza de Exhibición (nombre/precios/foto — SIN stock) */}
+      {editarPieza && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10 max-h-[92vh] flex flex-col overflow-y-auto">
+            <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
+              <h3 className="font-headline font-black text-lg">Editar Pieza</h3>
+              <p className="text-xs text-white/70">Nombre, precio y costo en dólares, y la foto. El stock no se toca aquí.</p>
+            </div>
+            <form onSubmit={handleEditarPieza} className="p-6 space-y-4 font-body">
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre de la pieza *</label>
+                <input type="text" required value={epForm.nombre} onChange={(e) => setEpForm(prev => ({ ...prev, nombre: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio venta (USD) *</label>
+                  <input type="number" min="0" step="0.01" required placeholder="Ej. 1500" value={epForm.precio_usd} onChange={(e) => setEpForm(prev => ({ ...prev, precio_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo de producir (USD)</label>
+                  <input type="number" min="0" step="0.01" placeholder="Ej. 900" value={epForm.costo_usd} onChange={(e) => setEpForm(prev => ({ ...prev, costo_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+              </div>
+              {parseFloat(epForm.precio_usd || '0') > 0 && parseFloat(epForm.costo_usd || '0') > 0 && (() => {
+                const p = parseFloat(epForm.precio_usd);
+                const c = parseFloat(epForm.costo_usd);
+                const g = p - c;
+                const pct = c > 0 ? (g / c) * 100 : 0;
+                return (
+                  <p className={`text-[11px] font-mono rounded-lg px-3 py-1.5 ${g >= 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-600 border border-red-200'}`}>
+                    Ganancia: ${g.toLocaleString('es-CO')} ({pct.toFixed(1)}% sobre el costo)
+                    {g < 0 && ' · se vende por debajo del costo'}
+                  </p>
+                );
+              })()}
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de la pieza <span className="text-yeikar-neutral/40 font-normal">(se comprime sola)</span></label>
+                <div className="flex items-center gap-3">
+                  {fotoEpPreview ? (
+                    <img src={fotoEpPreview} alt="Vista previa" className="w-16 h-16 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+                  ) : editarPieza.fotos && editarPieza.fotos[0]?.id && !quitarFotoEp ? (
+                    <div className="relative shrink-0">
+                      <AdjuntoImagen adjunto={editarPieza.fotos[0] as AdjuntoInfo} alt={editarPieza.nombre} className="w-16 h-16 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+                      <button
+                        type="button"
+                        onClick={() => setQuitarFotoEp(true)}
+                        title="Quitar esta foto"
+                        className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center hover:bg-red-600 transition-colors"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : (
+                    <span className="w-16 h-16 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 text-[10px] font-bold">SIN FOTO</span>
+                  )}
+                  <div className="flex flex-col gap-2 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => epCameraRef.current?.click()}
+                      className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h2l1-2h8l1 2h2a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><circle cx="12" cy="13" r="3" /></svg>
+                      Tomar foto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => epGalleryRef.current?.click()}
+                      className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      Desde galería
+                    </button>
+                  </div>
+                  <input ref={epCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFotoEp} />
+                  <input ref={epGalleryRef} type="file" accept="image/*" className="hidden" onChange={handleFotoEp} />
+                </div>
+                {(fotoEp || quitarFotoEp) && (
+                  <button
+                    type="button"
+                    onClick={() => { setQuitarFotoEp(false); quitarFotoEpArchivo(); }}
+                    className="mt-1.5 text-[10px] font-bold text-red-600 hover:underline"
+                  >
+                    {fotoEp ? 'Quitar la foto nueva' : 'Dejar la foto como estaba'}
+                  </button>
+                )}
+                {quitarFotoEp && !fotoEp && (
+                  <p className="mt-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
+                    La foto actual se eliminará al guardar.
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                <button type="button" onClick={() => setEditarPieza(null)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
+                <button type="submit" disabled={savingEp} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingEp ? 'Guardando...' : 'Guardar cambios'}</button>
               </div>
             </form>
           </div>

@@ -10,7 +10,7 @@ from app.modules.production.model import (
     TIPO_PEDIDO, TIPO_EXHIBICION, TIPO_STOCK, TIPOS_ORDEN,
     OrdenProduccion, EtapaProduccion, ConsumoMaterial, ManoObra, CostoProduccion,
     ProductoCrudoInventario, ProduccionCrudo, ProduccionCrudoConsumo,
-    ProduccionCrudoManoObra, ProduccionCrudoUso,
+    ProduccionCrudoManoObra, ProduccionCrudoUso, MovimientoCrudo,
 )
 from app.modules.production.schemas import (
     OrdenProduccionCreate, OrdenProduccionUpdate,
@@ -1744,6 +1744,39 @@ def crear_crudo(db, esquema: CrudoCreate, usuario=None):
     return crudo
 
 
+def actualizar_crudo(db, crudo_id, esquema, usuario=None):
+    """Edición simple del ítem en crudo (nombre, área, ubicación, activo)."""
+    from app.modules.catalogos.model import Ubicacion
+    crudo = db.query(ProductoCrudoInventario).filter(
+        ProductoCrudoInventario.id == crudo_id
+    ).first()
+    if not crudo:
+        return None
+    datos = esquema.model_dump(exclude_unset=True)
+    if "nombre" in datos:
+        nombre = (datos["nombre"] or "").strip()
+        if not nombre:
+            raise ValueError("El nombre del producto en crudo es obligatorio.")
+        crudo.nombre = nombre
+    if datos.get("area_id") is not None:
+        crudo.area_id = datos["area_id"]
+    if datos.get("ubicacion_id") is not None:
+        ubi = db.query(Ubicacion).filter(Ubicacion.id == datos["ubicacion_id"]).first()
+        if not ubi:
+            raise ValueError("La ubicación no existe.")
+        crudo.ubicacion_id = ubi.id
+    if datos.get("activo") is not None:
+        crudo.activo = bool(datos["activo"])
+    record_event(
+        db, actor=usuario, action="UPDATE", entity_type="producto_crudo", entity_id=crudo.id,
+        after={"nombre": crudo.nombre, "activo": crudo.activo},
+    )
+    db.commit()
+    db.refresh(crudo)
+    crudo.foto_url = _foto_crudo(db, crudo.id)
+    return crudo
+
+
 def listar_crudos(db, activo=None, usuario=None):
     q = db.query(ProductoCrudoInventario).options(joinedload(ProductoCrudoInventario.area))
     if activo is not None:
@@ -2001,6 +2034,16 @@ def cambiar_estado_produccion_crudo(db, produccion_id, estado: str, usuario=None
         )
         crudo.cantidad = Decimal(str(crudo.cantidad)) + Decimal(str(pc.cantidad))
         crudo.activo = True
+        # Kardex: la producción completada también queda en el historial.
+        db.add(MovimientoCrudo(
+            crudo_id=crudo.id,
+            tipo="ENTRADA",
+            cantidad=Decimal(str(pc.cantidad)),
+            referencia_tipo="PRODUCCION",
+            referencia_id=pc.id,
+            observaciones=f"Producción de crudo #{pc.id} completada",
+            creado_por_id=usuario.id if usuario else None,
+        ))
         # Materializa el egreso de toda la mano de obra aún sin pagar (costo de
         # producción que alimenta la nómina). Idempotente: las ya pagadas se omiten.
         _egresar_mano_obra_crudo(db, pc, usuario)
@@ -2203,6 +2246,16 @@ def asignar_crudo_a_detalle(db, crudo_id, detalle_pedido_id, usuario=None):
         creado_por_id=usuario.id if usuario else None,
     )
     db.add(uso)
+    # Kardex: la asignación también queda en el historial del crudo.
+    db.add(MovimientoCrudo(
+        crudo_id=crudo.id,
+        tipo="SALIDA",
+        cantidad=cantidad,
+        referencia_tipo="ASIGNACION",
+        referencia_id=detalle.id,
+        observaciones=f"Asignado al pedido #{detalle.pedido_id} (detalle #{detalle.id})",
+        creado_por_id=usuario.id if usuario else None,
+    ))
     record_event(
         db, actor=usuario, action="UPDATE", entity_type="producto_crudo", entity_id=crudo.id,
         after={"descontado": float(cantidad), "detalle_pedido_id": detalle.id},
@@ -2210,6 +2263,73 @@ def asignar_crudo_a_detalle(db, crudo_id, detalle_pedido_id, usuario=None):
     db.commit()
     db.refresh(uso)
     return uso
+
+
+# ------------------------------------------------------------
+# Kardex de crudo (misma UI de movimientos que insumos/productos)
+# ------------------------------------------------------------
+def registrar_movimiento_crudo(db: Session, crudo_id: int, esquema, usuario: Usuario | None = None):
+    """Movimiento manual de un ítem en crudo. Misma semántica que el kardex
+    de productos: ENTRADA/DEVOLUCION suman, SALIDA/DAÑO restan (validando
+    stock), AJUSTE fija el stock al valor dado."""
+    crudo = (
+        db.query(ProductoCrudoInventario)
+        .filter(ProductoCrudoInventario.id == crudo_id)
+        .with_for_update()
+        .first()
+    )
+    if not crudo:
+        raise ValueError("El ítem en crudo no existe.")
+    tipo = (esquema.tipo or "").upper()
+    cantidad = Decimal(str(esquema.cantidad))
+    if cantidad <= 0:
+        raise ValueError("La cantidad debe ser mayor que cero.")
+    if tipo in ("ENTRADA", "DEVOLUCION"):
+        crudo.cantidad = Decimal(str(crudo.cantidad)) + cantidad
+        crudo.activo = True
+    elif tipo in ("SALIDA", "DAÑO", "DANO"):
+        if Decimal(str(crudo.cantidad)) < cantidad:
+            raise ValueError(f"Stock insuficiente. Disponible: {crudo.cantidad}")
+        crudo.cantidad = Decimal(str(crudo.cantidad)) - cantidad
+        if crudo.cantidad <= 0:
+            crudo.cantidad = Decimal("0")
+            crudo.activo = False
+        tipo = "DAÑO" if tipo == "DANO" else tipo
+    elif tipo == "AJUSTE":
+        crudo.cantidad = cantidad
+        crudo.activo = cantidad > 0
+    else:
+        raise ValueError(f"Tipo de movimiento inválido: {esquema.tipo}")
+    db_mov = MovimientoCrudo(
+        crudo_id=crudo.id,
+        tipo=tipo,
+        cantidad=cantidad,
+        observaciones=getattr(esquema, "observaciones", None),
+        creado_por_id=usuario.id if usuario else None,
+    )
+    db.add(db_mov)
+    db.add(crudo)
+    db.flush()
+    record_event(
+        db, actor=usuario, action="CREATE", entity_type="movimiento_crudo",
+        entity_id=db_mov.id,
+        after={"crudo_id": crudo.id, "tipo": tipo, "cantidad": float(cantidad)},
+    )
+    db.commit()
+    db.refresh(db_mov)
+    db.refresh(crudo)
+    return db_mov
+
+
+def obtener_kardex_crudo(db: Session, crudo_id: int, limite: int = 200):
+    """Historial de movimientos de un ítem en crudo, más recientes primero."""
+    return (
+        db.query(MovimientoCrudo)
+        .filter(MovimientoCrudo.crudo_id == crudo_id)
+        .order_by(MovimientoCrudo.id.desc())
+        .limit(limite)
+        .all()
+    )
 
 
 # ------------------------------------------------------------

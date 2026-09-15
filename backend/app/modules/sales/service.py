@@ -669,6 +669,12 @@ def _descontar_stock_productos(
             ProductoInventario.producto_id == dp.producto_id
         ).with_for_update().all()
         if not filas:
+            if producto.es_exhibicion:
+                # Pieza de exhibición de alta simple (sin entradas de
+                # inventario): se vende con el costo del producto y se da de
+                # baja al venderse (se acabó → se borra del listado).
+                producto.activo = False
+                continue
             raise ValueError(
                 f"El producto '{producto.nombre}' es de reventa pero no tiene stock "
                 f"registrado en inventario. Registra una entrada primero."
@@ -703,6 +709,13 @@ def _descontar_stock_productos(
                 observaciones=f"Descuento por factura Venta #{db_venta.id}",
             ))
             restante -= a_descontar
+
+        # Pieza de exhibición agotada: se da de baja sola (desaparece del
+        # listado; el historial de ventas queda intacto).
+        if producto.es_exhibicion:
+            queda = sum(f.cantidad or Decimal("0") for f in filas)
+            if queda <= 0:
+                producto.activo = False
 
     return costo_real_por_producto
 

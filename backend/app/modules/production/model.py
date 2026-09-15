@@ -277,6 +277,40 @@ class ProductoCrudoInventario(Base):
     )
 
 
+class MovimientoCrudo(Base):
+    """Kardex de un ítem en crudo: cada ENTRADA/SALIDA/AJUSTE/DAÑO/DEVOLUCION
+    manual, más las automáticas (ENTRADA al completar una producción,
+    SALIDA al asignar a un pedido). Misma semántica que el kardex de
+    productos: ENTRADA/DEVOLUCION suman, SALIDA/DAÑO restan (validando
+    stock), AJUSTE fija el stock al valor dado.
+
+    El crudo vive en una sola ubicación y no lleva costeo por movimiento,
+    así que el formulario es el mismo pero sin ubicación ni precio.
+    """
+
+    __tablename__ = "movimiento_crudo"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    crudo_id = Column(BigInteger, ForeignKey("producto_crudo_inventario.id", ondelete="RESTRICT"), nullable=False, index=True)
+    tipo = Column(String(50), nullable=False)  # ENTRADA | SALIDA | AJUSTE | DAÑO | DEVOLUCION
+    cantidad = Column(Numeric(12, 2), nullable=False)
+    # Vínculo opcional con lo que originó el movimiento automático.
+    referencia_tipo = Column(String(100), nullable=True)  # PRODUCCION | ASIGNACION
+    referencia_id = Column(BigInteger, nullable=True)
+    observaciones = Column(Text, nullable=True)
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    fecha = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, server_default=func.now())
+
+    crudo = relationship("ProductoCrudoInventario")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+
+    @property
+    def creador_nombre(self):
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
+
+
 class ProduccionCrudo(Base):
     """Segunda producción: fabricación de un ítem en crudo. Al marcarla como
     COMPLETADA se suma stock al `ProductoCrudoInventario` correspondiente.

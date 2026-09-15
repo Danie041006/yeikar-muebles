@@ -231,8 +231,10 @@ def crear_cuenta_desde_entrada(
     db: Session,
     *,
     proveedor_id: int,
-    material_id: Optional[int],
-    material_nombre: str,
+    material_id: Optional[int] = None,
+    material_nombre: str = "",
+    producto_id: Optional[int] = None,
+    producto_nombre: Optional[str] = None,
     cantidad: Decimal,
     costo_unitario: Decimal,
     llevada: Decimal,
@@ -248,13 +250,14 @@ def crear_cuenta_desde_entrada(
         raise ValueError(f"El proveedor con id {proveedor_id} no existe.")
     tipo_gasto = _resolver_tipo_compra_insumos(db)
     monto = (cantidad * costo_unitario + llevada).quantize(Decimal("0.01"))
+    nombre = producto_nombre or material_nombre
 
     cxp = model.CuentaPorPagar(
         proveedor_id=proveedor_id,
         tipo_gasto_id=tipo_gasto.id,
         moneda_id=MONEDA_BASE_ID,
         fecha=fecha,
-        descripcion=f"Compra fiada: {material_nombre} x{cantidad:g}",
+        descripcion=f"Compra fiada: {nombre} x{cantidad:g}",
         monto=monto,
         tasa_cambio=Decimal("1.0"),
         monto_en_moneda_base=monto,
@@ -265,12 +268,12 @@ def crear_cuenta_desde_entrada(
     )
     db.add(cxp)
     db.flush()
-    # Renglón de la deuda: el material comprado, con el cliente/obra si la
+    # Renglón de la deuda: lo comprado, con el cliente/obra si la
     # entrada lo traía (p. ej. "madera para la obra del cliente X").
     db.add(model.DetalleCuentaPorPagar(
         cuenta_por_pagar_id=cxp.id,
         orden=0,
-        descripcion=material_nombre,
+        descripcion=nombre,
         material_id=material_id,
         cantidad=cantidad,
         precio_unitario=costo_unitario,

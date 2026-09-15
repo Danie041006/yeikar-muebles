@@ -602,6 +602,47 @@ def alta_crudo(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/crudo/{crudo_id}/kardex", response_model=List[schemas.CrudoMovimientoResponse])
+def kardex_crudo(
+    crudo_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Historial de movimientos de un ítem en crudo (misma UI que insumos)."""
+    return service.obtener_kardex_crudo(db, crudo_id)
+
+
+@router.post("/crudo/{crudo_id}/movimiento", response_model=schemas.CrudoMovimientoResponse, status_code=status.HTTP_201_CREATED)
+def movimiento_crudo(
+    crudo_id: int,
+    esquema: schemas.CrudoMovimientoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Registra un movimiento manual de crudo (ENTRADA/SALIDA/AJUSTE/DAÑO/DEVOLUCION)."""
+    try:
+        return service.registrar_movimiento_crudo(db, crudo_id, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/crudo/{crudo_id}", response_model=schemas.CrudoResponse)
+def editar_crudo(
+    crudo_id: int,
+    esquema: schemas.CrudoUpdate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Edita nombre, área, ubicación o estado del ítem en crudo."""
+    try:
+        db_obj = service.actualizar_crudo(db, crudo_id, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Producto en crudo no encontrado")
+    return db_obj
+
+
 # ------------------------------------------------------------
 # Producción de Crudos (segunda producción, separada del kanban)
 # ------------------------------------------------------------

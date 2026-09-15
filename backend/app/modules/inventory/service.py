@@ -688,9 +688,49 @@ def registrar_movimiento_producto(
             usuario=usuario,
         )
 
+    # ── "Fiar": ENTRADA sin pagar → cuenta por pagar (igual que insumos) ───
+    fiar = getattr(movimiento, "fiar", False)
+    if movimiento.tipo == "ENTRADA" and fiar:
+        _fiar_entrada_producto(
+            db, db_mov, producto, movimiento, proveedor_id, proveedor_nombre,
+            cliente_id, cliente_nombre, llevada, usuario,
+        )
+
     db.flush()
     db.refresh(db_mov)
     return db_mov
+
+
+def _fiar_entrada_producto(db, db_mov, producto, movimiento, proveedor_id, proveedor_nombre,
+                           cliente_id, cliente_nombre, llevada, usuario=None):
+    """Crea la cuenta por pagar de una ENTRADA fiada de producto (misma
+    mecánica que en insumos). NO hace commit (el llamador lo hace)."""
+    if getattr(movimiento, "pagado_desde_metodo_caja_id", None):
+        raise ValueError("Elige entre pagar de una cuenta o fiar, no ambos.")
+    if not proveedor_id and proveedor_nombre:
+        proveedor_nuevo = Proveedor(nombre=proveedor_nombre)
+        db.add(proveedor_nuevo)
+        db.flush()
+        proveedor_id = proveedor_nuevo.id
+    if not proveedor_id:
+        raise ValueError("Para fiar debes indicar el proveedor (campo Proveedor del movimiento).")
+    if movimiento.costo_unitario is None or Decimal(str(movimiento.costo_unitario)) <= 0:
+        raise ValueError("Para fiar debes indicar el costo unitario del producto.")
+    from app.modules.cuentas_por_pagar.service import crear_cuenta_desde_entrada
+    crear_cuenta_desde_entrada(
+        db,
+        proveedor_id=proveedor_id,
+        producto_id=producto.id,
+        producto_nombre=producto.nombre,
+        cantidad=movimiento.cantidad,
+        costo_unitario=Decimal(str(movimiento.costo_unitario)),
+        llevada=Decimal(str(llevada)) if llevada else Decimal("0.0"),
+        fecha=datetime.utcnow().date(),
+        movimiento_id=db_mov.id,
+        cliente_id=cliente_id,
+        cliente_nombre=cliente_nombre,
+        usuario=usuario,
+    )
 
 
 def obtener_movimientos_producto(
