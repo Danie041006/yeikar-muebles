@@ -935,6 +935,15 @@ export default function Cotizaciones() {
       return;
     }
 
+    // Moneda extranjera SIEMPRE exige TRM contable (>0 y ≠1): el ERP guarda el
+    // valor en pesos (total_en_moneda_base) y con 1.0 fabricaría 1 USD = 1 COP.
+    if (selectedMonedaId !== 1 && !(tasaCambio > 0 && tasaCambio !== 1)) {
+      setErrorForm(
+        `Indica la TRM (1 ${currencyCode} = X COP) para registrar el valor en pesos. Escríbela aquí o regístrala en Catálogos → Tasas de cambio.`,
+      );
+      return;
+    }
+
     let globalTotal = 0;
     const detalles: QuoteDetail[] = items.map((item) => {
       if (item.tipo_item === 'INSUMO') {
@@ -1010,9 +1019,9 @@ export default function Cotizaciones() {
       estado: editingQuote ? editingQuote.estado : 'BORRADOR',
       total_estimado: totalEstimado,
       moneda_id: selectedMonedaId,
-      // Sin renglones que convertir, la tasa es neutra (1): guarda la cotización
-      // en su moneda pura (ej. reventa USD cotizada en USD).
-      tasa_cambio: necesitaTasaCotizacion ? tasaCambio : 1,
+      // En moneda extranjera la tasa SIEMPRE sale (conversión o TRM contable):
+      // el backend la usa para valorar la cotización en pesos. En COP es 1.
+      tasa_cambio: selectedMonedaId === 1 ? 1 : tasaCambio,
       observaciones: finalObs,
       detalles
     };
@@ -1316,6 +1325,17 @@ export default function Cotizaciones() {
       return code !== currencyCode;
     });
   }, [items, products, currencyCode, selectedMonedaId]);
+
+  // TRM contable: aunque no haya conversión (todo en la misma moneda), el
+  // ERP guarda el valor en pesos (total_en_moneda_base) y sin tasa real
+  // fabricaría 1 USD = 1 COP. Se pre-llena con la última tasa registrada.
+  useEffect(() => {
+    if (selectedMonedaId === 1 || !currencyCode) return;
+    if (tasaCambio && tasaCambio !== 1) return;
+    const reg = tasasRegistradasRef.current[currencyCode];
+    if (reg && reg !== 1) setTasaCambio(reg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonedaId, currencyCode, necesitaTasaCotizacion]);
 
   // Prellenar cada moneda nueva con su última tasa registrada (visible y
   // editable: el usuario siempre confirma el valor).
@@ -1743,6 +1763,25 @@ export default function Cotizaciones() {
                     />
                     <p className="mt-1 text-[11px] text-stone-500 font-mono">
                       {formatCurrency(Math.round(globalTotalCalc), currencyCode)} → {(Math.round(globalTotalCalc * tasaCambio)).toLocaleString('es-CO')} COP
+                    </p>
+                  </div>
+                )}
+                {selectedMonedaId !== 1 && !necesitaTasaCotizacion && (
+                  <div>
+                    <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                      TRM contable (1 {currencyCode} = X COP) *
+                    </label>
+                    <input
+                      type="number"
+                      step="0.000001"
+                      min="0.000001"
+                      value={tasaCambio && tasaCambio !== 1 ? tasaCambio : ''}
+                      onChange={(e) => setTasaCambio(Number(e.target.value) || 1)}
+                      placeholder="Ej. 4200"
+                      className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm font-mono"
+                    />
+                    <p className="mt-1 text-[11px] text-stone-500 font-mono">
+                      Solo para el valor en pesos en la contabilidad. Tus precios en {currencyCode} no cambian.
                     </p>
                   </div>
                 )}

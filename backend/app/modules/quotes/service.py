@@ -51,9 +51,9 @@ def _trm_cotizacion(db: Session, moneda_id: int, fecha: date, tasa_indicada) -> 
     trm = _trm_registrada(db, moneda_id, fecha)
     if not trm:
         raise ValueError(
-            "No hay una TRM registrada para esta moneda. Regístrala en el catálogo "
-            "de tasas de cambio (o indícala en el formulario) antes de cotizar "
-            "en esta moneda."
+            "Indica la TRM (1 unidad de esta moneda = X COP) para registrar el "
+            "valor en pesos de la cotización. Regístrala en Catálogos → Tasas de "
+            "cambio, o escríbela en el formulario."
         )
     return trm
 
