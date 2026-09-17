@@ -18,6 +18,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Card, StatCard, Badge, Button, ResponsiveDataTable, type DataColumn } from '../components/ui';
+import { fmtFechaVE } from '../utils/fechas';
 
 interface IngresoMesDetail {
   moneda: string;
@@ -186,7 +187,7 @@ export default function Dashboard() {
     {
       key: 'fecha',
       header: 'Fecha',
-      render: (o) => <span className="font-mono text-xs text-yeikar-neutral/50">{new Date(o.fecha).toLocaleDateString('es-ES')}</span>,
+      render: (o) => <span className="font-mono text-xs text-yeikar-neutral/50">{fmtFechaVE(o.fecha)}</span>,
       mobileLabel: 'Fecha',
     },
     {

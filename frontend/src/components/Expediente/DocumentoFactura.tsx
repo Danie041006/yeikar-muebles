@@ -1,4 +1,5 @@
 import type { FacturaExp, ClienteExp } from '../../services/historialService';
+import { fmtFechaVE } from '../../utils/fechas';
 
 const fmtBs = (n: number) =>
   n.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -12,9 +13,7 @@ interface DocumentoFacturaProps {
 export default function DocumentoFactura({ factura, cliente, className = '' }: DocumentoFacturaProps) {
   const numero = `00 – ${factura.id.toString().padStart(5, '0')}`;
   const numeroControl = `00 – ${factura.id.toString().padStart(6, '0')}`;
-  const fechaEmision = factura.fecha_emision
-    ? new Date(factura.fecha_emision).toLocaleDateString('es-ES')
-    : '—';
+  const fechaEmision = fmtFechaVE(factura.fecha_emision);
   const tasa = factura.tasa_usd_ves || 1;
 
   const lineas = (factura.detalles || []).map((d, i) => ({

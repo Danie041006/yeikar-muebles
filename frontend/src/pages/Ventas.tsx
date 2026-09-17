@@ -19,6 +19,7 @@ import {
 } from '../services/ventaService';
 import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, extractErrorMessage } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
+import { fmtFechaVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
@@ -163,7 +164,7 @@ function ResumenCobro({
       </span>
 
       <span className="mt-2 flex items-center justify-between text-[11px] font-bold text-yeikar-neutral/45">
-        <span>{new Date(venta.fecha).toLocaleDateString('es-ES')}</span>
+        <span>{fmtFechaVE(venta.fecha)}</span>
         <span>{abierta ? 'Ocultar detalle' : 'Toca para ver deuda y pedido'}</span>
       </span>
     </button>
@@ -211,7 +212,7 @@ function BloquePedido({ venta }: { venta: Venta }) {
         Estado: {venta.pedido_estado === 'ENTREGADO' ? 'Entregado al cliente' : 'Todavía en proceso'}
       </p>
       <p className="mt-1 font-mono text-xs text-yeikar-neutral/60">
-        Venta #{venta.id} · {new Date(venta.fecha).toLocaleDateString('es-ES')}
+        Venta #{venta.id} · {fmtFechaVE(venta.fecha)}
       </p>
     </div>
   );
@@ -605,7 +606,7 @@ function ModalDetalle({
               </h3>
               {detalle && (
                 <p className="mt-0.5 truncate text-xs text-yeikar-tertiary/70">
-                  {detalle.cliente?.nombre} · {new Date(detalle.fecha).toLocaleDateString('es-ES')}
+                  {detalle.cliente?.nombre} · {fmtFechaVE(detalle.fecha)}
                 </p>
               )}
             </div>
@@ -812,7 +813,7 @@ function ModalDetalle({
                               )}
                             </span>
                             <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
-                              {new Date(p.fecha).toLocaleDateString('es-ES')}
+                              {fmtFechaVE(p.fecha)}
                             </span>
                             {/* Recibos del cobro (comprobantes digitales) */}
                             {p.recibos && p.recibos.length > 0 && (
@@ -878,7 +879,7 @@ function ModalDetalle({
                               <span className="mt-0.5 block break-words text-xs text-yeikar-neutral/60">{d.motivo}</span>
                             )}
                             <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
-                              {new Date(d.fecha).toLocaleDateString('es-ES')} · sin movimiento de caja
+                              {fmtFechaVE(d.fecha)} · sin movimiento de caja
                             </span>
                             {esMulti && (
                               <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
@@ -1544,7 +1545,7 @@ export default function Ventas() {
     {
       key: 'fecha',
       header: 'Fecha',
-      render: (v) => <span className="font-mono text-yeikar-neutral/70">{new Date(v.fecha).toLocaleDateString('es-ES')}</span>,
+      render: (v) => <span className="font-mono text-yeikar-neutral/70">{fmtFechaVE(v.fecha)}</span>,
       mobileLabel: 'Fecha',
     },
     {

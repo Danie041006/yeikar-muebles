@@ -197,7 +197,7 @@ def pasar_a_area(
     from app.modules.empleados.model import Empleado
     from app.modules.production.model import EtapaProduccion, EtapaAsignadoAdicional
     from app.modules.production.service import _scope_stages
-    from datetime import datetime
+    from app.core.hora_ve import ahora_ve
 
     # FOR UPDATE: dos "pasar a área" simultáneos sobre la misma etapa se serializan;
     # el segundo re-lee la etapa ya COMPLETADA y recibe 400 en vez de duplicar la etapa.
@@ -246,7 +246,7 @@ def pasar_a_area(
     #    antes se usaba utcnow() y una etapa completada de noche caía fuera del
     #    período de nómina destajo).
     etapa_actual.estado = "COMPLETADA"
-    etapa_actual.fecha_fin = datetime.now()
+    etapa_actual.fecha_fin = ahora_ve()
     db.add(etapa_actual)
 
     # 2. Crear nueva etapa en el área destino. Si esa área ya tiene una etapa
@@ -262,7 +262,7 @@ def pasar_a_area(
         empleado_responsable_id=payload.empleado_responsable_id,
         estado="ASIGNADA",
         observaciones=payload.observaciones,
-        fecha_inicio=datetime.now(),
+        fecha_inicio=ahora_ve(),
         es_retrabajo=ya_completada_destino is not None,
     )
     db.add(nueva_etapa)

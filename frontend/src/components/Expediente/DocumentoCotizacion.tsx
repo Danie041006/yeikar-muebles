@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatCurrency } from '../../utils/format';
+import { fmtFechaVE } from '../../utils/fechas';
 import { METODOS_PAGO } from '../../services/ventaService';
 
 export interface PagoDocumento {
@@ -246,7 +247,7 @@ export default function DocumentoCotizacion({
                       const simbolo = p.moneda?.simbolo ?? '';
                       return (
                         <tr key={p.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/50'}>
-                          <td className="px-2 py-1 text-stone-700">{new Date(p.fecha).toLocaleDateString('es-ES')}</td>
+                          <td className="px-2 py-1 text-stone-700">{fmtFechaVE(p.fecha)}</td>
                           <td className="px-2 py-1 font-bold text-stone-900">{metodoLabel}</td>
                           <td className="px-2 py-1 text-stone-600">{p.referencia || '—'}</td>
                           <td className="px-2 py-1 text-right font-bold text-stone-800">

@@ -19,6 +19,7 @@ from app.modules.tasas_cambio.model import TasaCambio
 from app.modules.auditoria.service import record_event
 from app.modules.cuentas_por_pagar.model import CuentaPorPagar, PagoCuentaPorPagar
 from app.modules.users.model import Usuario
+from app.core.hora_ve import hoy_ve
 
 def obtener_pnl(db: Session, mes: str) -> schemas.PnLResponse:
     try:
@@ -1136,7 +1137,7 @@ def crear_metodo_caja(db: Session, esquema: schemas.MetodoCajaCreate) -> model.M
         monto=1_000_000.0 if moneda_id == 1 else 0.0,
         moneda_id=moneda_id,
         tasa_cambio=1.0,
-        fecha=date.today(),
+        fecha=hoy_ve(),
         referencia="Saldo inicial por defecto",
         observaciones=f"Apertura por defecto: {1_000_000 if moneda_id == 1 else 0} {'COP' if moneda_id == 1 else 'USD'}",
     )
@@ -1367,7 +1368,7 @@ def crear_transferencia(
     - Multimoneda (p. ej. EFECTIVO_USD → BANCOLOMBIA): la pata de destino
       lleva el monto convertido con la TRM de su moneda (del catálogo).
     """
-    fecha = esquema.fecha or date.today()
+    fecha = esquema.fecha or hoy_ve()
     monto = Decimal(str(esquema.monto))
 
     origen = db.query(model.MetodoCaja).filter(model.MetodoCaja.id == esquema.cuenta_origen_id).first()

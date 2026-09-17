@@ -14,6 +14,7 @@ import ConfirmDialog from '../ui/ConfirmDialog';
 import { SearchSelect } from '../ui';
 import CostosOrdenEnVivo from '../CostosOrdenEnVivo';
 import { useToast } from '../../context/ToastContext';
+import { fmtFechaVE } from '../../utils/fechas';
 import { esOrdenExhibicion, fmt, type Empleado, type Material } from './tipos';
 import {
   dimensionalidad,
@@ -1545,7 +1546,7 @@ export default function EtapaModal({
                     <div className="flex items-center gap-3 shrink-0 text-[10px] font-mono text-yeikar-neutral/50">
                       {et.empleado_responsable && <span>{et.empleado_responsable.nombre}</span>}
                       <span className="font-bold">{et.estado.replace('_', ' ')}</span>
-                      {et.fecha_fin && <span>{new Date(et.fecha_fin).toLocaleDateString('es-CO')}</span>}
+                      {et.fecha_fin && <span>{fmtFechaVE(et.fecha_fin)}</span>}
                     </div>
                   </div>
                 ))

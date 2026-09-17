@@ -2,7 +2,6 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_
 from sqlalchemy.exc import IntegrityError
 from decimal import Decimal
-from datetime import datetime
 from typing import Optional, List
 
 
@@ -12,6 +11,7 @@ from app.modules.productos.model import Material, Producto
 from app.modules.catalogos.model import Ubicacion
 from app.modules.proveedores.model import Proveedor
 from app.modules.clients.model import Client
+from app.core.hora_ve import ahora_ve, hoy_ve
 
 MONEDA_BASE_ID = 1  # COP
 
@@ -62,7 +62,6 @@ def _gasto_compra_contado(
       - Referencia en COP pagada desde moneda extranjera → deducción =
         total ÷ tasa (tasa obligatoria).
     """
-    from datetime import date as _date
     from app.modules.gastos.service import crear_gasto
     from app.modules.gastos.schemas import GastoCreate
     from app.modules.catalogos.model import TipoGasto, Moneda
@@ -137,7 +136,7 @@ def _gasto_compra_contado(
         GastoCreate(
             tipo_gasto_id=tipo_gasto.id,
             moneda_id=gasto_moneda,
-            fecha=_date.today(),
+            fecha=hoy_ve(),
             descripcion=descripcion,
             monto=monto.quantize(Decimal("0.01")),
             tasa_cambio=tasa,
@@ -287,7 +286,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
-        fecha=datetime.utcnow()
+        fecha=ahora_ve()
     )
     db.add(db_mov)
     # IMPORTANTE: flush, NO commit. Un commit aquí rompería la transacción del
@@ -368,7 +367,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             cantidad=movimiento.cantidad,
             costo_unitario=movimiento.costo_unitario or Decimal("0.0"),
             llevada=llevada or Decimal("0.0"),
-            fecha=datetime.utcnow().date(),
+            fecha=ahora_ve().date(),
             movimiento_id=db_mov.id,
             cliente_id=cliente_id,
             cliente_nombre=cliente_nombre,
@@ -638,7 +637,7 @@ def registrar_movimiento_producto(
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
-        fecha=datetime.utcnow(),
+        fecha=ahora_ve(),
     )
     db.add(db_mov)
 
@@ -725,7 +724,7 @@ def _fiar_entrada_producto(db, db_mov, producto, movimiento, proveedor_id, prove
         cantidad=movimiento.cantidad,
         costo_unitario=Decimal(str(movimiento.costo_unitario)),
         llevada=Decimal(str(llevada)) if llevada else Decimal("0.0"),
-        fecha=datetime.utcnow().date(),
+        fecha=ahora_ve().date(),
         movimiento_id=db_mov.id,
         cliente_id=cliente_id,
         cliente_nombre=cliente_nombre,

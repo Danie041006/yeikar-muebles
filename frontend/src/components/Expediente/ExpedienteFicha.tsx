@@ -1,5 +1,6 @@
 import React from 'react';
 import { formatCurrency } from '../../utils/format';
+import { fmtFechaVE } from '../../utils/fechas';
 import { accionVerbo } from '../../utils/auditoria';
 import BadgeEstado from '../BadgeEstado';
 import AdjuntoImagen from '../AdjuntoImagen';
@@ -34,7 +35,7 @@ import {
   VentaExp,
 } from '../../services/historialService';
 
-const fmtFecha = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-CO') : '—');
+const fmtFecha = (v?: string | null) => fmtFechaVE(v);
 const fmtFechaHora = (v?: string | null) =>
   v ? new Date(v).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 const dinero = (n?: number | null, moneda?: string | null) => formatCurrency(Number(n || 0), moneda || undefined);

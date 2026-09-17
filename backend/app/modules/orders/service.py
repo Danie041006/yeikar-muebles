@@ -11,6 +11,7 @@ from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
 from app.modules.users.model import Usuario
 from app.core.state_machine import TRANSICIONES_PEDIDO, validar_transicion
+from app.core.hora_ve import hoy_ve
 
 def _snapshot(pedido: model.Pedido) -> dict:
     return {
@@ -68,7 +69,7 @@ def obtener_pedidos(
             )
         else:
             # Solo mes sin año: se asume el año en curso.
-            today = date.today()
+            today = hoy_ve()
             inicio = date(today.year, mes, 1)
             if mes == 12:
                 fin = date(today.year + 1, 1, 1)
@@ -76,7 +77,7 @@ def obtener_pedidos(
                 fin = date(today.year, mes + 1, 1)
             query = query.filter(model.Pedido.fecha >= inicio, model.Pedido.fecha < fin)
     elif solo_mes_actual:
-        today = date.today()
+        today = hoy_ve()
         if today.month == 12:
             fin = date(today.year + 1, 1, 1)
         else:
@@ -207,7 +208,7 @@ def actualizar_pedido(
                 db_orden = OrdenProduccion(
                     detalle_pedido_id=detalle.id,
                     estado="EN_PRODUCCION",
-                    fecha_inicio=date.today(),
+                    fecha_inicio=hoy_ve(),
                     fecha_fin=None,
                     creado_por_id=usuario.id if usuario is not None else None,
                     actualizado_por_id=usuario.id if usuario is not None else None,
@@ -397,7 +398,7 @@ def convertir_cotizacion_a_pedido(
     db_pedido = model.Pedido(
         cotizacion_id=db_cotizacion.id,
         cliente_id=db_cotizacion.cliente_id,
-        fecha=date.today(),
+        fecha=hoy_ve(),
         estado=estado_pedido,
         observaciones=db_cotizacion.observaciones,
         fecha_entrega_estimada=fecha_entrega_estimada,
@@ -489,7 +490,7 @@ def convertir_cotizacion_a_pedido(
         VentaCreate(
             pedido_id=db_pedido.id,
             moneda_id=db_cotizacion.moneda_id,
-            fecha=date.today(),
+            fecha=hoy_ve(),
         ),
         permitir_estado_cotizado=True,
         commit=False,  # la conversión commitea atómicamente al final
@@ -503,7 +504,7 @@ def convertir_cotizacion_a_pedido(
             PagoCreate(
                 venta_id=db_venta.id,
                 moneda_id=moneda_pago,
-                fecha=date.today(),
+                fecha=hoy_ve(),
                 monto=adelanto_monto,
                 tasa_cambio=tasa_pago,
                 metodo_pago=metodo_pago,

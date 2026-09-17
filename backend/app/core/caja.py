@@ -7,6 +7,7 @@ compras, gastos y devoluciones lo usan.
 from datetime import date
 
 from sqlalchemy.orm import Session
+from app.core.hora_ve import hoy_ve
 
 
 def obtener_cuenta_por_codigo(db: Session, codigo: str):
@@ -73,7 +74,7 @@ def registrar_movimiento_caja(
         metodo_caja_id=cuenta.id,
         usuario_id=usuario_id,
         pago_id=pago_id,
-        fecha=fecha or date.today(),
+        fecha=fecha or hoy_ve(),
         tipo=tipo,
         monto=round(float(monto), 2),
         moneda_id=moneda_id,

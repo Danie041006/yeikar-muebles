@@ -13,6 +13,7 @@ import { facturacionService, Factura } from '../services/facturacionService';
 import { clienteService, Client } from '../services/clienteService';
 import { envioService, Envio } from '../services/envioService';
 import { formatCurrency } from '../utils/format';
+import { fmtFechaVE } from '../utils/fechas';
 
 type Tab = 'cotizaciones' | 'pedidos' | 'facturas' | 'clientes' | 'envios';
 
@@ -24,7 +25,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'envios', label: 'Libro de Guías de Despacho' },
 ];
 
-const fmtD = (v?: string | null) => (v ? new Date(v).toLocaleDateString('es-CO') : '—');
+const fmtD = (v?: string | null) => fmtFechaVE(v);
 
 export default function Expediente() {
   const [searchParams, setSearchParams] = useSearchParams();

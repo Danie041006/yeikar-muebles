@@ -15,6 +15,7 @@ import {
   type DetalleFactura,
 } from '../services/facturacionService';
 import { formatCurrency, fmtMoneda } from '../utils/format';
+import { fmtFechaVE } from '../utils/fechas';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -465,7 +466,7 @@ function ModalDetalleFactura({
               <div className="flex items-center gap-2">
                 <Badge text={factura.estado} className={ESTADO_FACTURA_STYLE[factura.estado]} />
                 <span className="text-xs text-yeikar-neutral/40 font-mono">
-                  Emitida el {new Date(factura.fecha_emision).toLocaleDateString('es-ES')} por {factura.creador_nombre || '—'}
+                  Emitida el {fmtFechaVE(factura.fecha_emision)} por {factura.creador_nombre || '—'}
                 </span>
               </div>
 
@@ -498,7 +499,7 @@ function ModalDetalleFactura({
                   id={`pdf-factura-container-${factura.id}`}
                   numero={`00 – ${factura.id.toString().padStart(5, '0')}`}
                   numeroControl={`00 – ${factura.id.toString().padStart(6, '0')}`}
-                  fechaEmision={new Date(factura.fecha_emision).toLocaleDateString('es-ES')}
+                  fechaEmision={fmtFechaVE(factura.fecha_emision)}
                   cliente={factura.cliente}
                   monedaCodigo="USD"
                   tasaBs={tasa}
@@ -758,7 +759,7 @@ export default function Facturacion() {
                         </td>
                         <td className="px-5 py-3.5 font-medium text-yeikar-secondary">{f.cliente?.nombre ?? '—'}</td>
                         <td className="px-5 py-3.5 text-yeikar-neutral/70 font-mono text-xs">
-                          {new Date(f.fecha_emision).toLocaleDateString('es-ES')}
+                          {fmtFechaVE(f.fecha_emision)}
                         </td>
                         <td className="px-5 py-3.5 text-right font-mono text-yeikar-neutral/70">
                           ${fmtEs(Number(f.total_usd))}
@@ -806,7 +807,7 @@ export default function Facturacion() {
                       <p className="font-headline font-bold text-yeikar-neutral">Pedido #{p.pedido_id}</p>
                       <p className="text-sm text-yeikar-neutral/60">{p.cliente_nombre}</p>
                       <p className="text-xs font-mono text-yeikar-neutral/40 mt-0.5">
-                        {new Date(p.fecha).toLocaleDateString('es-ES')} · {p.lineas.length} producto{p.lineas.length !== 1 ? 's' : ''}
+                        {fmtFechaVE(p.fecha)} · {p.lineas.length} producto{p.lineas.length !== 1 ? 's' : ''}
                       </p>
                     </div>
                     <Badge

@@ -3,6 +3,7 @@ from typing import List, Optional
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 from app.modules.tasas_cambio import model, schemas
+from app.core.hora_ve import hoy_ve
 
 def obtener_tasa_moneda_a_cop(db: Session, moneda_id: int, fecha: date = None):
     """
@@ -12,7 +13,7 @@ def obtener_tasa_moneda_a_cop(db: Session, moneda_id: int, fecha: date = None):
     """
     if moneda_id in (None, 1):
         return Decimal("1.0")
-    fecha = fecha or date.today()
+    fecha = fecha or hoy_ve()
     query = db.query(model.TasaCambio).filter(
         model.TasaCambio.moneda_origen_id == moneda_id,
         model.TasaCambio.moneda_destino_id == 1,

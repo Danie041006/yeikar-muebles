@@ -1,4 +1,5 @@
 import type { EnvioExp, VentaExp, ClienteExp, DetallePedidoExp } from '../../services/historialService';
+import { fmtFechaVE } from '../../utils/fechas';
 
 interface DocumentoGuiaDespachoProps {
   envio: EnvioExp;
@@ -17,8 +18,8 @@ export default function DocumentoGuiaDespacho({
 }: DocumentoGuiaDespachoProps) {
   const guiaNum = (envio.guia_despacho || envio.id.toString()).padStart(6, '0');
   const fechaEmision = envio.fecha_salida
-    ? new Date(envio.fecha_salida).toLocaleDateString('es-ES')
-    : new Date().toLocaleDateString('es-ES');
+    ? fmtFechaVE(envio.fecha_salida)
+    : fmtFechaVE(new Date());
 
   const totalBs = venta ? Number(venta.total) : 0;
   const baseImponibleBs = totalBs / 1.16;

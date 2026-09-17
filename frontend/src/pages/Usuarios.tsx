@@ -4,6 +4,7 @@ import api from '../services/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useToast } from '../context/ToastContext';
 import { ResponsiveDataTable, type DataColumn } from '../components/ui';
+import { fmtFechaVE } from '../utils/fechas';
 
 interface Role {
   id: number;
@@ -452,7 +453,7 @@ export default function Usuarios() {
       header: 'Creado el',
       render: (u) => (
         <span className="text-yeikar-neutral/50 font-mono text-xs">
-          {new Date(u.created_at).toLocaleDateString('es-ES')}
+          {fmtFechaVE(u.created_at)}
         </span>
       ),
       mobileLabel: 'Creado',
@@ -463,9 +464,7 @@ export default function Usuarios() {
       render: (u) => (
         <span className="text-yeikar-neutral/50 font-mono text-xs">
           {u.ultimo_acceso ? (
-            new Date(u.ultimo_acceso).toLocaleDateString('es-ES', {
-              day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
-            })
+            fmtFechaVE(u.ultimo_acceso)
           ) : (
             <span className="text-yeikar-neutral/30 italic">Nunca</span>
           )}

@@ -3,6 +3,7 @@ from sqlalchemy import or_
 from datetime import date, datetime
 from decimal import Decimal
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
+from app.core.hora_ve import hoy_ve
 from app.modules.sales.model import Venta, DetalleVenta, Pago, DescuentoVenta
 from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, DescuentoCreate
 from app.modules.orders.model import Pedido, DetallePedido
@@ -105,14 +106,14 @@ def crear_venta_desde_pedido(
     if cot and moneda_id == cot.moneda_id and cot.tasa_cambio:
         tasa_cambio = float(cot.tasa_cambio)
     if not tasa_cambio:
-        tasa_cambio = tasa_cambio_service.obtener_tasa_moneda_a_cop(db, moneda_id, esquema.fecha or date.today())
+        tasa_cambio = tasa_cambio_service.obtener_tasa_moneda_a_cop(db, moneda_id, esquema.fecha or hoy_ve())
 
     # Crear cabecera de la venta
     db_venta = Venta(
         pedido_id=esquema.pedido_id,
         cliente_id=pedido.cliente_id,
         moneda_id=moneda_id,
-        fecha=esquema.fecha or date.today(),
+        fecha=esquema.fecha or hoy_ve(),
         total=0.0,
         estado="PENDIENTE",
         tasa_cambio=tasa_cambio,

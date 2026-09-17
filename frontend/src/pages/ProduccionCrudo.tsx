@@ -11,6 +11,7 @@ import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import SearchSelect, { type SearchSelectOption } from '../components/ui/SearchSelect';
 import { dimensionalidad, volumenPieza, convertirCapturaLineal, etiquetaCaptura, fmtNum, fmtNum4, UnidadCaptura } from '../utils/unidades';
+import { fmtFechaVE } from '../utils/fechas';
 import { getPreciosProduccion, crearPrecioProduccion, getAreas, type PrecioProduccion, type Area } from '../services/costosProduccionService';
 
 interface Material {
@@ -431,8 +432,8 @@ export default function ProduccionCrudo() {
                         </p>
                         <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
                           × {prod.cantidad.toLocaleString('es-ES')} und
-                          {prod.fecha_inicio && ` · Inicio: ${new Date(prod.fecha_inicio).toLocaleDateString('es-ES')}`}
-                          {prod.fecha_fin && ` · Fin: ${new Date(prod.fecha_fin).toLocaleDateString('es-ES')}`}
+                          {prod.fecha_inicio && ` · Inicio: ${fmtFechaVE(prod.fecha_inicio)}`}
+                          {prod.fecha_fin && ` · Fin: ${fmtFechaVE(prod.fecha_fin)}`}
                         </p>
                       </div>
                     </div>

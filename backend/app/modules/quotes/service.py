@@ -6,6 +6,7 @@ from app.modules.quotes import model, schemas
 from app.modules.clients.model import Client
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import tiene_alcance_total
+from app.core.hora_ve import hoy_ve
 from app.modules.users.model import Usuario
 from app.modules.tasas_cambio.model import TasaCambio
 
@@ -148,7 +149,7 @@ def obtener_cotizaciones(
             )
         else:
             # Solo mes sin año: se asume el año en curso.
-            today = date.today()
+            today = hoy_ve()
             inicio = date(today.year, mes, 1)
             if mes == 12:
                 fin = date(today.year + 1, 1, 1)
@@ -156,7 +157,7 @@ def obtener_cotizaciones(
                 fin = date(today.year, mes + 1, 1)
             query = query.filter(model.Cotizacion.fecha >= inicio, model.Cotizacion.fecha < fin)
     elif solo_mes_actual:
-        today = date.today()
+        today = hoy_ve()
         if today.month == 12:
             fin = date(today.year + 1, 1, 1)
         else:
@@ -257,7 +258,7 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
 
     if datos.get("moneda_id", MONEDA_BASE_ID) != MONEDA_BASE_ID:
         datos["tasa_cambio"] = _trm_cotizacion(
-            db, datos["moneda_id"], datos.get("fecha") or date.today(), datos.get("tasa_cambio")
+            db, datos["moneda_id"], datos.get("fecha") or hoy_ve(), datos.get("tasa_cambio")
         )
         datos["total_en_moneda_base"] = float(datos.get("total_estimado", 0)) * float(datos["tasa_cambio"])
     else:
@@ -324,7 +325,7 @@ def actualizar_cotizacion(
             # La tasa 1.0 (default del formulario) en moneda extranjera
             # fabricaba 1 USD = 1 COP: se sustituye por la TRM registrada.
             db_obj.tasa_cambio = _trm_cotizacion(
-                db, db_obj.moneda_id, db_obj.fecha or date.today(), db_obj.tasa_cambio
+                db, db_obj.moneda_id, db_obj.fecha or hoy_ve(), db_obj.tasa_cambio
             )
             if not db_obj.tasa_cambio or float(db_obj.tasa_cambio) <= 0:
                 raise ValueError("La cotización en moneda extranjera requiere una tasa de cambio mayor que cero.")

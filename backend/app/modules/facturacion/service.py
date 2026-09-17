@@ -6,6 +6,7 @@ from app.modules.facturacion.model import Factura, DetalleFactura, TasaImpuesto
 from app.modules.facturacion.schemas import FacturaCreate, TasaImpuestoUpdate
 from app.modules.orders.model import Pedido
 from app.modules.sales.model import Venta
+from app.core.hora_ve import hoy_ve
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import es_admin_user, filtrar_registros_propios
 from app.modules.users.model import Usuario
@@ -229,7 +230,7 @@ def crear_factura_desde_pedido(db: Session, esquema: FacturaCreate, commit: bool
     db_factura = Factura(
         pedido_id=pedido.id,
         cliente_id=pedido.cliente_id,
-        fecha_emision=esquema.fecha_emision or date.today(),
+        fecha_emision=esquema.fecha_emision or hoy_ve(),
         total_usd=total_usd,
         tasa_usd_ves=tasa_usd_ves,
         base_imponible_bs=base_imponible_bs,

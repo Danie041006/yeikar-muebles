@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
 from app.modules.users.deps import es_admin, require_module
+from app.core.hora_ve import hoy_ve
 from app.modules.reports import service, schemas
 
 router = APIRouter(
@@ -37,7 +38,7 @@ def get_resumen_diario(
 ):
     """Estado del día: saldo inicial, ingresos, egresos, quién los hizo y saldo final."""
     try:
-        return service.resumen_diario(db, fecha or date.today(), moneda)
+        return service.resumen_diario(db, fecha or hoy_ve(), moneda)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

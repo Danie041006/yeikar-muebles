@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.core.redondeo import redondear_precio_cop
+from app.core.hora_ve import hoy_ve
 from app.modules.users.deps import require_module
 from app.modules.quotes.atributos import FurnitureAttributes
 from app.modules.quotes.intelligent_schemas import (
@@ -308,7 +309,7 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
             precio_costo_base=costo_prod,
             precio_venta_base=redondear_precio_cop(precio_sin_iva, "ceil"),
             precio_venta_con_iva=redondear_precio_cop(precio_con_iva, "ceil"),
-            descripcion=payload.observaciones or f"Creado desde Cotizador Inteligente el {datetime.date.today()}",
+            descripcion=payload.observaciones or f"Creado desde Cotizador Inteligente el {hoy_ve()}",
             activo=True,
         )
         db.add(nuevo_prod)
@@ -390,7 +391,7 @@ def finalize_structure(payload: FinalizeStructureRequest, db: Session = Depends(
 
     cotizacion = Cotizacion(
         cliente_id=payload.cliente_id,
-        fecha=datetime.date.today(),
+        fecha=hoy_ve(),
         estado="BORRADOR",
         total_estimado=precio_con_iva,
         observaciones=payload.observaciones or "Generada con estructura de costos editable.",

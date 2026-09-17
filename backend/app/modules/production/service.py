@@ -35,6 +35,7 @@ from app.core.state_machine import (
     TRANSICIONES_ETAPA_PRODUCCION,
     validar_transicion,
 )
+from app.core.hora_ve import ahora_ve, hoy_ve
 from app.modules.productos.cost_service import _calcular_cantidad_material, _normalizar_seccion
 from app.modules.production.unidades import resolver_cantidad_consumo, nota_captura
 
@@ -287,9 +288,9 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
     antes = _snapshot_orden(db_orden)
     db_orden.estado = nuevo_estado
     if nuevo_estado == 'EN_PRODUCCION' and not db_orden.fecha_inicio:
-        db_orden.fecha_inicio = date.today()
+        db_orden.fecha_inicio = hoy_ve()
     elif nuevo_estado == 'FINALIZADA':
-        db_orden.fecha_fin = date.today()
+        db_orden.fecha_fin = hoy_ve()
 
         # C2: no se puede finalizar una orden sin ninguna etapa creada
         n_etapas = db.query(EtapaProduccion).filter(
@@ -517,7 +518,7 @@ def crear_etapa_produccion(db: Session, esquema: EtapaProduccionCreate, usuario:
     if orden and orden.estado == "PENDIENTE":
         orden.estado = "EN_PRODUCCION"
         if not orden.fecha_inicio:
-            orden.fecha_inicio = date.today()
+            orden.fecha_inicio = hoy_ve()
             
     db.commit()
     db.refresh(db_etapa)
@@ -549,9 +550,9 @@ def cambiar_estado_etapa_produccion(db: Session, id_etapa: int, nuevo_estado: st
 
     db_etapa.estado = nuevo_estado
     if nuevo_estado == 'EN_PROCESO' and not db_etapa.fecha_inicio:
-        db_etapa.fecha_inicio = datetime.now()
+        db_etapa.fecha_inicio = ahora_ve()
     elif nuevo_estado == 'COMPLETADA':
-        db_etapa.fecha_fin = datetime.now()
+        db_etapa.fecha_fin = ahora_ve()
         
     db.commit()
     db.refresh(db_etapa)
@@ -797,7 +798,7 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         db_gasto = Gasto(
             tipo_gasto_id=tipo_gasto_consumo.id,
             moneda_id=1,
-            fecha=esquema.fecha or date.today(),
+            fecha=esquema.fecha or hoy_ve(),
             descripcion=descripcion_gasto,
             monto=costo_total,
             tasa_cambio=Decimal("1.0"),
@@ -1383,7 +1384,7 @@ def _egreso_mano_obra(db: Session, db_mano: ManoObra, pagado: bool):
         db.add(Gasto(
             tipo_gasto_id=tipo_gasto.id,
             moneda_id=1,
-            fecha=date.today(),
+            fecha=hoy_ve(),
             descripcion=f"Mano de obra #{db_mano.id} - Etapa #{db_mano.etapa_produccion_id}",
             monto=monto,
             tasa_cambio=Decimal("1.0"),
@@ -1872,7 +1873,7 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
     solicitante = db.query(Empleado).filter(Empleado.id == esquema.solicitante_empleado_id).first()
     if not solicitante:
         raise ValueError("Debe indicar quién solicita el material (solicitante inválido).")
-    now = datetime.utcnow()
+    now = ahora_ve()
     corte_activo = bool(getattr(esquema, "ancho_corte_cm", None) and getattr(esquema, "largo_corte_cm", None))
     # El motor de cortes no admite captura flexible (igual que producción por pedidos).
     if corte_activo and (
@@ -1969,7 +1970,7 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
         db.add(Gasto(
             tipo_gasto_id=tipo_gasto.id,
             moneda_id=1,
-            fecha=date.today(),
+            fecha=hoy_ve(),
             descripcion=descripcion_gasto,
             monto=costo_total,
             tasa_cambio=Decimal("1.0"),
@@ -2048,7 +2049,7 @@ def cambiar_estado_produccion_crudo(db, produccion_id, estado: str, usuario=None
         # producción que alimenta la nómina). Idempotente: las ya pagadas se omiten.
         _egresar_mano_obra_crudo(db, pc, usuario)
         pc.estado = "COMPLETADA"
-        pc.fecha_fin = datetime.utcnow()
+        pc.fecha_fin = ahora_ve()
         pc.actualizado_por_id = usuario.id if usuario else None
         db.add(crudo)
     elif estado == "CANCELADA":
@@ -2058,7 +2059,7 @@ def cambiar_estado_produccion_crudo(db, produccion_id, estado: str, usuario=None
         pc.actualizado_por_id = usuario.id if usuario else None
     elif estado == "EN_PRODUCCION":
         pc.estado = "EN_PRODUCCION"
-        pc.fecha_inicio = pc.fecha_inicio or datetime.utcnow()
+        pc.fecha_inicio = pc.fecha_inicio or ahora_ve()
         pc.actualizado_por_id = usuario.id if usuario else None
     else:  # PENDIENTE
         pc.estado = "PENDIENTE"
@@ -2091,7 +2092,7 @@ def _egresar_mano_obra_crudo(db, pc, usuario=None):
         db.add(Gasto(
             tipo_gasto_id=tipo_gasto.id,
             moneda_id=1,
-            fecha=date.today(),
+            fecha=hoy_ve(),
             descripcion=f"Mano de obra #{mo.id} - Producción Crudo #{pc.id} - {mo.empleado_nombre or 'Empleado'}",
             monto=monto,
             tasa_cambio=Decimal("1.0"),

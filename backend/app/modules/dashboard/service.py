@@ -10,6 +10,7 @@ from app.modules.inventory.model import Inventario
 from app.modules.sales.model import Pago, Venta
 from app.modules.catalogos.model import Moneda
 from app.modules.dashboard import schemas
+from app.core.hora_ve import hoy_ve
 from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
 from app.modules.users.model import Usuario
 
@@ -33,10 +34,10 @@ def obtener_metricas_dashboard(db: Session, usuario: Usuario) -> schemas.Dashboa
         else 0
     )
 
-    # 4. Ingresos del mes actual
-    now = datetime.utcnow()
-    year = now.year
-    month = now.month
+    # 4. Ingresos del mes actual (mes de Venezuela, no UTC)
+    hoy = hoy_ve()
+    year = hoy.year
+    month = hoy.month
     _, last_day = calendar.monthrange(year, month)
     start_dt = datetime(year, month, 1, 0, 0, 0)
     end_dt = datetime(year, month, last_day, 23, 59, 59)

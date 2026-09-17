@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 import os
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import TimeoutError
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
@@ -27,6 +27,17 @@ engine = create_engine(
     pool_timeout=5,
     connect_args=_conn_args,
 )
+
+
+@event.listens_for(engine, "connect")
+def _fijar_zona_horaria_ve(dbapi_connection, _connection_record):
+    # Los server_default now() (Neon corre en UTC) deben guardar hora VE,
+    # igual que los timestamps que fija Python (ver app/core/hora_ve.py).
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SET TIME ZONE 'America/Caracas'")
+    finally:
+        cursor.close()
 session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():

@@ -12,6 +12,7 @@ from app.modules.orders.model import Pedido
 from app.modules.users.deps import tiene_alcance_total
 from app.modules.users.model import Usuario
 from app.core.state_machine import TRANSICIONES_ENVIO, validar_transicion
+from app.core.hora_ve import ahora_ve
 
 # Estados del envío desde los que se permite crear un nuevo intento para el
 # mismo pedido (reintento tras un fallo de entrega).
@@ -47,7 +48,7 @@ def _registrar_asignacion(db: Session, envio: Envio, empleado_id: int | None, us
         EnvioAsignacion.envio_id == envio.id,
         EnvioAsignacion.desasignado_en.is_(None),
     ).all()
-    ahora = datetime.now()
+    ahora = ahora_ve()
     for asignacion in activa:
         asignacion.desasignado_en = ahora
 
@@ -149,10 +150,10 @@ def crear_envio(db: Session, esquema: schemas.EnvioCreate, usuario: Usuario | No
         )
 
     if esquema.estado == "ENTREGADO":
-        db_envio.fecha_entrega = datetime.now()
+        db_envio.fecha_entrega = ahora_ve()
         pedido.estado = "ENTREGADO"
     elif esquema.estado == "EN_TRANSITO":
-        db_envio.fecha_salida = datetime.now()
+        db_envio.fecha_salida = ahora_ve()
 
     record_event(
         db,
@@ -251,9 +252,9 @@ def actualizar_envio(
 
     if nuevo_estado and nuevo_estado != estado_anterior:
         if nuevo_estado == "EN_TRANSITO" and not db_envio.fecha_salida:
-            db_envio.fecha_salida = datetime.now()
+            db_envio.fecha_salida = ahora_ve()
         elif nuevo_estado == "ENTREGADO":
-            db_envio.fecha_entrega = datetime.now()
+            db_envio.fecha_entrega = ahora_ve()
             pedido = db.query(Pedido).filter(Pedido.id == db_envio.pedido_id).first()
             if pedido:
                 pedido.estado = "ENTREGADO"

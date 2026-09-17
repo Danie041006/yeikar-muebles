@@ -9,6 +9,7 @@ acumula el bono de aguinaldo (porcentaje del área) en el saldo del empleado.
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import List, Optional
+from app.core.hora_ve import hoy_ve
 
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
@@ -815,7 +816,7 @@ def pagar_nomina(db: Session, nomina_id: int, usuario: Optional[Usuario] = None)
             schemas_gasto(
                 tipo_gasto_id=tg.id,
                 moneda_id=1,
-                fecha=date.today(),
+                fecha=hoy_ve(),
                 descripcion=f"Nómina {periodo} — {detalle.empleado.nombre}",
                 monto=detalle.monto_a_pagar,
                 metodo_caja_id=detalle.metodo_caja_id,
@@ -928,13 +929,13 @@ def pagar_aguinaldo(db: Session, esquema: schemas.PagoAguinaldoRequest, usuario:
     from app.modules.gastos.service import crear_gasto
 
     tg = _tipo_gasto(db, TIPO_GASTO_AGUINALDO)
-    periodo = date.today().year
+    periodo = hoy_ve().year
     gasto = crear_gasto(
         db,
         schemas_gasto(
             tipo_gasto_id=tg.id,
             moneda_id=1,
-            fecha=date.today(),
+            fecha=hoy_ve(),
             descripcion=f"Aguinaldo {periodo} — {empleado.nombre}",
             monto=saldo,
             metodo_caja_id=esquema.metodo_caja_id,

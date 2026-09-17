@@ -31,6 +31,7 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 from app.core.config import settings
+from app.core.hora_ve import ahora_ve
 from app.modules.users import model, schemas
 
 # Configuración de hashing
@@ -129,7 +130,7 @@ def crear_token_acceso(data: dict, expires_delta: timedelta = None):
 def actualizar_ultimo_acceso(db: Session, user_id: int):
     user = obtener_usuario_por_id(db, user_id)
     if user:
-        user.ultimo_acceso = datetime.utcnow()
+        user.ultimo_acceso = ahora_ve()
         db.commit()
 
 # ------------------------------------------------------------
@@ -519,7 +520,7 @@ def _verificar_firma_huella(desafio, credencial: model.CredencialWebauthn, respu
         credential_current_sign_count=credencial.contador,
     )
     credencial.contador = verificacion.new_sign_count
-    credencial.ultimo_uso = datetime.utcnow()
+    credencial.ultimo_uso = ahora_ve()
 
 
 def verificar_login_huella(
