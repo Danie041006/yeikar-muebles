@@ -1275,9 +1275,9 @@ export default function Inventario() {
       render: (c) => (
         <div className="flex items-center gap-2.5">
           {c.foto_url ? (
-            <img src={c.foto_url} alt={c.nombre} className="w-16 h-16 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
+            <img src={c.foto_url} alt={c.nombre} className="w-24 h-24 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
           ) : (
-            <span className="w-16 h-16 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-xl shrink-0">N</span>
+            <span className="w-24 h-24 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-2xl shrink-0">N</span>
           )}
           <span className="font-semibold text-yeikar-secondary">{c.nombre}</span>
         </div>
@@ -1480,9 +1480,9 @@ export default function Inventario() {
       render: (f) => (
         <div className="flex items-center gap-2.5 min-w-0">
           {f.fotoUrl ? (
-            <img src={f.fotoUrl} alt={f.nombre} className="w-16 h-16 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
+            <img src={f.fotoUrl} alt={f.nombre} className="w-24 h-24 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
           ) : (
-            <span className="w-16 h-16 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-xl shrink-0">P</span>
+            <span className="w-24 h-24 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-2xl shrink-0">P</span>
           )}
           <div className="min-w-0">
             <span className="font-semibold text-yeikar-secondary block truncate">{f.nombre}</span>
@@ -2452,7 +2452,7 @@ export default function Inventario() {
                 <img
                   src={productoSeleccionado.fotos[0].url}
                   alt={productoSeleccionado.nombre}
-                  className="w-full h-64 object-cover rounded-2xl border border-yeikar-secondary-light/15 mb-4"
+                  className="w-full h-[45vh] min-h-[320px] object-cover rounded-2xl border border-yeikar-secondary-light/15 mb-4"
                 />
               )}
 
