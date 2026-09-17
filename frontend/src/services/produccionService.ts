@@ -400,6 +400,8 @@ export interface Crudo {
   area?: Area | null;
   ubicacion_id: number;
   cantidad: number;
+  /** Costo unitario de referencia de lo ya hecho (base del futuro egreso). */
+  costo_unitario?: number | null;
   activo: boolean;
   foto_url?: string | null;
   created_at?: string;
@@ -411,6 +413,8 @@ export interface CrudoCreate {
   area_id?: number | null;
   ubicacion_id?: number;
   cantidad?: number;
+  /** Costo unitario de referencia (opcional, solo para lo ya hecho). */
+  costo_unitario?: number | null;
 }
 
 export interface CrudoMovimiento {

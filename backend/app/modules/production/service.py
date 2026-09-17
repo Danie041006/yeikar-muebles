@@ -1727,17 +1727,43 @@ def crear_crudo(db, esquema: CrudoCreate, usuario=None):
     nombre = (esquema.nombre or "").strip()
     if not nombre:
         raise ValueError("El nombre del producto en crudo es obligatorio.")
+    cantidad_inicial = Decimal(str(esquema.cantidad or 0))
+    if cantidad_inicial < 0:
+        raise ValueError("La cantidad inicial no puede ser negativa.")
+    costo = Decimal(str(esquema.costo_unitario)) if esquema.costo_unitario is not None else None
+    if costo is not None and costo < 0:
+        raise ValueError("El costo unitario no puede ser negativo.")
     crudo = ProductoCrudoInventario(
         nombre=nombre,
         area_id=esquema.area_id if esquema.area_id else _area_default(db),
         ubicacion_id=esquema.ubicacion_id or _ubicacion_deposito(db),
-        cantidad=Decimal(str(esquema.cantidad or 0)),
+        cantidad=Decimal("0"),
+        costo_unitario=costo,
         activo=True,
     )
     db.add(crudo)
+    db.flush()
+    # Stock inicial de lo YA HECHO: entra por kardex (trazable) sin descontar
+    # materiales ni generar nómina. Lo que se va a producir se crea en 0.
+    if cantidad_inicial > 0:
+        crudo.cantidad = cantidad_inicial
+        obs = f"STOCK INICIAL (importación de lo ya hecho)"
+        if costo is not None:
+            obs += f" · costo ${float(costo):,.2f} c/u"
+        db.add(MovimientoCrudo(
+            crudo_id=crudo.id,
+            tipo="ENTRADA",
+            cantidad=cantidad_inicial,
+            referencia_tipo="STOCK_INICIAL",
+            referencia_id=None,
+            observaciones=obs,
+            creado_por_id=usuario.id if usuario else None,
+        ))
+        db.add(crudo)
     record_event(
         db, actor=usuario, action="CREATE", entity_type="producto_crudo", entity_id=crudo.id,
-        after={"nombre": nombre, "cantidad": float(crudo.cantidad)},
+        after={"nombre": nombre, "cantidad": float(crudo.cantidad),
+               "costo_unitario": float(costo) if costo is not None else None},
     )
     db.commit()
     db.refresh(crudo)

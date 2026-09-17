@@ -405,6 +405,9 @@ class CrudoCreate(BaseModel):
     area_id: Optional[int] = None
     ubicacion_id: Optional[int] = 1
     cantidad: Optional[float] = Field(0.0, ge=0)
+    # Costo unitario de referencia de lo ya hecho (base del futuro egreso).
+    # Lo que se va a producir se crea sin costo: lo pone su producción.
+    costo_unitario: Optional[float] = Field(None, ge=0)
 
 
 class CrudoUpdate(BaseModel):
@@ -421,6 +424,7 @@ class CrudoResponse(BaseModel):
     area: Optional[AreaResponse] = None
     ubicacion_id: int
     cantidad: float
+    costo_unitario: Optional[float] = None
     activo: bool = True
     foto_url: Optional[str] = None
     created_at: Optional[datetime] = None

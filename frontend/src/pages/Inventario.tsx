@@ -216,6 +216,7 @@ export default function Inventario() {
   // Tab del modal de crudo (movimiento / editar / historial).
   const [detalleTabCrudo, setDetalleTabCrudo] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
   const [editCrudo, setEditCrudo] = useState({ nombre: '', ubicacion_id: '', activo: true });
+  const [fotoEditCrudo, setFotoEditCrudo] = useState<File | null>(null);
   const [savingEditCrudo, setSavingEditCrudo] = useState(false);
 
   // ---- Exhibición (piezas mostradas, no rotan como venta normal) ----
@@ -255,7 +256,7 @@ export default function Inventario() {
   const [loadingCrudo, setLoadingCrudo] = useState(false);
   // Alta manual de ítem en crudo.
   const [showCrudoModal, setShowCrudoModal] = useState(false);
-  const [newCrudo, setNewCrudo] = useState({ nombre: '' });
+  const [newCrudo, setNewCrudo] = useState({ nombre: '', cantidad: '', costo: '' });
   const [fotoCrudo, setFotoCrudo] = useState<File | null>(null);
   const [savingCrudo, setSavingCrudo] = useState(false);
   // Modal "Asignar a pedido"
@@ -438,9 +439,22 @@ export default function Inventario() {
     e.preventDefault();
     const nombre = newCrudo.nombre.trim();
     if (!nombre) return;
+    const cantidad = parseFloat(newCrudo.cantidad || '0') || 0;
+    const costo = parseFloat(newCrudo.costo || '0') || 0;
+    if (cantidad < 0 || costo < 0) {
+      toast.error('Stock y costo no pueden ser negativos.');
+      return;
+    }
     setSavingCrudo(true);
     try {
-      const creado = await crudoService.crearCrudo({ nombre });
+      // Lo YA HECHO entra con stock + costo de referencia (base del futuro
+      // egreso) sin descontar materiales ni generar nómina. Lo que se va a
+      // producir se crea en 0 y luego pasa por Producción de Crudos.
+      const creado = await crudoService.crearCrudo({
+        nombre,
+        cantidad,
+        costo_unitario: costo > 0 ? costo : null,
+      });
       if (fotoCrudo) {
         try {
           await subirAdjunto(fotoCrudo, TIPO_ADJUNTO.CRUDO, creado.id);
@@ -449,9 +463,13 @@ export default function Inventario() {
         }
       }
       setShowCrudoModal(false);
-      setNewCrudo({ nombre: '' });
+      setNewCrudo({ nombre: '', cantidad: '', costo: '' });
       setFotoCrudo(null);
-      toast.success('Ítem en crudo registrado.');
+      toast.success(
+        cantidad > 0
+          ? `Ítem en crudo registrado con ${cantidad.toLocaleString('es-ES')} en stock.`
+          : 'Ítem en crudo registrado (sin stock: listo para producir).'
+      );
       fetchCrudo();
     } catch (error: any) {
       toast.error(extractErrorMessage(error, 'Error al registrar el ítem en crudo.'));
@@ -668,6 +686,7 @@ export default function Inventario() {
     setDetalleTabCrudo('movimiento');
     setMovCrudo({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
     setEditCrudo({ nombre: c.nombre ?? '', ubicacion_id: c.ubicacion_id != null ? String(c.ubicacion_id) : '', activo: c.activo !== false });
+    setFotoEditCrudo(null);
     refrescarKardexCrudo(c.id);
   };
 
@@ -696,6 +715,18 @@ export default function Inventario() {
         ubicacion_id: editCrudo.ubicacion_id ? parseInt(editCrudo.ubicacion_id) : undefined,
         activo: editCrudo.activo,
       });
+      // Cambiar foto: se sube como nuevo adjunto CRUDO y pasa a ser la
+      // visible (el backend muestra siempre la más reciente).
+      if (fotoEditCrudo) {
+        try {
+          await subirAdjunto(fotoEditCrudo, TIPO_ADJUNTO.CRUDO, selectedCrudoId);
+        } catch {
+          toast.error('Ítem actualizado, pero no se pudo subir la foto.');
+          fetchCrudo();
+          return;
+        }
+        setFotoEditCrudo(null);
+      }
       toast.success('Ítem en crudo actualizado.');
       fetchCrudo();
     } catch (error: any) {
@@ -1291,6 +1322,16 @@ export default function Inventario() {
       header: 'Stock',
       render: (c) => <span className="font-mono text-xs font-bold text-yeikar-secondary">{c.cantidad.toLocaleString('es-ES')}</span>,
       mobileLabel: 'Stock',
+    },
+    {
+      key: 'costo',
+      header: 'Costo c/u',
+      render: (c) => (
+        <span className="font-mono text-xs text-yeikar-neutral/70">
+          {c.costo_unitario != null ? `$${Number(c.costo_unitario).toLocaleString('es-ES')}` : '—'}
+        </span>
+      ),
+      mobileLabel: 'Costo c/u',
     },
     {
       key: 'acciones',
@@ -2979,6 +3020,27 @@ export default function Inventario() {
                     <input type="text" required value={editCrudo.nombre} onChange={(e) => setEditCrudo((p) => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '')} />
                   </div>
                   <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Foto de referencia</label>
+                    <div className="flex items-center gap-3">
+                      {crudoSeleccionado.foto_url ? (
+                        <img src={crudoSeleccionado.foto_url} alt={crudoSeleccionado.nombre} className="w-24 h-24 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
+                      ) : (
+                        <span className="w-24 h-24 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-2xl shrink-0">N</span>
+                      )}
+                      <div className="min-w-0">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => setFotoEditCrudo(e.target.files?.[0] || null)}
+                          className="w-full text-sm text-yeikar-neutral/70 file:mr-3 file:rounded-lg file:border-0 file:bg-yeikar-tertiary file:px-4 file:py-2 file:text-xs file:font-bold file:text-yeikar-secondary hover:file:bg-yeikar-secondary-light/20"
+                        />
+                        <p className="text-[11px] text-yeikar-neutral/50 mt-1">
+                          {fotoEditCrudo ? fotoEditCrudo.name : 'Opcional: elige una imagen para reemplazar la actual.'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
                     <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
                     <SearchSelect
                       value={editCrudo.ubicacion_id}
@@ -3392,6 +3454,31 @@ export default function Inventario() {
                   className={inputCls.replace('font-mono', '').replace(' uppercase', '')}
                 />
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Stock inicial</label>
+                  <input
+                    type="number" min="0" step="any"
+                    placeholder="0 = por producir"
+                    value={newCrudo.cantidad}
+                    onChange={(e) => setNewCrudo(prev => ({ ...prev, cantidad: e.target.value }))}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo c/u ($)</label>
+                  <input
+                    type="number" min="0" step="any"
+                    placeholder="Opcional"
+                    value={newCrudo.costo}
+                    onChange={(e) => setNewCrudo(prev => ({ ...prev, costo: e.target.value }))}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+              <p className="text-[11px] text-yeikar-neutral/50 italic bg-yeikar-tertiary/30 border border-yeikar-secondary-light/5 rounded-lg px-3 py-2">
+                Lo ya hecho entra con stock + costo (base del futuro egreso) sin descontar materiales. En 0 queda listo para producir en Producción de Crudos.
+              </p>
               <div>
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de referencia (opcional)</label>
                 <input

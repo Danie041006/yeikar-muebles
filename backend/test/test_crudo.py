@@ -83,6 +83,41 @@ def test_crear_crudo_requiere_nombre(client, cleaner):
     )
 
 
+def test_importar_crudo_ya_hecho_con_stock_y_costo(client, cleaner, db):
+    """Lo YA HECHO se importa con stock + costo sin producción: entra por
+    kardex (STOCK INICIAL) sin descontar materiales ni generar nómina."""
+    material = crear_material(client, cleaner, costo_base=500.0)
+    crear_movimiento(client, cleaner, material["id"], "ENTRADA", 10)
+
+    r = client.post("/api/v1/produccion/crudo/", json={
+        "nombre": "Silla en crudo (importada)",
+        "cantidad": 5,
+        "costo_unitario": 120000,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, f"importar crudo → {r.status_code}: {r.text}"
+    crudo = r.json()
+    cleaner.registrar("producto_crudo_inventario", crudo["id"])
+    assert float(crudo["cantidad"]) == 5.0
+    assert float(crudo["costo_unitario"]) == 120000.0
+
+    # Kardex trazable: la entrada inicial queda en el historial.
+    r_kardex = client.get(
+        f"/api/v1/produccion/crudo/{crudo['id']}/kardex", headers=ADMIN_HEADERS)
+    assert r_kardex.status_code == 200
+    movimientos = r_kardex.json()
+    assert any(m["tipo"] == "ENTRADA" and float(m["cantidad"]) == 5.0
+               for m in movimientos), "Falta la ENTRADA de STOCK INICIAL en kardex"
+    for m in movimientos:
+        cleaner.registrar("movimiento_crudo", m["id"])
+
+    # No descontó materiales ni generó gastos/nómina: importación pura.
+    stock_mat = db.execute(text(
+        "SELECT i.cantidad FROM inventario i WHERE i.material_id=:m"),
+        {"m": material["id"]},
+    ).scalar()
+    assert float(stock_mat) == 10.0, f"Importar no debe descontar material, quedó {stock_mat}"
+
+
 def test_listar_crudos(client, cleaner):
     _crear_crudo(client, cleaner, "Pieza A")
     _crear_crudo(client, cleaner, "Pieza B")

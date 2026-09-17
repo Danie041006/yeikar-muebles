@@ -262,6 +262,10 @@ class ProductoCrudoInventario(Base):
     area_id = Column(BigInteger, ForeignKey("area.id"), nullable=True, index=True)
     ubicacion_id = Column(BigInteger, ForeignKey("ubicacion.id", ondelete="RESTRICT"), nullable=False, default=1)
     cantidad = Column(Numeric(12, 2), nullable=False, default=0)
+    # Costo unitario de referencia (base del futuro egreso al asignar/usar la
+    # pieza). Lo ya hecho se importa con su costo; lo producido toma el costo
+    # real de su producción. Equivale a costo_promedio de producto_inventario.
+    costo_unitario = Column(Numeric(15, 2), nullable=True)
     activo = Column(Boolean, nullable=False, default=True)
     # La foto de referencia se guarda como adjunto de tipo CRUDO.
 
