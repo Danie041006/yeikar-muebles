@@ -1749,7 +1749,7 @@ def crear_crudo(db, esquema: CrudoCreate, usuario=None):
         crudo.cantidad = cantidad_inicial
         obs = f"STOCK INICIAL (importación de lo ya hecho)"
         if costo is not None:
-            obs += f" · costo ${float(costo):,.2f} c/u"
+            obs += f" · costo COP {float(costo):,.0f} c/u"
         db.add(MovimientoCrudo(
             crudo_id=crudo.id,
             tipo="ENTRADA",

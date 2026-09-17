@@ -217,6 +217,16 @@ export default function Inventario() {
   const [detalleTabCrudo, setDetalleTabCrudo] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
   const [editCrudo, setEditCrudo] = useState({ nombre: '', ubicacion_id: '', activo: true });
   const [fotoEditCrudo, setFotoEditCrudo] = useState<File | null>(null);
+  const [fotoEditCrudoPreview, setFotoEditCrudoPreview] = useState<string | null>(null);
+  const fotoEditCrudoCameraRef = useRef<HTMLInputElement>(null);
+  const fotoEditCrudoGalleryRef = useRef<HTMLInputElement>(null);
+  const handleFotoEditCrudo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (fotoEditCrudoPreview) URL.revokeObjectURL(fotoEditCrudoPreview);
+    setFotoEditCrudo(file);
+    setFotoEditCrudoPreview(file ? URL.createObjectURL(file) : null);
+    e.target.value = '';
+  };
   const [savingEditCrudo, setSavingEditCrudo] = useState(false);
 
   // ---- Exhibición (piezas mostradas, no rotan como venta normal) ----
@@ -258,6 +268,21 @@ export default function Inventario() {
   const [showCrudoModal, setShowCrudoModal] = useState(false);
   const [newCrudo, setNewCrudo] = useState({ nombre: '', cantidad: '', costo: '' });
   const [fotoCrudo, setFotoCrudo] = useState<File | null>(null);
+  const [fotoCrudoPreview, setFotoCrudoPreview] = useState<string | null>(null);
+  const fotoCrudoCameraRef = useRef<HTMLInputElement>(null);
+  const fotoCrudoGalleryRef = useRef<HTMLInputElement>(null);
+  const handleFotoCrudo = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (fotoCrudoPreview) URL.revokeObjectURL(fotoCrudoPreview);
+    setFotoCrudo(file);
+    setFotoCrudoPreview(file ? URL.createObjectURL(file) : null);
+    e.target.value = '';
+  };
+  const quitarFotoCrudo = () => {
+    if (fotoCrudoPreview) URL.revokeObjectURL(fotoCrudoPreview);
+    setFotoCrudo(null);
+    setFotoCrudoPreview(null);
+  };
   const [savingCrudo, setSavingCrudo] = useState(false);
   // Modal "Asignar a pedido"
   const [asignarCrudoTarget, setAsignarCrudoTarget] = useState<Crudo | null>(null);
@@ -464,7 +489,7 @@ export default function Inventario() {
       }
       setShowCrudoModal(false);
       setNewCrudo({ nombre: '', cantidad: '', costo: '' });
-      setFotoCrudo(null);
+      quitarFotoCrudo();
       toast.success(
         cantidad > 0
           ? `Ítem en crudo registrado con ${cantidad.toLocaleString('es-ES')} en stock.`
@@ -687,6 +712,8 @@ export default function Inventario() {
     setMovCrudo({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
     setEditCrudo({ nombre: c.nombre ?? '', ubicacion_id: c.ubicacion_id != null ? String(c.ubicacion_id) : '', activo: c.activo !== false });
     setFotoEditCrudo(null);
+    if (fotoEditCrudoPreview) URL.revokeObjectURL(fotoEditCrudoPreview);
+    setFotoEditCrudoPreview(null);
     refrescarKardexCrudo(c.id);
   };
 
@@ -726,6 +753,8 @@ export default function Inventario() {
           return;
         }
         setFotoEditCrudo(null);
+        if (fotoEditCrudoPreview) URL.revokeObjectURL(fotoEditCrudoPreview);
+        setFotoEditCrudoPreview(null);
       }
       toast.success('Ítem en crudo actualizado.');
       fetchCrudo();
@@ -1325,7 +1354,7 @@ export default function Inventario() {
     },
     {
       key: 'costo',
-      header: 'Costo c/u',
+      header: 'Costo c/u (COP)',
       render: (c) => (
         <span className="font-mono text-xs text-yeikar-neutral/70">
           {c.costo_unitario != null ? `$${Number(c.costo_unitario).toLocaleString('es-ES')}` : '—'}
@@ -3020,25 +3049,39 @@ export default function Inventario() {
                     <input type="text" required value={editCrudo.nombre} onChange={(e) => setEditCrudo((p) => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '')} />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Foto de referencia</label>
+                    <label className="text-xs font-bold text-yeikar-secondary">Foto de referencia <span className="text-yeikar-neutral/40 font-normal">(se comprime sola)</span></label>
                     <div className="flex items-center gap-3">
-                      {crudoSeleccionado.foto_url ? (
-                        <img src={crudoSeleccionado.foto_url} alt={crudoSeleccionado.nombre} className="w-24 h-24 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
+                      {fotoEditCrudoPreview ? (
+                        <img src={fotoEditCrudoPreview} alt="Vista previa" className="w-24 h-24 rounded-lg object-cover border border-yeikar-secondary-light/15 shrink-0" />
+                      ) : crudoSeleccionado.foto_url ? (
+                        <img src={crudoSeleccionado.foto_url} alt={crudoSeleccionado.nombre} className="w-24 h-24 rounded-lg object-cover border border-yeikar-secondary-light/15 shrink-0" />
                       ) : (
-                        <span className="w-24 h-24 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-2xl shrink-0">N</span>
+                        <span className="w-16 h-16 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 text-[10px] font-bold shrink-0">SIN FOTO</span>
                       )}
-                      <div className="min-w-0">
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => setFotoEditCrudo(e.target.files?.[0] || null)}
-                          className="w-full text-sm text-yeikar-neutral/70 file:mr-3 file:rounded-lg file:border-0 file:bg-yeikar-tertiary file:px-4 file:py-2 file:text-xs file:font-bold file:text-yeikar-secondary hover:file:bg-yeikar-secondary-light/20"
-                        />
-                        <p className="text-[11px] text-yeikar-neutral/50 mt-1">
-                          {fotoEditCrudo ? fotoEditCrudo.name : 'Opcional: elige una imagen para reemplazar la actual.'}
-                        </p>
+                      <div className="flex flex-col gap-2 flex-1">
+                        <button
+                          type="button"
+                          onClick={() => fotoEditCrudoCameraRef.current?.click()}
+                          className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h2l1-2h8l1 2h2a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><circle cx="12" cy="13" r="3" /></svg>
+                          Tomar foto
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fotoEditCrudoGalleryRef.current?.click()}
+                          className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                          Desde galería
+                        </button>
                       </div>
+                      <input ref={fotoEditCrudoCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFotoEditCrudo} />
+                      <input ref={fotoEditCrudoGalleryRef} type="file" accept="image/*" className="hidden" onChange={handleFotoEditCrudo} />
                     </div>
+                    <p className="text-[11px] text-yeikar-neutral/50 mt-1">
+                      {fotoEditCrudo ? fotoEditCrudo.name : 'Opcional: elige una imagen para reemplazar la actual.'}
+                    </p>
                   </div>
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
@@ -3466,7 +3509,7 @@ export default function Inventario() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo c/u ($)</label>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo c/u (COP)</label>
                   <input
                     type="number" min="0" step="any"
                     placeholder="Opcional"
@@ -3480,15 +3523,38 @@ export default function Inventario() {
                 Lo ya hecho entra con stock + costo (base del futuro egreso) sin descontar materiales. En 0 queda listo para producir en Producción de Crudos.
               </p>
               <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de referencia (opcional)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => setFotoCrudo(e.target.files?.[0] || null)}
-                  className="w-full text-sm text-yeikar-neutral/70 file:mr-3 file:rounded-lg file:border-0 file:bg-yeikar-tertiary file:px-4 file:py-2 file:text-xs file:font-bold file:text-yeikar-secondary hover:file:bg-yeikar-secondary-light/20"
-                />
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de referencia <span className="text-yeikar-neutral/40 font-normal">(opcional · se comprime sola)</span></label>
+                <div className="flex items-center gap-3">
+                  {fotoCrudoPreview ? (
+                    <img src={fotoCrudoPreview} alt="Vista previa" className="w-24 h-24 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+                  ) : (
+                    <span className="w-16 h-16 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 text-[10px] font-bold">SIN FOTO</span>
+                  )}
+                  <div className="flex flex-col gap-2 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => fotoCrudoCameraRef.current?.click()}
+                      className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h2l1-2h8l1 2h2a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><circle cx="12" cy="13" r="3" /></svg>
+                      Tomar foto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => fotoCrudoGalleryRef.current?.click()}
+                      className="py-2 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold text-xs transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      Desde galería
+                    </button>
+                  </div>
+                  <input ref={fotoCrudoCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleFotoCrudo} />
+                  <input ref={fotoCrudoGalleryRef} type="file" accept="image/*" className="hidden" onChange={handleFotoCrudo} />
+                </div>
                 {fotoCrudo && (
-                  <p className="text-[11px] text-yeikar-neutral/50 mt-1">{fotoCrudo.name}</p>
+                  <button type="button" onClick={quitarFotoCrudo} className="mt-1.5 text-[10px] font-bold text-red-600 hover:underline">
+                    Quitar foto
+                  </button>
                 )}
               </div>
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
