@@ -243,6 +243,8 @@ export default function Inventario() {
   const [fotoEpPreview, setFotoEpPreview] = useState<string | null>(null);
   const [quitarFotoEp, setQuitarFotoEp] = useState(false);
   const [savingEp, setSavingEp] = useState(false);
+  // Foto ampliada a pantalla completa (clic en la foto del detalle).
+  const [fotoGrande, setFotoGrande] = useState<string | null>(null);
   // Modal "Orden de Producción": fabricar la pieza (etapas, consumos, nómina).
   const [producirPieza, setProducirPieza] = useState<{ producto_id: number; nombre: string } | null>(null);
   const [savingProducir, setSavingProducir] = useState(false);
@@ -2452,8 +2454,22 @@ export default function Inventario() {
                 <img
                   src={productoSeleccionado.fotos[0].url}
                   alt={productoSeleccionado.nombre}
-                  className="w-full h-[45vh] min-h-[320px] object-cover rounded-2xl border border-yeikar-secondary-light/15 mb-4"
+                  title="Clic para ampliar"
+                  onClick={() => setFotoGrande(productoSeleccionado.fotos?.[0]?.url ?? null)}
+                  className="w-full max-h-[50vh] min-h-[280px] object-contain bg-yeikar-tertiary/30 rounded-2xl border border-yeikar-secondary-light/15 mb-4 cursor-zoom-in"
                 />
+              )}
+              {fotoGrande && (
+                <div
+                  className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+                  onClick={() => setFotoGrande(null)}
+                >
+                  <img
+                    src={fotoGrande}
+                    alt="Foto ampliada"
+                    className="max-w-full max-h-full object-contain rounded-xl"
+                  />
+                </div>
               )}
 
             {tab === 'exhibicion' && (
