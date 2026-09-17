@@ -33,7 +33,7 @@ import {
 //    3. ¿Cuánto llevamos?    → Barra de totales consolidada (sticky)
 //    4. ¿Qué sigue?          → Acciones de estado en el header (Iniciar/Pausar/…)
 
-type TabActiva = 'registrar' | 'historial' | 'costos';
+type TabActiva = 'registrar' | 'mano-obra' | 'historial' | 'costos';
 
 interface EtapaModalProps {
   stage: EtapaProduccion;
@@ -548,139 +548,163 @@ export default function EtapaModal({
         onClick={(e) => e.stopPropagation()}
       >
         {/* ══ HEADER STICKY: identidad + datos de orden + acciones por intención ══ */}
-        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur rounded-t-3xl border-b border-yeikar-secondary-light/10 px-4 sm:px-6 pt-4 pb-3 space-y-2">
+        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur rounded-t-3xl border-b border-yeikar-secondary-light/10 px-4 sm:px-6 pt-4 pb-3 space-y-2.5">
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40 tracking-wider uppercase">
-                  Etapa #{stage.id} · {stage.area?.nombre || 'Sin área'}
-                </span>
-                {stage.es_retrabajo && (
-                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 uppercase">Retrabajo</span>
-                )}
-                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border ${ESTADO_COLORS[stage.estado]}`}>
-                  {stage.estado.replace('_', ' ')}
-                </span>
-              </div>
-              <h2 className="text-xl sm:text-2xl font-black font-headline text-yeikar-secondary tracking-tight truncate">
-                {productoNombre}
-              </h2>
+            <div className="min-w-0 space-y-1.5">
+            {/* Fila 1 — identidad de la etapa */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40 tracking-wider uppercase">
+                Etapa #{stage.id} · {stage.area?.nombre || 'Sin área'}
+              </span>
+              {stage.es_retrabajo && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 uppercase">Retrabajo</span>
+              )}
+              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border ${ESTADO_COLORS[stage.estado]}`}>
+                {stage.estado.replace('_', ' ')}
+              </span>
             </div>
+            <h2 className="text-xl sm:text-2xl font-black font-headline text-yeikar-secondary tracking-tight truncate">
+              {productoNombre}
+            </h2>
+
+            {/* Fila 2 — datos de la orden en chips agrupados */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {detalle?.pedido?.cliente?.nombre && (
+                <span className="text-[11px] font-bold text-yeikar-primary-dark bg-yeikar-primary/10 border border-yeikar-primary/20 rounded-lg px-2 py-1">
+                  {detalle.pedido.cliente.nombre}
+                </span>
+              )}
+              {!detalle && (
+                <span className="text-[11px] font-bold text-yeikar-primary-dark bg-yeikar-primary/10 border border-yeikar-primary/20 rounded-lg px-2 py-1">
+                  {esOrdenExhibicion(stage.orden) ? 'Pieza de exhibición' : 'Sin pedido'}
+                </span>
+              )}
+              <span className="text-[11px] font-mono text-yeikar-neutral/55 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-lg px-2 py-1">
+                Orden #{stage.orden_produccion_id}
+              </span>
+              {medidas && (
+                <span className="text-[11px] font-mono text-yeikar-neutral/55 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-lg px-2 py-1">
+                  {medidas}
+                </span>
+              )}
+              {detalle?.cantidad != null && (
+                <span className="text-[11px] font-mono text-yeikar-neutral/55 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-lg px-2 py-1">
+                  × {detalle.cantidad} und
+                </span>
+              )}
+              {detalle?.pedido?.fecha_entrega_estimada && (
+                <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1" title="Fecha estimada de entrega al cliente">
+                  Entrega {new Date(detalle.pedido.fecha_entrega_estimada + 'T00:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                </span>
+              )}
+              {stage.orden?.estado && (
+                <span className={`text-[11px] font-bold rounded-lg px-2 py-1 border ${
+                  stage.orden.estado === 'FINALIZADA' ? 'text-green-700 bg-green-50 border-green-200'
+                  : stage.orden.estado === 'PAUSADA' ? 'text-red-600 bg-red-50 border-red-200'
+                  : 'text-blue-700 bg-blue-50 border-blue-200'
+                }`}>
+                  Orden {stage.orden.estado.replace('_', ' ').toLowerCase()}
+                </span>
+              )}
+              <span className="text-[11px] font-mono text-yeikar-neutral/55 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-lg px-2 py-1 flex items-center gap-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                {stage.empleado_responsable ? stage.empleado_responsable.nombre : 'Sin asignar'}
+              </span>
+              {stage.fecha_inicio && (
+                <span className="text-[11px] font-mono text-yeikar-neutral/55 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-lg px-2 py-1">
+                  Inicio {new Date(stage.fecha_inicio).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}
+                </span>
+              )}
+              {stage.fecha_fin && (
+                <span className="text-[11px] font-mono text-yeikar-neutral/55 bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-lg px-2 py-1">
+                  Fin {new Date(stage.fecha_fin).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-yeikar-tertiary rounded-xl text-yeikar-neutral/40 hover:text-yeikar-neutral/80 transition-colors shrink-0"
+            title="Cerrar modal"
+            aria-label="Cerrar modal"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Acciones: flujo de la etapa */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/40 mr-1">Etapa</span>
+          {acciones.map((a) => (
             <button
-              onClick={onClose}
-              className="p-2 hover:bg-yeikar-tertiary rounded-xl text-yeikar-neutral/40 hover:text-yeikar-neutral/80 transition-colors shrink-0"
-              title="Cerrar modal"
-              aria-label="Cerrar modal"
+              key={a.destino}
+              onClick={() => onCambiarEstado(stage.id, a.destino)}
+              disabled={statusUpdating}
+              title={
+                a.destino === 'COMPLETADA'
+                  ? 'Marca la etapa como terminada'
+                  : a.destino === 'EN_PROCESO'
+                    ? 'El trabajo está en marcha: ya puedes registrar consumos y mano de obra'
+                    : 'Pausa el trabajo de esta etapa'
+              }
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
+                a.primario
+                  ? 'bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary-dark'
+                  : 'bg-white border border-yeikar-secondary-light/25 text-yeikar-neutral/70 hover:bg-yeikar-tertiary/50'
+              }`}
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {a.icono.map((d, i) => (
+                  <path key={i} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
+                ))}
               </svg>
+              {a.label}
             </button>
-          </div>
+          ))}
+          {stage.estado !== 'COMPLETADA' && (
+            <button
+              onClick={() => onPasarAArea(stage)}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-bold font-headline bg-white border border-yeikar-secondary-light/25 text-yeikar-secondary hover:bg-yeikar-tertiary/50 transition-all flex items-center gap-1.5 shadow-sm"
+              title="Enviar la orden a la siguiente área del taller"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+              </svg>
+              Pasar a Área
+            </button>
+          )}
+        </div>
 
-          {/* Datos de la orden: una línea de lectura, no una pila de pills */}
-          <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[11px] font-mono text-yeikar-neutral/55">
-            {detalle?.pedido?.cliente?.nombre && (
-              <span className="font-bold text-yeikar-primary-dark">{detalle.pedido.cliente.nombre}</span>
-            )}
-            {!detalle && (
-              <span className="font-bold text-yeikar-primary-dark">
-                {esOrdenExhibicion(stage.orden) ? 'Pieza de exhibición' : 'Sin pedido'}
-              </span>
-            )}
-            <span>Orden #{stage.orden_produccion_id}</span>
-            {medidas && <span>{medidas}</span>}
-            {detalle?.cantidad != null && <span>× {detalle.cantidad} und</span>}
-            {detalle?.pedido?.fecha_entrega_estimada && (
-              <span className="font-bold text-amber-700" title="Fecha estimada de entrega al cliente">
-                Entrega {new Date(detalle.pedido.fecha_entrega_estimada + 'T00:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-              </span>
-            )}
-            {stage.orden?.estado && (
-              <span className={`font-bold ${
-                stage.orden.estado === 'FINALIZADA' ? 'text-green-700'
-                : stage.orden.estado === 'PAUSADA' ? 'text-red-600'
-                : 'text-blue-700'
-              }`}>
-                Orden {stage.orden.estado.replace('_', ' ').toLowerCase()}
-              </span>
-            )}
-            <span className="flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              {stage.empleado_responsable ? stage.empleado_responsable.nombre : 'Sin asignar'}
-            </span>
-            {stage.fecha_inicio && <span>Inicio {new Date(stage.fecha_inicio).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>}
-            {stage.fecha_fin && <span>Fin {new Date(stage.fecha_fin).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>}
-          </div>
-
-          {/* Acciones agrupadas por intención: flujo de la etapa vs documentos */}
-          <div className="flex items-center gap-2 flex-wrap pt-0.5">
-            <span className="text-[9px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/40">Etapa</span>
-            {acciones.map((a) => (
-              <button
-                key={a.destino}
-                onClick={() => onCambiarEstado(stage.id, a.destino)}
-                disabled={statusUpdating}
-                title={
-                  a.destino === 'COMPLETADA'
-                    ? 'Marca la etapa como terminada'
-                    : a.destino === 'EN_PROCESO'
-                      ? 'El trabajo está en marcha: ya puedes registrar consumos y mano de obra'
-                      : 'Pausa el trabajo de esta etapa'
-                }
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed ${
-                  a.primario
-                    ? 'bg-yeikar-primary text-yeikar-neutral hover:bg-yeikar-primary-dark'
-                    : 'bg-white border border-yeikar-secondary-light/25 text-yeikar-neutral/70 hover:bg-yeikar-tertiary/50'
-                }`}
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  {a.icono.map((d, i) => (
-                    <path key={i} strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
-                  ))}
-                </svg>
-                {a.label}
-              </button>
-            ))}
-            {stage.estado !== 'COMPLETADA' && (
-              <button
-                onClick={() => onPasarAArea(stage)}
-                className="px-3.5 py-1.5 rounded-xl text-xs font-bold font-headline bg-white border border-yeikar-secondary-light/25 text-yeikar-secondary hover:bg-yeikar-tertiary/50 transition-all flex items-center gap-1.5 shadow-sm"
-                title="Enviar la orden a la siguiente área del taller"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
-                </svg>
-                Pasar a Área
-              </button>
-            )}
-            <span className="w-px h-5 bg-yeikar-secondary-light/20 mx-1" />
-            <span className="text-[9px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/40">Documentos</span>
-            {(stage.orden?.detalle_pedido?.producto || stage.orden?.producto_id) && (
-              <button
-                onClick={onAbrirHojaTrabajo}
-                className="px-3 py-1.5 bg-white border border-yeikar-secondary-light/25 text-yeikar-secondary hover:bg-yeikar-tertiary/50 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
-                title="Imprimir la hoja de trabajo de esta etapa (sin montos, con foto del mueble)"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                </svg>
-                Hoja de Trabajo
-              </button>
-            )}
-            {stage.orden?.detalle_pedido?.pedido?.id && (
-              <button
-                onClick={() => { window.location.href = `/historial?tipo=pedido&id=${stage.orden!.detalle_pedido!.pedido!.id}`; }}
-                className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-primary hover:bg-yeikar-secondary-light rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
-                title="Ver expediente completo del pedido"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                </svg>
-                Expediente
-              </button>
-            )}
-          </div>
+        {/* Acciones: documentos */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[9px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/40 mr-1">Documentos</span>
+          {(stage.orden?.detalle_pedido?.producto || stage.orden?.producto_id) && (
+            <button
+              onClick={onAbrirHojaTrabajo}
+              className="px-3 py-1.5 bg-white border border-yeikar-secondary-light/25 text-yeikar-secondary hover:bg-yeikar-tertiary/50 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
+              title="Imprimir la hoja de trabajo de esta etapa (sin montos, con foto del mueble)"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+              </svg>
+              Hoja de Trabajo
+            </button>
+          )}
+          {stage.orden?.detalle_pedido?.pedido?.id && (
+            <button
+              onClick={() => { window.location.href = `/historial?tipo=pedido&id=${stage.orden!.detalle_pedido!.pedido!.id}`; }}
+              className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-primary hover:bg-yeikar-secondary-light rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
+              title="Ver expediente completo del pedido"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>
+              Expediente
+            </button>
+          )}
+        </div>
 
           {esOrdenExhibicion(stage.orden) && (
             <div className="bg-yeikar-primary/10 border border-yeikar-primary/25 rounded-xl px-3 py-2 text-[11px] font-bold text-yeikar-primary-dark">
@@ -691,11 +715,12 @@ export default function EtapaModal({
 
         {/* ══ TABS ══ */}
         <div className="px-4 sm:px-6 pt-3 border-b border-yeikar-secondary-light/10 bg-white">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 overflow-x-auto">
             {([
-              ['registrar', 'Registrar', consumos.length + manoObras.length],
+              ['registrar', 'Materiales', consumos.length],
+              ['mano-obra', 'Mano de obra', manoObras.length],
               ['historial', 'Historial', etapasOrden.length],
-              ['costos', 'Costos de la orden', null],
+              ['costos', 'Costos', null],
             ] as [TabActiva, string, number | null][]).map(([id, label, count]) => (
               <button
                 key={id}
@@ -849,7 +874,6 @@ export default function EtapaModal({
               {/* ── PASO 1: MATERIALES (form + registro en la misma tarjeta) ── */}
               <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
                 <header className="flex items-center gap-2.5 px-4 py-3 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
-                  <span className="w-6 h-6 shrink-0 rounded-lg bg-yeikar-secondary text-yeikar-tertiary font-headline font-black text-xs flex items-center justify-center">1</span>
                   <div className="min-w-0">
                     <h3 className="text-sm font-bold font-headline text-yeikar-secondary leading-tight">Materiales — pedir y registrar</h3>
                     <p className="text-[10px] text-yeikar-neutral/50">Quién lo pide y cuánto sale: descuenta stock y genera el egreso</p>
@@ -1337,11 +1361,14 @@ export default function EtapaModal({
                   </p>
                 )}
               </section>
+            </>
+          )}
 
-              {/* ── PASO 2: MANO DE OBRA (form + registro en la misma tarjeta) ── */}
+          {tab === 'mano-obra' && (
+            <>
+              {/* ── MANO DE OBRA (form + registro en la misma tarjeta) ── */}
               <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
                 <header className="flex items-center gap-2.5 px-4 py-3 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
-                  <span className="w-6 h-6 shrink-0 rounded-lg bg-yeikar-secondary text-yeikar-tertiary font-headline font-black text-xs flex items-center justify-center">2</span>
                   <div className="min-w-0">
                     <h3 className="text-sm font-bold font-headline text-yeikar-secondary leading-tight">Mano de obra — quién y cuánto</h3>
                     <p className="text-[10px] text-yeikar-neutral/50">Alimenta el costo de la etapa y la nómina del trabajador</p>
