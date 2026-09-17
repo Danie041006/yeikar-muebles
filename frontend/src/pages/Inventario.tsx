@@ -1232,7 +1232,11 @@ export default function Inventario() {
     filasExhibicion.push(buildFilaExhibicion(p, filas.reduce((a, f) => a + (parseFloat(String(f.cantidad)) || 0), 0)));
   }
   const filasExhibicionFiltradas = filasExhibicion
-    .filter(f => f.nombre.toLowerCase().includes(searchExhibicion.toLowerCase()))
+    .filter(f => {
+      const q = searchExhibicion.toLowerCase().trim();
+      if (!q) return true;
+      return f.nombre.toLowerCase().includes(q) || String(f.producto_id).includes(q);
+    })
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
   const piezasEnExhibicion = filasExhibicionFiltradas.reduce((a, f) => a + f.stock, 0);
   const valorExhibicion = filasExhibicionFiltradas.reduce((a, f) => a + f.stock * f.precioUsd, 0);
@@ -1463,6 +1467,14 @@ export default function Inventario() {
 
   const exhibicionColumns: DataColumn<FilaExhibicion>[] = [
     {
+      key: 'id',
+      header: 'ID',
+      render: (f) => (
+        <span className="font-mono text-xs text-yeikar-neutral/60">#{f.producto_id}</span>
+      ),
+      mobileHidden: true,
+    },
+    {
       key: 'pieza',
       header: 'Pieza',
       render: (f) => (
@@ -1474,7 +1486,7 @@ export default function Inventario() {
           )}
           <div className="min-w-0">
             <span className="font-semibold text-yeikar-secondary block truncate">{f.nombre}</span>
-            {f.codigo && <span className="text-[10px] font-mono text-yeikar-neutral/40">{f.codigo}</span>}
+            <span className="text-[10px] font-mono text-yeikar-neutral/40">#{f.producto_id}{f.codigo ? ` · ${f.codigo}` : ''}</span>
           </div>
         </div>
       ),
