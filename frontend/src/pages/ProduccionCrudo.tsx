@@ -10,6 +10,7 @@ import { getEmpleados, type Empleado } from '../services/empleadosService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import SearchSelect, { type SearchSelectOption } from '../components/ui/SearchSelect';
+import { Package } from 'lucide-react';
 import { dimensionalidad, volumenPieza, convertirCapturaLineal, etiquetaCaptura, fmtNum, fmtNum4, UnidadCaptura } from '../utils/unidades';
 import { fmtFechaVE } from '../utils/fechas';
 import { getPreciosProduccion, crearPrecioProduccion, getAreas, type PrecioProduccion, type Area } from '../services/costosProduccionService';
@@ -130,10 +131,18 @@ export default function ProduccionCrudo() {
   }, [fetchCrudo, fetchProducciones, fetchBase]);
 
   // Options para SearchSelect
-  const crudoOptions: SearchSelectOption[] = useMemo(
-    () => crudo.map((c) => ({ value: c.id, label: `${c.nombre} (stock ${c.cantidad.toLocaleString('es-ES')})` })),
-    [crudo],
-  );
+  const crudoById = useMemo(() => {
+    const mapa: Record<number, Crudo> = {};
+    for (const c of crudo) mapa[c.id] = c;
+    return mapa;
+  }, [crudo]);
+  const crudoElegidoNP = crudo.find((c) => String(c.id) === String(newProduccion.crudo_id)) ?? null;
+  const [modalSearch, setModalSearch] = useState('');
+  const crudosFiltradosModal = useMemo(() => {
+    const q = modalSearch.toLowerCase().trim();
+    if (!q) return crudo;
+    return crudo.filter((c) => c.nombre.toLowerCase().includes(q));
+  }, [crudo, modalSearch]);
 
   const materialOptions: SearchSelectOption[] = useMemo(
     () => materiales.map((m) => ({ value: m.id, label: `${m.nombre} — $${m.costo_base.toLocaleString('es-ES')}` })),
@@ -194,6 +203,7 @@ export default function ProduccionCrudo() {
       cantidad: '1',
       observaciones: '',
     });
+    setModalSearch('');
     setConsumoForm({
       material_id: '', cantidad: '1', solicitante_empleado_id: '', seccion: 'EBANISTERIA', observaciones: '',
       unidad_captura: '', modo_pieza: false, pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
@@ -425,9 +435,20 @@ export default function ProduccionCrudo() {
                         <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`}></span>
                         {cfg.label}
                       </span>
+                      {(() => {
+                        const item = crudoById[prod.crudo_id];
+                        const foto = item?.foto_url || prod.crudo?.foto_url;
+                        return foto ? (
+                          <img src={foto} alt="" className="w-12 h-12 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" loading="lazy" />
+                        ) : (
+                          <span className="w-12 h-12 rounded-xl bg-yeikar-tertiary/60 flex items-center justify-center text-yeikar-secondary/40 shrink-0">
+                            <Package className="w-5 h-5" />
+                          </span>
+                        );
+                      })()}
                       <div>
                         <p className="font-headline font-bold text-yeikar-secondary text-sm">
-                          Ítem: {prod.crudo?.nombre || `#${prod.crudo_id}`}
+                          Ítem: {crudoById[prod.crudo_id]?.nombre || prod.crudo?.nombre || `#${prod.crudo_id}`}
                           <span className="ml-2 font-mono text-yeikar-neutral/40">#{prod.id}</span>
                         </p>
                         <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
@@ -882,44 +903,121 @@ export default function ProduccionCrudo() {
       {/* Modal de Nueva Producción */}
       {showProdModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10 max-h-[90vh] overflow-y-auto">
-            <div className="bg-gradient-to-r from-yeikar-primary to-yeikar-primary-dark text-yeikar-neutral px-6 py-5">
+          <div className="bg-white rounded-3xl shadow-xl max-w-2xl w-full overflow-hidden border border-yeikar-secondary-light/10 max-h-[90vh] flex flex-col">
+            <div className="bg-gradient-to-r from-yeikar-primary to-yeikar-primary-dark text-yeikar-neutral px-6 py-5 shrink-0">
               <h3 className="font-headline font-black text-lg">Nueva Producción</h3>
-              <p className="text-xs text-yeikar-neutral/70">Elige el ítem a fabricar y la cantidad.</p>
+              <p className="text-xs text-yeikar-neutral/70">1 · Elige el ítem con su foto &nbsp;→&nbsp; 2 · Di cuántos vas a fabricar.</p>
             </div>
-            <form onSubmit={handleCrearProduccion} className="p-6 space-y-4 font-body">
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Ítem en Crudo *</label>
-                  <SearchSelect
-                    value={newProduccion.crudo_id}
-                    onChange={(v) => setNewProduccion((p) => ({ ...p, crudo_id: v }))}
-                    options={crudoOptions}
-                    placeholder="Selecciona un ítem..."
-                    searchPlaceholder="Buscar ítem en crudo..."
+            <form onSubmit={handleCrearProduccion} className="p-6 space-y-5 font-body overflow-y-auto">
+              {/* Paso 1: elegir ítem con foto */}
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1.5">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-yeikar-secondary text-yeikar-tertiary text-[10px] font-black mr-1.5">1</span>
+                  ¿Qué vas a fabricar? *
+                </label>
+                <input
+                  type="text"
+                  value={modalSearch}
+                  onChange={(e) => setModalSearch(e.target.value)}
+                  placeholder="Buscar por nombre…"
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-3 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary mb-2"
+                />
+                {crudosFiltradosModal.length === 0 ? (
+                  <p className="text-xs italic text-yeikar-neutral/40 bg-yeikar-tertiary/20 rounded-xl px-3 py-4 text-center">
+                    {crudo.length === 0
+                      ? 'Aún no hay ítems en crudo. Créalos en Inventario → Crudo.'
+                      : 'Sin coincidencias para esa búsqueda.'}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 max-h-72 overflow-y-auto pr-0.5">
+                    {crudosFiltradosModal.map((c) => {
+                      const sel = String(newProduccion.crudo_id) === String(c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => setNewProduccion((p) => ({ ...p, crudo_id: c.id }))}
+                          className={`relative text-left bg-white border-2 rounded-2xl overflow-hidden transition-all hover:shadow-md ${
+                            sel
+                              ? 'border-yeikar-primary shadow-md ring-2 ring-yeikar-primary/30'
+                              : 'border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+                          }`}
+                        >
+                          <div className="h-24 bg-yeikar-tertiary/40 relative">
+                            {c.foto_url ? (
+                              <img src={c.foto_url} alt={c.nombre} className="w-full h-full object-cover" loading="lazy" />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-yeikar-neutral/25">
+                                <Package className="w-8 h-8" />
+                              </div>
+                            )}
+                            {sel && (
+                              <span className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-yeikar-primary text-yeikar-neutral text-xs font-black flex items-center justify-center shadow">
+                                ✓
+                              </span>
+                            )}
+                          </div>
+                          <div className="p-2">
+                            <p className="text-xs font-bold text-yeikar-secondary leading-snug line-clamp-2 min-h-[2rem]">{c.nombre}</p>
+                            <p className="mt-1">
+                              <span className="text-[10px] font-mono font-bold bg-yeikar-tertiary/60 text-yeikar-secondary px-1.5 py-0.5 rounded-md">
+                                Stock: {Number(c.cantidad).toLocaleString('es-ES')}
+                              </span>
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {/* Paso 2: cantidad a fabricar */}
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1.5">
+                  <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-yeikar-secondary text-yeikar-tertiary text-[10px] font-black mr-1.5">2</span>
+                  ¿Cuántos vas a fabricar? *
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewProduccion((p) => ({ ...p, cantidad: String(Math.max(1, (parseInt(String(p.cantidad)) || 1) - 1)) }))}
+                    className="w-10 h-10 shrink-0 rounded-xl bg-yeikar-tertiary hover:bg-yeikar-secondary-light/20 text-yeikar-secondary font-black text-lg transition-colors"
+                    aria-label="Quitar uno"
+                  >
+                    −
+                  </button>
+                  <input
+                    type="number" min="1" step="1" required
+                    value={newProduccion.cantidad}
+                    onChange={(e) => setNewProduccion((p) => ({ ...p, cantidad: e.target.value }))}
+                    className={`${inputCls} text-center !text-base !font-bold`}
                   />
+                  <button
+                    type="button"
+                    onClick={() => setNewProduccion((p) => ({ ...p, cantidad: String((parseInt(String(p.cantidad)) || 0) + 1) }))}
+                    className="w-10 h-10 shrink-0 rounded-xl bg-yeikar-tertiary hover:bg-yeikar-secondary-light/20 text-yeikar-secondary font-black text-lg transition-colors"
+                    aria-label="Agregar uno"
+                  >
+                    +
+                  </button>
+                  <span className="text-xs font-bold text-yeikar-secondary whitespace-nowrap">und</span>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2">
-                    <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad *</label>
-                    <input
-                      type="number" min="1" step="1" required
-                      value={newProduccion.cantidad}
-                      onChange={(e) => setNewProduccion((p) => ({ ...p, cantidad: e.target.value }))}
-                      className={inputCls}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-yeikar-secondary mb-1">Observaciones</label>
-                    <input
-                      type="text"
-                      value={newProduccion.observaciones}
-                      onChange={(e) => setNewProduccion((p) => ({ ...p, observaciones: e.target.value }))}
-                      className={inputCls.replace('font-mono', '')}
-                      placeholder="Ej: Lote 1"
-                    />
-                  </div>
-                </div>
+                {crudoElegidoNP && (parseInt(String(newProduccion.cantidad)) || 0) > 0 && (
+                  <p className="mt-2 text-xs bg-yeikar-primary/10 border border-yeikar-primary/20 rounded-xl px-3 py-2 text-yeikar-secondary">
+                    Vas a fabricar <b>{parseInt(String(newProduccion.cantidad))} × {crudoElegidoNP.nombre}</b>
+                    <span className="text-yeikar-neutral/60"> (stock actual: {Number(crudoElegidoNP.cantidad).toLocaleString('es-ES')})</span>
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Observaciones</label>
+                <input
+                  type="text"
+                  value={newProduccion.observaciones}
+                  onChange={(e) => setNewProduccion((p) => ({ ...p, observaciones: e.target.value }))}
+                  className={inputCls.replace('font-mono', '')}
+                  placeholder="Ej: Lote 1"
+                />
               </div>
               <div className="flex gap-3">
                 <button
@@ -929,7 +1027,7 @@ export default function ProduccionCrudo() {
                   Cancelar
                 </button>
                 <button
-                  type="submit" disabled={savingProd}
+                  type="submit" disabled={savingProd || !newProduccion.crudo_id}
                   className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50"
                 >
                   {savingProd ? 'Creando...' : 'Crear Producción'}
