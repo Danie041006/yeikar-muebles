@@ -225,6 +225,15 @@ export default function EtapaModal({
     }).then((r) => setOpcionesCosto(r.data)).catch(() => setOpcionesCosto([]));
   }, [stage.id, stage.area_id]);
 
+  // El solicitante arranca como el responsable de la etapa (se puede cambiar):
+  // en el taller quien pide el material es quien tiene la etapa asignada.
+  useEffect(() => {
+    const responsableId = stage.empleado_responsable?.id;
+    if (!responsableId) return;
+    setNewConsumo((prev) => (prev.solicitante_id ? prev : { ...prev, solicitante_id: String(responsableId) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stage.id]);
+
   const seleccionarCostoMo = (costoId: string) => {
     setNewManoObra((prev) => {
       const opcion = opcionesCosto.find((o) => String(o.id) === String(costoId));
@@ -538,8 +547,8 @@ export default function EtapaModal({
         aria-label={`Etapa ${stage.id} de ${productoNombre}`}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ══ HEADER STICKY: identidad + acciones de estado ══ */}
-        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur rounded-t-3xl border-b border-yeikar-secondary-light/10 px-4 sm:px-6 pt-4 pb-3 space-y-3">
+        {/* ══ HEADER STICKY: identidad + datos de orden + acciones por intención ══ */}
+        <div className="sticky top-0 z-20 bg-white/95 backdrop-blur rounded-t-3xl border-b border-yeikar-secondary-light/10 px-4 sm:px-6 pt-4 pb-3 space-y-2">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -569,59 +578,44 @@ export default function EtapaModal({
             </button>
           </div>
 
-          {/* Identidad de la orden en una sola línea de badges */}
-          <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Datos de la orden: una línea de lectura, no una pila de pills */}
+          <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap text-[11px] font-mono text-yeikar-neutral/55">
             {detalle?.pedido?.cliente?.nombre && (
-              <span className="bg-yeikar-primary/10 text-yeikar-primary font-bold text-[11px] px-2 py-0.5 rounded-lg border border-yeikar-primary/20">
-                {detalle.pedido.cliente.nombre}
-              </span>
+              <span className="font-bold text-yeikar-primary-dark">{detalle.pedido.cliente.nombre}</span>
             )}
             {!detalle && (
-              <span className="bg-yeikar-primary/15 text-yeikar-primary-dark font-bold text-[11px] px-2 py-0.5 rounded-lg border border-yeikar-primary/25">
-                {esOrdenExhibicion(stage.orden) ? 'PIEZA DE EXHIBICIÓN' : 'SIN PEDIDO'}
+              <span className="font-bold text-yeikar-primary-dark">
+                {esOrdenExhibicion(stage.orden) ? 'Pieza de exhibición' : 'Sin pedido'}
               </span>
             )}
-            <span className="bg-yeikar-tertiary text-yeikar-secondary font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border border-yeikar-secondary-light/10">
-              Orden #{stage.orden_produccion_id}
-            </span>
-            {medidas && (
-              <span className="bg-stone-100 text-stone-600 font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border border-stone-200">
-                {medidas}
-              </span>
-            )}
-            {detalle?.cantidad != null && (
-              <span className="bg-yeikar-primary/10 text-yeikar-primary font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border border-yeikar-primary/20">
-                × {detalle.cantidad} und
-              </span>
-            )}
+            <span>Orden #{stage.orden_produccion_id}</span>
+            {medidas && <span>{medidas}</span>}
+            {detalle?.cantidad != null && <span>× {detalle.cantidad} und</span>}
             {detalle?.pedido?.fecha_entrega_estimada && (
-              <span className="bg-amber-50 text-amber-800 font-bold text-[11px] px-2 py-0.5 rounded-lg border border-amber-200" title="Fecha estimada de entrega al cliente">
-                Entrega: {new Date(detalle.pedido.fecha_entrega_estimada + 'T00:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+              <span className="font-bold text-amber-700" title="Fecha estimada de entrega al cliente">
+                Entrega {new Date(detalle.pedido.fecha_entrega_estimada + 'T00:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })}
               </span>
             )}
             {stage.orden?.estado && (
-              <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border ${
-                stage.orden.estado === 'FINALIZADA' ? 'bg-green-50 text-green-700 border-green-200'
-                : stage.orden.estado === 'PAUSADA' ? 'bg-red-50 text-red-700 border-red-200'
-                : 'bg-blue-50 text-blue-700 border-blue-200'
+              <span className={`font-bold ${
+                stage.orden.estado === 'FINALIZADA' ? 'text-green-700'
+                : stage.orden.estado === 'PAUSADA' ? 'text-red-600'
+                : 'text-blue-700'
               }`}>
-                ORDEN: {stage.orden.estado.replace('_', ' ')}
+                Orden {stage.orden.estado.replace('_', ' ').toLowerCase()}
               </span>
             )}
-          </div>
-
-          {/* Responsable y fechas de la etapa */}
-          <div className="flex items-center gap-3 flex-wrap text-[10px] font-mono text-yeikar-neutral/50 -mt-1">
             <span className="flex items-center gap-1">
               <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-              Encargado: {stage.empleado_responsable ? stage.empleado_responsable.nombre : 'Sin asignar'}
+              {stage.empleado_responsable ? stage.empleado_responsable.nombre : 'Sin asignar'}
             </span>
-            {stage.fecha_inicio && <span>Inicio: {new Date(stage.fecha_inicio).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>}
-            {stage.fecha_fin && <span>Fin: {new Date(stage.fecha_fin).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+            {stage.fecha_inicio && <span>Inicio {new Date(stage.fecha_inicio).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>}
+            {stage.fecha_fin && <span>Fin {new Date(stage.fecha_fin).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}</span>}
           </div>
 
-          {/* Barra de acciones: estado + documentos */}
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Acciones agrupadas por intención: flujo de la etapa vs documentos */}
+          <div className="flex items-center gap-2 flex-wrap pt-0.5">
+            <span className="text-[9px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/40">Etapa</span>
             {acciones.map((a) => (
               <button
                 key={a.destino}
@@ -660,7 +654,8 @@ export default function EtapaModal({
                 Pasar a Área
               </button>
             )}
-            <span className="flex-1" />
+            <span className="w-px h-5 bg-yeikar-secondary-light/20 mx-1" />
+            <span className="text-[9px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/40">Documentos</span>
             {(stage.orden?.detalle_pedido?.producto || stage.orden?.producto_id) && (
               <button
                 onClick={onAbrirHojaTrabajo}
@@ -723,9 +718,26 @@ export default function EtapaModal({
         </div>
 
         {/* ══ CONTENIDO ══ */}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-5">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
           {tab === 'registrar' && (
             <>
+              {stage.estado === 'ASIGNADA' && (
+                <div className="flex items-center gap-2 flex-wrap bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[11px] font-semibold text-amber-800">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                  La etapa aún está ASIGNADA: iníciala para pedir material y registrar mano de obra.
+                  <button
+                    type="button"
+                    onClick={() => onCambiarEstado(stage.id, 'EN_PROCESO')}
+                    disabled={statusUpdating}
+                    className="ml-auto bg-yeikar-primary text-yeikar-neutral text-[10px] font-bold px-2.5 py-1 rounded-lg hover:bg-yeikar-primary-dark disabled:opacity-50 transition-colors"
+                  >
+                    Iniciar trabajo
+                  </button>
+                </div>
+              )}
+
               {/* ── 1. RECETA VS REGISTRADO: qué debo usar y qué llevo ── */}
               {loadingReceta ? (
                 <div className="text-xs font-mono text-yeikar-neutral/40 py-3 text-center">Cargando receta de referencia…</div>
@@ -834,13 +846,16 @@ export default function EtapaModal({
                 </p>
               )}
 
-              {/* ── 2. REGISTRAR MATERIAL CONSUMIDO ── */}
-              <section className="space-y-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <h3 className="text-sm font-bold font-headline text-yeikar-secondary">Registrar material consumido</h3>
-                  <span className="text-[10px] font-mono text-yeikar-neutral/40">descuenta stock y genera egreso</span>
-                </div>
-                <form onSubmit={handleAddConsumo} className="space-y-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
+              {/* ── PASO 1: MATERIALES (form + registro en la misma tarjeta) ── */}
+              <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
+                <header className="flex items-center gap-2.5 px-4 py-3 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
+                  <span className="w-6 h-6 shrink-0 rounded-lg bg-yeikar-secondary text-yeikar-tertiary font-headline font-black text-xs flex items-center justify-center">1</span>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold font-headline text-yeikar-secondary leading-tight">Materiales — pedir y registrar</h3>
+                    <p className="text-[10px] text-yeikar-neutral/50">Quién lo pide y cuánto sale: descuenta stock y genera el egreso</p>
+                  </div>
+                </header>
+                <form onSubmit={handleAddConsumo} className="p-4 space-y-2.5">
                   <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                     {/* Material */}
                     <div className="sm:col-span-6 relative">
@@ -945,13 +960,13 @@ export default function EtapaModal({
                         placeholder="¿Quién pide?"
                       />
                     </div>
-                    <div className="sm:col-span-12 flex justify-end">
+                    <div className="sm:col-span-12">
                       <button
                         type="submit"
                         disabled={consumoSubmitting}
-                        className="bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2 px-5 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                        className="w-full bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2.5 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
                       >
-                        {consumoSubmitting ? 'Guardando…' : '+ Agregar material'}
+                        {consumoSubmitting ? 'Guardando…' : '+ Agregar material a la etapa'}
                       </button>
                     </div>
                   </div>
@@ -1229,14 +1244,18 @@ export default function EtapaModal({
                   </details>
                 </form>
 
-                {/* Lista de consumos */}
-                {consumos.length > 0 && (
-                  <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {/* Registro del paso: qué ha salido ya del depósito */}
+                <div className="flex items-center justify-between gap-2 px-4 py-2 bg-yeikar-tertiary/25 border-y border-yeikar-secondary-light/10">
+                  <span className="text-[10px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/50">Registrado en esta etapa</span>
+                  <span className="text-[10px] font-mono font-bold text-yeikar-secondary">{consumos.length} · ${totalMateriales.toLocaleString('es-CO')}</span>
+                </div>
+                {consumos.length > 0 ? (
+                  <div className="divide-y divide-yeikar-secondary-light/5 max-h-72 overflow-y-auto">
                     {consumos.map((c) => {
                       const costo = c.costo_unitario !== undefined && c.costo_unitario !== null ? c.costo_unitario : (c.material?.costo_base || 0);
                       const subtotal = c.cantidad * costo;
                       return (
-                        <div key={c.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/10 p-3 rounded-xl shadow-xs text-xs hover:border-yeikar-primary/30 transition-colors">
+                        <div key={c.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs hover:bg-yeikar-tertiary/20 transition-colors">
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <p className="font-bold text-yeikar-secondary text-sm">{c.material?.nombre}</p>
@@ -1312,15 +1331,23 @@ export default function EtapaModal({
                       );
                     })}
                   </div>
+                ) : (
+                  <p className="px-4 py-6 text-center text-[11px] text-yeikar-neutral/40 italic">
+                    Aún no hay materiales registrados: lo que pidas en el formulario de arriba aparecerá aquí.
+                  </p>
                 )}
               </section>
 
-              {/* ── 3. MANO DE OBRA ── */}
-              <section className="space-y-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <h3 className="text-sm font-bold font-headline text-yeikar-secondary">Registrar mano de obra</h3>
-                  <span className="text-[10px] font-mono text-yeikar-neutral/40">alimenta el costo de la orden</span>
-                </div>
+              {/* ── PASO 2: MANO DE OBRA (form + registro en la misma tarjeta) ── */}
+              <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
+                <header className="flex items-center gap-2.5 px-4 py-3 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
+                  <span className="w-6 h-6 shrink-0 rounded-lg bg-yeikar-secondary text-yeikar-tertiary font-headline font-black text-xs flex items-center justify-center">2</span>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-bold font-headline text-yeikar-secondary leading-tight">Mano de obra — quién y cuánto</h3>
+                    <p className="text-[10px] text-yeikar-neutral/50">Alimenta el costo de la etapa y la nómina del trabajador</p>
+                  </div>
+                </header>
+                <div className="p-4 space-y-2.5">
                 {stage.estado !== 'EN_PROCESO' && (
                   <div className="flex items-center gap-2 flex-wrap bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[11px] font-semibold text-amber-800">
                     <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1339,7 +1366,7 @@ export default function EtapaModal({
                     )}
                   </div>
                 )}
-                <form onSubmit={handleAddManoObra} className="space-y-2 bg-yeikar-tertiary/30 p-3 rounded-2xl border border-yeikar-secondary-light/5">
+                <form onSubmit={handleAddManoObra} className="space-y-2.5">
                   <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                     <div className="sm:col-span-4">
                       <label className="block text-[10px] font-headline font-bold uppercase tracking-wider text-yeikar-secondary/70 mb-1">Empleado</label>
@@ -1440,29 +1467,32 @@ export default function EtapaModal({
                     className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary"
                   />
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setMostrarNuevoCosto(v => !v)}
-                      className="text-[11px] font-bold text-yeikar-primary-dark hover:underline"
-                    >
-                      {mostrarNuevoCosto ? '× Cancelar nuevo costo' : '+ Nuevo costo de producción'}
-                    </button>
-                    <span className="flex-1" />
-                    <button
-                      type="submit"
-                      disabled={stage.estado !== 'EN_PROCESO'}
-                      className="bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2 px-4 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
-                    >
-                      + Agregar mano de obra
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarNuevoCosto(v => !v)}
+                    className="text-[11px] font-bold text-yeikar-primary-dark hover:underline"
+                  >
+                    {mostrarNuevoCosto ? '× Cancelar nuevo costo' : '+ Nuevo costo de producción'}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={stage.estado !== 'EN_PROCESO'}
+                    className="w-full bg-yeikar-primary text-yeikar-neutral text-xs font-bold font-headline py-2.5 rounded-xl hover:bg-yeikar-primary-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+                  >
+                    + Agregar mano de obra a la etapa
+                  </button>
                 </form>
+                </div>
 
-                {manoObras.length > 0 && (
-                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {/* Registro del paso: quién trabajó y cuánto */}
+                <div className="flex items-center justify-between gap-2 px-4 py-2 bg-yeikar-tertiary/25 border-y border-yeikar-secondary-light/10">
+                  <span className="text-[10px] font-headline font-black uppercase tracking-wider text-yeikar-neutral/50">Registrado en esta etapa</span>
+                  <span className="text-[10px] font-mono font-bold text-yeikar-secondary">{manoObras.length} · ${totalManoObra.toLocaleString('es-CO')}</span>
+                </div>
+                {manoObras.length > 0 ? (
+                  <div className="divide-y divide-yeikar-secondary-light/5 max-h-64 overflow-y-auto">
                     {manoObras.map((mo) => (
-                      <div key={mo.id} className="flex items-center justify-between bg-white border border-yeikar-secondary-light/10 p-3 rounded-xl shadow-xs text-xs hover:border-yeikar-primary/30 transition-colors">
+                      <div key={mo.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs hover:bg-yeikar-tertiary/20 transition-colors">
                         <div className="min-w-0">
                           <p className="font-bold text-yeikar-secondary text-sm">
                             {mo.empleado ? `${mo.empleado.nombre}` : `Empleado #${mo.empleado_id}`}
@@ -1515,47 +1545,73 @@ export default function EtapaModal({
                       </div>
                     ))}
                   </div>
+                ) : (
+                  <p className="px-4 py-6 text-center text-[11px] text-yeikar-neutral/40 italic">
+                    Sin mano de obra registrada en esta etapa todavía.
+                  </p>
                 )}
               </section>
             </>
           )}
 
           {tab === 'historial' && (
-            <div className="space-y-1.5">
+            <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs p-4 sm:p-5">
+              <h3 className="text-sm font-bold font-headline text-yeikar-secondary mb-4">Ruta de la orden por áreas</h3>
               {etapasOrden.length === 0 ? (
                 <p className="text-xs text-yeikar-neutral/40 text-center py-8">Sin historial de etapas para esta orden.</p>
               ) : (
-                etapasOrden.map((et) => (
-                  <div key={et.id} className={`flex items-center justify-between p-2.5 rounded-xl text-xs border ${
-                    et.id === stage.id
-                      ? 'bg-yeikar-primary/10 border-yeikar-primary/30'
-                      : 'bg-yeikar-tertiary/30 border-yeikar-secondary-light/10'
-                  }`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${
-                        et.estado === 'COMPLETADA' ? 'bg-green-500' : et.estado === 'EN_PROCESO' ? 'bg-amber-400' : et.estado === 'PAUSADA' ? 'bg-red-400' : 'bg-blue-400'
+                <ol className="relative space-y-4 before:absolute before:left-[7px] before:top-2 before:bottom-2 before:w-px before:bg-yeikar-secondary-light/25">
+                  {etapasOrden.map((et, idx) => (
+                    <li key={et.id} className="relative pl-6">
+                      <span className={`absolute left-0 top-1.5 w-[15px] h-[15px] rounded-full border-2 ${
+                        et.id === stage.id
+                          ? 'bg-yeikar-primary border-yeikar-primary'
+                          : et.estado === 'COMPLETADA' ? 'bg-green-500 border-green-500'
+                          : et.estado === 'EN_PROCESO' ? 'bg-amber-400 border-amber-400'
+                          : et.estado === 'PAUSADA' ? 'bg-red-400 border-red-400'
+                          : 'bg-white border-blue-400'
                       }`} />
-                      <span className="font-bold text-yeikar-secondary">{et.area?.nombre || `Área #${et.area_id}`}</span>
-                      {et.es_retrabajo && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 uppercase">Retrabajo</span>
-                      )}
-                      {et.id === stage.id && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-yeikar-primary text-yeikar-neutral uppercase">Esta etapa</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0 text-[10px] font-mono text-yeikar-neutral/50">
-                      {et.empleado_responsable && <span>{et.empleado_responsable.nombre}</span>}
-                      <span className="font-bold">{et.estado.replace('_', ' ')}</span>
-                      {et.fecha_fin && <span>{fmtFechaVE(et.fecha_fin)}</span>}
-                    </div>
-                  </div>
-                ))
+                      <div className={`rounded-xl border px-3 py-2 text-xs ${
+                        et.id === stage.id
+                          ? 'bg-yeikar-primary/10 border-yeikar-primary/30'
+                          : 'bg-yeikar-tertiary/30 border-yeikar-secondary-light/10'
+                      }`}>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="font-bold text-yeikar-secondary">
+                            {idx + 1}. {et.area?.nombre || `Área #${et.area_id}`}
+                          </span>
+                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border ${ESTADO_COLORS[et.estado] || 'bg-stone-100 text-stone-600 border-stone-200'}`}>
+                            {et.estado.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 flex-wrap mt-1 text-[10px] font-mono text-yeikar-neutral/50">
+                          {et.empleado_responsable && <span>Encargado: {et.empleado_responsable.nombre}</span>}
+                          {et.fecha_inicio && <span>Inicio {fmtFechaVE(et.fecha_inicio)}</span>}
+                          {et.fecha_fin && <span>Fin {fmtFechaVE(et.fecha_fin)}</span>}
+                          {et.es_retrabajo && <span className="font-bold text-amber-700">RETRABAJO</span>}
+                          {et.id === stage.id && <span className="font-bold text-yeikar-primary-dark">Estás aquí</span>}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
               )}
             </div>
           )}
 
           {tab === 'costos' && (
-            <CostosOrdenEnVivo data={costosEnVivo} loading={costosEnVivoLoading} compacto />
+            <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
+              <header className="flex items-center justify-between gap-2 px-4 py-3 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
+                <div>
+                  <h3 className="text-sm font-bold font-headline text-yeikar-secondary leading-tight">Estructura de costos de la orden</h3>
+                  <p className="text-[10px] text-yeikar-neutral/50">Desglose por sección, como la hoja de Excel</p>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-yeikar-neutral/50 shrink-0">Orden #{stage.orden_produccion_id}</span>
+              </header>
+              <div className="p-4">
+                <CostosOrdenEnVivo data={costosEnVivo} loading={costosEnVivoLoading} compacto />
+              </div>
+            </div>
           )}
         </div>
 
@@ -1575,6 +1631,9 @@ export default function EtapaModal({
               <span className="text-lg font-black text-yeikar-primary font-mono">${totalEtapa.toLocaleString('es-CO')}</span>
             </div>
             <span className="flex-1" />
+            <span className="text-[10px] font-mono text-yeikar-neutral/40 hidden sm:block">
+              {consumos.length} materiales · {manoObras.length} mano de obra
+            </span>
             <button
               onClick={onClose}
               className="bg-white border border-yeikar-secondary-light/15 text-yeikar-neutral/70 hover:text-yeikar-secondary hover:bg-yeikar-tertiary/50 px-4 py-2 rounded-xl text-xs font-bold font-headline transition-all"
