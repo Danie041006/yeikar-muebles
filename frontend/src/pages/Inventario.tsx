@@ -1275,9 +1275,9 @@ export default function Inventario() {
       render: (c) => (
         <div className="flex items-center gap-2.5">
           {c.foto_url ? (
-            <img src={c.foto_url} alt={c.nombre} className="w-9 h-9 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+            <img src={c.foto_url} alt={c.nombre} className="w-16 h-16 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
           ) : (
-            <span className="w-9 h-9 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black">N</span>
+            <span className="w-16 h-16 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-xl shrink-0">N</span>
           )}
           <span className="font-semibold text-yeikar-secondary">{c.nombre}</span>
         </div>
@@ -1480,9 +1480,9 @@ export default function Inventario() {
       render: (f) => (
         <div className="flex items-center gap-2.5 min-w-0">
           {f.fotoUrl ? (
-            <img src={f.fotoUrl} alt={f.nombre} className="w-9 h-9 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+            <img src={f.fotoUrl} alt={f.nombre} className="w-16 h-16 rounded-xl object-cover border border-yeikar-secondary-light/15 shrink-0" />
           ) : (
-            <span className="w-9 h-9 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black shrink-0">P</span>
+            <span className="w-16 h-16 rounded-xl bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 font-black text-xl shrink-0">P</span>
           )}
           <div className="min-w-0">
             <span className="font-semibold text-yeikar-secondary block truncate">{f.nombre}</span>
@@ -1982,8 +1982,8 @@ export default function Inventario() {
                   </div>
                 </div>
 
-                {/* Cuerpo */}
-                <div className="flex-1 overflow-y-auto p-6">
+              {/* Cuerpo */}
+              <div className="flex-1 overflow-y-auto p-6">
                   {/* ── TAB: Registrar movimiento ── */}
                   {detalleTab === 'movimiento' && (
                     <form onSubmit={handleRegisterMovement} className="space-y-4">
@@ -2448,6 +2448,13 @@ export default function Inventario() {
 
               {/* Cuerpo */}
               <div className="flex-1 overflow-y-auto p-6">
+              {productoSeleccionado.fotos?.[0]?.url && (
+                <img
+                  src={productoSeleccionado.fotos[0].url}
+                  alt={productoSeleccionado.nombre}
+                  className="w-full h-64 object-cover rounded-2xl border border-yeikar-secondary-light/15 mb-4"
+                />
+              )}
 
             {tab === 'exhibicion' && (
               <div className="grid grid-cols-2 gap-2 mb-4">
@@ -3511,7 +3518,7 @@ export default function Inventario() {
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de la pieza <span className="text-yeikar-neutral/40 font-normal">(opcional · se comprime sola)</span></label>
                 <div className="flex items-center gap-3">
                   {fotoPiezaPreview ? (
-                    <img src={fotoPiezaPreview} alt="Vista previa" className="w-16 h-16 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+                    <img src={fotoPiezaPreview} alt="Vista previa" className="w-24 h-24 rounded-lg object-cover border border-yeikar-secondary-light/15" />
                   ) : (
                     <span className="w-16 h-16 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 text-[10px] font-bold">SIN FOTO</span>
                   )}
@@ -3593,10 +3600,10 @@ export default function Inventario() {
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de la pieza <span className="text-yeikar-neutral/40 font-normal">(se comprime sola)</span></label>
                 <div className="flex items-center gap-3">
                   {fotoEpPreview ? (
-                    <img src={fotoEpPreview} alt="Vista previa" className="w-16 h-16 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+                    <img src={fotoEpPreview} alt="Vista previa" className="w-24 h-24 rounded-lg object-cover border border-yeikar-secondary-light/15" />
                   ) : editarPieza.fotos && editarPieza.fotos[0]?.id && !quitarFotoEp ? (
                     <div className="relative shrink-0">
-                      <AdjuntoImagen adjunto={editarPieza.fotos[0] as AdjuntoInfo} alt={editarPieza.nombre} className="w-16 h-16 rounded-lg object-cover border border-yeikar-secondary-light/15" />
+                      <AdjuntoImagen adjunto={editarPieza.fotos[0] as AdjuntoInfo} alt={editarPieza.nombre} className="w-24 h-24 rounded-lg object-cover border border-yeikar-secondary-light/15" />
                       <button
                         type="button"
                         onClick={() => setQuitarFotoEp(true)}
