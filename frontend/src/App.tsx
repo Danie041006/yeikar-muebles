@@ -27,6 +27,7 @@ import EstadoDia from './pages/EstadoDia';
 import Expediente from './pages/Expediente';
 import NotFound from './pages/NotFound';
 import DashboardLayout from './components/Layout/DashboardLayout';
+import ActualizacionSW from './components/ActualizacionSW';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 
@@ -205,6 +206,7 @@ function App() {
   return (
     <HelmetProvider>
       <ToastProvider>
+        <ActualizacionSW />
         <AuthProvider>
           <BrowserRouter>
           <OrganizationSchema />

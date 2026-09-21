@@ -4,18 +4,24 @@ import { CheckCircle2, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface ToastItem {
   id: number;
   type: ToastType;
   message: string;
   duration: number;
+  action?: ToastAction;
 }
 
 interface ToastApi {
   success: (message: string) => void;
   error: (message: string) => void;
-  info: (message: string) => void;
-  warning: (message: string) => void;
+  info: (message: string, action?: ToastAction) => void;
+  warning: (message: string, action?: ToastAction) => void;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -59,11 +65,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const push = useCallback(
-    (type: ToastType, message: string) => {
+    (type: ToastType, message: string, action?: ToastAction) => {
       const id = nextId.current++;
-      const duration = DURATIONS[type];
-      setToasts((prev) => [...prev.slice(-3), { id, type, message, duration }]);
-      window.setTimeout(() => dismiss(id), duration);
+      const duration = action ? 0 : DURATIONS[type];
+      setToasts((prev) => [...prev.slice(-3), { id, type, message, duration, action }]);
+      if (!action) window.setTimeout(() => dismiss(id), duration);
     },
     [dismiss],
   );
@@ -72,8 +78,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     () => ({
       success: (message) => push('success', message),
       error: (message) => push('error', message),
-      info: (message) => push('info', message),
-      warning: (message) => push('warning', message),
+      info: (message, action) => push('info', message, action),
+      warning: (message, action) => push('warning', message, action),
     }),
     [push],
   );
@@ -104,7 +110,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                   <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border ${style.chip}`}>
                     {style.icon}
                   </div>
-                  <p className="flex-1 pt-1 text-sm font-medium leading-snug text-yeikar-neutral">{toast.message}</p>
+                  <div className="flex-1 pt-1">
+                    <p className="text-sm font-medium leading-snug text-yeikar-neutral">{toast.message}</p>
+                    {toast.action && (
+                      <button
+                        onClick={toast.action.onClick}
+                        className="mt-2 rounded-lg bg-yeikar-primary px-3 py-1.5 text-xs font-bold text-yeikar-neutral shadow-gold transition-transform active:scale-95"
+                      >
+                        {toast.action.label}
+                      </button>
+                    )}
+                  </div>
                   <button
                     onClick={() => dismiss(toast.id)}
                     className="-mr-1 -mt-1 p-1 text-yeikar-neutral/35 transition-colors hover:text-yeikar-neutral"
@@ -113,12 +129,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <motion.div
-                  initial={{ width: '100%' }}
-                  animate={{ width: '0%' }}
-                  transition={{ duration: toast.duration / 1000, ease: 'linear' }}
-                  className={`h-0.5 ${style.bar}`}
-                />
+                {toast.duration > 0 && (
+                  <motion.div
+                    initial={{ width: '100%' }}
+                    animate={{ width: '0%' }}
+                    transition={{ duration: toast.duration / 1000, ease: 'linear' }}
+                    className={`h-0.5 ${style.bar}`}
+                  />
+                )}
               </motion.div>
             );
           })}
