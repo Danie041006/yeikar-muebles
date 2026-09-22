@@ -30,22 +30,24 @@ def _snapshot_venta(venta: Venta) -> dict:
     }
 
 
-def obtener_venta(db: Session, id_venta: int, usuario: Usuario | None = None):
-    query = db.query(Venta).filter(Venta.id == id_venta)
-    if usuario is not None:
-        query = filtrar_registros_propios(query, Venta.creado_por_id, usuario)
-    return query.first()
+def obtener_venta(db: Session, id_venta: int):
+    # Lectura compartida (igual que cotizaciones): cualquiera con el módulo
+    # 'ventas' ve la factura — los cobradores deben ver los dineros pendientes
+    # aunque la factura la registró otro. Los mutadores validan propiedad aquí
+    # mismo con filtrar_registros_propios.
+    return db.query(Venta).filter(Venta.id == id_venta).first()
 
 def obtener_ventas(
     db: Session,
     salto: int = 0,
     limite: int = 100,
     buscar: str = None,
-    usuario: Usuario | None = None,
 ):
+    # Lectura compartida (igual que cotizaciones): todos con el módulo 'ventas'
+    # ven todas las facturas. Sin esto, Paola/cobradores no ven los dineros
+    # pendientes de cobrar registrados por otro usuario. La escritura sigue
+    # siendo del creador (o Dueño/Administrador).
     query = db.query(Venta).options(joinedload(Venta.pedido))
-    if usuario is not None:
-        query = filtrar_registros_propios(query, Venta.creado_por_id, usuario)
     if buscar:
         query = query.join(Client).filter(
             or_(
@@ -202,7 +204,12 @@ def crear_venta_desde_pedido(
     return db_venta
 
 def actualizar_venta(db: Session, id_venta: int, esquema: VentaUpdate, usuario: Usuario | None = None):
-    db_venta = obtener_venta(db, id_venta, usuario)
+    # Lectura compartida, escritura propia: solo el creador (o Dueño/Admin)
+    # edita la factura.
+    db_venta_query = db.query(Venta).filter(Venta.id == id_venta)
+    if usuario is not None:
+        db_venta_query = filtrar_registros_propios(db_venta_query, Venta.creado_por_id, usuario)
+    db_venta = db_venta_query.first()
     if not db_venta:
         return None
     antes = _snapshot_venta(db_venta)
@@ -225,7 +232,11 @@ def actualizar_venta(db: Session, id_venta: int, esquema: VentaUpdate, usuario: 
     return db_venta
 
 def eliminar_venta(db: Session, id_venta: int, usuario: Usuario | None = None):
-    db_venta = obtener_venta(db, id_venta, usuario)
+    # Escritura propia: solo el creador (o Dueño/Admin) elimina la factura.
+    db_venta_query = db.query(Venta).filter(Venta.id == id_venta)
+    if usuario is not None:
+        db_venta_query = filtrar_registros_propios(db_venta_query, Venta.creado_por_id, usuario)
+    db_venta = db_venta_query.first()
     if not db_venta:
         return False
     # No permitir eliminar una factura con abonos o descuentos: los FK son
@@ -424,10 +435,9 @@ def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, us
 def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: Usuario | None = None):
     # 1. Obtener la venta con FOR UPDATE para serializar pagos concurrentes:
     #    dos abonos simultáneos no pueden validar el saldo al mismo tiempo.
-    venta_query = db.query(Venta).filter(Venta.id == esquema.venta_id)
-    if usuario is not None:
-        venta_query = filtrar_registros_propios(venta_query, Venta.creado_por_id, usuario)
-    venta = venta_query.with_for_update().first()
+    #    Sin filtro por creador: cualquier cobrador registra abonos en las
+    #    facturas del equipo (lectura compartida de ventas).
+    venta = db.query(Venta).filter(Venta.id == esquema.venta_id).with_for_update().first()
     if not venta:
         raise ValueError("La venta especificada no existe.")
 
@@ -525,11 +535,9 @@ def crear_descuento(db: Session, esquema: DescuentoCreate, commit: bool = True, 
     """Registra una rebaja otorgada al cobrar: resta del saldo pendiente con la
     misma lógica multimoneda de los pagos, pero NO genera MovimientoCaja."""
     # 1. Venta con FOR UPDATE: un cobro y un descuento simultáneos no pueden
-    #    validar el saldo al mismo tiempo.
-    venta_query = db.query(Venta).filter(Venta.id == esquema.venta_id)
-    if usuario is not None:
-        venta_query = filtrar_registros_propios(venta_query, Venta.creado_por_id, usuario)
-    venta = venta_query.with_for_update().first()
+    #    validar el saldo al mismo tiempo. Sin filtro por creador: igual que
+    #    los pagos, el cobrador registra rebajas en las facturas del equipo.
+    venta = db.query(Venta).filter(Venta.id == esquema.venta_id).with_for_update().first()
     if not venta:
         raise ValueError("La venta especificada no existe.")
 
@@ -594,10 +602,9 @@ def anular_descuento(db: Session, id_descuento: int, usuario: Usuario | None = N
     db_descuento = db.query(DescuentoVenta).filter(DescuentoVenta.id == id_descuento).first()
     if not db_descuento:
         return False
-    venta_query = db.query(Venta).filter(Venta.id == db_descuento.venta_id)
-    if usuario is not None:
-        venta_query = filtrar_registros_propios(venta_query, Venta.creado_por_id, usuario)
-    venta = venta_query.with_for_update().first()
+    # Sin filtro por creador: igual que los pagos, el cobrador anula rebajas
+    # en las facturas del equipo (la auditoría registra quién lo hizo).
+    venta = db.query(Venta).filter(Venta.id == db_descuento.venta_id).with_for_update().first()
     if not venta:
         raise ValueError("La venta del descuento no existe o no tienes acceso a ella.")
     if venta.estado == "CANCELADA":
