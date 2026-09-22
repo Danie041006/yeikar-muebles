@@ -94,6 +94,15 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 5. Completing all etapas: supervisor presses "Finalizar" which sets estado=FINALIZADA, auto-calculates costs
 6. When all órdenes for a pedido are FINALIZADA, pedido → TERMINADO and envio auto-created
 
+### Pedidos de material y captura flexible de madera
+
+- **Pedido ABIERTO**: `es_pedido=true` sin `cantidad` → consumo PENDIENTE sin tocar stock/gasto (piden "madera" a secas). Al confirmar se descuenta todo lo usado.
+- **Confirmación MULTI-USO**: `PUT /produccion/consumo/{id}/confirmar` acepta `usos: [{cantidad, unidad_captura?, pieza_*?}]` → un consumo CONFIRMADO por uso (renglón aislado en costos y en la estructura), cada uno con su movimiento (reversa por fila exacta) y su gasto. La cabeza del pedido conserva `cantidad_pedida`.
+- **Capturas** (motor único `produccion/unidades.py`): pieza = `(largo m × ancho cm × espesor cm) × n.º piezas ÷ 10000`; `unidad_captura='CM'` en m³ = cuenta del ebanista ÷ 10000; en lineales (m) = cm ÷ 100.
+- `consumo_material.detalle_uso` guarda la etiqueta legible ("Pieza 2×10×5 × 2", "1500 cm (cuenta del taller)"); `costos-en-vivo` la expone como `captura` por renglón y `CostosOrdenEnVivo.tsx` la muestra bajo el material.
+- **Costo final al finalizar**: `CostoProduccion.costo_total` = materiales + MO registrada + **gastos por sección** (ReglaGastoSeccion, default 10%, helper `_gastos_seccion_orden`); `POST /produccion/costo/calcular/{id}` sin `costo_gastos` también los autocalcula. Con MO con recargo explícito el total cuadra exacto con la tablita de costos en vivo.
+- **Nómina**: lee `mano_obra` directamente (no los consumos); el costo de producción suma esa misma fila `monto × (1+recargo/100)`.
+
 ### Piezas de exhibición (showroom)
 
 - `OrdenProduccion.tipo` (PEDIDO | EXHIBICION | STOCK) define el DESTINO de lo fabricado; `es_stock` queda como alias heredado de "sin pedido". El servicio deriva el tipo y rechaza un `tipo` explícito que contradiga el destino

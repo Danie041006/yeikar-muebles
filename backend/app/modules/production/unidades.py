@@ -29,9 +29,11 @@ from decimal import Decimal, ROUND_HALF_UP
 # ---------------------------------------------------------------------------
 CM_POR_METRO = Decimal("100")
 
-# Fórmula de la casa: el producto de las 3 medidas de la pieza (números tal
-# cual los anotan en el taller) dividido entre 10000 da los m³ a descontar.
-# (El taller divide entre 10000, no 1000 — regla confirmada por el dueño.)
+# Fórmula de la casa: el producto de las 3 medidas de la pieza (largo en
+# METROS, ancho/espesor en cm — números tal cual los anota el taller)
+# dividido entre 10000 da los m³ a descontar. (El taller divide entre
+# 10000, no 1000 — regla confirmada por el dueño.) El mismo divisor aplica
+# a la cuenta del ebanista digitada en cm (un solo campo: "832" → 0.0832 m³).
 DIVISOR_PIEZA = Decimal("10000")
 
 # Las columnas de cantidad son Numeric(12,4) (4 decimales: la fórmula de la
@@ -128,7 +130,8 @@ def resolver_cantidad_consumo(
         if faltan:
             raise ValueError(f"Faltan medidas de la pieza: {', '.join(faltan)}.")
         # FÓRMULA DE LA CASA (21 años de práctica): producto de las 3 medidas
-        # tal cual, por número de piezas, dividido entre 10000 = m³.
+        # por número de piezas, con el largo en METROS y ancho/espesor en cm;
+        # la regla de los 10000 lo lleva a m³.
         volumen = (
             Decimal(str(pieza_largo))
             * Decimal(str(pieza_ancho))
@@ -138,11 +141,21 @@ def resolver_cantidad_consumo(
         return volumen.quantize(DECIMALES_CANTIDAD, rounding=ROUND_HALF_UP)
 
     if unidad_captura:
+        captura = unidad_captura.upper()
+        if dim == VOLUMEN:
+            # Cuenta del ebanista en cm: el taller da UN número (el producto
+            # de sus medidas tal cual, ej. "2,10×22×18 = 832") y la regla de
+            # los 10000 lo convierte a m³. Un solo campo, sin medidas.
+            if captura != "CM":
+                raise ValueError(
+                    "Los materiales en m³ solo admiten captura en cm (cuenta del taller) o por pieza."
+                )
+            return (cant / DIVISOR_PIEZA).quantize(DECIMALES_CANTIDAD, rounding=ROUND_HALF_UP)
         if dim != LONGITUD:
             raise ValueError(
-                "El toggle cm/mts solo aplica a materiales medidos en longitud (m)."
+                "El toggle cm/mts solo aplica a materiales medidos en longitud (m) "
+                "o en m³ (cuenta del taller en cm)."
             )
-        captura = unidad_captura.upper()
         if captura == "CM":
             cant = cant / CM_POR_METRO if _base_en_metros(abrev) else cant
         elif captura == "M":
@@ -173,6 +186,30 @@ def nota_captura(
     return None
 
 
+def etiqueta_uso(
+    cantidad,
+    unidad_captura: str | None = None,
+    pieza_largo=None,
+    pieza_ancho=None,
+    pieza_espesor=None,
+) -> str:
+    """Etiqueta HUMANA de un uso de material, para la tablita de costos:
+
+    - 'Pieza 2×10×5 × 3' (fórmula de la casa, con n.º de piezas si aplica)
+    - '1.500 cm (cuenta del taller)' (un solo campo en cm)
+    - '2,5 (unidad base)' (digitado directo)
+    """
+    if pieza_largo or pieza_ancho or pieza_espesor:
+        sufijo = f" × {_fmt(cantidad)}" if cantidad is not None else ""
+        return f"Pieza {_fmt(pieza_largo)}×{_fmt(pieza_ancho)}×{_fmt(pieza_espesor)}{sufijo}"
+    if (unidad_captura or "").upper() == "CM":
+        return f"{_fmt(cantidad)} cm (cuenta del taller)"
+    return f"{_fmt(cantidad)} (unidad base)"
+
+
 def _fmt(valor) -> str:
     """Formatea un número sin ceros de más: 20.0 → '20', 2.5 → '2.5'."""
-    return f"{Decimal(str(valor)):g}"
+    d = Decimal(str(valor)).normalize()
+    if d == d.to_integral_value():
+        return str(int(d))
+    return format(d, "f")

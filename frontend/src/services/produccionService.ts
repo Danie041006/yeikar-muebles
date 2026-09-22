@@ -298,8 +298,10 @@ export const produccionService = {
   registrarConsumo: async (consumo: {
     etapa_produccion_id: number;
     material_id: number;
-    /** Número digitado por el operario (en modo pieza: N.º de piezas). */
-    cantidad: number;
+    /** Número digitado por el operario (en modo pieza: N.º de piezas).
+     *  null/undefined + es_pedido = pedido ABIERTO: piden sin cantidad y el
+     *  descuento/costo real ocurre al confirmar el uso. */
+    cantidad?: number | null;
     fecha: string;
     seccion?: string;
     observaciones?: string;
@@ -318,8 +320,9 @@ export const produccionService = {
     // hoy; el consumo queda PENDIENTE hasta confirmar los cortes reales.
     es_lamina_completa?: boolean;
     // --- PEDIDO general (madera y demás: confirmar uso después) ---
-    // True: `cantidad` = cantidad ENTREGADA hoy (sale del depósito con costo
-    // provisional); el consumo queda PENDIENTE hasta confirmar cuánto se usó.
+    // True: `cantidad` = cantidad ENTREGADA hoy (opcional: si va vacía es un
+    // pedido ABIERTO que no toca stock hasta confirmar); el consumo queda
+    // PENDIENTE hasta confirmar cuánto se usó.
     // Híbrido: si es False se registra el uso directo (CONFIRMADO inmediato).
     es_pedido?: boolean;
     // --- Consumo por corte (materiales laminares) ---
@@ -334,8 +337,11 @@ export const produccionService = {
   },
 
   /** Confirma el uso real de un pedido (PENDIENTE → CONFIRMADO).
-   *  Dos modos excluyentes: por cortes (láminas) o por cantidad usada
-   *  en la unidad base del material (madera y demás). */
+   *  Dos modos excluyentes: por cortes (láminas) o por usos (madera y demás).
+   *  Los usos admiten captura flexible: unidad_captura (cm para la cuenta del
+   *  taller, cm/mts lineal) o medidas de pieza (fórmula de la casa) — el
+   *  backend convierte a la unidad base y guarda un consumo por uso (renglón
+   *  aislado en la tablita de costos). */
   confirmarConsumo: async (
     id: number,
     payload: {
@@ -344,7 +350,20 @@ export const produccionService = {
       ancho_corte_cm?: number;
       sobrante_largo_cm?: number;
       sobrante_ancho_cm?: number;
+      /** Legacy: un solo uso en unidad base (o con captura flexible). */
       cantidad_usada?: number;
+      unidad_captura?: 'M' | 'CM';
+      pieza_largo?: number;
+      pieza_ancho?: number;
+      pieza_espesor?: number;
+      /** Varios usos en una sola confirmación (uno por renglón de costo). */
+      usos?: {
+        cantidad: number;
+        unidad_captura?: 'M' | 'CM';
+        pieza_largo?: number;
+        pieza_ancho?: number;
+        pieza_espesor?: number;
+      }[];
     },
   ): Promise<ConsumoMaterial> => {
     const response = await api.put<ConsumoMaterial>(`/produccion/consumo/${id}/confirmar`, payload);
@@ -669,6 +688,8 @@ export interface CostosEnVivoSeccion {
     unidad: string;
     v_unit: number;
     total: number;
+    /** Etiqueta legible del uso ("Pieza 2×10×5", "1.500 cm (cuenta del taller)"). */
+    captura?: string | null;
     es_excedente: boolean;
     es_retrabajo: boolean;
     motivo: string | null;

@@ -103,7 +103,7 @@ class ConsumoMaterial(Base):
     id = Column(BigInteger, primary_key=True, index=True)
     etapa_produccion_id = Column(BigInteger, ForeignKey("etapa_produccion.id", ondelete="CASCADE"), nullable=False)
     material_id = Column(BigInteger, ForeignKey("material.id"), nullable=False)
-    cantidad = Column(Numeric(12, 2), nullable=False)
+    cantidad = Column(Numeric(12, 4), nullable=False)
     costo_unitario = Column(Numeric(15, 2), nullable=True)
     seccion = Column(String(50), nullable=True)
     # --- Confirmación de uso de láminas ---
@@ -117,7 +117,7 @@ class ConsumoMaterial(Base):
     # que se ENTREGÓ al pedir (unidad base). NULL = registro directo de uso
     # (flujo inmediato tradicional, sin pedido previo). Permite que el registro
     # diga cuánto pidieron y cuánto usaron de verdad.
-    cantidad_pedida = Column(Numeric(12, 2), nullable=True)
+    cantidad_pedida = Column(Numeric(12, 4), nullable=True)
     # --- Consumo por CORTE (materiales laminares) ---
     # Si ancho_corte_cm/largo_corte_cm están definidos, `cantidad` = NÚMERO de
     # cortes de ese tamaño y costo_unitario = costo proporcional al área del
@@ -136,6 +136,10 @@ class ConsumoMaterial(Base):
     pieza_largo = Column(Numeric(10, 2), nullable=True)
     pieza_ancho = Column(Numeric(10, 2), nullable=True)
     pieza_espesor = Column(Numeric(10, 2), nullable=True)
+    # Etiqueta legible del uso (para la tablita de costos en vivo): "Pieza
+    # 2×10×5", "1.500 cm (cuenta del taller)", etc. NULL = derivarla de las
+    # columnas de captura.
+    detalle_uso = Column(String(120), nullable=True)
     # --- Componente y consumo extra (alimentan la estructura de costes) ---
     # componente: pieza del mueble a la que se destinó el material (CAMA,
     # NOCHERO, CABECERA...) → genera secciones "SECCIÓN (COMPONENTE)" en la

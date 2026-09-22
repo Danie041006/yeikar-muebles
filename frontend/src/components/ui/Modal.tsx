@@ -62,6 +62,10 @@ export default function Modal({
            role="dialog"
            aria-modal="true"
            aria-labelledby={title ? titleId : undefined}
+           // Los clicks dentro del diálogo (o en su propio backdrop) NO deben
+           // burbujear a modales padres anidados debajo (p. ej. un
+           // ConfirmDialog dentro del EtapaModal cerraría la etapa completa).
+           onClick={(e) => e.stopPropagation()}
         >
           {/* Backdrop Blur overlay */}
           <motion.div

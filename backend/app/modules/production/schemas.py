@@ -17,6 +17,10 @@ class ConsumoMaterialBase(BaseModel):
 class ConsumoMaterialCreate(ConsumoMaterialBase):
     etapa_produccion_id: int
     material_id: int
+    # Pedido ABIERTO (madera y demás): el taller pide "madera" a secas, la
+    # cantidad solo se conoce al confirmar el uso. None = pedido abierto
+    # (no toca stock ni genera gasto hasta la confirmación).
+    cantidad: Optional[float] = Field(None, gt=0)  # type: ignore[assignment]
     # Obligatorio: quién pide el material (empleado). Trazabilidad por honestidad.
     solicitante_empleado_id: int
     # --- Pedido de LÁMINA COMPLETA (confirmación de uso después) ---
@@ -25,11 +29,11 @@ class ConsumoMaterialCreate(ConsumoMaterialBase):
     # consumo queda PENDIENTE hasta confirmar por cortes cuánto se usó.
     es_lamina_completa: Optional[bool] = False
     # --- PEDIDO de material general (madera y demás: confirmar uso después) ---
-    # Si es True, `cantidad` = cantidad ENTREGADA hoy (obligatoria, en la
-    # unidad que se digite: admite captura en cm/por pieza) que sale del
-    # depósito AHORA con costo provisional, y el consumo queda PENDIENTE hasta
-    # confirmar cuánto se usó de verdad. Híbrido: si es False se registra el
-    # uso directo como siempre (CONFIRMADO inmediato).
+    # Si es True, `cantidad` = cantidad ENTREGADA hoy (opcional: None = pedido
+    # ABIERTO, en la unidad que se digite: admite captura en cm/por pieza) que
+    # sale del depósito AHORA con costo provisional, y el consumo queda
+    # PENDIENTE hasta confirmar cuánto se usó de verdad. Híbrido: si es False
+    # se registra el uso directo como siempre (CONFIRMADO inmediato).
     es_pedido: Optional[bool] = False
     # --- Consumo por CORTE (materiales laminares) ---
     # Si se envían las dos medidas, `cantidad` = NÚMERO de cortes de ese tamaño.
@@ -46,7 +50,7 @@ class ConsumoMaterialCreate(ConsumoMaterialBase):
     # descontar (ver app/modules/production/unidades.py).
     unidad_captura: Optional[str] = Field(None, pattern="^(M|CM)$")
     # Medidas de UNA pieza tal cual las escribe el taller; si alguna viene se
-    # activa la fórmula de la casa: (L×A×E) × cantidad ÷ 1000 = m³.
+    # activa la fórmula de la casa: (L×A×E) × cantidad ÷ 10000 = m³.
     pieza_largo: Optional[float] = Field(None, gt=0)
     pieza_ancho: Optional[float] = Field(None, gt=0)
     pieza_espesor: Optional[float] = Field(None, gt=0)
@@ -64,16 +68,32 @@ class ConsumoMaterialUpdate(BaseModel):
     fecha: Optional[datetime] = None
     observaciones: Optional[str] = None
 
+class UsoConfirmarItem(BaseModel):
+    """Una línea de uso al confirmar un pedido general (multi-línea).
+
+    Permite registrar en UNA sola confirmación todo lo que se hizo con la
+    madera pedida: varios usos con capturas distintas (cm, por pieza, m³).
+    Cada uso se convierte con el mismo motor del registro y se guarda como
+    un consumo CONFIRMADO propio (renglón aislado en la tablita de costos).
+    """
+    # Número digitado: en modo pieza = n.º de piezas; en cm = cuenta del
+    # taller; sin captura = unidad base.
+    cantidad: float = Field(gt=0)
+    unidad_captura: Optional[str] = Field(None, pattern="^(M|CM)$")
+    pieza_largo: Optional[float] = Field(None, gt=0)
+    pieza_ancho: Optional[float] = Field(None, gt=0)
+    pieza_espesor: Optional[float] = Field(None, gt=0)
+
 class ConsumoConfirmarCreate(BaseModel):
     """Confirmación de uso de un material pedido (PENDIENTE → CONFIRMADO).
 
     Dos modos excluyentes:
     - Láminas: `cantidad_cortes` + medidas → costo proporcional al área,
       devuelve láminas sin abrir y genera el sobrante reutilizable.
-    - General (madera y demás): `cantidad_usada` en la unidad base del
-      material → lo que sobró vuelve solo al depósito; si se usó de más se
-      descuenta del stock (validando disponibilidad). El gasto se ajusta al
-      costo real en ambos modos.
+    - General (madera y demás): `cantidad_usada` (un uso) o `usos` (varios
+      usos en una sola confirmación) → lo que sobró vuelve solo al depósito;
+      si se usó de más se descuenta del stock (validando disponibilidad). El
+      gasto se ajusta/crea al costo real en todos los modos.
     """
     cantidad_cortes: Optional[float] = Field(None, gt=0)
     largo_corte_cm: Optional[float] = Field(None, gt=0)
@@ -83,11 +103,26 @@ class ConsumoConfirmarCreate(BaseModel):
     sobrante_ancho_cm: Optional[float] = Field(None, gt=0)
     # Modo general: cuánto se usó de verdad (unidad base del material).
     cantidad_usada: Optional[float] = Field(None, gt=0)
+    # --- Captura flexible al confirmar (madera y demás) ---
+    # Si se envían, `cantidad_usada` es lo DIGITADO (en modo pieza: n.º de
+    # piezas) y el backend lo convierte a la unidad base con el MISMO motor
+    # del registro (unidades.resolver_cantidad_consumo). Opcional: sin ellos
+    # la cantidad se toma tal cual (unidad base).
+    unidad_captura: Optional[str] = Field(None, pattern="^(M|CM)$")
+    pieza_largo: Optional[float] = Field(None, gt=0)
+    pieza_ancho: Optional[float] = Field(None, gt=0)
+    pieza_espesor: Optional[float] = Field(None, gt=0)
+    # --- Confirmación MULTI-LÍNEA: varios usos de un mismo pedido ---
+    # Excluyente con `cantidad_usada`: cada línea se convierte y suma; la
+    # suma es lo que se descuenta. Cada uso queda como un consumo propio.
+    usos: Optional[List[UsoConfirmarItem]] = None
 
 class ConsumoMaterialResponse(ConsumoMaterialBase):
     id: int
     etapa_produccion_id: int
     material_id: int
+    # 0 = pedido ABIERTO (aún no se sabe cuánto llevaron).
+    cantidad: float = Field(ge=0)  # type: ignore[assignment]
     estado: Optional[str] = None
     # Lo que se ENTREGÓ al pedir (unidad base). NULL = uso directo sin pedido.
     cantidad_pedida: Optional[float] = None
@@ -107,6 +142,8 @@ class ConsumoMaterialResponse(ConsumoMaterialBase):
     pieza_largo: Optional[float] = None
     pieza_ancho: Optional[float] = None
     pieza_espesor: Optional[float] = None
+    # Etiqueta legible del uso ("Pieza 2×10×5") para la tablita de costos.
+    detalle_uso: Optional[str] = None
     componente: Optional[str] = None
     es_excedente: Optional[bool] = False
     motivo_exceso: Optional[str] = None
@@ -221,7 +258,9 @@ class CostoProduccionBase(BaseModel):
 
 class CostoProduccionCreate(BaseModel): 
     ganancia_porcentaje: Optional[float] = Field(0.0, ge=0, le=100)
-    costo_gastos: Optional[float] = Field(0.0, ge=0)
+    # None = calcular automáticamente los gastos por sección (ReglaGastoSeccion,
+    # default 10%) sobre los costos registrados, igual que al finalizar.
+    costo_gastos: Optional[float] = Field(None, ge=0)
     precio_impuestos_base: Optional[float] = Field(0.0, ge=0)
 
 class CostoProduccionUpdate(BaseModel):

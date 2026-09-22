@@ -59,6 +59,48 @@ interface EtapaModalProps {
 /** Un material es laminar cuando tiene las dos dimensiones de lámina (cm). */
 const esMaterialLaminar = (m?: Material | null) => !!m && m.largo_cm != null && m.ancho_cm != null;
 
+/**
+ * Normaliza un valor digitado a número con PUNTO decimal: el navegador puede
+ * estar en locale inglés y `type="number"` rechaza la coma (0,5 → vacío →
+ * "Please fill out this field"). Se usa type="text" + inputMode="decimal" y
+ * esta función convierte "0,5" → 0.5. Devuelve NaN si no es numérico.
+ */
+const parseDecimalEs = (v: string): number => parseFloat(v.trim().replace(',', '.'));
+
+// ── Confirmación multi-uso: una línea = una cosa que se hizo con la madera.
+//    BASE = unidad base del material (m³/m); PIEZA = fórmula de la casa
+//    (largo m × ancho cm × espesor cm × n.º piezas ÷ 10000); CM = la cuenta
+//    del ebanista en un solo campo (÷10000 en m³, ÷100 en lineales).
+type ModoUso = 'BASE' | 'PIEZA' | 'CM';
+
+interface UsoLinea {
+  modo: ModoUso;
+  cantidad: string;
+  pieza_largo: string;
+  pieza_ancho: string;
+  pieza_espesor: string;
+}
+
+const lineaUsoVacia = (): UsoLinea => ({
+  modo: 'BASE', cantidad: '', pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
+});
+
+/** Convierte una línea de uso a la unidad base (vista previa; la conversión
+ *  real la hace el backend con el mismo motor). null = línea incompleta. */
+const convertirUso = (u: UsoLinea, dim: string): number | null => {
+  const v = parseDecimalEs(u.cantidad);
+  if (!(v > 0)) return null;
+  if (u.modo === 'CM') return dim === 'VOLUMEN' ? v / 10000 : v / 100;
+  if (u.modo === 'PIEZA') {
+    const l = parseDecimalEs(u.pieza_largo);
+    const a = parseDecimalEs(u.pieza_ancho);
+    const e = parseDecimalEs(u.pieza_espesor);
+    if (!(l > 0 && a > 0 && e > 0)) return null;
+    return volumenPieza({ largo: l, ancho: a, espesor: e }, v);
+  }
+  return v;
+};
+
 const ESTADO_COLORS: Record<string, string> = {
   ASIGNADA: 'bg-blue-50 text-blue-700 border-blue-200',
   EN_PROCESO: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -120,8 +162,12 @@ export default function EtapaModal({
     cantidad: '',
     observaciones: '',
     solicitante_id: '',
+    // Captura flexible de madera: el modo depende de la unidad del material.
     unidad_captura: '' as '' | UnidadCaptura,
     modo_pieza: false,
+    // Modo "Medidas en cm" (volumétricos): lo mismo que Por pieza pero con
+    // TODAS las medidas en cm → (L×A×E) × piezas ÷ 1000000 = m³.
+    modo_cm: false,
     pieza_largo: '',
     pieza_ancho: '',
     pieza_espesor: '',
@@ -144,9 +190,10 @@ export default function EtapaModal({
   const [confirmarForm, setConfirmarForm] = useState({
     cantidad_cortes: '', largo_corte_cm: '', ancho_corte_cm: '',
     sobrante_largo_cm: '', sobrante_ancho_cm: '',
-    // Modo general (madera y demás): cuánto se usó en la unidad base.
-    cantidad_usada: '',
   });
+  // Confirmación MULTI-USO (madera y demás): varias líneas en un solo
+  // confirmar; cada línea queda como un renglón aislado de costo.
+  const [usos, setUsos] = useState<UsoLinea[]>([lineaUsoVacia()]);
   const [confirmarSubmitting, setConfirmarSubmitting] = useState(false);
 
   const [newManoObra, setNewManoObra] = useState({ empleado_id: '', costo_id: '', monto: '', observaciones: '' });
@@ -161,12 +208,15 @@ export default function EtapaModal({
   // ── Derivados del formulario de consumo ──
   const materialConsumo = materiales.find((m) => String(m.id) === newConsumo.material_id);
   const dimConsumo = dimensionalidad(materialConsumo?.unidad_medida?.abreviatura);
+  // Dimensionalidad del material que se está CONFIRMANDO (mismo motor que el
+  // registro: captura flexible al confirmar el uso).
+  const dimConfirmar = dimensionalidad(consumoAConfirmar?.material?.unidad_medida?.abreviatura);
 
   // Sobrantes del material actual que le caben al corte digitado (ambas orientaciones)
   const sobrantesQueCaben = (() => {
     if (!materialConsumo || !newConsumo.ancho_corte_cm || !newConsumo.largo_corte_cm) return [];
-    const lc = parseFloat(newConsumo.largo_corte_cm);
-    const ac = parseFloat(newConsumo.ancho_corte_cm);
+    const lc = parseDecimalEs(newConsumo.largo_corte_cm);
+    const ac = parseDecimalEs(newConsumo.ancho_corte_cm);
     if (!(lc > 0) || !(ac > 0)) return [];
     const cabe = (L: number, A: number) =>
       Math.max(
@@ -196,7 +246,9 @@ export default function EtapaModal({
     consumos.forEach((c) => {
       const entry = mapa[c.material_id] || { cantidad: 0, pendientes: 0 };
       entry.cantidad += c.cantidad;
-      if (c.estado === 'PENDIENTE') entry.pendientes += c.cantidad;
+      // PENDIENTE sin cantidad_pedida = pedido abierto (cantidad desconocida):
+      // cuenta como pendiente aunque la cantidad sea 0.
+      if (c.estado === 'PENDIENTE') entry.pendientes += c.cantidad_pedida == null ? 1 : c.cantidad;
       mapa[c.material_id] = entry;
     });
     return mapa;
@@ -273,7 +325,7 @@ export default function EtapaModal({
       ...prev,
       material_id: String(materialId),
       cantidad: cantidadFaltante > 0 ? String(Math.round(cantidadFaltante * 100) / 100) : '',
-      unidad_captura: '', modo_pieza: false,
+      unidad_captura: '', modo_pieza: false, modo_cm: false,
       pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
       ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
       es_lamina_completa: false, es_pedido: false,
@@ -288,12 +340,19 @@ export default function EtapaModal({
   const handleAddConsumo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (consumoSubmitting) return;
-    if (!newConsumo.material_id || !newConsumo.cantidad) return;
+    if (!newConsumo.material_id) return;
+    // Pedido general SIN cantidad = pedido ABIERTO (piden "madera" a secas y
+    // la cantidad se confirma después). Uso directo sí exige cantidad.
+    const esPedidoAbierto = newConsumo.es_pedido && newConsumo.cantidad.trim() === '';
+    if (!newConsumo.es_pedido && !newConsumo.cantidad) return;
     if (!newConsumo.solicitante_id) {
       toast.error('Selecciona quién solicita el material.');
       return;
     }
     const esPieza = dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza;
+    // Modo cm: UN solo campo con la cuenta del ebanista (ej. 832); la regla
+    // de los 10000 la lleva a m³. El backend resuelve con unidad_captura='CM'.
+    const esCm = dimConsumo === 'VOLUMEN' && newConsumo.modo_cm;
     if (esPieza && (!newConsumo.pieza_largo || !newConsumo.pieza_ancho || !newConsumo.pieza_espesor)) {
       toast.error('Completa las medidas de la pieza (largo × ancho × espesor).');
       return;
@@ -303,6 +362,10 @@ export default function EtapaModal({
     // Pedido general: solo no-laminares (las láminas ya tienen su modo de
     // pedido) y sin cortes. Híbrido: o pedido o uso directo.
     const esPedido = newConsumo.es_pedido && !esCorte && !esLaminaCompleta;
+    if (esPedidoAbierto && (esPieza || esCm)) {
+      toast.error('El pedido abierto no admite captura por pieza ni en cm: la cantidad se confirma después.');
+      return;
+    }
     if (newConsumo.es_pedido && (esCorte || esLaminaCompleta)) {
       toast.error('El pedido general no aplica a láminas ni cortes: usa lámina completa o corte directo.');
       return;
@@ -315,33 +378,37 @@ export default function EtapaModal({
       toast.error('El pedido de lámina completa no sale de sobrantes: se pide lámina nueva del depósito.');
       return;
     }
-    if (esCorte && newConsumo.modo_pieza) {
+    if (esCorte && (esPieza || esCm)) {
       toast.error('El consumo por corte no admite captura por pieza volumétrica.');
       return;
     }
-    if (esLaminaCompleta && newConsumo.modo_pieza) {
+    if (esLaminaCompleta && (esPieza || esCm)) {
       toast.error('El pedido de lámina completa no admite captura por pieza volumétrica.');
       return;
     }
     setConsumoSubmitting(true);
     try {
       const materialId = parseInt(newConsumo.material_id);
-      const cantidad = parseFloat(newConsumo.cantidad);
-      const cantidadConvertida = esCorte
-        ? cantidad
-        : esPieza
-          ? volumenPieza(
-              { largo: parseFloat(newConsumo.pieza_largo), ancho: parseFloat(newConsumo.pieza_ancho), espesor: parseFloat(newConsumo.pieza_espesor) },
-              cantidad,
-            )
-          : newConsumo.unidad_captura === 'CM'
-            ? convertirCapturaLineal(cantidad, 'CM')
-            : cantidad;
+      const cantidad = esPedidoAbierto ? null : parseDecimalEs(newConsumo.cantidad);
+      const cantidadConvertida = esPedidoAbierto
+        ? 0
+        : esCorte
+          ? cantidad!
+          : esPieza
+            ? volumenPieza(
+                { largo: parseDecimalEs(newConsumo.pieza_largo), ancho: parseDecimalEs(newConsumo.pieza_ancho), espesor: parseDecimalEs(newConsumo.pieza_espesor) },
+                cantidad!,
+              )
+            : esCm
+              ? cantidad! / 10000
+              : newConsumo.unidad_captura === 'CM'
+                ? convertirCapturaLineal(cantidad!, 'CM')
+                : cantidad!;
       const stockAntes = inventario[materialId];
       await produccionService.registrarConsumo({
         etapa_produccion_id: stage.id,
         material_id: materialId,
-        cantidad,
+        cantidad: cantidad as unknown as number,
         fecha: new Date().toISOString(),
         seccion: referenciaReceta?.seccion_actual || undefined,
         observaciones: newConsumo.observaciones || undefined,
@@ -350,19 +417,21 @@ export default function EtapaModal({
           ? { es_lamina_completa: true }
           : esCorte
             ? {
-                ancho_corte_cm: parseFloat(newConsumo.ancho_corte_cm),
-                largo_corte_cm: parseFloat(newConsumo.largo_corte_cm),
+                ancho_corte_cm: parseDecimalEs(newConsumo.ancho_corte_cm),
+                largo_corte_cm: parseDecimalEs(newConsumo.largo_corte_cm),
                 origen_sobrante_id: newConsumo.origen_sobrante_id ? parseInt(newConsumo.origen_sobrante_id) : undefined,
               }
             : esPieza
               ? {
-                  pieza_largo: parseFloat(newConsumo.pieza_largo),
-                  pieza_ancho: parseFloat(newConsumo.pieza_ancho),
-                  pieza_espesor: parseFloat(newConsumo.pieza_espesor),
+                  pieza_largo: parseDecimalEs(newConsumo.pieza_largo),
+                  pieza_ancho: parseDecimalEs(newConsumo.pieza_ancho),
+                  pieza_espesor: parseDecimalEs(newConsumo.pieza_espesor),
                 }
-              : newConsumo.unidad_captura
-                ? { unidad_captura: newConsumo.unidad_captura }
-                : {}),
+              : esCm
+                ? { unidad_captura: 'CM' as const }
+                : newConsumo.unidad_captura
+                  ? { unidad_captura: newConsumo.unidad_captura }
+                  : {}),
         ...(newConsumo.componente.trim() ? { componente: newConsumo.componente.trim() } : {}),
         // Pedido general: la cantidad digitada es lo ENTREGADO; el uso real
         // se confirma después (el backend deja el consumo PENDIENTE).
@@ -375,7 +444,7 @@ export default function EtapaModal({
       setNewConsumo((prev) => ({
         ...prev,
         material_id: '', cantidad: '', observaciones: '',
-        unidad_captura: '', modo_pieza: false, pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
+        unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
         componente: '', es_excedente: false, motivo_exceso: '',
         ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
         es_lamina_completa: false, es_pedido: false,
@@ -384,8 +453,10 @@ export default function EtapaModal({
       await onRecargarSobrantes();
       toast.success(
         esLaminaCompleta
-          ? `Lámina completa pedida: ${fmtNum(cantidad)} lámina(s) descontada(s) del depósito. Costo provisional — confirma el uso por cortes cuando el trabajador diga cuánto se usó.`
-          : esPedido
+          ? `Lámina completa pedida: ${fmtNum(cantidad!)} lámina(s) descontada(s) del depósito. Costo provisional — confirma el uso por cortes cuando el trabajador diga cuánto se usó.`
+          : esPedidoAbierto
+            ? 'Pedido abierto registrado: aún no sale nada del depósito. Se descontará y costeará al confirmar cuánto se usó.'
+            : esPedido
             ? `Pedido registrado: ${fmtNum(cantidadConvertida)} ${materialConsumo?.unidad_medida?.abreviatura || ''} entregadas (costo provisional). Confirma el uso cuando digan cuánto se usó — lo que sobre vuelve solo al depósito.`
             : esCorte
             ? `Consumo por cortes registrado${newConsumo.origen_sobrante_id ? ' desde sobrante' : ' — lámina(s) descontada(s) y sobrante actualizado'}.`
@@ -416,20 +487,41 @@ export default function EtapaModal({
 
   const ejecutarConfirmarConsumo = async () => {
     if (!consumoAConfirmar) return;
-    // Pedido general (no-laminar): se confirma con la cantidad usada.
+    // Pedido general (no-laminar): se confirma con la LISTA de usos (multi-línea).
     const esLaminar = !!(consumoAConfirmar.material?.largo_cm && consumoAConfirmar.material?.ancho_cm);
     let payload: Parameters<typeof produccionService.confirmarConsumo>[1];
     if (!esLaminar) {
-      const usada = parseFloat(confirmarForm.cantidad_usada);
-      if (!(usada > 0)) {
-        toast.error('Indica cuánto se usó (cantidad mayor a 0).');
+      if (usos.length === 0) {
+        toast.error('Agrega al menos un uso del material.');
         return;
       }
-      payload = { cantidad_usada: usada };
+      const payloadUsos: NonNullable<Parameters<typeof produccionService.confirmarConsumo>[1]['usos']> = [];
+      for (const [i, u] of usos.entries()) {
+        const v = parseDecimalEs(u.cantidad);
+        if (!(v > 0)) {
+          toast.error(`Uso ${i + 1}: indica la cantidad (mayor a 0).`);
+          return;
+        }
+        if (u.modo === 'PIEZA') {
+          const l = parseDecimalEs(u.pieza_largo);
+          const a = parseDecimalEs(u.pieza_ancho);
+          const e = parseDecimalEs(u.pieza_espesor);
+          if (!(l > 0 && a > 0 && e > 0)) {
+            toast.error(`Uso ${i + 1}: completa las medidas de la pieza (largo × ancho × espesor).`);
+            return;
+          }
+          payloadUsos.push({ cantidad: v, pieza_largo: l, pieza_ancho: a, pieza_espesor: e });
+        } else if (u.modo === 'CM') {
+          payloadUsos.push({ cantidad: v, unidad_captura: 'CM' });
+        } else {
+          payloadUsos.push({ cantidad: v });
+        }
+      }
+      payload = { usos: payloadUsos };
     } else {
-      const cortes = parseFloat(confirmarForm.cantidad_cortes);
-      const lc = parseFloat(confirmarForm.largo_corte_cm);
-      const ac = parseFloat(confirmarForm.ancho_corte_cm);
+      const cortes = parseDecimalEs(confirmarForm.cantidad_cortes);
+      const lc = parseDecimalEs(confirmarForm.largo_corte_cm);
+      const ac = parseDecimalEs(confirmarForm.ancho_corte_cm);
       if (!(cortes > 0) || !(lc > 0) || !(ac > 0)) {
         toast.error('Indica la cantidad de cortes y sus medidas (largo × ancho en cm).');
         return;
@@ -440,8 +532,8 @@ export default function EtapaModal({
         ancho_corte_cm: ac,
         ...(confirmarForm.sobrante_largo_cm && confirmarForm.sobrante_ancho_cm
           ? {
-              sobrante_largo_cm: parseFloat(confirmarForm.sobrante_largo_cm),
-              sobrante_ancho_cm: parseFloat(confirmarForm.sobrante_ancho_cm),
+              sobrante_largo_cm: parseDecimalEs(confirmarForm.sobrante_largo_cm),
+              sobrante_ancho_cm: parseDecimalEs(confirmarForm.sobrante_ancho_cm),
             }
           : {}),
       };
@@ -454,7 +546,9 @@ export default function EtapaModal({
       await onRecargarSobrantes();
       toast.success(esLaminar
         ? 'Uso confirmado: costo real aplicado, láminas ajustadas y sobrante registrado.'
-        : 'Uso confirmado: lo que sobró volvió al depósito y el costo quedó en lo usado.');
+        : usos.length > 1
+          ? `Uso confirmado: ${usos.length} renglones de costo registrados; stock y egresos exactos.`
+          : 'Uso confirmado: lo que sobró volvió al depósito y el costo quedó en lo usado.');
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Error al confirmar el uso del material.');
     } finally {
@@ -831,7 +925,7 @@ export default function EtapaModal({
                                 </button>
                               ) : (
                                 <span className="text-[10px] font-bold text-emerald-600 shrink-0">
-                                  {reg.pendientes > 0 ? `Completo · ${fmtNum(reg.pendientes)} lámina(s) por confirmar` : 'Receta completa ✓'}
+                                  {reg.pendientes > 0 ? `Completo · pendiente de confirmar (${fmtNum(reg.pendientes)})` : 'Receta completa ✓'}
                                 </span>
                               )}
                             </div>
@@ -912,7 +1006,7 @@ export default function EtapaModal({
                                     ...prev,
                                     material_id: String(m.id),
                                     // El material define el modo de captura: reset.
-                                    unidad_captura: '', modo_pieza: false,
+      unidad_captura: '', modo_pieza: false, modo_cm: false,
                                     pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
                                     ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
                                     es_pedido: false,
@@ -954,25 +1048,31 @@ export default function EtapaModal({
                     <div className="sm:col-span-3">
                       <label className="block text-[10px] font-headline font-bold uppercase tracking-wider text-yeikar-secondary/70 mb-1">
                         {newConsumo.es_pedido && !esMaterialLaminar(materialConsumo)
-                          ? 'Cantidad entregada'
+                          ? 'Cantidad entregada (opcional)'
                           : esMaterialLaminar(materialConsumo) && newConsumo.es_lamina_completa
                           ? 'N.º de láminas'
-                          : dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza
-                            ? 'N.º de piezas'
-                            : dimConsumo === 'VOLUMEN'
-                              ? 'Cantidad (m³)'
-                              : 'Cantidad'}
+                          : dimConsumo === 'VOLUMEN' && newConsumo.modo_cm
+                            ? 'Cantidad (cm)'
+                            : dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza
+                              ? 'N.º de piezas'
+                              : dimConsumo === 'VOLUMEN'
+                                ? 'Cantidad (m³)'
+                                : 'Cantidad'}
                       </label>
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="0"
+                        type="text"
+                        inputMode="decimal"
+                        placeholder={newConsumo.es_pedido && !esMaterialLaminar(materialConsumo) ? 'Vacío = pedido abierto' : '0'}
                         value={newConsumo.cantidad}
                         onChange={(e) => setNewConsumo(prev => ({ ...prev, cantidad: e.target.value }))}
-                        required
+                        required={!(newConsumo.es_pedido && !esMaterialLaminar(materialConsumo))}
                         className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
                       />
+                      {newConsumo.es_pedido && !esMaterialLaminar(materialConsumo) && !newConsumo.cantidad.trim() && (
+                        <p className="text-[9px] font-mono text-amber-700 mt-1">
+                          Piden sin cantidad: se descuenta al confirmar cuánto se usó.
+                        </p>
+                      )}
                     </div>
                     {/* Solicitante (prellenado con el responsable) */}
                     <div className="sm:col-span-3">
@@ -1050,9 +1150,9 @@ export default function EtapaModal({
                           {etiqueta}
                         </button>
                       ))}
-                      {newConsumo.cantidad && parseFloat(newConsumo.cantidad) > 0 && (
+                      {newConsumo.cantidad && parseDecimalEs(newConsumo.cantidad) > 0 && (
                         <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-0.5">
-                          Descontará: {fmtNum(convertirCapturaLineal(parseFloat(newConsumo.cantidad), (newConsumo.unidad_captura || 'M') as UnidadCaptura))} m
+                          Descontará: {fmtNum(convertirCapturaLineal(parseDecimalEs(newConsumo.cantidad), (newConsumo.unidad_captura || 'M') as UnidadCaptura))} m
                         </span>
                       )}
                     </div>
@@ -1060,13 +1160,17 @@ export default function EtapaModal({
                   {materialConsumo && dimConsumo === 'VOLUMEN' && (
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-[10px] font-semibold text-yeikar-neutral/50 uppercase">Como:</span>
-                      {([['M3', 'm³'], ['PIEZA', 'Por pieza']] as const).map(([valor, etiqueta]) => (
+                      {([['M3', 'm³'], ['PIEZA', 'Por pieza'], ['CM', 'cm']] as const).map(([valor, etiqueta]) => (
                         <button
                           key={valor}
                           type="button"
-                          onClick={() => setNewConsumo(prev => ({ ...prev, modo_pieza: valor === 'PIEZA' }))}
+                          onClick={() => setNewConsumo(prev => ({
+                            ...prev,
+                            modo_pieza: valor === 'PIEZA',
+                            modo_cm: valor === 'CM',
+                          }))}
                           className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
-                            (newConsumo.modo_pieza ? 'PIEZA' : 'M3') === valor
+                            ((newConsumo.modo_cm ? 'CM' : newConsumo.modo_pieza ? 'PIEZA' : 'M3')) === valor
                               ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
                               : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
                           }`}
@@ -1076,15 +1180,25 @@ export default function EtapaModal({
                       ))}
                     </div>
                   )}
+                  {materialConsumo && dimConsumo === 'VOLUMEN' && newConsumo.modo_cm && (
+                    <p className="text-[10px] font-mono text-yeikar-secondary bg-yeikar-primary/5 border border-yeikar-primary/20 rounded-lg px-2 py-1">
+                      La cuenta del ebanista en cm (ej. 832): ÷ 10000 = m³.
+                      {newConsumo.cantidad && parseDecimalEs(newConsumo.cantidad) > 0 && (
+                        <>
+                          {' '}Descontará:{' '}
+                          <span className="font-bold">{fmtNum4(parseDecimalEs(newConsumo.cantidad) / 10000)} m³</span>
+                        </>
+                      )}
+                    </p>
+                  )}
                   {materialConsumo && dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza && (
                     <div className="space-y-2">
                       <div className="grid grid-cols-3 gap-2">
-                        {([['pieza_largo', 'Largo'], ['pieza_ancho', 'Ancho'], ['pieza_espesor', 'Espesor']] as const).map(([campo, etiqueta]) => (
+                        {([['pieza_largo', 'Largo (m)'], ['pieza_ancho', 'Ancho (cm)'], ['pieza_espesor', 'Espesor (cm)']] as const).map(([campo, etiqueta]) => (
                           <input
                             key={campo}
-                            type="number"
-                            step="0.01"
-                            min="0"
+                            type="text"
+                            inputMode="decimal"
                             placeholder={etiqueta}
                             value={newConsumo[campo]}
                             onChange={(e) => setNewConsumo(prev => ({ ...prev, [campo]: e.target.value }))}
@@ -1093,13 +1207,13 @@ export default function EtapaModal({
                           />
                         ))}
                       </div>
-                      {newConsumo.pieza_largo && newConsumo.pieza_ancho && newConsumo.pieza_espesor && parseFloat(newConsumo.cantidad || '0') > 0 && (
+                      {newConsumo.pieza_largo && newConsumo.pieza_ancho && newConsumo.pieza_espesor && parseDecimalEs(newConsumo.cantidad || '0') > 0 && (
                         <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
                           Fórmula de la casa: ({newConsumo.pieza_largo}×{newConsumo.pieza_ancho}×{newConsumo.pieza_espesor}) × {newConsumo.cantidad} ÷ 10000 ={' '}
                           <span className="font-bold">
                             {fmtNum4(volumenPieza(
-                              { largo: parseFloat(newConsumo.pieza_largo), ancho: parseFloat(newConsumo.pieza_ancho), espesor: parseFloat(newConsumo.pieza_espesor) },
-                              parseFloat(newConsumo.cantidad) || 0,
+                              { largo: parseDecimalEs(newConsumo.pieza_largo), ancho: parseDecimalEs(newConsumo.pieza_ancho), espesor: parseDecimalEs(newConsumo.pieza_espesor) },
+                              parseDecimalEs(newConsumo.cantidad) || 0,
                             ))} m³
                           </span>{' '}a descontar
                         </p>
@@ -1154,18 +1268,16 @@ export default function EtapaModal({
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                             <input
-                              type="number"
-                              step="0.01"
-                              min="0"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="Ancho cm (ej. 80)"
                               value={newConsumo.ancho_corte_cm}
                               onChange={(e) => setNewConsumo(prev => ({ ...prev, ancho_corte_cm: e.target.value }))}
                               className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
                             />
                             <input
-                              type="number"
-                              step="0.01"
-                              min="0"
+                              type="text"
+                              inputMode="decimal"
                               placeholder="Largo cm (ej. 130)"
                               value={newConsumo.largo_corte_cm}
                               onChange={(e) => setNewConsumo(prev => ({ ...prev, largo_corte_cm: e.target.value }))}
@@ -1187,8 +1299,8 @@ export default function EtapaModal({
                             )}
                           </div>
                           {newConsumo.ancho_corte_cm && newConsumo.largo_corte_cm && (() => {
-                            const ac = parseFloat(newConsumo.ancho_corte_cm);
-                            const lc = parseFloat(newConsumo.largo_corte_cm);
+                            const ac = parseDecimalEs(newConsumo.ancho_corte_cm);
+                            const lc = parseDecimalEs(newConsumo.largo_corte_cm);
                             const L = parseFloat(String(materialConsumo.largo_cm));
                             const A = parseFloat(String(materialConsumo.ancho_cm));
                             const areaLamina = L * A;
@@ -1205,7 +1317,7 @@ export default function EtapaModal({
                               lc <= L && ac <= A ? Math.floor(L / lc) * Math.floor(A / ac) : 0,
                               ac <= L && lc <= A ? Math.floor(L / ac) * Math.floor(A / lc) : 0,
                             );
-                            const cantidad = parseFloat(newConsumo.cantidad || '0');
+                            const cantidad = parseDecimalEs(newConsumo.cantidad || '0');
                             const laminasEquiv = cantidad > 0 ? (cantidad * ac * lc / areaLamina).toFixed(2) : null;
                             const laminaNecesarias = porLamina > 0 && cantidad > 0 ? Math.ceil(cantidad / porLamina) : null;
                             return (
@@ -1287,7 +1399,9 @@ export default function EtapaModal({
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-700 border border-amber-300 uppercase">
                                   {c.material?.largo_cm && c.material?.ancho_cm
                                     ? `PENDIENTE · ${c.cantidad} lámina(s)`
-                                    : `PEDIDO · ${c.cantidad} ${c.material?.unidad_medida?.abreviatura ?? ''} por confirmar`}
+                                    : c.cantidad_pedida == null
+                                      ? 'PEDIDO ABIERTO · por confirmar'
+                                      : `PEDIDO · ${c.cantidad} ${c.material?.unidad_medida?.abreviatura ?? ''} por confirmar`}
                                 </span>
                               )}
                               {c.es_excedente && (
@@ -1307,7 +1421,12 @@ export default function EtapaModal({
                               )}
                             </div>
                             <p className="text-[11px] text-yeikar-neutral/60 font-mono mt-0.5">
-                              Cant: <span className="font-bold text-yeikar-secondary">{c.cantidad}</span>
+                              Cant:{' '}
+                              {c.estado === 'PENDIENTE' && c.cantidad_pedida == null && !(c.material?.largo_cm && c.material?.ancho_cm) ? (
+                                <span className="font-bold text-amber-700">por confirmar</span>
+                              ) : (
+                                <span className="font-bold text-yeikar-secondary">{c.cantidad}</span>
+                              )}
                               {etiquetaCaptura(c) && <span className="text-yeikar-neutral/40"> · {etiquetaCaptura(c)}</span>}
                               {' '}| Unit: <span className="font-bold">${costo.toLocaleString('es-CO')}</span>
                               {c.estado === 'PENDIENTE' && <span className="text-amber-600/80"> · provisional</span>}
@@ -1331,8 +1450,8 @@ export default function EtapaModal({
                                   setConfirmarForm({
                                     cantidad_cortes: '', largo_corte_cm: '', ancho_corte_cm: '',
                                     sobrante_largo_cm: '', sobrante_ancho_cm: '',
-                                    cantidad_usada: '',
                                   });
+                                  setUsos([lineaUsoVacia()]);
                                   setConsumoAConfirmar(c);
                                 }}
                                 className="text-amber-700 hover:text-amber-900 font-bold text-xs p-1 transition-colors bg-amber-50 border border-amber-200 rounded-lg px-2"
@@ -1695,50 +1814,174 @@ export default function EtapaModal({
         // Pedido general (madera y demás): modal simple de cantidad usada.
         const esLaminar = !!(mat?.largo_cm && mat?.ancho_cm);
         if (!esLaminar) {
-          const pedidas = consumoAConfirmar.cantidad_pedida ?? consumoAConfirmar.cantidad;
+          // Pedido abierto: cantidad_pedida NULL → nada salió del depósito al
+          // pedir; lo que se use aquí es lo que se descuenta ahora.
+          const esAbierto = consumoAConfirmar.cantidad_pedida == null;
+          const pedidas = consumoAConfirmar.cantidad_pedida ?? 0;
           const unidad = mat?.unidad_medida?.abreviatura ?? '';
-          const usada = parseFloat(confirmarForm.cantidad_usada);
-          const dif = usada > 0 ? Number(pedidas) - usada : null;
+          // Modos de captura disponibles según la dimensionalidad del material.
+          const opcionesModo: [ModoUso, string][] = dimConfirmar === 'VOLUMEN'
+            ? [['BASE', 'm³'], ['PIEZA', 'Por pieza'], ['CM', 'cm']]
+            : dimConfirmar === 'LONGITUD'
+              ? [['BASE', 'mts'], ['CM', 'cm']]
+              : [];
+          const etiquetaCantidad = (u: UsoLinea) =>
+            u.modo === 'PIEZA'
+              ? 'N.º de piezas'
+              : u.modo === 'CM'
+                ? 'Cantidad (cm)'
+                : `Cantidad (${unidad || 'unidad base'})`;
+          // Total de la confirmación (vista previa; el backend convierte igual).
+          const totalBase = usos.reduce((acc, u) => acc + (convertirUso(u, dimConfirmar) ?? 0), 0);
+          const dif = totalBase > 0 ? Number(pedidas) - totalBase : null;
+          const toggleBtn = (activo: boolean) =>
+            `text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+              activo
+                ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+            }`;
+          const setUso = (i: number, campo: keyof UsoLinea, valor: string) =>
+            setUsos(prev => prev.map((u, j) => (j === i ? { ...u, [campo]: valor } : u)));
           return (
-            <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-              <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
+            <div
+              className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]"
+              onClick={(e) => {
+                // Este modal vive DENTRO del backdrop del modal de etapa (que
+                // cierra todo con onClick): sin stopPropagation, cualquier
+                // clic aquí burbujea y saca al usuario de la etapa. Clic en el
+                // fondo oscuro = cancelar solo este diálogo.
+                e.stopPropagation();
+                setConsumoAConfirmar(null);
+              }}
+            >
+              <div
+                className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-lg w-full p-4 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <h3 className="text-xl font-headline font-black text-yeikar-secondary">¿Cuánto se usó?</h3>
                 <p className="text-xs text-yeikar-neutral/60">
-                  Se entregaron <b>{pedidas} {unidad}</b> de{' '}
-                  <span className="font-bold text-yeikar-secondary">{mat?.nombre}</span>
-                  {consumoAConfirmar.solicitante_nombre && (
-                    <> a <span className="font-bold text-yeikar-secondary">{consumoAConfirmar.solicitante_nombre}</span></>
-                  )}. Escribe cuánto se usó de verdad:
+                  {esAbierto ? (
+                    <>
+                      Pedido <b>abierto</b> de{' '}
+                      <span className="font-bold text-yeikar-secondary">{mat?.nombre}</span>
+                      {consumoAConfirmar.solicitante_nombre && (
+                        <> a <span className="font-bold text-yeikar-secondary">{consumoAConfirmar.solicitante_nombre}</span></>
+                      )}
+                      {' '}(no se especificó cuánto llevan). Agrega cada cosa que se hizo con la
+                      madera — cada uso queda como su propio renglón de costo:
+                    </>
+                  ) : (
+                    <>
+                      Se entregaron <b>{pedidas} {unidad}</b> de{' '}
+                      <span className="font-bold text-yeikar-secondary">{mat?.nombre}</span>
+                      {consumoAConfirmar.solicitante_nombre && (
+                        <> a <span className="font-bold text-yeikar-secondary">{consumoAConfirmar.solicitante_nombre}</span></>
+                      )}. Agrega cada uso (cada uno queda como su renglón de costo):
+                    </>
+                  )}
                 </p>
                 <form
                   onSubmit={(e) => { e.preventDefault(); ejecutarConfirmarConsumo(); }}
                   className="space-y-3"
                 >
-                  <div>
-                    <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">
-                      Cantidad usada ({unidad || 'unidad base'})
-                    </label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      placeholder="Ej. 2.5"
-                      value={confirmarForm.cantidad_usada}
-                      onChange={(e) => setConfirmarForm(prev => ({ ...prev, cantidad_usada: e.target.value }))}
-                      required
-                      autoFocus
-                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
-                    />
-                  </div>
-                  {dif !== null && (
-                    <p className="text-[10px] font-mono bg-yeikar-primary/5 border border-yeikar-primary/20 rounded-lg px-2 py-1 text-yeikar-secondary">
-                      Pediste {pedidas}, usas {usada}:{' '}
-                      {dif > 0 ? (
-                        <span className="font-bold text-emerald-700">sobran {dif} y vuelven solos al depósito</span>
-                      ) : dif < 0 ? (
-                        <span className="font-bold text-red-600">faltan {-dif} — se descontarán del inventario</span>
-                      ) : (
-                        <span className="font-bold text-emerald-700">justo lo que pediste ✓</span>
+                  {usos.map((u, i) => {
+                    const baseLinea = convertirUso(u, dimConfirmar);
+                    return (
+                      <div key={i} className="rounded-2xl border border-yeikar-secondary-light/15 bg-yeikar-tertiary/20 p-2.5 space-y-2">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[9px] font-black text-yeikar-neutral/40 uppercase tracking-wider">
+                            Uso {i + 1}
+                          </span>
+                          {opcionesModo.map(([valor, etiqueta]) => (
+                            <button
+                              key={valor}
+                              type="button"
+                              onClick={() => setUso(i, 'modo', valor)}
+                              className={toggleBtn(u.modo === valor)}
+                            >
+                              {etiqueta}
+                            </button>
+                          ))}
+                          {usos.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setUsos(prev => prev.filter((_, j) => j !== i))}
+                              className="ml-auto text-[10px] font-bold text-red-500 hover:text-red-700 px-1.5 py-0.5 rounded-lg hover:bg-red-50 transition-colors"
+                            >
+                              Quitar
+                            </button>
+                          )}
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">
+                            {etiquetaCantidad(u)}
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder={u.modo === 'PIEZA' ? 'Ej. 4' : u.modo === 'CM' ? 'Ej. 832' : 'Ej. 2,5'}
+                            value={u.cantidad}
+                            onChange={(e) => setUso(i, 'cantidad', e.target.value)}
+                            required
+                            autoFocus={i === 0}
+                            className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                          />
+                        </div>
+                        {u.modo === 'PIEZA' && (
+                          <div className="grid grid-cols-3 gap-2">
+                            {([['pieza_largo', 'Largo (m)'], ['pieza_ancho', 'Ancho (cm)'], ['pieza_espesor', 'Espesor (cm)']] as const).map(([campo, etiqueta]) => (
+                              <input
+                                key={campo}
+                                type="text"
+                                inputMode="decimal"
+                                placeholder={etiqueta}
+                                value={u[campo]}
+                                onChange={(e) => setUso(i, campo, e.target.value)}
+                                required
+                                className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {u.modo === 'PIEZA' && baseLinea !== null && (
+                          <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+                            Fórmula de la casa: ({u.pieza_largo}×{u.pieza_ancho}×{u.pieza_espesor}) × {u.cantidad} ÷ 10000 ={' '}
+                            <span className="font-bold">{fmtNum4(baseLinea)} {unidad}</span>
+                          </p>
+                        )}
+                        {u.modo === 'CM' && baseLinea !== null && (
+                          <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+                            {dimConfirmar === 'VOLUMEN' ? (
+                              <>Cuenta del taller: {u.cantidad} ÷ 10000 = <span className="font-bold">{fmtNum4(baseLinea)} {unidad}</span></>
+                            ) : (
+                              <>Digitado en cm: <span className="font-bold">{fmtNum4(baseLinea)} {unidad}</span></>
+                            )}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setUsos(prev => [...prev, lineaUsoVacia()])}
+                    className="w-full border border-dashed border-yeikar-primary/40 text-yeikar-primary text-[11px] font-bold font-headline py-2 rounded-xl hover:bg-yeikar-primary/5 transition-colors"
+                  >
+                    + Agregar otro uso (otra pieza, otra medida en cm…)
+                  </button>
+                  {totalBase > 0 && (
+                    <p className="text-[11px] font-mono bg-yeikar-primary/5 border border-yeikar-primary/20 rounded-lg px-2 py-1.5 text-yeikar-secondary">
+                      Total a descontar: <span className="font-bold">{fmtNum4(totalBase)} {unidad}</span>
+                      {!esAbierto && dif !== null && (
+                        <>
+                          {' '}· pediste {fmtNum(Number(pedidas))}:{' '}
+                          {dif > 0 ? (
+                            <span className="font-bold text-emerald-700">sobran {fmtNum(dif)} y vuelven solos al depósito</span>
+                          ) : dif < 0 ? (
+                            <span className="font-bold text-red-600">faltan {fmtNum(-dif)} — se descontarán del inventario</span>
+                          ) : (
+                            <span className="font-bold text-emerald-700">justo lo que pediste ✓</span>
+                          )}
+                        </>
                       )}
                     </p>
                   )}
@@ -1755,7 +1998,7 @@ export default function EtapaModal({
                       disabled={confirmarSubmitting}
                       className="bg-yeikar-secondary text-white px-5 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {confirmarSubmitting ? 'Confirmando…' : 'Confirmar uso'}
+                      {confirmarSubmitting ? 'Confirmando…' : usos.length > 1 ? `Confirmar ${usos.length} usos` : 'Confirmar uso'}
                     </button>
                   </div>
                 </form>
@@ -1767,9 +2010,9 @@ export default function EtapaModal({
         const A = parseFloat(String(mat?.ancho_cm ?? 0));
         const pedidas = consumoAConfirmar.cantidad;
         const costoBase = parseFloat(String(mat?.costo_base ?? 0));
-        const lc = parseFloat(confirmarForm.largo_corte_cm);
-        const ac = parseFloat(confirmarForm.ancho_corte_cm);
-        const cortes = parseFloat(confirmarForm.cantidad_cortes);
+        const lc = parseDecimalEs(confirmarForm.largo_corte_cm);
+        const ac = parseDecimalEs(confirmarForm.ancho_corte_cm);
+        const cortes = parseDecimalEs(confirmarForm.cantidad_cortes);
         const cabeAlgo = L > 0 && A > 0 && lc > 0 && ac > 0 && ((lc <= L && ac <= A) || (ac <= L && lc <= A));
         const porLamina = cabeAlgo
           ? Math.max(
@@ -1781,8 +2024,19 @@ export default function EtapaModal({
         const diferencia = necesarias !== null ? pedidas - necesarias : null;
         const costoReal = cabeAlgo && cortes > 0 && L * A > 0 ? (costoBase * (lc * ac) / (L * A)) * cortes : null;
         return (
-          <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-            <div className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4">
+          <div
+            className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-4 z-[60]"
+            onClick={(e) => {
+              // Igual que el modal general: sin stopPropagation, cualquier
+              // clic burbujea al backdrop del modal de etapa y lo cierra todo.
+              e.stopPropagation();
+              setConsumoAConfirmar(null);
+            }}
+          >
+            <div
+              className="bg-white rounded-3xl shadow-xl border border-yeikar-secondary-light/10 max-w-md w-full p-4 sm:p-6 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
               <h3 className="text-xl font-headline font-black text-yeikar-secondary">¿Cuánto se usó de la lámina?</h3>
               <p className="text-xs text-yeikar-neutral/60">
                 Pediste <b>{pedidas}</b> {pedidas === 1 ? 'lámina' : 'láminas'} de{' '}
@@ -1797,9 +2051,8 @@ export default function EtapaModal({
                   <div>
                     <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">Piezas</label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="Ej. 5"
                       value={confirmarForm.cantidad_cortes}
                       onChange={(e) => setConfirmarForm(prev => ({ ...prev, cantidad_cortes: e.target.value }))}
@@ -1810,9 +2063,8 @@ export default function EtapaModal({
                   <div>
                     <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">Largo (cm)</label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="Ej. 100"
                       value={confirmarForm.largo_corte_cm}
                       onChange={(e) => setConfirmarForm(prev => ({ ...prev, largo_corte_cm: e.target.value }))}
@@ -1823,9 +2075,8 @@ export default function EtapaModal({
                   <div>
                     <label className="block text-[10px] font-semibold text-yeikar-neutral/50 uppercase mb-1">Ancho (cm)</label>
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="Ej. 40"
                       value={confirmarForm.ancho_corte_cm}
                       onChange={(e) => setConfirmarForm(prev => ({ ...prev, ancho_corte_cm: e.target.value }))}
@@ -1864,18 +2115,16 @@ export default function EtapaModal({
                   <summary className="cursor-pointer font-semibold">¿El pedazo que sobró tiene otras medidas? (opcional)</summary>
                   <div className="grid grid-cols-2 gap-2 mt-1">
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="Sobrante largo cm"
                       value={confirmarForm.sobrante_largo_cm}
                       onChange={(e) => setConfirmarForm(prev => ({ ...prev, sobrante_largo_cm: e.target.value }))}
                       className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-lg p-2 focus:outline-none focus:border-yeikar-primary font-mono"
                     />
                     <input
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
                       placeholder="Sobrante ancho cm"
                       value={confirmarForm.sobrante_ancho_cm}
                       onChange={(e) => setConfirmarForm(prev => ({ ...prev, sobrante_ancho_cm: e.target.value }))}

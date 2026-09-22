@@ -297,7 +297,13 @@ def test_caso3_insumo_nomina_aguinaldo(client, db, cleaner):
     # consumos: madera 0.016×40000 + tornillos 20×500 + madera_lineal 15.20×30000 = 466.640
     assert float(costo["costo_material"]) == 466640, costo
     assert float(costo["costo_mano_obra"]) == 55000, costo
-    assert float(costo["costo_total"]) == 521640, costo
+    # El costo final incluye los gastos por sección (misma fórmula de la
+    # tablita de costos en vivo, default 10%).
+    rv = client.get(f"/api/v1/produccion/orden/{orden['id']}/costos-en-vivo", headers=ADMIN_HEADERS)
+    assert rv.status_code == 200, rv.text
+    gastos_seccion = rv.json()["totales"]["gastos"]
+    assert float(costo["costo_gastos"]) == gastos_seccion, costo
+    assert float(costo["costo_total"]) == 466640 + 55000 + gastos_seccion, costo
 
     gastos_consumo = []
     for c in (c1, c2, c3):

@@ -160,7 +160,8 @@ def test_finalizar_exhibicion_entrada_showroom_moneda_producto(client, db, clean
     assert finalizada["tipo"] == "EXHIBICION"
     registrar_inventario_producto(db, cleaner, pieza["id"])
 
-    costo_esperado_usd = round(50000.0 / float(tasa), 2)
+    # Costo real de la pieza = MO 50.000 + gastos de sección 10% (default).
+    costo_esperado_usd = round(50000.0 * 1.10 / float(tasa), 2)
     ubi = ubicacion_exhibicion_id(db, cleaner)
 
     fila = db.execute(text(

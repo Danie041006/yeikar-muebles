@@ -11,7 +11,9 @@ export type UnidadCaptura = 'M' | 'CM';
 
 export const CM_POR_METRO = 100;
 
-/** Fórmula de la casa (21 años de práctica): (L×A×E) × piezas ÷ 10000 = m³. */
+/** Fórmula de la casa (21 años de práctica): (L×A×E) × piezas ÷ 10000 = m³.
+ *  Con el LARGO en metros y ancho/espesor en cm. El mismo divisor aplica a la
+ *  cuenta del ebanista digitada en cm (un solo campo: 832 → 0,0832 m³). */
 export const DIVISOR_PIEZA = 10000;
 
 export type Dimensionalidad = 'LONGITUD' | 'AREA' | 'VOLUMEN' | 'OTRA';

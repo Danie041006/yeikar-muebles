@@ -37,7 +37,7 @@ from app.core.state_machine import (
 )
 from app.core.hora_ve import ahora_ve, hoy_ve
 from app.modules.productos.cost_service import _calcular_cantidad_material, _normalizar_seccion
-from app.modules.production.unidades import resolver_cantidad_consumo, nota_captura
+from app.modules.production.unidades import resolver_cantidad_consumo, nota_captura, etiqueta_uso
 
 
 def _redondear2(v: Decimal) -> Decimal:
@@ -318,6 +318,8 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
         # ya calculado manualmente (no pisar la ganancia/gastos del supervisor).
         # Si el cálculo falla, la orden NO se finaliza: nunca quedan órdenes
         # cerradas sin costos (antes el error se tragaba con print()).
+        # El costo guardado suma los gastos por sección (default 10%) sobre los
+        # costos registrados: materiales + MO + %, para que cuadre con la tablita.
         if not obtener_costo_por_orden(db, id_orden):
             calcular_y_guardar_costo(db, id_orden)
 
@@ -585,8 +587,13 @@ def obtener_consumo_material(db: Session, id_consumo: int, usuario: Usuario | No
 
 
 def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario: Usuario | None = None):
-    # 0. Validar que la cantidad sea positiva
-    if esquema.cantidad <= 0:
+    # 0. Validar que la cantidad sea positiva. Pedido ABIERTO (es_pedido y sin
+    #    cantidad): se permite None — se confirma el uso después.
+    pedido_general = bool(getattr(esquema, "es_pedido", False))
+    if esquema.cantidad is None:
+        if not pedido_general:
+            raise ValueError("La cantidad debe ser mayor que cero")
+    elif esquema.cantidad <= 0:
         raise ValueError("La cantidad debe ser mayor que cero")
     # 1. Validar que la etapa exista (evita IntegrityError 500 por FK) y que
     #    pertenezca al alcance del usuario.
@@ -633,6 +640,14 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         raise ValueError("El pedido no admite medidas de corte: el uso se confirma después.")
     if pedido_general and lamina_completa:
         raise ValueError("Elige un modo: lámina completa o pedido general (no ambos).")
+    # Pedido ABIERTO: se pide sin cantidad (ej. "madera") y lo usado se
+    # confirma después. Uso directo sin cantidad es un error.
+    pedido_abierto = pedido_general and esquema.cantidad is None
+    if esquema.cantidad is None:
+        if not pedido_abierto:
+            raise ValueError("Indica la cantidad consumida.")
+        if esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho or esquema.pieza_espesor:
+            raise ValueError("El pedido abierto no admite captura en cm ni por pieza: la cantidad se confirma después.")
     pendiente = lamina_completa or pedido_general
     # 4.0 El consumo por corte de láminas NO admite captura flexible: ahí la
     #     cantidad es N.º de cortes y el motor de láminas hace su propia math.
@@ -656,6 +671,11 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
                 "Configúralas en Productos para pedirlo por láminas completas."
             )
         cantidad_base = Decimal(str(esquema.cantidad))  # N.º de láminas enteras
+    elif pedido_abierto:
+        # Pedido ABIERTO: aún no hay cantidad (columna NOT NULL → 0).
+        # Sin movimiento de inventario ni gasto provisional: nada salió del
+        # depósito. El descuento y el costo real ocurren al confirmar el uso.
+        cantidad_base = Decimal("0")
     else:
         # 4.0.1 Captura flexible: convertir a la unidad base del material ANTES de
         #     descontar inventario o costear (cm→m; pieza L×A×E → m³ con la
@@ -676,8 +696,9 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         seccion=seccion,
         estado="PENDIENTE" if pendiente else "CONFIRMADO",
         # Lo entregado queda guardado: al confirmar, `cantidad` pasa a ser lo
-        # usado y `cantidad_pedida` conserva lo que pidieron.
-        cantidad_pedida=cantidad_base if pendiente else None,
+        # usado y `cantidad_pedida` conserva lo que pidieron. Pedido abierto:
+        # NULL (aún no se sabe cuánto llevan).
+        cantidad_pedida=(cantidad_base if pendiente and not pedido_abierto else None),
         ancho_corte_cm=Decimal(str(esquema.ancho_corte_cm)) if corte_activo else None,
         largo_corte_cm=Decimal(str(esquema.largo_corte_cm)) if corte_activo else None,
         origen_sobrante_id=esquema.origen_sobrante_id if corte_activo else None,
@@ -685,6 +706,16 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         pieza_largo=Decimal(str(esquema.pieza_largo)) if esquema.pieza_largo else None,
         pieza_ancho=Decimal(str(esquema.pieza_ancho)) if esquema.pieza_ancho else None,
         pieza_espesor=Decimal(str(esquema.pieza_espesor)) if esquema.pieza_espesor else None,
+        # Etiqueta legible para la tablita de costos (solo capturas flexibles).
+        detalle_uso=(
+            etiqueta_uso(
+                esquema.cantidad, esquema.unidad_captura,
+                esquema.pieza_largo, esquema.pieza_ancho, esquema.pieza_espesor,
+            )
+            if (esquema.cantidad is not None and not corte_activo and not lamina_completa
+                and (esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho or esquema.pieza_espesor))
+            else None
+        ),
         componente=(esquema.componente or "").strip().upper() or None,
         es_excedente=bool(getattr(esquema, "es_excedente", False)),
         motivo_exceso=(esquema.motivo_exceso or "").strip().upper() or None,
@@ -743,6 +774,11 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         db_consumo.laminas_consumidas = resultado_corte["laminas_consumidas"]
         costo_total_consumo = resultado_corte["costo_total"]
         detalle_corte = resultado_corte["detalle"]
+    elif pedido_abierto:
+        # Pedido abierto: nada salió del depósito todavía (sin movimiento),
+        # costo provisional $0. El descuento real ocurre al confirmar el uso.
+        costo_total_consumo = Decimal("0")
+        detalle_corte = None
     else:
         movimiento = MovimientoCreate(
             material_id=esquema.material_id,
@@ -770,7 +806,9 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
     tipo_gasto_consumo = db.query(TipoGasto).filter(
         TipoGasto.nombre == "Consumo de Materia Prima en Producción"
     ).first()
-    if tipo_gasto_consumo:
+    # Pedido ABIERTO: sin gasto provisional (costo $0); el gasto real se crea
+    # al confirmar el uso (ver _confirmar_uso_general).
+    if tipo_gasto_consumo and costo_total_consumo > 0:
         costo_total = costo_total_consumo
         from app.modules.gastos.model import Gasto
         if lamina_completa:
@@ -862,18 +900,50 @@ def confirmar_consumo_material(
     if not material:
         raise ValueError("El material del consumo ya no existe.")
 
-    modo_general = esquema.cantidad_usada is not None
+    modo_general = esquema.cantidad_usada is not None or bool(esquema.usos)
     modo_lamina = any([
         esquema.cantidad_cortes is not None,
         esquema.largo_corte_cm is not None,
         esquema.ancho_corte_cm is not None,
     ])
+    if esquema.usos and esquema.cantidad_usada is not None:
+        raise ValueError("Confirma de una forma: un solo uso o la lista de usos, no ambas.")
     if modo_general and modo_lamina:
         raise ValueError("Confirma de una forma: cantidad usada o cortes con medidas, no ambas.")
     if not modo_general and not modo_lamina:
         raise ValueError("Indica cuánto se usó: cantidad usada o cortes con medidas.")
     if modo_general:
-        return _confirmar_uso_general(db, db_consumo, material, Decimal(str(esquema.cantidad_usada)), usuario)
+        # Cada línea de uso se convierte con el MISMO motor del registro
+        # (resolver_cantidad_consumo, punto único) y se confirma TODO junto:
+        # un consumo por uso → renglones aislados en la tablita de costos.
+        if esquema.usos:
+            entradas = [
+                (u.cantidad, u.unidad_captura, u.pieza_largo, u.pieza_ancho, u.pieza_espesor)
+                for u in esquema.usos
+            ]
+        else:
+            # Legacy: un solo uso (con captura flexible opcional).
+            entradas = [(
+                esquema.cantidad_usada, esquema.unidad_captura,
+                esquema.pieza_largo, esquema.pieza_ancho, esquema.pieza_espesor,
+            )]
+        usos = []
+        for cant_digitada, u_captura, p_largo, p_ancho, p_espesor in entradas:
+            es_flexible = bool(u_captura or p_largo or p_ancho or p_espesor)
+            base = (
+                resolver_cantidad_consumo(material, cant_digitada, u_captura, p_largo, p_ancho, p_espesor)
+                if es_flexible
+                else Decimal(str(cant_digitada))
+            )
+            usos.append({
+                "base": base,
+                "unidad_captura": u_captura,
+                "pieza_largo": Decimal(str(p_largo)) if p_largo else None,
+                "pieza_ancho": Decimal(str(p_ancho)) if p_ancho else None,
+                "pieza_espesor": Decimal(str(p_espesor)) if p_espesor else None,
+                "etiqueta": etiqueta_uso(cant_digitada, u_captura, p_largo, p_ancho, p_espesor),
+            })
+        return _confirmar_usos(db, db_consumo, material, usos, usuario)
     if not material.largo_cm or not material.ancho_cm:
         raise ValueError(
             f"El material '{material.nombre}' no tiene dimensiones de lámina (largo_cm/ancho_cm). "
@@ -1004,86 +1074,202 @@ def confirmar_consumo_material(
     return db_consumo
 
 
-def _confirmar_uso_general(
+def _gasto_consumo(db: Session, consumo_id: int):
+    """Gasto automático ligado a un consumo (marcador [consumo {id}])."""
+    from app.modules.gastos.model import Gasto
+
+    return db.query(Gasto).filter(Gasto.observaciones.like(f"%[consumo {consumo_id}]%")).first()
+
+
+def _captura_desde_columnas(c: ConsumoMaterial) -> str | None:
+    """Etiqueta de uso derivada de las columnas cuando no hay detalle_uso
+    (registros viejos): 'Pieza 2×10×5' o 'Uso en cm (cuenta del taller)'."""
+    if c.pieza_largo or c.pieza_ancho or c.pieza_espesor:
+        return etiqueta_uso(None, None, c.pieza_largo, c.pieza_ancho, c.pieza_espesor)
+    if (c.unidad_captura or "").upper() == "CM":
+        return "Uso en cm (cuenta del taller)"
+    return None
+
+
+def _upsert_gasto_consumo(
+    db: Session,
+    consumo: ConsumoMaterial,
+    cantidad: Decimal,
+    costo_unit: Decimal,
+    descripcion: str,
+):
+    """Crea o ajusta el gasto automático del consumo al costo real."""
+    from app.modules.gastos.model import Gasto
+
+    costo_total = (cantidad * costo_unit).quantize(Decimal("0.01"))
+    gasto = _gasto_consumo(db, consumo.id)
+    if gasto:
+        gasto.monto = costo_total
+        gasto.monto_en_moneda_base = costo_total
+        gasto.descripcion = descripcion
+        return gasto
+    tipo_gasto_consumo = db.query(TipoGasto).filter(
+        TipoGasto.nombre == "Consumo de Materia Prima en Producción"
+    ).first()
+    if not tipo_gasto_consumo:
+        return None
+    gasto = Gasto(
+        tipo_gasto_id=tipo_gasto_consumo.id,
+        moneda_id=1,
+        fecha=hoy_ve(),
+        descripcion=descripcion,
+        monto=costo_total,
+        tasa_cambio=Decimal("1.0"),
+        monto_en_moneda_base=costo_total,
+        observaciones=f"Generado automáticamente al confirmar el uso en producción (Etapa #{consumo.etapa_produccion_id}) [consumo {consumo.id}]"
+    )
+    db.add(gasto)
+    return gasto
+
+
+def _confirmar_usos(
     db: Session,
     db_consumo: ConsumoMaterial,
     material: Material,
-    usada: Decimal,
+    usos: list[dict],
     usuario: Usuario | None = None,
 ):
-    """Confirma el uso real de un pedido general (madera y demás): `cantidad`
-    pasa a ser lo USADO (unidad base) y `cantidad_pedida` conserva lo que se
-    ENTREGÓ. Lo que sobró vuelve solo al Depósito Principal; si se usó de más
-    se descuenta del stock (validando disponibilidad). El gasto automático se
-    ajusta del provisional al costo real. Pasa de PENDIENTE a CONFIRMADO.
+    """Confirma en UNA operación todos los usos de un pedido general.
+
+    Cada uso queda como un consumo CONFIRMADO propio (renglón aislado en la
+    tablita de costos y en la nómina) con su captura y su movimiento — la
+    reversa por fila sigue exacta. El primer uso reutiliza la fila del pedido
+    (cabeza) y conserva `cantidad_pedida`; los adicionales nacen como filas
+    hermanas ligadas al pedido por observaciones.
+
+    Inventario:
+    - Pedido abierto: cada uso descuenta su cantidad (SALIDA propia).
+    - Pedido con entrega: la cabeza ajusta la entrega a lo que le toca del
+      uso 1 (ENTRADA si sobró / SALIDA si se pasó) y cada uso adicional saca
+      lo suyo. La suma neta es siempre el total usado.
     """
     from app.modules.inventory.model import Inventario
 
-    if usada <= 0:
-        raise ValueError("La cantidad usada debe ser mayor que cero.")
-    if db_consumo.cantidad_pedida is None:
-        db_consumo.cantidad_pedida = Decimal(str(db_consumo.cantidad))
-    entregada = Decimal(str(db_consumo.cantidad_pedida))
+    if not usos:
+        raise ValueError("Indica al menos un uso del material.")
+    ubicacion = db.query(Ubicacion).filter(Ubicacion.nombre == "Depósito Principal").first()
+    ubicacion_id = ubicacion.id if ubicacion else 1
+
+    entregada = (
+        Decimal(str(db_consumo.cantidad_pedida))
+        if db_consumo.cantidad_pedida is not None
+        else Decimal("0")
+    )
     costo_unit = Decimal(str(
         db_consumo.costo_unitario if db_consumo.costo_unitario is not None else material.costo_base
     ))
-    costo_total = (usada * costo_unit).quantize(Decimal("0.01"))
+    total = sum((u["base"] for u in usos), Decimal("0"))
+    if total <= 0:
+        raise ValueError("La cantidad usada debe ser mayor que cero.")
 
-    ubicacion = db.query(Ubicacion).filter(Ubicacion.nombre == "Depósito Principal").first()
-    ubicacion_id = ubicacion.id if ubicacion else 1
-    diferencia = entregada - usada
-    if diferencia > 0:
-        # Sobró material: lo no usado vuelve solo al depósito.
-        registrar_movimiento(db, MovimientoCreate(
-            material_id=material.id,
-            ubicacion_id=ubicacion_id,
-            tipo="ENTRADA",
-            cantidad=diferencia,
-            referencia_tipo="produccion",
-            referencia_id=db_consumo.id,
-            observaciones=f"Confirmación de consumo #{db_consumo.id}: devolución de "
-                          f"{diferencia.normalize()} no usado(s) "
-                          f"(pedidas {entregada.normalize()}, usadas {usada.normalize()})",
-        ))
-    elif diferencia < 0:
-        # Se usó de más: validar stock antes de descontar lo que falte.
-        faltan = -diferencia
+    # Validar stock para el extra NETO (si lo entregado ya cubre, no falta nada).
+    extra = total - entregada
+    if extra > 0:
         stock = db.query(Inventario).filter(
             Inventario.material_id == material.id,
             Inventario.ubicacion_id == ubicacion_id,
         ).first()
         disponible = Decimal(str(stock.cantidad)) if stock else Decimal("0")
-        if disponible < faltan:
+        if disponible < extra:
             raise ValueError(
-                f"Se usaron {usada.normalize()} y se pidieron "
-                f"{entregada.normalize()}: faltan {faltan.normalize()}. "
+                f"Los usos suman {total.normalize()} y se entregaron "
+                f"{entregada.normalize()}: faltan {extra.normalize()}. "
                 f"Stock disponible: {disponible.normalize()}."
             )
+
+    # ── Cabeza: el pedido pasa a ser el uso #1 ──
+    first = usos[0]
+    ajuste = entregada - first["base"]
+    if ajuste > 0:
+        registrar_movimiento(db, MovimientoCreate(
+            material_id=material.id,
+            ubicacion_id=ubicacion_id,
+            tipo="ENTRADA",
+            cantidad=ajuste,
+            referencia_tipo="produccion",
+            referencia_id=db_consumo.id,
+            observaciones=f"Confirmación de consumo #{db_consumo.id}: la entrega cubría "
+                          f"{ajuste.normalize()} de más para el uso 1 ({first['etiqueta']})",
+        ))
+    elif ajuste < 0:
         registrar_movimiento(db, MovimientoCreate(
             material_id=material.id,
             ubicacion_id=ubicacion_id,
             tipo="SALIDA",
-            cantidad=faltan,
+            cantidad=-ajuste,
             referencia_tipo="produccion",
             referencia_id=db_consumo.id,
-            observaciones=f"Confirmación de consumo #{db_consumo.id}: cantidad adicional "
-                          f"usada de más (pedidas {entregada.normalize()}, usadas {usada.normalize()})",
+            observaciones=f"Confirmación de consumo #{db_consumo.id}: uso 1 ({first['etiqueta']}) "
+                          f"supera la entrega en {(-ajuste).normalize()}",
         ))
-
-    # ── Congelar el costo real y marcar CONFIRMADO ──
-    db_consumo.cantidad = usada
+    db_consumo.cantidad = first["base"]
+    db_consumo.unidad_captura = first["unidad_captura"]
+    db_consumo.pieza_largo = first["pieza_largo"]
+    db_consumo.pieza_ancho = first["pieza_ancho"]
+    db_consumo.pieza_espesor = first["pieza_espesor"]
+    db_consumo.detalle_uso = first["etiqueta"]
     db_consumo.estado = "CONFIRMADO"
+    _upsert_gasto_consumo(
+        db, db_consumo, first["base"], costo_unit,
+        f"Consumo {material.nombre} ({first['etiqueta']})"
+        f" - Etapa #{db_consumo.etapa_produccion_id} — Solicita: {db_consumo.solicitante_nombre or '—'}",
+    )
 
-    # ── Ajustar el gasto automático al monto real ──
-    from app.modules.gastos.model import Gasto
-    gasto = db.query(Gasto).filter(Gasto.observaciones.like(f"%[consumo {db_consumo.id}]%")).first()
-    if gasto:
-        gasto.monto = costo_total
-        gasto.monto_en_moneda_base = costo_total
-        gasto.descripcion = (
-            f"Consumo {material.nombre} (pedidas {entregada.normalize()}, "
-            f"usadas {usada.normalize()})"
-            f" - Etapa #{db_consumo.etapa_produccion_id} — Solicita: {db_consumo.solicitante_nombre or '—'}"
+    # ── Usos adicionales: consumo propio cada uno (renglón aislado) ──
+    for numero, uso in enumerate(usos[1:], start=2):
+        hermano = ConsumoMaterial(
+            etapa_produccion_id=db_consumo.etapa_produccion_id,
+            material_id=db_consumo.material_id,
+            cantidad=uso["base"],
+            costo_unitario=costo_unit,
+            seccion=db_consumo.seccion,
+            estado="CONFIRMADO",
+            cantidad_pedida=None,
+            unidad_captura=uso["unidad_captura"],
+            pieza_largo=uso["pieza_largo"],
+            pieza_ancho=uso["pieza_ancho"],
+            pieza_espesor=uso["pieza_espesor"],
+            detalle_uso=uso["etiqueta"],
+            componente=db_consumo.componente,
+            es_excedente=db_consumo.es_excedente,
+            motivo_exceso=db_consumo.motivo_exceso,
+            solicitante_empleado_id=db_consumo.solicitante_empleado_id,
+            creado_por_id=usuario.id if usuario is not None else None,
+            fecha=hoy_ve(),
+            observaciones=f"[Pedido #{db_consumo.id} · uso {numero}] {uso['etiqueta']}",
+        )
+        db.add(hermano)
+        db.flush()
+        registrar_movimiento(db, MovimientoCreate(
+            material_id=material.id,
+            ubicacion_id=ubicacion_id,
+            tipo="SALIDA",
+            cantidad=uso["base"],
+            referencia_tipo="produccion",
+            referencia_id=hermano.id,
+            observaciones=f"Uso {numero} del pedido #{db_consumo.id}: {uso['etiqueta']}",
+        ))
+        _upsert_gasto_consumo(
+            db, hermano, uso["base"], costo_unit,
+            f"Consumo {material.nombre} ({uso['etiqueta']})"
+            f" - Etapa #{hermano.etapa_produccion_id} — Solicita: {db_consumo.solicitante_nombre or '—'}",
+        )
+        record_event(
+            db, actor=usuario, action="CREATE", entity_type="consumo_material",
+            entity_id=hermano.id,
+            after={
+                "material_id": hermano.material_id,
+                "cantidad": float(hermano.cantidad),
+                "detalle_uso": hermano.detalle_uso,
+                "estado": hermano.estado,
+                "pedido_origen_id": db_consumo.id,
+                "etapa_produccion_id": hermano.etapa_produccion_id,
+            },
         )
 
     record_event(
@@ -1092,8 +1278,8 @@ def _confirmar_uso_general(
         after={
             "estado": "CONFIRMADO",
             "cantidad_pedida": float(entregada),
-            "cantidad_usada": float(usada),
-            "costo_total": float(costo_total),
+            "cantidad_usada": float(total),
+            "usos": [u["etiqueta"] for u in usos],
         },
     )
     db.commit()
@@ -1567,6 +1753,10 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
                 "unidad": unidad,
                 "v_unit": float(costo_u),
                 "total": float(total),
+                # Etiqueta legible del uso ("Pieza 2×10×5", "1.500 cm (cuenta
+                # del taller)"): la tablita la muestra bajo el material para
+                # que cada renglón se entienda sin adivinar.
+                "captura": c.detalle_uso or _captura_desde_columnas(c),
                 "es_excedente": bool(c.es_excedente),
                 "es_retrabajo": bool(etapa and etapa.es_retrabajo),
                 "motivo": c.motivo_exceso or None,
@@ -1641,12 +1831,77 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
     }
 
 
-def calcular_y_guardar_costo(db: Session, orden_id: int, ganancia_porcentaje: float = 0.0, costo_gastos: float = 0.0, precio_impuestos_base: float = 0.0):
+def _gastos_seccion_orden(db: Session, orden_id: int) -> Decimal:
+    """Gastos indirectos por sección (ReglaGastoSeccion, default 10%) del
+    costo REAL de una orden: cada sección (área normalizada + componente,
+    agrupada igual que la estructura) aplica su % a su subtotal de costos
+    REGISTRADOS (insumos + mano de obra tal como se cargaron, el mismo
+    subtotal que guarda CostoProduccion).
+
+    Se usa al FINALIZAR para que el costo guardado (CostoProduccion) incluya
+    los gastos de sección: materiales + MO + % por sección. Con la MO
+    registrada con su recargo (uso normal), el total cuadra con la tablita.
+    """
+    from app.modules.production.estructura_generador import _nombre_seccion
+
+    etapas = (
+        db.query(EtapaProduccion)
+        .filter(EtapaProduccion.orden_produccion_id == orden_id)
+        .all()
+    )
+    if not etapas:
+        return Decimal("0")
+    etapa_ids = [e.id for e in etapas]
+    seccion_de_etapa = {
+        e.id: _normalizar_seccion(e.area.nombre if e.area else None) for e in etapas
+    }
+
+    subtotales: dict[tuple, Decimal] = {}
+    for c in db.query(ConsumoMaterial).filter(
+        ConsumoMaterial.etapa_produccion_id.in_(etapa_ids)
+    ).all():
+        clave = (seccion_de_etapa.get(c.etapa_produccion_id, "EBANISTERIA"), c.componente or None)
+        costo_u = c.costo_unitario
+        if costo_u is None:
+            costo_u = c.material.costo_base if c.material else Decimal("0")
+        total = _redondear2(Decimal(str(c.cantidad)) * Decimal(str(costo_u)))
+        subtotales[clave] = subtotales.get(clave, Decimal("0")) + total
+    for mo in db.query(ManoObra).filter(ManoObra.etapa_produccion_id.in_(etapa_ids)).all():
+        # La MO cae en la sección BASE de su área (sin componente), igual que
+        # la tablita y el generador de estructura; el recargo es el registrado
+        # (mismo criterio que el costo guardado).
+        clave = (seccion_de_etapa.get(mo.etapa_produccion_id, "EBANISTERIA"), None)
+        recargo = (
+            Decimal(str(mo.porcentaje_recargo)) / Decimal("100")
+            if mo.porcentaje_recargo
+            else Decimal("0")
+        )
+        total_mo = _redondear2(Decimal(str(mo.monto)) * (Decimal("1") + recargo))
+        subtotales[clave] = subtotales.get(clave, Decimal("0")) + total_mo
+
+    pct_gastos = {
+        r.seccion: Decimal(str(r.porcentaje_gasto)) for r in db.query(ReglaGastoSeccion).all()
+    }
+    total = Decimal("0")
+    for (sec_norm, comp), subtotal in subtotales.items():
+        nombre = _nombre_seccion(sec_norm, comp)
+        pct_g = pct_gastos.get(_normalizar_seccion(nombre), Decimal("10.00"))
+        if pct_g > 0 and subtotal > 0:
+            total += _redondear2(subtotal * pct_g / Decimal("100"))
+    return _redondear2(total)
+
+
+def calcular_y_guardar_costo(db: Session, orden_id: int, ganancia_porcentaje: float = 0.0, costo_gastos: float | None = None, precio_impuestos_base: float = 0.0):
     # FOR UPDATE: serializa los cálculos concurrentes sobre la misma orden para
     # que el get-or-create de CostoProduccion no genere duplicados.
     orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == orden_id).with_for_update().first()
     if not orden:
         raise ValueError("La orden de produccion especificada no existe.")
+    # Sin gastos explícitos: se calculan automáticamente por sección
+    # (ReglaGastoSeccion, default 10%) sobre los costos registrados — el
+    # mismo criterio de la finalización.
+    if costo_gastos is None:
+        costo_gastos = float(_gastos_seccion_orden(db, orden_id))
     # Calcular costo de materiales (todo en Decimal: los floats de los esquemas
     # se convierten una sola vez y el cálculo no acumula errores de redondeo).
     consumos = obtener_consumos_por_orden(db, orden_id)
