@@ -170,6 +170,17 @@ export function convertirMonedaHumana(
 }
 
 /**
+ * Regla del taller para cobros con tasa: el equivalente SIEMPRE es entero.
+ * Si el decimal es < 0.9 baja al entero actual (61,538 → 61); si es >= 0.9
+ * sube al siguiente entero (61,94 → 62).
+ */
+export function redondearCobroEntero(valor: number): number {
+  const n = Number(valor) || 0;
+  const entero = Math.floor(n);
+  return n - entero >= 0.9 ? entero + 1 : entero;
+}
+
+/**
  * Calcula la tasa a almacenar en el backend para un pago (tasa_cambio en modelo Pago).
  * En el backend de ventas: monto_en_moneda_venta = monto_pago * tasa_almacenada.
  */

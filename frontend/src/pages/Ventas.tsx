@@ -17,7 +17,7 @@ import {
   type DescuentoCreate,
   type MetodoPagoOption,
 } from '../services/ventaService';
-import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, extractErrorMessage } from '../utils/format';
+import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, redondearCobroEntero, extractErrorMessage } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { fmtFechaVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
@@ -425,7 +425,7 @@ function ModalDetalle({
     : 0;
   const montoNum = parseFloat(monto) || 0;
   const montoEquivalente = necesitaTRM && tasaHumana > 0
-    ? convertirMonedaHumana(montoNum, monedaPago?.codigo, monedaVenta?.codigo, tasaHumana)
+    ? redondearCobroEntero(convertirMonedaHumana(montoNum, monedaPago?.codigo, monedaVenta?.codigo, tasaHumana))
     : montoNum;
   const saldoRestante = detalle ? Number(detalle.saldo_pendiente) : 0;
 
@@ -439,7 +439,7 @@ function ModalDetalle({
     : 0;
   const descMontoNum = parseFloat(descMonto) || 0;
   const descEquivalente = necesitaTRMDesc && tasaHumanaDesc > 0
-    ? convertirMonedaHumana(descMontoNum, monedaDesc?.codigo, monedaVenta?.codigo, tasaHumanaDesc)
+    ? redondearCobroEntero(convertirMonedaHumana(descMontoNum, monedaDesc?.codigo, monedaVenta?.codigo, tasaHumanaDesc))
     : descMontoNum;
 
   const abrirDescForm = () => {
@@ -506,7 +506,7 @@ function ModalDetalle({
         setErrorPago(`Ingresa primero la tasa de cambio (${parPago.label}) para calcular el monto restante.`);
         return;
       }
-      const montoCalc = convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaPago?.codigo, tasaHumana);
+      const montoCalc = redondearCobroEntero(convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaPago?.codigo, tasaHumana));
       setMonto(montoCalc.toFixed(2));
     } else {
       setMonto(saldoRestante.toString());
@@ -560,7 +560,7 @@ function ModalDetalle({
         setDescError(`Ingresa primero la tasa de cambio (${parDesc.label}) para calcular el monto restante.`);
         return;
       }
-      const montoCalc = convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaDesc?.codigo, tasaHumanaDesc);
+      const montoCalc = redondearCobroEntero(convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaDesc?.codigo, tasaHumanaDesc));
       setDescMonto(montoCalc.toFixed(2));
     } else {
       setDescMonto(saldoRestante.toString());

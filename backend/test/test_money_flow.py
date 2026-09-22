@@ -275,7 +275,8 @@ def test_abono_ves_requiere_trm(client, cleaner, db):
 # ---------------------------------------------------------------------------
 def test_abono_ves_con_trm(client, cleaner, db):
     """Adelanto 1000 VES @ tasa 10 (1 VES = 10 COP) en factura USD 500@3900:
-       10000 COP base → total_pagado ≈ 10000/3900 en la moneda de la factura (USD)."""
+       el equivalente en la moneda de la factura SIEMPRE es entero:
+       10000 COP base = 2.5641 USD → baja a 2 USD (regla del taller, < 0.9)."""
     cliente = crear_cliente(client, cleaner)
     producto = crear_producto(client, cleaner)
     cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
@@ -289,9 +290,9 @@ def test_abono_ves_con_trm(client, cleaner, db):
     venta = _buscar_venta(client, cleaner, db, r.json()["id"])
     assert venta is not None, "Debe existir la factura en USD"
     assert venta["estado"] == "ABONADA", f"Con abono parcial debe quedar ABONADA, fue {venta['estado']}"
-    assert venta["total_pagado"] == pytest.approx(10000 / 3900, abs=0.01), \
-        f"1000 VES*10 = 10000 COP base = {10000/3900:.4f} USD; total_pagado={venta['total_pagado']}"
-    assert venta["saldo_pendiente"] == pytest.approx(500 - 10000 / 3900, abs=0.01), \
+    assert venta["total_pagado"] == 2.0, \
+        f"1000 VES*10 = 10000 COP base = 2.5641 USD → entero 2; total_pagado={venta['total_pagado']}"
+    assert venta["saldo_pendiente"] == pytest.approx(500 - 2, abs=0.01), \
         f"saldo_pendiente={venta['saldo_pendiente']}"
 
 

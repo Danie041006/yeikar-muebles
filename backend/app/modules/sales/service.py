@@ -2,6 +2,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from datetime import date, datetime
 from decimal import Decimal
+import math
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
 from app.core.hora_ve import hoy_ve
 from app.modules.sales.model import Venta, DetalleVenta, Pago, DescuentoVenta
@@ -285,6 +286,23 @@ def _recalcular_estado_venta(db: Session, venta: Venta, margen_saldo: float = 0.
         venta.estado = "PENDIENTE"
 
 
+def _redondear_a_entero_cobro(valor: float) -> float:
+    """Equivalente de un pago/descuento con tasa SIEMPRE entero.
+
+    Regla del taller: si el decimal es < 0.9 se baja al entero actual
+    (61,538 → 61); si es >= 0.9 sube al siguiente entero (61,94 → 62).
+    Los cobros en la vida real se manejan enteros; los decimales descuadran.
+    Los valores no finitos (inf/nan de un fuzzing) pasan sin tocar: los
+    rechaza la validación de tasa desviada que viene después.
+    """
+    if not math.isfinite(valor):
+        return float(valor)
+    entero = math.floor(valor)
+    if valor - entero >= 0.9:
+        return float(entero + 1)
+    return float(entero)
+
+
 def _convertir_a_moneda_venta(
     db: Session, moneda_id: int, monto: float, tasa_cambio: float | None, venta: Venta
 ) -> tuple[float, float, float]:
@@ -319,6 +337,11 @@ def _convertir_a_moneda_venta(
             )
         )
         margen_saldo = float(PASO_PRECIO_COP)
+
+    # Al saltar la tasa el equivalente en la moneda de la venta SIEMPRE es
+    # entero (así lo manejaron en el taller): decimal < 0.9 → baja al entero
+    # actual; decimal >= 0.9 → sube al siguiente entero. Nunca decimales.
+    monto_base = _redondear_a_entero_cobro(monto_base)
 
     # Tasa de cambio: validar que no sea absurda. El piso 0.0001 permite
     # tasas invertidas legítimas (COP→USD ≈ 1/3900 = 0.0002564); lo que se
