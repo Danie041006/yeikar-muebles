@@ -10,7 +10,11 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-yeikar123}
       POSTGRES_DB: ${DB_NAME:-yeikar_db}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PG18+: la imagen monta el volumen en /var/lib/postgresql (padre) y
+      # guarda los datos en una subcarpeta con la versión (pg_ctlcluster).
+      # Montar en /var/lib/postgresql/data (como hacía ≤17) hace que el
+      # entrypoint se queje y el contenedor no arranque.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-yeikar} -d ${DB_NAME:-yeikar_db}"]
       interval: 10s
