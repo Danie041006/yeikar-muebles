@@ -148,6 +148,8 @@ services:
     environment:
       TZ: America/Caracas
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
       R2_BUCKET: ${R2_BUCKET:-yeikar-backups}
       # Config de rclone por variables de entorno (sin rclone.conf en disco)
       RCLONE_CONFIG_R2_TYPE: s3
