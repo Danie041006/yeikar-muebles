@@ -232,7 +232,7 @@ sección 5.3). El usuario inicial se crea por SQL o por registro admin.
 
 ### 5.1. Resumen
 
-- **Motor:** PostgreSQL 15+ (imagen `postgres:15-alpine` en compose).
+- **Motor:** PostgreSQL 18 (imagen `postgres:18-alpine` en compose).
 - **BD por defecto:** `yeikar` (usuario `yeikar` / `yeikar123`), definida en
   `backend/app/core/config.py` (`DATABASE_URL`).
 - **Moneda base:** `COP` → `moneda.id = 1`. Todo lo que "no es COP" se expresa
@@ -1273,10 +1273,10 @@ pytest test/test_money_flow.py -v
 
 | Servicio | Imagen | Puertos | Rol |
 |----------|--------|---------|-----|
-| `db` | postgres:15-alpine | interno (`expose` no publicado) | PostgreSQL con healthcheck |
+| `db` | postgres:18-alpine | interno (`expose` no publicado) | PostgreSQL con healthcheck |
 | `backend` | Python 3.11-slim (build) | interno 8000 | uvicorn con **2 workers** y `--no-proxy-headers` |
 | `frontend` | Node 20 build → nginx:alpine | **80:80** (único punto de entrada público) | SPA estática + proxy `/api → backend:8000` |
-| `backup` | postgres:15-alpine (perfil `backup`) | — | pg_dump diario a las 03:00, retención 14 días |
+| `backup` | postgres:18-alpine (perfil `backup`) | — | pg_dump diario a las 03:00, retención 14 días |
 
 - **`docker-compose.yml`**: DB con volumen `postgres_data`, backend espera a
   que la DB esté sana (`service_healthy`), frontend espera al backend. Todas

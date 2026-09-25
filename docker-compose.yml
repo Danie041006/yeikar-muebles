@@ -3,7 +3,7 @@ services:
   # Base de datos PostgreSQL
   # ──────────────────────────────────────────────────────────────
   db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-yeikar}
@@ -104,7 +104,7 @@ services:
   #                < backups/yeikar_YYYYMMDD_HHMMSS.dump
   # ──────────────────────────────────────────────────────────────────────────
   backup:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     profiles: ["backup"]
     restart: unless-stopped
     environment:

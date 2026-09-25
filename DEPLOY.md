@@ -292,9 +292,8 @@ Tu BD actual vive en Neon (se usa para el backend de Vercel). La copiamos entera
 cd ~/YEIKAR
 
 # A) Descarga el dump desde Neon (contenedor desechable con cliente postgres)
-docker run --rm -v $(pwd):/tmp postgres:15-alpine \
-  pg_dump "postgresql://USUARIO:PASSWORD@ep-xxxx.neon.tech/yeikar?sslmode=require" \
-  -Fc -f /tmp/neon.dump
+docker run --rm -v $HOME/neon_mig:/work postgres:18-alpine \
+  sh -c 'pg_dump "$(cat /work/url.txt)" -Fc -Z 9 -f /work/neon.dump'
 
 ls -lh neon.dump    # debe pesar ~unos MB (tu BD hoy pesa 22 MB)
 
