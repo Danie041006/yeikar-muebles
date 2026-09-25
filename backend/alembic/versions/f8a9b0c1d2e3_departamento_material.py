@@ -42,11 +42,11 @@ def upgrade() -> None:
         "material",
         sa.Column("departamento", sa.String(30), nullable=True),
     )
+    deptos_sql = ", ".join(f"'{d}'" for d in DEPARTAMENTOS)
     op.create_check_constraint(
         "material_departamento_check",
         "material",
-        "departamento IS NULL OR departamento IN "
-        f"({', '.join(f"'{d}'" for d in DEPARTAMENTOS)})",
+        f"departamento IS NULL OR departamento IN ({deptos_sql})",
     )
 
     conn = op.get_bind()
