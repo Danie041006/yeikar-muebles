@@ -3,11 +3,11 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://yeikar-api.vercel.app/api/:path*"
+      "destination": "https://api.yeikar.com/api/:path*"
     },
     {
       "source": "/api/:path*/",
-      "destination": "https://yeikar-api.vercel.app/api/:path*/"
+      "destination": "https://api.yeikar.com/api/:path*/"
     },
     {
       "source": "/((?!api/).*)",
