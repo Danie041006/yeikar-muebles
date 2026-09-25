@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronDown, Search } from 'lucide-react';
+import { Check, ChevronDown, Loader2, Search } from 'lucide-react';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 
 export interface SearchSelectOption {
   value: string | number;
@@ -28,7 +29,23 @@ function useCoarsePointer(): boolean {
 interface SearchSelectProps {
   value: string | number | null | undefined;
   onChange: (value: string | number) => void;
-  options: SearchSelectOption[];
+  /**
+   * Modo estático: opciones ya cargadas que se filtran en memoria.
+   * En modo async (`loadOptions`) se usan como semilla del valor actual.
+   */
+  options?: SearchSelectOption[];
+  /**
+   * Modo async (autocomplete server-side): se llama al escribir, con debounce.
+   * Cuando está presente, el dropdown consulta el backend en vez de filtrar
+   * `options` en memoria (patrón Instagram/Facebook: pocos resultados, según
+   * lo que tecleas). Opcional para conservar compatibilidad con los callers
+   * actuales que pasan `options` estáticas.
+   */
+  loadOptions?: (query: string) => Promise<SearchSelectOption[]>;
+  /** Async: caracteres mínimos para disparar la búsqueda (0 = cargar al abrir). */
+  minChars?: number;
+  /** Async: milisegundos de debounce entre keystrokes. */
+  debounceMs?: number;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyText?: string;
@@ -36,33 +53,55 @@ interface SearchSelectProps {
   className?: string;
   /** Renderizado custom del label de cada opción (dropdown + trigger). */
   renderLabel?: (option: SearchSelectOption) => React.ReactNode;
+  /**
+   * Label del valor actual. Necesario en modo async cuando el valor ya está
+   * seleccionado (p.ej. responsable de etapa precargado) y `options` no
+   * contiene todavía esa fila: sin esto el trigger mostraría el placeholder.
+   */
+  selectedOption?: SearchSelectOption;
 }
 
 export default function SearchSelect({
   value,
   onChange,
-  options,
+  options = [],
+  loadOptions,
+  minChars = 0,
+  debounceMs = 300,
   placeholder = 'Seleccionar...',
   searchPlaceholder = 'Buscar...',
   emptyText = 'Sin resultados',
   disabled = false,
   className = '',
   renderLabel,
+  selectedOption,
 }: SearchSelectProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [highlighted, setHighlighted] = useState(0);
   const [coords, setCoords] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [asyncOptions, setAsyncOptions] = useState<SearchSelectOption[]>([]);
+  const [loadingAsync, setLoadingAsync] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const isCoarse = useCoarsePointer();
 
-  const selected = useMemo(
-    () => options.find((o) => String(o.value) === String(value)),
-    [options, value]
-  );
+  const isAsync = typeof loadOptions === 'function';
+  const debouncedQuery = useDebouncedValue(query, isAsync ? debounceMs : 0);
+
+  const selected = useMemo(() => {
+    // Prioridad: lo que ya está en options (estático) o vino de la búsqueda
+    // async. selectedOption es solo un fallback para valores precargados que
+    // aún no están en ninguna lista (p.ej. responsable de etapa).
+    return (
+      options.find((o) => String(o.value) === String(value)) ??
+      asyncOptions.find((o) => String(o.value) === String(value)) ??
+      selectedOption ??
+      undefined
+    );
+  }, [options, asyncOptions, value, selectedOption]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -70,25 +109,43 @@ export default function SearchSelect({
     return options.filter((o) => o.label.toLowerCase().includes(q));
   }, [options, query]);
 
-  // Agrupa las opciones filtradas conservando el orden de aparición. Los
-  // índices originales en `filtered` se preservan para la navegación con
-  // teclado (highlighted apunta a posiciones del array plano).
+  // ── Async: buscar en el backend con debounce ──
+  useEffect(() => {
+    if (!isAsync || !open) return;
+    const q = debouncedQuery.trim();
+    if (q.length < minChars) {
+      setAsyncOptions([]);
+      setLoadingAsync(false);
+      return;
+    }
+    let active = true;
+    setLoadingAsync(true);
+    loadOptions!(q)
+      .then((res) => { if (active) setAsyncOptions(res); })
+      .catch(() => { if (active) setAsyncOptions([]); })
+      .finally(() => { if (active) setLoadingAsync(false); });
+    return () => { active = false; };
+  }, [isAsync, open, debouncedQuery, minChars, loadOptions]);
+
+  const items = isAsync ? asyncOptions : filtered;
+
+  // Agrupa las opciones (estáticas o async) conservando el orden de aparición.
   const clusters = useMemo(() => {
-    if (!filtered.some((o) => o.group)) return null;
+    if (!items.some((o) => o.group)) return null;
     const map = new Map<string, { group: string; items: { opt: SearchSelectOption; index: number }[] }>();
-    filtered.forEach((opt, index) => {
+    items.forEach((opt, index) => {
       const group = opt.group ?? '';
       if (!map.has(group)) map.set(group, { group, items: [] });
       map.get(group)!.items.push({ opt, index });
     });
     return Array.from(map.values());
-  }, [filtered]);
+  }, [items]);
 
   const openDropdown = () => {
     if (disabled) return;
     const rect = triggerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const height = Math.min(288, options.length * 40 + 64);
+    const height = Math.min(288, items.length * 40 + 64);
     const placeUp = window.innerHeight - rect.bottom < height + 12;
     setCoords({
       top: placeUp ? Math.max(8, rect.top - height - 6) : rect.bottom + 6,
@@ -106,7 +163,7 @@ export default function SearchSelect({
 
   useEffect(() => {
     itemRefs.current[highlighted]?.scrollIntoView({ block: 'nearest' });
-  }, [highlighted, filtered.length]);
+  }, [highlighted, items.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -137,7 +194,10 @@ export default function SearchSelect({
     setOpen(false);
   };
 
-  if (isCoarse) {
+  // En móvil (pointer coarse) se renderiza un <select> nativo. En modo async
+  // no aplica (no hay forma de buscar en server con un select nativo), así
+  // que en ese caso usamos el autocomplete custom.
+  if (isCoarse && !isAsync) {
     return (
       <div className={`relative ${className}`}>
         <select
@@ -174,18 +234,21 @@ export default function SearchSelect({
   const onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setHighlighted((h) => Math.min(h + 1, filtered.length - 1));
+      setHighlighted((h) => Math.min(h + 1, items.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setHighlighted((h) => Math.max(h - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const opt = filtered[highlighted];
+      const opt = items[highlighted];
       if (opt) selectOption(opt);
     } else if (e.key === 'Escape') {
       setOpen(false);
     }
   };
+
+  const queryLength = debouncedQuery.trim().length;
+  const canSearch = !isAsync || queryLength >= minChars;
 
   return (
     <div className={`relative ${className}`}>
@@ -227,11 +290,24 @@ export default function SearchSelect({
             </div>
           </div>
 
-          {filtered.length === 0 && (
+          {loadingAsync && (
+            <div className="flex items-center gap-2 px-4 py-3 text-sm text-yeikar-neutral/50">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Buscando…
+            </div>
+          )}
+
+          {!loadingAsync && !canSearch && (
+            <div className="px-4 py-6 text-center text-sm text-yeikar-neutral/40">
+              Escribe al menos {minChars} caracteres para buscar
+            </div>
+          )}
+
+          {!loadingAsync && canSearch && items.length === 0 && (
             <div className="px-4 py-6 text-center text-sm text-yeikar-neutral/40">{emptyText}</div>
           )}
 
-          {(() => {
+          {canSearch && (() => {
             const renderItem = (opt: SearchSelectOption, i: number, indented: boolean) => {
               const isSelected = String(opt.value) === String(value);
               const isHighlighted = i === highlighted;
@@ -257,7 +333,7 @@ export default function SearchSelect({
                 </button>
               );
             };
-            if (!clusters) return filtered.map((opt, i) => renderItem(opt, i, false));
+            if (!clusters) return items.map((opt, i) => renderItem(opt, i, false));
             return clusters.map((cluster) => (
               <div key={cluster.group || '__sin_grupo'}>
                 {cluster.group && (

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import {
   produccionService,
   type EtapaProduccion,
@@ -8,6 +9,9 @@ import {
   type CostosEnVivoOrden,
   type ConsumoMaterial,
 } from '../../services/produccionService';
+import { productosService } from '../../services/productosService';
+import { getEmpleados } from '../../services/empleadosService';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import type { SobranteLamina } from '../../services/inventarioService';
 import api from '../../services/api';
 import ConfirmDialog from '../ui/ConfirmDialog';
@@ -183,6 +187,14 @@ export default function EtapaModal({
   });
   const [materialSearch, setMaterialSearch] = useState('');
   const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
+  // Búsqueda server-side de materiales (autocomplete): el catálogo completo no
+  // se carga en el cliente, se consulta por nombre/sinónimo al escribir.
+  const [materialesBusqueda, setMaterialesBusqueda] = useState<Material[]>([]);
+  const [materialesCargando, setMaterialesCargando] = useState(false);
+  // Objeto del material elegido en el dropdown async: antes se derivaba de
+  // `materiales.find(...)`, pero con catálogos grandes ese material ya no está
+  // en la lista precargada.
+  const [materialSeleccionado, setMaterialSeleccionado] = useState<Material | null>(null);
   const [consumoSubmitting, setConsumoSubmitting] = useState(false);
   const [consumoAEliminar, setConsumoAEliminar] = useState<number | null>(null);
   const [manoObraAEliminar, setManoObraAEliminar] = useState<number | null>(null);
@@ -206,7 +218,7 @@ export default function EtapaModal({
   const manoObras = stage.mano_obras ?? [];
 
   // ── Derivados del formulario de consumo ──
-  const materialConsumo = materiales.find((m) => String(m.id) === newConsumo.material_id);
+  const materialConsumo = materialSeleccionado ?? materiales.find((m) => String(m.id) === newConsumo.material_id);
   const dimConsumo = dimensionalidad(materialConsumo?.unidad_medida?.abreviatura);
   // Dimensionalidad del material que se está CONFIRMANDO (mismo motor que el
   // registro: captura flexible al confirmar el uso).
@@ -277,6 +289,23 @@ export default function EtapaModal({
     }).then((r) => setOpcionesCosto(r.data)).catch(() => setOpcionesCosto([]));
   }, [stage.id, stage.area_id]);
 
+  // ── Búsqueda async de materiales (autocomplete server-side) ──
+  // El catálogo completo no se baja al cliente (con cientos de materiales solo
+  // se veían los primeros 100 y en orden arbitrario). Se consulta por nombre o
+  // sinónimo al escribir, con debounce.
+  const materialSearchDebounced = useDebouncedValue(materialSearch, 250);
+  useEffect(() => {
+    if (!showMaterialDropdown) return;
+    let active = true;
+    setMaterialesCargando(true);
+    productosService
+      .getMateriales(materialSearchDebounced.trim() || undefined)
+      .then((r) => { if (active) setMaterialesBusqueda(r); })
+      .catch(() => { if (active) setMaterialesBusqueda([]); })
+      .finally(() => { if (active) setMaterialesCargando(false); });
+    return () => { active = false; };
+  }, [showMaterialDropdown, materialSearchDebounced]);
+
   // El solicitante arranca como el responsable de la etapa (se puede cambiar):
   // en el taller quien pide el material es quien tiene la etapa asignada.
   useEffect(() => {
@@ -330,8 +359,15 @@ export default function EtapaModal({
       ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
       es_lamina_completa: false, es_pedido: false,
     }));
-    const mat = materiales.find((m) => m.id === materialId);
-    setMaterialSearch(mat?.nombre || '');
+    setMaterialSeleccionado(null);
+    // La receta puede referenciar un material que no está en la lista async;
+    // lo traemos por id para conocer su unidad/dimensionalidad.
+    productosService.getMaterial(materialId)
+      .then((mat) => {
+        setMaterialSeleccionado(mat);
+        setMaterialSearch(mat.nombre || '');
+      })
+      .catch(() => setMaterialSearch(''));
     setShowMaterialDropdown(false);
     setTab('registrar');
   };
@@ -994,10 +1030,13 @@ export default function EtapaModal({
                       />
                       {showMaterialDropdown && (
                         <div className="absolute z-50 w-full mt-1 bg-white border border-yeikar-secondary-light/15 rounded-xl shadow-lg max-h-52 overflow-y-auto">
-                          {[...materiales]
-                            .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-                            .filter(m => m.nombre.toLowerCase().includes(materialSearch.toLowerCase()))
-                            .map((m) => (
+                          {materialesCargando && (
+                            <p className="flex items-center gap-2 text-center text-yeikar-neutral/40 text-xs py-4">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Buscando…
+                            </p>
+                          )}
+                          {!materialesCargando &&
+                            materialesBusqueda.map((m) => (
                               <button
                                 key={m.id}
                                 type="button"
@@ -1011,6 +1050,7 @@ export default function EtapaModal({
                                     ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
                                     es_pedido: false,
                                   }));
+                                  setMaterialSeleccionado(m);
                                   setMaterialSearch(m.nombre);
                                   setShowMaterialDropdown(false);
                                 }}
@@ -1034,7 +1074,7 @@ export default function EtapaModal({
                                 )}
                               </button>
                             ))}
-                          {materiales.filter(m => m.nombre.toLowerCase().includes(materialSearch.toLowerCase())).length === 0 && (
+                          {!materialesCargando && materialesBusqueda.length === 0 && (
                             <p className="text-center text-yeikar-neutral/40 text-xs py-4">Sin resultados</p>
                           )}
                         </div>
@@ -1080,7 +1120,14 @@ export default function EtapaModal({
                       <SearchSelect
                         value={newConsumo.solicitante_id || null}
                         onChange={(v) => setNewConsumo(prev => ({ ...prev, solicitante_id: String(v) }))}
-                        options={empleados.map((emp) => ({ value: emp.id, label: emp.nombre }))}
+                        loadOptions={async (q) =>
+                          (await getEmpleados({ buscar: q || undefined, limite: 20 }))
+                            .map((e) => ({ value: e.id, label: e.nombre }))
+                        }
+                        minChars={0}
+                        selectedOption={stage.empleado_responsable
+                          ? { value: stage.empleado_responsable.id, label: stage.empleado_responsable.nombre }
+                          : undefined}
                         placeholder="¿Quién pide?"
                       />
                     </div>
@@ -1519,7 +1566,11 @@ export default function EtapaModal({
                       <SearchSelect
                         value={newManoObra.empleado_id}
                         onChange={(v) => setNewManoObra(prev => ({ ...prev, empleado_id: String(v) }))}
-                        options={empleados.map((e) => ({ value: e.id, label: `${e.nombre}` }))}
+                        loadOptions={async (q) =>
+                          (await getEmpleados({ buscar: q || undefined, limite: 20 }))
+                            .map((e) => ({ value: e.id, label: e.nombre }))
+                        }
+                        minChars={0}
                         placeholder="Empleado…"
                       />
                     </div>

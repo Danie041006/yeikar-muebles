@@ -212,10 +212,15 @@ export const productosService = {
     await api.delete(`/receta/${recetaId}`);
   },
 
-  getMateriales: async (search?: string): Promise<Material[]> => {
+  getMateriales: async (search?: string, limite = 100): Promise<Material[]> => {
     const response = await api.get<Material[]>('/material/', {
-      params: search ? { buscar: search } : {},
+      params: { ...(search ? { buscar: search } : {}), limite },
     });
+    return response.data;
+  },
+
+  getMaterial: async (id: number | string): Promise<Material> => {
+    const response = await api.get<Material>(`/material/${id}`);
     return response.data;
   },
 

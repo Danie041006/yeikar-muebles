@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DataError, IntegrityError
 from app.core.rate_limit import RateLimitMiddleware
@@ -39,6 +40,11 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.DEBUG else None,
 )
 origins = [origin.strip() for origin in settings.ALLOWED_ORIGINS.split(",") if origin.strip()]
+# GZip: las respuestas JSON del catálogo (materiales, productos, inventario)
+# bajan ~85% más pequeñas. Clave con internet de bajo ancho de banda (VPS,
+# datos móviles). El RateLimit y el rate-limit de login ven la petición ya
+# descomprimida porque este middleware es el más externo (se registra primero).
+app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,

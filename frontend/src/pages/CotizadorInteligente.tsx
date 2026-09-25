@@ -8,7 +8,7 @@ import {
   type ContextoExportarOut,
   type GenerateStructureOut,
 } from '../services/iqeService';
-import { clienteService, type Client } from '../services/clienteService';
+import { clienteService } from '../services/clienteService';
 import { productosService } from '../services/productosService';
 import EstructuraCostosEditor from '../components/EstructuraCostosEditor';
 import EstructuraCostos from '../components/EstructuraCostos';
@@ -141,7 +141,7 @@ export default function CotizadorInteligente() {
   // ── Paso 3: Finalizar y guardar ──
   const [paso, setPaso] = useState<Paso>('manual');
   const [guardarComo, setGuardarComo] = useState<'cotizacion' | 'producto'>('cotizacion');
-  const [clientes, setClientes] = useState<Client[]>([]);
+  // Clientes: el selector es async (autocomplete server-side); no se precarga.
   const [clienteId, setClienteId] = useState('');
   const [observacionesFinal, setObservacionesFinal] = useState('');
   const [nombreProducto, setNombreProducto] = useState('');
@@ -360,14 +360,8 @@ export default function CotizadorInteligente() {
     }
   };
 
-  /** Ir al paso final cargando clientes */
+  /** Ir al paso final */
   const irAPasoFinal = async () => {
-    try {
-      const list = await clienteService.getAll();
-      setClientes(list);
-    } catch (e) {
-      console.error('Error al cargar clientes:', e);
-    }
     setPaso('finalizar');
   };
 
@@ -1048,7 +1042,10 @@ export default function CotizadorInteligente() {
                       <SearchSelect
                         value={clienteId}
                         onChange={(v) => setClienteId(String(v))}
-                        options={clientes.map((c) => ({ value: c.id, label: c.nombre }))}
+                        loadOptions={async (q) =>
+                          (await clienteService.getAll(q || undefined)).map((c) => ({ value: c.id, label: c.nombre }))
+                        }
+                        minChars={1}
                         placeholder="Seleccione un cliente..."
                       />
                     </div>

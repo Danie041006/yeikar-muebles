@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FolderOpen, Loader2 } from 'lucide-react';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { PageHeader, SearchInput, Spinner, EmptyState } from '../components/ui';
 import BadgeEstado from '../components/BadgeEstado';
 import ExpedienteFicha from '../components/Expediente/ExpedienteFicha';
@@ -46,26 +47,29 @@ export default function Expediente() {
   const [resumenCliente, setResumenCliente] = useState<ClienteResumen | null>(null);
   const [tituloFicha, setTituloFicha] = useState<string>('');
 
-  const cargarTab = useCallback(async (t: Tab) => {
+  const cargarTab = useCallback(async (q: string) => {
     setLoading(true);
-    setBuscar('');
     try {
-      if (t === 'cotizaciones') setCotizaciones(await cotizacionService.getAll(undefined, false));
-      else if (t === 'pedidos') setPedidos(await pedidoService.getAll(undefined, false));
-      else if (t === 'facturas') setFacturas(await facturacionService.getAll());
-      else if (t === 'clientes') setClientes(await clienteService.getAll());
-      else if (t === 'envios') setEnvios(await envioService.getAll());
+      // Búsqueda server-side por pestaña: el catálogo no se baja completo al
+      // cliente (clientes 1.204+ → antes solo llegaban los primeros 100).
+      if (tab === 'cotizaciones') setCotizaciones(await cotizacionService.getAll(q || undefined, false));
+      else if (tab === 'pedidos') setPedidos(await pedidoService.getAll(q || undefined, false));
+      else if (tab === 'facturas') setFacturas((await facturacionService.getAll()).items);
+      else if (tab === 'clientes') setClientes(await clienteService.getAll(q || undefined));
+      else if (tab === 'envios') setEnvios(await envioService.getAll(q || undefined));
     } catch (e) {
       console.error('Error cargando expedientes:', e);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [tab]);
+
+  const buscarDeb = useDebouncedValue(buscar, 400);
 
   useEffect(() => {
-    cargarTab(tab);
+    cargarTab(buscarDeb);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, buscarDeb, cargarTab]);
 
   // Apertura directa desde otras secciones: /historial?tipo=pedido&id=5
   useEffect(() => {
@@ -114,16 +118,17 @@ export default function Expediente() {
   };
 
   const listaFiltrada: (Quote | Order | Factura | Client | Envio)[] = (() => {
-    const q = buscar.toLowerCase();
-    if (tab === 'cotizaciones')
-      return cotizaciones.filter((c) => !q || c.cliente?.nombre?.toLowerCase().includes(q) || String(c.id).includes(q));
-    if (tab === 'pedidos')
-      return pedidos.filter((p) => !q || p.cliente?.nombre?.toLowerCase().includes(q) || String(p.id).includes(q));
-    if (tab === 'facturas')
+    // Facturas: el endpoint no soporta búsqueda, se filtra por id en el cliente.
+    if (tab === 'facturas') {
+      const q = buscar.toLowerCase();
       return facturas.filter((f) => !q || String(f.id).includes(q));
-    if (tab === 'clientes')
-      return clientes.filter((c) => !q || c.nombre.toLowerCase().includes(q) || String(c.id).includes(q));
-    return envios.filter((e) => !q || String(e.id).includes(q) || e.guia_despacho?.toLowerCase().includes(q));
+    }
+    // Cotizaciones, pedidos, clientes y envíos ya vienen filtrados por el
+    // servidor (búsqueda con debounce en cargarTab).
+    if (tab === 'cotizaciones') return cotizaciones;
+    if (tab === 'pedidos') return pedidos;
+    if (tab === 'clientes') return clientes;
+    return envios;
   })();
 
   return (

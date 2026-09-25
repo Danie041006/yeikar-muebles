@@ -24,6 +24,7 @@ engine = create_engine(
     pool_size=4,
     max_overflow=2,
     pool_pre_ping=True,  # crítico con autosuspend (Neon): descarta conexiones muertas
+    pool_recycle=3600,   # en VPS/PG idle el server puede cerrar conexiones dormidas
     pool_timeout=5,
     connect_args=_conn_args,
 )

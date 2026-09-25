@@ -3,7 +3,7 @@ from typing import Optional
 from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload, selectinload
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, exists
 from app.modules.productos import model, schemas
 
 # Moneda base del ERP: COP (id=1). Todos los costos internos del motor de
@@ -109,10 +109,12 @@ def obtener_productos(
         query = query.filter(model.Producto.es_reventa == es_reventa)
     if es_exhibicion is not None:
         query = query.filter(model.Producto.es_exhibicion == es_exhibicion)
+    total = query.count()
     # NUEVOS PRIMERO: con el catálogo pasado de 1000 ítems, el orden por id
     # ASC truncaba la página en los más viejos y los recién creados (piezas
     # de exhibición, productos nuevos) nunca aparecían en ningún listado.
-    return query.order_by(model.Producto.id.desc()).offset(salto).limit(limite).all()
+    items = query.order_by(model.Producto.id.desc()).offset(salto).limit(limite).all()
+    return items, total
 
 def crear_producto(db: Session, esquema: schemas.ProductoCreate):
     db_obj = model.Producto(**esquema.model_dump())
@@ -158,8 +160,21 @@ def obtener_materiales(db: Session, salto: int = 0, limite: int = 100, buscar: s
         joinedload(model.Material.categoria_inventario),
     )
     if buscar:
-        query = query.filter(model.Material.nombre.ilike(f"%{buscar}%"))
-    return query.offset(salto).limit(limite).all()
+        term = f"%{buscar}%"
+        # Multi-campo: nombre o sinónimo del taller (p.ej. buscar "tabla" y
+        # encontrar un material cuyo sinónimo sea ese). Requiere pg_trgm.
+        query = query.filter(
+            or_(
+                model.Material.nombre.ilike(term),
+                exists().where(
+                    model.MaterialSinonimo.material_id == model.Material.id,
+                    model.MaterialSinonimo.sinonimo.ilike(term),
+                ),
+            )
+        )
+    total = query.count()
+    items = query.order_by(model.Material.nombre.asc()).offset(salto).limit(limite).all()
+    return items, total
 
 def crear_material(db: Session, esquema: schemas.MaterialCreate):
     db_obj = model.Material(**esquema.model_dump())

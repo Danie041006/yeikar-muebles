@@ -401,9 +401,10 @@ export default function ProduccionKanban() {
   }, [search]);
 
   useEffect(() => {
-    // Cargar empleados, materiales e inventario para los modales
-    api.get('/empleado/').then((r) => setEmpleados(r.data)).catch(() => {});
-    api.get('/material/').then((r) => setMateriales(r.data)).catch(() => {});
+    // Empleados (con límite alto) para los modales de pasar a área / nueva
+    // etapa. Los materiales ya NO se precargan: el selector de insumo de la
+    // estación de trabajo busca server-side (autocomplete) en EtapaModal.
+    api.get('/empleado/', { params: { limite: 1000 } }).then((r) => setEmpleados(r.data)).catch(() => {});
     cargarInventario();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

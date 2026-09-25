@@ -1,4 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Search, Loader2, Plus } from 'lucide-react';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import FacturaFiscalPDF from '../components/FacturaFiscalPDF';
@@ -619,16 +621,47 @@ export default function Facturacion() {
   const [pedidoParaFactura, setPedidoParaFactura] = useState<PedidoFacturable | null>(null);
 
   const [filtroEstado, setFiltroEstado] = useState<string>('');
+  const [buscarFacturas, setBuscarFacturas] = useState('');
+  const [totalFacturas, setTotalFacturas] = useState(0);
+  const [cargandoMasFacturas, setCargandoMasFacturas] = useState(false);
+  const buscarFacturasDeb = useDebouncedValue(buscarFacturas, 400);
+  const PAGE_FACTURAS = 100;
 
   const cargarFacturas = useCallback(async () => {
+    setFacturasLoading(true);
     try {
-      setFacturasLoading(true);
-      const data = await facturacionService.getAll();
-      setFacturas(data);
+      const { items, total } = await facturacionService.getAll({
+        buscar: buscarFacturasDeb.trim() || undefined,
+        estado: filtroEstado || undefined,
+        salto: 0,
+        limite: PAGE_FACTURAS,
+      });
+      setFacturas(items);
+      setTotalFacturas(total);
+    } catch {
+      // dejar la lista como está
     } finally {
       setFacturasLoading(false);
     }
-  }, []);
+  }, [buscarFacturasDeb, filtroEstado]);
+
+  const cargarMasFacturas = useCallback(async () => {
+    setCargandoMasFacturas(true);
+    try {
+      const { items, total } = await facturacionService.getAll({
+        buscar: buscarFacturasDeb.trim() || undefined,
+        estado: filtroEstado || undefined,
+        salto: facturas.length,
+        limite: PAGE_FACTURAS,
+      });
+      setFacturas((prev) => [...prev, ...items]);
+      setTotalFacturas(total);
+    } catch {
+      // dejar la lista como está
+    } finally {
+      setCargandoMasFacturas(false);
+    }
+  }, [buscarFacturasDeb, filtroEstado, facturas.length]);
 
   const cargarPedidos = useCallback(async () => {
     try {
@@ -656,10 +689,10 @@ export default function Facturacion() {
     } else {
       cargarPedidos();
     }
-  }, [activeTab, cargarFacturas, cargarPedidos, cargarTasas]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, buscarFacturasDeb, filtroEstado]);
 
   const tasasMap: Record<string, number> = Object.fromEntries(tasas.map((t) => [t.clave, Number(t.tasa)]));
-  const facturasFiltradas = filtroEstado ? facturas.filter((f) => f.estado === filtroEstado) : facturas;
 
   return (
     <div className="space-y-6">
@@ -712,7 +745,7 @@ export default function Facturacion() {
       {/* TAB: Facturas emitidas */}
       {activeTab === 'facturas' && (
         <div className="space-y-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <span className="text-xs font-bold text-yeikar-neutral/50 font-mono">FILTRAR:</span>
             {['', 'EMITIDA', 'ANULADA'].map((est) => (
               <button
@@ -727,11 +760,27 @@ export default function Facturacion() {
                 {est === '' ? 'Todas' : est}
               </button>
             ))}
+
+            <div className="relative ml-auto">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-yeikar-neutral/40" />
+              <input
+                type="text"
+                value={buscarFacturas}
+                onChange={(e) => setBuscarFacturas(e.target.value)}
+                placeholder="Buscar por # factura, pedido o cliente..."
+                className="w-64 rounded-xl border border-yeikar-secondary-light/15 bg-white py-2 pl-9 pr-3 text-sm focus:outline-none focus:border-yeikar-primary shadow-sm"
+              />
+            </div>
+          </div>
+
+          <div className="text-xs text-yeikar-neutral/50 font-medium">
+            Mostrando <strong className="text-yeikar-secondary">{facturas.length}</strong>
+            {totalFacturas > 0 ? <> de <strong className="text-yeikar-secondary">{totalFacturas}</strong></> : null} facturas
           </div>
 
           {facturasLoading ? (
             <Spinner />
-          ) : facturasFiltradas.length === 0 ? (
+          ) : facturas.length === 0 ? (
             <div className="text-center py-16 text-yeikar-neutral/40">
               <p className="text-sm font-bold">No hay facturas para mostrar.</p>
               <p className="text-xs mt-1">Emite la primera desde la pestaña "Pedidos por Facturar".</p>
@@ -752,7 +801,7 @@ export default function Facturacion() {
                     </tr>
                   </thead>
                   <tbody>
-                    {facturasFiltradas.map((f) => (
+                    {facturas.map((f) => (
                       <tr key={f.id} className="hover:bg-yeikar-tertiary/30 transition-colors">
                         <td className="px-5 py-3.5 font-mono font-bold text-yeikar-primary">
                           00-{f.id.toString().padStart(5, '0')}
@@ -783,6 +832,20 @@ export default function Facturacion() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {!facturasLoading && facturas.length < totalFacturas && (
+            <div className="flex justify-center pt-1">
+              <button
+                type="button"
+                onClick={cargarMasFacturas}
+                disabled={cargandoMasFacturas}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold font-headline bg-white border border-yeikar-secondary-light/20 text-yeikar-secondary hover:bg-yeikar-tertiary/50 transition-all shadow-xs disabled:opacity-50"
+              >
+                {cargandoMasFacturas ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                {cargandoMasFacturas ? 'Cargando…' : `Cargar más (${totalFacturas - facturas.length} restantes)`}
+              </button>
             </div>
           )}
         </div>

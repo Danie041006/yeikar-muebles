@@ -12,7 +12,7 @@ import EstructuraCostos from '../components/EstructuraCostos';
 import DocumentoCotizacion from '../components/Expediente/DocumentoCotizacion';
 
 import api from '../services/api';
-import { productosService } from '../services/productosService';
+import { productosService, type Material } from '../services/productosService';
 import { inventarioService } from '../services/inventarioService';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -21,7 +21,8 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
-import { Package, Sparkles, Plus } from 'lucide-react';
+import { Package, Sparkles, Plus, Loader2 } from 'lucide-react';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 interface CotizacionItemForm {
   producto_id: string;
@@ -173,6 +174,10 @@ export default function Cotizaciones() {
   // Create/Edit Form state (multi-item)
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null);
   const [selectedClientId, setSelectedClientId] = useState('');
+  // Label del cliente actualmente seleccionado: el selector de cliente es async,
+  // así que el trigger necesita saber qué mostrar cuando el valor ya está fijado
+  // (cliente recién creado o cliente de una cotización en edición).
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<{ value: number; label: string } | null>(null);
   const [observaciones, setObservaciones] = useState('');
   const [items, setItems] = useState<CotizacionItemForm[]>([]);
   const [isProductSelectorOpen, setIsProductSelectorOpen] = useState(false);
@@ -212,6 +217,23 @@ export default function Cotizaciones() {
   const [addMaterialSearch, setAddMaterialSearch] = useState('');
   const [showAddMaterialDropdown, setShowAddMaterialDropdown] = useState(false);
   const [addMaterialSeccionIndex, setAddMaterialSeccionIndex] = useState<number | null>(null);
+  // Búsqueda server-side de materiales para el modal de "agregar material a
+  // sección": el catálogo completo no se baja al cliente.
+  const [addMaterialResultados, setAddMaterialResultados] = useState<Material[]>([]);
+  const [addMaterialCargando, setAddMaterialCargando] = useState(false);
+  const addMaterialSearchDeb = useDebouncedValue(addMaterialSearch, 250);
+
+  useEffect(() => {
+    if (!showAddMaterialDropdown) return;
+    let active = true;
+    setAddMaterialCargando(true);
+    productosService
+      .getMateriales(addMaterialSearchDeb.trim() || undefined)
+      .then((r) => { if (active) setAddMaterialResultados(r.slice(0, 15)); })
+      .catch(() => { if (active) setAddMaterialResultados([]); })
+      .finally(() => { if (active) setAddMaterialCargando(false); });
+    return () => { active = false; };
+  }, [showAddMaterialDropdown, addMaterialSearchDeb]);
 
   // Para agregar un costo de producción ad-hoc
   const [showAddCostModal, setShowAddCostModal] = useState(false);
@@ -693,6 +715,9 @@ export default function Cotizaciones() {
   const handleOpenEdit = (quote: Quote) => {
     setEditingQuote(quote);
     setSelectedClientId(String(quote.cliente_id));
+    setClienteSeleccionado(quote.cliente
+      ? { value: quote.cliente_id, label: `${quote.cliente.nombre} (${quote.cliente.telefono})` }
+      : null);
     setObservaciones(quote.observaciones || '');
     setSelectedMonedaId(quote.moneda_id || 1);
     setTasaCambio(quote.tasa_cambio || 1);
@@ -771,6 +796,7 @@ export default function Cotizaciones() {
       });
       setClients((prev) => (prev.some((c) => c.id === creado.id) ? prev : [...prev, creado]));
       setSelectedClientId(String(creado.id));
+      setClienteSeleccionado({ value: creado.id, label: `${creado.nombre} (${creado.telefono})` });
       setShowNuevoClienteModal(false);
       setNcForm({ nombre: '', telefono: '', cedula: '', direccion: '', ciudad: '', estado: '', observaciones: '' });
       toast.success(`Cliente "${creado.nombre}" seleccionado.`);
@@ -1708,10 +1734,12 @@ export default function Cotizaciones() {
                 <SearchSelect
                   value={selectedClientId}
                   onChange={(v) => setSelectedClientId(String(v))}
-                  options={clients.map((c) => ({
-                    value: c.id,
-                    label: `${c.nombre} (${c.telefono})`,
-                  }))}
+                  loadOptions={async (q) =>
+                    (await clienteService.getAll(q || undefined))
+                      .map((c) => ({ value: c.id, label: `${c.nombre} (${c.telefono})` }))
+                  }
+                  minChars={1}
+                  selectedOption={clienteSeleccionado ?? undefined}
                   placeholder="Selecciona un cliente..."
                 />
                 <button
@@ -1917,11 +1945,11 @@ export default function Cotizaciones() {
                               <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Material *</label>
                               <SearchSelect
                                 value={item.material_id}
-                                onChange={(v) => {
+                                onChange={async (v) => {
                                   const matId = Number(v);
                                   updateItemField(index, 'material_id', String(v));
                                   updateItemField(index, 'insumoCosto', null);
-                                  const mat = materiales.find((m) => m.id === matId);
+                                  const mat = await productosService.getMaterial(matId).catch(() => null);
                                   if (mat) {
                                     // Mientras llega el costo real, precargamos el
                                     // costo de compra como referencia (sin pasada).
@@ -1945,10 +1973,15 @@ export default function Cotizaciones() {
                                       });
                                   }
                                 }}
-                                options={materiales.filter(m => m.activo !== false).map((m) => ({
-                                  value: m.id,
-                                  label: `${m.nombre} (${m.unidad_medida?.abreviatura || 'und'}) — COP ${m.costo_base?.toLocaleString()}`,
-                                }))}
+                                loadOptions={async (q) =>
+                                  (await productosService.getMateriales(q || undefined))
+                                    .filter((m) => m.activo !== false)
+                                    .map((m) => ({
+                                      value: m.id,
+                                      label: `${m.nombre} (${m.unidad_medida?.abreviatura || 'und'}) — COP ${m.costo_base?.toLocaleString()}`,
+                                    }))
+                                }
+                                minChars={1}
                                 placeholder="Buscar lámina, tela, tornillo..."
                               />
                             </div>
@@ -3103,10 +3136,13 @@ export default function Cotizaciones() {
               autoFocus
             />
             <div className="max-h-[220px] overflow-y-auto divide-y divide-stone-100 pr-1 text-xs">
-              {materiales
-                .filter(m => m.nombre.toLowerCase().includes(addMaterialSearch.toLowerCase()))
-                .slice(0, 15)
-                .map((m) => (
+              {addMaterialCargando && (
+                <div className="flex items-center gap-2 p-2.5 text-stone-400">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Buscando…
+                </div>
+              )}
+              {!addMaterialCargando &&
+                addMaterialResultados.map((m) => (
                   <button
                     key={m.id}
                     type="button"
@@ -3119,6 +3155,9 @@ export default function Cotizaciones() {
                     </span>
                   </button>
                 ))}
+              {!addMaterialCargando && addMaterialResultados.length === 0 && (
+                <div className="p-2.5 text-center text-stone-400">Sin resultados</div>
+              )}
             </div>
           </div>
         </div>

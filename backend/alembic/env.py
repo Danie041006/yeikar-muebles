@@ -57,6 +57,20 @@ target_metadata = Base.metadata
 # ... etc.
 
 
+def include_object(obj, name, type_, reflected, compare_to):
+    """Ignora los índices GIN trigram en el autogenerate.
+
+    Los índices *_trgm (pg_trgm) se crean con SQL crudo en migraciones
+    dedicadas (buscan patrones ILIKE %...% que un btree no acelera). Como no
+    están declarados en los modelos SQLAlchemy, el autogenerate propondría
+    drop_index para cada uno en cada revision. Aquí los excluimos para que no
+    se borren por accidente.
+    """
+    if type_ == "index" and name and name.endswith("_trgm"):
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -73,6 +87,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -96,7 +111,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

@@ -1,4 +1,5 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from datetime import date
 from typing import Dict, List, Optional
 
@@ -6,6 +7,7 @@ from app.modules.facturacion.model import Factura, DetalleFactura, TasaImpuesto
 from app.modules.facturacion.schemas import FacturaCreate, TasaImpuestoUpdate
 from app.modules.orders.model import Pedido
 from app.modules.sales.model import Venta
+from app.modules.clients.model import Client
 from app.core.hora_ve import hoy_ve
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import es_admin_user, filtrar_registros_propios
@@ -86,11 +88,32 @@ def obtener_factura(db: Session, id_factura: int, usuario: Usuario | None = None
     return query.first()
 
 
-def obtener_facturas(db: Session, usuario: Usuario | None = None):
-    query = db.query(Factura)
+def obtener_facturas(
+    db: Session,
+    usuario: Usuario | None = None,
+    salto: int = 0,
+    limite: int = 100,
+    buscar: str | None = None,
+    estado: str | None = None,
+):
+    query = db.query(Factura).options(joinedload(Factura.cliente))
     if usuario is not None:
         query = filtrar_registros_propios(query, Factura.creado_por_id, usuario)
-    return query.order_by(Factura.id.desc()).limit(500).all()
+    if estado:
+        query = query.filter(Factura.estado == estado)
+    if buscar:
+        term = f"%{buscar}%"
+        num = int(buscar) if buscar.isdigit() else -1
+        query = query.filter(
+            or_(
+                Factura.id == num,
+                Factura.pedido_id == num,
+                Factura.cliente.has(Client.nombre.ilike(term)),
+            )
+        )
+    total = query.count()
+    items = query.order_by(Factura.id.desc()).offset(salto).limit(limite).all()
+    return items, total
 
 
 # ------------------------------------------------------------

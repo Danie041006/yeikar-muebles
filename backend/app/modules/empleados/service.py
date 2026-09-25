@@ -14,7 +14,9 @@ def obtener_empleados(db: Session, salto: int = 0, limite: int = 100, buscar: st
                 model.Empleado.telefono.ilike(f"%{buscar}%")
             )
         )
-    return query.order_by(model.Empleado.id).offset(salto).limit(limite).all()
+    total = query.count()
+    items = query.order_by(model.Empleado.nombre.asc()).offset(salto).limit(limite).all()
+    return items, total
 
 def crear_empleado(db: Session, esquema: schemas.EmpleadoCreate):
     db_obj = model.Empleado(**esquema.model_dump())

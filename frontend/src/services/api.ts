@@ -2,10 +2,73 @@ import axios, { type InternalAxiosRequestConfig } from 'axios';
 
 export const API_URL = (import.meta.env.VITE_API_URL ?? '').replace(/\/+$/, '');
 
+// ─── Caché SWR de catálogos estáticos ─────────────────────────────────────
+// Las páginas piden una y otra vez los mismos catálogos (unidades, monedas,
+// áreas, categorías, cargos, tipos…). Se cachean en memoria con stale-while-
+// revalidate: la primera vez se sirven y en paralelo se refrescan en segundo
+// plano; si el servidor no responde (sin internet) se sirve la última copia.
+const cacheApi = new Map<string, { data: unknown; fetchedAt: number }>();
+const inflightApi = new Map<string, Promise<unknown>>();
+const CATALOGO_TTL_MS = 10 * 60 * 1000;
+
+function esCatalogoCacheable(url: unknown, config?: { params?: unknown }): boolean {
+  return (
+    typeof url === 'string' &&
+    url.startsWith('/catalogos/') &&
+    !config?.params
+  );
+}
+
+export function limpiarCacheApi() {
+  cacheApi.clear();
+}
+
+function respuestaDesdeCache(data: unknown) {
+  return {
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: {},
+  } as never;
+}
+
 // API principal para los módulos: /api/v1/*
 const api = axios.create({
   baseURL: `${API_URL}/api/v1`,
 });
+
+// Caché SWR sobre GET de catálogos (no toca el resto de endpoints).
+const apiGetOriginal = api.get.bind(api);
+api.get = ((url: unknown, config?: any) => {
+  if (esCatalogoCacheable(url, config)) {
+    const key = `GET ${url}`;
+    const ahora = Date.now();
+    const hit = cacheApi.get(key);
+    const refrescar = () => {
+      const inflight = inflightApi.get(key);
+      if (inflight) return inflight;
+      const p = apiGetOriginal(url as string, config)
+        .then((r) => {
+          cacheApi.set(key, { data: r.data, fetchedAt: Date.now() });
+          return r;
+        })
+        .finally(() => inflightApi.delete(key));
+      inflightApi.set(key, p);
+      return p;
+    };
+    if (hit) {
+      if (ahora - hit.fetchedAt < CATALOGO_TTL_MS) {
+        return Promise.resolve(respuestaDesdeCache(hit.data));
+      }
+      // Stale-while-revalidate: sirve lo viejo ya y refresca en segundo plano.
+      refrescar().catch(() => { /* queda la copia anterior (resiliente offline) */ });
+      return Promise.resolve(respuestaDesdeCache(hit.data));
+    }
+    return refrescar();
+  }
+  return apiGetOriginal(url as string, config);
+}) as typeof api.get;
 
 // API de autenticación: /api/auth/*  (el backend la registra sin /v1)
 export const authApi = axios.create({
@@ -49,6 +112,10 @@ const requestInterceptor = (config: InternalAxiosRequestConfig) => {
   const token = localStorage.getItem('token');
   if (token && config.headers) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  // Los escritos sobre catálogos invalidan su caché SWR.
+  if (config.method && config.method.toLowerCase() !== 'get' && config.url?.startsWith('/catalogos/')) {
+    cacheApi.clear();
   }
   return config;
 };

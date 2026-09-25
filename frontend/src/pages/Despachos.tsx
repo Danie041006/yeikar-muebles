@@ -3,8 +3,7 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { envioService, Envio, EnvioUpdate } from '../services/envioService';
 import { OrderDetail } from '../services/pedidoService';
-import { Empleado } from '../services/produccionService';
-import api from '../services/api';
+import { getEmpleados } from '../services/empleadosService';
 import { esperarImagenesCargadas } from '../utils/pdfImagenes';
 import LocationTracker from '../components/LocationTracker';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -12,7 +11,6 @@ import { SearchSelect } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 export default function Despachos() {
   const toast = useToast();  const [envios, setEnvios] = useState<Envio[]>([]);
-  const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'activos' | 'historicos'>('activos');
@@ -132,20 +130,9 @@ export default function Despachos() {
       setLoading(false);
     }
   };
-  const fetchEmpleados = async () => {
-    try {
-      const response = await api.get<Empleado[]>('/empleado/');
-      setEmpleados(response.data.filter(e => e.activo));
-    } catch (error) {
-      console.error('Error loading employees:', error);
-    }
-  };
   useEffect(() => {
     fetchEnvios();
   }, [activeTab, search]);
-  useEffect(() => {
-    fetchEmpleados();
-  }, []);
   const handleOpenAssign = (envio: Envio) => {
     setAssigningEnvio(envio);
     setSelectedEmpleadoId(envio.empleado_id ? envio.empleado_id.toString() : '');
@@ -458,10 +445,15 @@ export default function Despachos() {
                 <SearchSelect
                   value={selectedEmpleadoId}
                   onChange={(v) => setSelectedEmpleadoId(String(v))}
-                  options={empleados.map((emp) => ({
-                    value: emp.id,
-                    label: `${emp.nombre} (${emp.cargo?.nombre || 'Empleado'})`,
-                  }))}
+                  loadOptions={async (q) =>
+                    (await getEmpleados({ buscar: q || undefined, limite: 20 }))
+                      .filter((e) => e.activo)
+                      .map((emp) => ({
+                        value: emp.id,
+                        label: `${emp.nombre} (${emp.cargo?.nombre || 'Empleado'})`,
+                      }))
+                  }
+                  minChars={0}
                   placeholder="Selecciona Conductor..."
                 />
               </div>

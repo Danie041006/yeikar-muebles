@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
@@ -27,10 +27,19 @@ def crear_factura(
 
 @router.get("/", response_model=List[schemas.FacturaResponse])
 def listar_facturas(
+    salto: int = Query(0, ge=0),
+    limite: int = Query(100, ge=1, le=1000),
+    buscar: Optional[str] = Query(None, description="Buscar por id de factura, pedido o nombre de cliente"),
+    estado: Optional[str] = Query(None, description="Filtrar por estado (EMITIDA, ANULADA)"),
+    response: Response = None,
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    return service.obtener_facturas(db, usuario=usuario_actual)
+    items, total = service.obtener_facturas(
+        db, usuario=usuario_actual, salto=salto, limite=limite, buscar=buscar, estado=estado
+    )
+    response.headers["X-Total-Count"] = str(total)
+    return items
 
 
 @router.get("/pedidos-facturables/", response_model=List[schemas.PedidoFacturableResponse])

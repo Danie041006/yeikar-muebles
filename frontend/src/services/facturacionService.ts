@@ -95,11 +95,20 @@ export interface TasaImpuesto {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
+export interface ListarFacturasParams {
+  buscar?: string;
+  estado?: string;
+  salto?: number;
+  limite?: number;
+}
+
 export const facturacionService = {
-  /** Listar facturas emitidas */
-  getAll: async (): Promise<Factura[]> => {
-    const res = await api.get<Factura[]>('/factura/');
-    return res.data;
+  /** Listar facturas emitidas (paginado + búsqueda server-side) */
+  getAll: async (params: ListarFacturasParams = {}): Promise<{ items: Factura[]; total: number }> => {
+    const res = await api.get<Factura[]>('/factura/', {
+      params: { ...(params.buscar ? { buscar: params.buscar } : {}), ...(params.estado ? { estado: params.estado } : {}), salto: params.salto ?? 0, limite: params.limite ?? 100 },
+    });
+    return { items: res.data, total: Number(res.headers['x-total-count']) || res.data.length };
   },
 
   /** Detalle de una factura con sus líneas */

@@ -133,8 +133,10 @@ export const cuentasPorPagarService = {
     await api.delete(`/cuentas-por-pagar/${cxpId}`);
   },
 
-  getProveedores: async (): Promise<Proveedor[]> => {
-    const response = await api.get<Proveedor[]>('/proveedor/');
+  getProveedores: async (buscar?: string, limite = 20): Promise<Proveedor[]> => {
+    const response = await api.get<Proveedor[]>('/proveedor/', {
+      params: { ...(buscar ? { buscar } : {}), limite },
+    });
     return response.data;
   },
 };

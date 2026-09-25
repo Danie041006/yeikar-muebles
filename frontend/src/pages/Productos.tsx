@@ -3,7 +3,8 @@ import { productosService, Product, ProductoMaterial, TipoProducto, SeccionProdu
 import api from '../services/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect, Modal } from '../components/ui';
-import { Package, Search, Plus, Copy, Pencil, Trash2, X, FileSpreadsheet, MoreHorizontal } from 'lucide-react';
+import { Package, Search, Plus, Copy, Pencil, Trash2, X, FileSpreadsheet, MoreHorizontal, Loader2 } from 'lucide-react';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import EstructuraCostos from '../components/EstructuraCostos';
@@ -73,6 +74,91 @@ export default function Productos() {
   // Filtros de navegación por Origen y Subcategorías
   const [tipoOrigenFiltro, setTipoOrigenFiltro] = useState<'TODOS' | 'FABRICADOS' | 'REVENTA'>('TODOS');
   const [subcategoriaFiltro, setSubcategoriaFiltro] = useState<string>('TODAS');
+
+  // ── Catálogo con paginación server-side ──
+  // No se baja el catálogo completo (1.776 productos → antes solo llegaban los
+  // primeros 1000). La búsqueda es server-side con debounce y se carga por
+  // páginas de PAGE_SIZE con "Cargar más". El total viene en X-Total-Count.
+  const PAGE_SIZE = 60;
+  const [totalCount, setTotalCount] = useState(0);
+  const [cargandoMas, setCargandoMas] = useState(false);
+  // Conteos globales (Fabricados/Reventa/Todos) para los chips de filtro:
+  // como la lista ahora es paginada, no se pueden derivar de lo cargado.
+  const [stats, setStats] = useState<{ fabricados: number; reventa: number; total: number }>({ fabricados: 0, reventa: 0, total: 0 });
+  const searchDeb = useDebouncedValue(search, 400);
+
+  const cargarStats = useCallback(async () => {
+    try {
+      const [fab, rev, tot] = await Promise.all([
+        api.get('/producto/', { params: { es_reventa: false, limite: 1 } }),
+        api.get('/producto/', { params: { es_reventa: true, limite: 1 } }),
+        api.get('/producto/', { params: { limite: 1 } }),
+      ]);
+      setStats({
+        fabricados: Number(fab.headers['x-total-count']) || 0,
+        reventa: Number(rev.headers['x-total-count']) || 0,
+        total: Number(tot.headers['x-total-count']) || 0,
+      });
+    } catch (error) {
+      console.error('Error loading product stats:', error);
+    }
+  }, []);
+  const fetchProductos = useCallback(async () => {
+    setLoading(true);
+    try {
+      const resp = await api.get<Product[]>('/producto/', {
+        params: {
+          buscar: searchDeb.trim() || undefined,
+          es_reventa: tipoOrigenFiltro === 'REVENTA' ? true : tipoOrigenFiltro === 'FABRICADOS' ? false : undefined,
+          salto: 0,
+          limite: PAGE_SIZE,
+        },
+      });
+      setProductos(resp.data);
+      const t = Number(resp.headers['x-total-count']);
+      if (!Number.isNaN(t)) setTotalCount(t);
+    } catch (error) {
+      console.error('Error loading products:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [searchDeb, tipoOrigenFiltro]);
+
+  useEffect(() => {
+    fetchProductos();
+  }, [fetchProductos]);
+
+  useEffect(() => {
+    cargarStats();
+  }, [cargarStats]);
+
+  const cargarMas = useCallback(async () => {
+    setCargandoMas(true);
+    try {
+      const resp = await api.get<Product[]>('/producto/', {
+        params: {
+          buscar: searchDeb.trim() || undefined,
+          es_reventa: tipoOrigenFiltro === 'REVENTA' ? true : tipoOrigenFiltro === 'FABRICADOS' ? false : undefined,
+          salto: productos.length,
+          limite: PAGE_SIZE,
+        },
+      });
+      setProductos((prev) => [...prev, ...resp.data]);
+      const t = Number(resp.headers['x-total-count']);
+      if (!Number.isNaN(t)) setTotalCount(t);
+    } catch (error) {
+      console.error('Error loading more products:', error);
+    } finally {
+      setCargandoMas(false);
+    }
+  }, [searchDeb, tipoOrigenFiltro, productos.length]);
+
+  /** Refresca catálogos auxiliares y la lista de productos (tras CRUD). */
+  const refreshData = async () => {
+    await fetchData();
+    await fetchProductos();
+    await cargarStats();
+  };
 
   // Selected product, legacy recipe and structured section recipe
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -244,19 +330,14 @@ export default function Productos() {
 
   const fetchData = async () => {
     try {
-      setLoading(true);
-      const [prodData, tiposData, matData] = await Promise.all([
-        productosService.getProductos(undefined, { limite: 1000 }),
+      const [tiposData, matData] = await Promise.all([
         api.get<TipoProducto[]>('/catalogos/tipo-producto/'),
         api.get<Material[]>('/material/?limite=1000'),
       ]);
-      setProductos(prodData);
       setTiposProducto(tiposData.data);
       setMateriales(matData.data);
     } catch (error) {
-      console.error('Error loading product data:', error);
-    } finally {
-      setLoading(false);
+      console.error('Error loading catalog data:', error);
     }
   };
 
@@ -377,7 +458,7 @@ export default function Productos() {
       setShowProductModal(false);
       setFotoArchivo(null);
       setFotoPreview(null);
-      fetchData();
+      refreshData();
     } catch (error) {
       console.error('Error saving product:', error);
     } finally {
@@ -424,7 +505,7 @@ export default function Productos() {
         )
       );
       toast.success(`¡Producto duplicado con éxito! Puedes editar "${nuevo.nombre}" desde el listado.`);
-      await fetchData();
+      await refreshData();
       handleOpenRecipe(nuevo);
     } catch (error) {
       console.error('Error duplicating product:', error);
@@ -482,7 +563,7 @@ export default function Productos() {
     try {
       await productosService.eliminarProducto(id);
       if (selectedProduct?.id === id) setSelectedProduct(null);
-      fetchData();
+      refreshData();
     } catch (error) {
       console.error('Error deleting product:', error);
     }
@@ -725,10 +806,6 @@ export default function Productos() {
     }
   };
 
-  // Totales principales
-  const totalFabricados = useMemo(() => productos.filter((p) => !p.es_reventa).length, [productos]);
-  const totalReventa = useMemo(() => productos.filter((p) => p.es_reventa).length, [productos]);
-
   // Lista de subcategorías disponibles según el filtro de origen
   const subcategoriasDisponibles = useMemo(() => {
     const prodsBase = productos.filter((p) => {
@@ -748,30 +825,16 @@ export default function Productos() {
       .sort((a, b) => b.count - a.count);
   }, [productos, tipoOrigenFiltro]);
 
-  // Filtrado final de productos
+  // Filtrado final de productos: el origen y la búsqueda textual ya los
+  // resolvió el servidor (es_reventa + buscar). Aquí solo queda la
+  // subcategoría, que se aplica sobre lo ya paginado.
   const filteredProducts = useMemo(() => {
-    const term = search.toLowerCase().trim();
-
+    if (subcategoriaFiltro === 'TODAS') return productos;
     return productos.filter((p) => {
-      // Filtro de origen (Fabricados vs Reventa)
-      if (tipoOrigenFiltro === 'FABRICADOS' && p.es_reventa) return false;
-      if (tipoOrigenFiltro === 'REVENTA' && !p.es_reventa) return false;
-
-      // Filtro de subcategoría
-      if (subcategoriaFiltro !== 'TODAS') {
-        const cat = p.tipo_producto?.nombre || (p.es_reventa ? 'Reventa' : 'Sin clasificar');
-        if (cat !== subcategoriaFiltro) return false;
-      }
-
-      // Filtro de búsqueda textual
-      if (!term) return true;
-      const matchName = p.nombre.toLowerCase().includes(term);
-      const matchCode = p.codigo?.toLowerCase().includes(term);
-      const matchDesc = p.descripcion?.toLowerCase().includes(term);
-      const matchCat = (p.tipo_producto?.nombre || '').toLowerCase().includes(term);
-      return matchName || matchCode || matchDesc || matchCat;
+      const cat = p.tipo_producto?.nombre || (p.es_reventa ? 'Reventa' : 'Sin clasificar');
+      return cat === subcategoriaFiltro;
     });
-  }, [productos, tipoOrigenFiltro, subcategoriaFiltro, search]);
+  }, [productos, subcategoriaFiltro]);
 
   // Agrupación de productos por categoría para la vista estructurada
   const productosPorCategoria = useMemo(() => {
@@ -959,7 +1022,7 @@ export default function Productos() {
       }
       toast.success(`Producto "${importNombre.trim()}" creado con su estructura de costos.`);
       setShowImportModal(false);
-      fetchData();
+      refreshData();
     } catch (error: any) {
       toast.error(error?.response?.data?.detail || 'No se pudo crear el producto.');
     } finally {
@@ -1074,10 +1137,10 @@ export default function Productos() {
                   : 'bg-white text-stone-600 border-stone-200 hover:bg-yeikar-tertiary'
               }`}
             >
-              Todos <span className="font-mono text-[10px] opacity-70">({productos.length})</span>
+              Todos <span className="font-mono text-[10px] opacity-70">({stats.total})</span>
             </button>
 
-            {totalFabricados > 0 && (
+            {stats.fabricados > 0 && (
               <button
                 type="button"
                 onClick={() => {
@@ -1090,11 +1153,11 @@ export default function Productos() {
                     : 'bg-white text-stone-600 border-stone-200 hover:bg-yeikar-tertiary'
                 }`}
               >
-                Fabricados <span className="font-mono text-[10px] opacity-70">({totalFabricados})</span>
+                Fabricados <span className="font-mono text-[10px] opacity-70">({stats.fabricados})</span>
               </button>
             )}
 
-            {totalReventa > 0 && (
+            {stats.reventa > 0 && (
               <button
                 type="button"
                 onClick={() => {
@@ -1107,13 +1170,14 @@ export default function Productos() {
                     : 'bg-white text-stone-600 border-stone-200 hover:bg-yeikar-tertiary'
                 }`}
               >
-                Revendidos <span className="font-mono text-[10px] opacity-70">({totalReventa})</span>
+                Revendidos <span className="font-mono text-[10px] opacity-70">({stats.reventa})</span>
               </button>
             )}
           </div>
 
           <div className="text-xs text-stone-500 font-medium">
-            Mostrando <strong className="text-yeikar-secondary">{filteredProducts.length}</strong> muebles
+            Mostrando <strong className="text-yeikar-secondary">{filteredProducts.length}</strong>
+            {totalCount > 0 ? <> de <strong className="text-yeikar-secondary">{totalCount}</strong></> : null} muebles
           </div>
         </div>
 
@@ -1226,6 +1290,20 @@ export default function Productos() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {filteredProducts.map(renderProductCard)}
               </div>
+            </div>
+          )}
+
+          {!loading && productos.length < totalCount && (
+            <div className="flex justify-center pt-1">
+              <button
+                type="button"
+                onClick={cargarMas}
+                disabled={cargandoMas}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold font-headline bg-white border border-yeikar-secondary-light/20 text-yeikar-secondary hover:bg-yeikar-tertiary/50 transition-all shadow-xs disabled:opacity-50"
+              >
+                {cargandoMas ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                {cargandoMas ? 'Cargando…' : `Cargar más (${totalCount - productos.length} restantes)`}
+              </button>
             </div>
           )}
         </div>
@@ -1828,7 +1906,7 @@ export default function Productos() {
                         title="Quitar foto"
                         onClick={async () => {
                           await eliminarAdjunto(f.id);
-                          fetchData();
+                          refreshData();
                         }}
                         className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
                       >

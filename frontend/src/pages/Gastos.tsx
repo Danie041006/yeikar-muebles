@@ -42,7 +42,6 @@ export default function Gastos() {
   const [monedas, setMonedas] = useState<Moneda[]>([]);
   const [cuentas, setCuentas] = useState<ResumenCuenta[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
-  const [proveedores, setProveedores] = useState<{ id: number; nombre: string }[]>([]);
   const [deudas, setDeudas] = useState<CuentaPorPagar[]>([]);
   const [resumen, setResumen] = useState<ResumenCuentasPorPagar | null>(null);
   const [categoria, setCategoria] = useState('');
@@ -106,18 +105,16 @@ export default function Gastos() {
   }, [categoria, fechaDesde, fechaHasta, areaFiltro]);
 
   const cargarCatalogos = useCallback(async () => {
-    const [tipos, monedasData, cuentasData, areasData, proveedoresData] = await Promise.all([
+    const [tipos, monedasData, cuentasData, areasData] = await Promise.all([
       getTiposGasto(),
       getMonedas(),
       cuentasService.getResumen(),
       getAreas(),
-      cuentasPorPagarService.getProveedores().catch(() => [] as any[]),
     ]);
     setTiposGasto(tipos);
     setMonedas(monedasData);
     setCuentas(cuentasData);
     setAreas(areasData);
-    setProveedores(proveedoresData);
     setForm((prev) => ({
       ...prev,
       metodo_caja_id: prev.metodo_caja_id === 0 ? cuentasData[0]?.metodo_caja.id || 0 : prev.metodo_caja_id,
@@ -342,6 +339,12 @@ export default function Gastos() {
   const pctAbonado = (d: CuentaPorPagar) =>
     Number(d.monto) > 0 ? Math.min(100, (Number(d.monto_pagado) / Number(d.monto)) * 100) : 0;
 
+  // Abrir el modal de abono (desde la fila, el detalle o la tarjeta del proveedor).
+  const abrirAbonoDeuda = (d: CuentaPorPagar) => {
+    setAbonarDeuda(d);
+    setAbonoForm((prev) => ({ ...prev, monto: Number(d.saldo), metodo_caja_id: prev.metodo_caja_id }));
+  };
+
   // Abrir el modal de abono desde la tarjeta del proveedor: usa la deuda
   // pendiente con mayor saldo de ese proveedor (la operación abona por deuda).
   const abrirAbonoProveedor = (proveedorId: number) => {
@@ -352,32 +355,31 @@ export default function Gastos() {
       toast.error('Este proveedor no tiene deudas pendientes para abonar.');
       return;
     }
-    setAbonarDeuda(deuda);
-    setAbonoForm((prev) => ({ ...prev, monto: Number(deuda.saldo), metodo_caja_id: prev.metodo_caja_id }));
+    abrirAbonoDeuda(deuda);
   };
 
   const renderAccionesDeuda = (d: CuentaPorPagar) => (
     <div className="flex flex-wrap gap-1.5">
       {d.estado === 'PENDIENTE' && (
         <Button variant="ghost" size="sm" className="text-emerald-700 hover:bg-emerald-50"
-          onClick={() => { setAbonarDeuda(d); setAbonoForm((prev) => ({ ...prev, monto: Number(d.saldo), metodo_caja_id: prev.metodo_caja_id })); }}>
+          onClick={(e) => { e.stopPropagation(); abrirAbonoDeuda(d); }}>
           Abonar
         </Button>
       )}
       {d.pagos && d.pagos.length > 0 && (
         <Button variant="ghost" size="sm" className="text-yeikar-secondary hover:bg-yeikar-tertiary/40"
-          onClick={() => setHistorialDeuda(d)}>
+          onClick={(e) => { e.stopPropagation(); setHistorialDeuda(d); }}>
           Historial ({d.pagos.length})
         </Button>
       )}
       {(d.detalles && d.detalles.length > 0) && (
         <Button variant="ghost" size="sm" className="text-yeikar-secondary hover:bg-yeikar-tertiary/40"
-          onClick={() => setHistorialDeuda(d)}>
+          onClick={(e) => { e.stopPropagation(); setHistorialDeuda(d); }}>
           Detalle ({d.detalles.length})
         </Button>
       )}
       <Button variant="ghost" size="sm" className="text-red-600 hover:bg-red-50"
-        onClick={() => setConfirmDeleteDeuda(d.id)}>
+        onClick={(e) => { e.stopPropagation(); setConfirmDeleteDeuda(d.id); }}>
         Eliminar
       </Button>
     </div>
@@ -703,6 +705,7 @@ export default function Gastos() {
                   {d.estado === 'PAGADA' ? 'Pagada' : 'Por pagar'}
                 </Badge>
               )}
+              onRowClick={(d) => setHistorialDeuda(d)}
               tableActions={renderAccionesDeuda}
               cardActions={renderAccionesDeuda}
             />
@@ -1098,10 +1101,11 @@ export default function Gastos() {
             <SearchSelect
               value={deudaForm.proveedor_id}
               onChange={(v) => setDeudaForm((prev) => ({ ...prev, proveedor_id: Number(v) }))}
-              options={[
-                { value: 0, label: 'Selecciona el proveedor...' },
-                ...proveedores.map((p) => ({ value: p.id, label: p.nombre })),
-              ]}
+              loadOptions={async (q) =>
+                (await cuentasPorPagarService.getProveedores(q || undefined))
+                  .map((p) => ({ value: p.id, label: p.nombre }))
+              }
+              minChars={0}
               placeholder="Buscar proveedor..."
             />
           </Field>
@@ -1314,9 +1318,25 @@ export default function Gastos() {
         onClose={() => setHistorialDeuda(null)}
         title={historialDeuda ? `Detalle — ${historialDeuda.proveedor?.nombre || 'proveedor'}` : 'Detalle'}
         subtitle={historialDeuda
-          ? `${historialDeuda.detalles?.length || 0} renglones · ${historialDeuda.pagos?.length || 0} abonos`
+          ? `Pendiente ${fmtMoneda(Number(historialDeuda.saldo), historialDeuda.moneda?.codigo || 'COP')} · ${historialDeuda.detalles?.length || 0} renglones · ${historialDeuda.pagos?.length || 0} abonos`
           : ''}
         size="xl"
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setHistorialDeuda(null)}>Cerrar</Button>
+            {historialDeuda?.estado === 'PENDIENTE' && (
+              <Button
+                onClick={() => {
+                  const d = historialDeuda;
+                  setHistorialDeuda(null);
+                  abrirAbonoDeuda(d);
+                }}
+              >
+                Abonar {fmtMoneda(Number(historialDeuda.saldo), historialDeuda.moneda?.codigo || 'COP')}
+              </Button>
+            )}
+          </>
+        }
       >
         <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
           {/* ── Desglose de la deuda (qué se compró y para quién) ── */}

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -23,10 +23,13 @@ def listar_empleados(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),
     buscar: Optional[str] = Query(None, description="Buscar por nombre o telefono"),
+    response: Response = None,
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_empleados(db, salto=salto, limite=limite, buscar=buscar)
+    items, total = service.obtener_empleados(db, salto=salto, limite=limite, buscar=buscar)
+    response.headers["X-Total-Count"] = str(total)
+    return items
 
 @router.get("/{id_empleado}", response_model=schemas.EmpleadoResponse)
 def ver_empleado(
