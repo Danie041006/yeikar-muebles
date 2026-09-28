@@ -427,11 +427,19 @@ def crear_opcion_costo_produccion(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     """Crea al vuelo un costo del tarifario (área + descripción + precio) desde
-    el formulario de mano de obra, sin requerir el módulo costos_produccion."""
-    from decimal import Decimal
-    from app.modules.catalogos.model import Area
-    from app.modules.costos_produccion.model import PrecioProduccion
+    el formulario de mano de obra.
 
+    Escribe el tarifario GLOBAL que alimenta la nómina: exige el mismo permiso
+    de escritura que el módulo costos_produccion (o Dueño/Administrador)."""
+    from app.modules.users.deps import es_admin_user, obtener_accesos_usuario
+    from app.modules.costos_produccion import schemas as costos_schemas
+    from app.modules.costos_produccion import service as costos_service
+
+    if not es_admin_user(usuario_actual) and not obtener_accesos_usuario(db, usuario_actual).get("costos_produccion"):
+        raise HTTPException(
+            status_code=403,
+            detail="No tienes permisos para crear tarifas de costos de producción.",
+        )
     try:
         area_id = int(payload.get("area_id") or 0)
         descripcion = str(payload.get("descripcion") or "").strip()
@@ -440,13 +448,16 @@ def crear_opcion_costo_produccion(
         raise HTTPException(status_code=400, detail="Datos inválidos.")
     if not area_id or not descripcion or precio <= 0:
         raise HTTPException(status_code=400, detail="Área, descripción y precio (> 0) son obligatorios.")
-    if not db.query(Area).filter(Area.id == area_id).first():
-        raise HTTPException(status_code=400, detail="El área especificada no existe.")
-
-    item = PrecioProduccion(area_id=area_id, descripcion=descripcion[:200], precio=Decimal(str(precio)), activo=True)
-    db.add(item)
-    db.commit()
-    db.refresh(item)
+    try:
+        item = costos_service.crear_precio(
+            db,
+            costos_schemas.PrecioProduccionCreate(
+                area_id=area_id, descripcion=descripcion[:200], precio=precio, activo=True,
+            ),
+            usuario=usuario_actual,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return {"id": item.id, "descripcion": item.descripcion, "precio": float(item.precio), "area_id": item.area_id}
 
 

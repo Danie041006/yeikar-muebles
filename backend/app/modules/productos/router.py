@@ -74,6 +74,20 @@ def actualizar_producto(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
+    actual = service.obtener_producto(db, id_producto)
+    if not actual:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    # Los precios base son una ruta paralela al recálculo admin-only: fijarlos
+    # o cambiarlos queda reservado a Dueño/Administrador (si vienen iguales,
+    # el formulario puede reenviarlos sin bloquear la edición normal).
+    datos = esquema.model_dump(exclude_unset=True)
+    for campo in ("precio_costo_base", "precio_venta_base"):
+        if campo in datos and float(datos[campo] or 0) != float(getattr(actual, campo) or 0):
+            if not es_admin_user(usuario_actual):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Solo Dueño/Administrador pueden fijar los precios base del producto.",
+                )
     db_obj = service.actualizar_producto(db, id_producto, esquema)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
@@ -527,6 +541,13 @@ def crear_elemento_seccion(
     seccion = db.query(model.SeccionProducto).filter(model.SeccionProducto.id == seccion_id).first()
     if not seccion:
         raise HTTPException(status_code=404, detail="Sección no encontrada")
+    # Igual que en el update: el precio del insumo es base autoritativa del
+    # costo del producto y queda reservado a Dueño/Administrador.
+    if esquema.precio_unitario is not None and not es_admin_user(usuario_actual):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo Dueño/Administrador pueden fijar el precio de un insumo de la receta.",
+        )
     elemento = model.ElementoSeccion(seccion_id=seccion_id, **esquema.model_dump(exclude={"seccion_id"}))
     db.add(elemento)
     db.commit()
@@ -592,6 +613,13 @@ def actualizar_elemento_seccion(
             setattr(elemento, campo, datos[campo])
 
     if registrar_sinonimo and elemento.material_id_normalizado is not None:
+        # El sinónimo es un mapeo GLOBAL que resuelven los imports y el IQE de
+        # todos: solo un administrador puede sembrarlo (y queda auditado).
+        if not es_admin_user(usuario_actual):
+            raise HTTPException(
+                status_code=403,
+                detail="Solo Dueño/Administrador pueden registrar sinónimos de material.",
+            )
         sinonimo = elemento.nombre_insumo_original
         if sinonimo and not db.query(model.MaterialSinonimo).filter(
                 model.MaterialSinonimo.sinonimo == sinonimo).first():
@@ -599,6 +627,16 @@ def actualizar_elemento_seccion(
                 material_id=elemento.material_id_normalizado,
                 sinonimo=sinonimo,
             ))
+            from app.modules.auditoria.service import record_event
+
+            record_event(
+                db,
+                actor=usuario_actual,
+                action="CREATE",
+                entity_type="material_sinonimo",
+                entity_id=elemento.material_id_normalizado,
+                after={"sinonimo": sinonimo, "material_id": elemento.material_id_normalizado},
+            )
 
     db.commit()
     db.refresh(elemento)

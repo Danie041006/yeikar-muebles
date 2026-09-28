@@ -1,8 +1,10 @@
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 
+from app.modules.auditoria.service import record_event
 from app.modules.costos_produccion import model, schemas
 from app.modules.catalogos.model import Area
+from app.modules.users.model import Usuario
 
 
 def _validar_area(db: Session, area_id: int) -> None:
@@ -37,35 +39,73 @@ def listar_precios(
     )
 
 
-def crear_precio(db: Session, esquema: schemas.PrecioProduccionCreate) -> model.PrecioProduccion:
+def _snapshot(obj: model.PrecioProduccion) -> dict:
+    return {
+        "area_id": obj.area_id,
+        "descripcion": obj.descripcion,
+        "precio": float(obj.precio) if obj.precio is not None else None,
+        "activo": bool(obj.activo),
+    }
+
+
+def crear_precio(
+    db: Session,
+    esquema: schemas.PrecioProduccionCreate,
+    usuario: Usuario | None = None,
+) -> model.PrecioProduccion:
     _validar_area(db, esquema.area_id)
     obj = model.PrecioProduccion(**esquema.model_dump())
     db.add(obj)
+    db.flush()
+    record_event(
+        db, actor=usuario, action="CREATE", entity_type="precio_produccion",
+        entity_id=obj.id, after=_snapshot(obj),
+    )
     db.commit()
     db.refresh(obj)
     return obj
 
 
 def actualizar_precio(
-    db: Session, precio_id: int, esquema: schemas.PrecioProduccionUpdate
+    db: Session,
+    precio_id: int,
+    esquema: schemas.PrecioProduccionUpdate,
+    usuario: Usuario | None = None,
 ) -> Optional[model.PrecioProduccion]:
     obj = db.query(model.PrecioProduccion).filter(model.PrecioProduccion.id == precio_id).first()
     if not obj:
         return None
+    antes = _snapshot(obj)
     data = esquema.model_dump(exclude_unset=True)
     if "area_id" in data:
         _validar_area(db, data["area_id"])
     for campo, valor in data.items():
         setattr(obj, campo, valor)
+    record_event(
+        db, actor=usuario, action="UPDATE", entity_type="precio_produccion",
+        entity_id=obj.id, before=antes, after=_snapshot(obj),
+    )
     db.commit()
     db.refresh(obj)
     return obj
 
 
-def eliminar_precio(db: Session, precio_id: int) -> bool:
+def eliminar_precio(db: Session, precio_id: int, usuario: Usuario | None = None) -> bool:
     obj = db.query(model.PrecioProduccion).filter(model.PrecioProduccion.id == precio_id).first()
     if not obj:
         return False
+    # Una tarifa usada por mano de obra se desactiva, no se borra: la FK es
+    # ON DELETE SET NULL y el borrado desvinculaba el trabajo histórico.
+    from app.modules.production.model import ManoObra
+
+    if db.query(ManoObra.id).filter(ManoObra.precio_produccion_id == precio_id).first():
+        raise ValueError(
+            "La tarifa está en uso por mano de obra registrada: desactívala en lugar de eliminarla."
+        )
+    record_event(
+        db, actor=usuario, action="DELETE", entity_type="precio_produccion",
+        entity_id=precio_id, before=_snapshot(obj),
+    )
     db.delete(obj)
     db.commit()
     return True

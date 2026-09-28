@@ -211,6 +211,28 @@ def actualizar_gasto(
             data["tasa_cambio"] = Decimal(str(tasa))
             data["monto_en_moneda_base"] = monto * data["tasa_cambio"]
 
+    # El gasto con salida de caja tiene un MovimientoCaja espejo (referencia
+    # "Gasto #{id}"): editar el monto/moneda/fecha sin sincronizarlo dejaba la
+    # caja descuadrada respecto al gasto.
+    from app.modules.reports.model import MovimientoCaja
+
+    movimiento = db.query(MovimientoCaja).filter(
+        MovimientoCaja.referencia == f"Gasto #{db_gasto.id}"
+    ).first()
+    if "metodo_caja_id" in data:
+        if movimiento is not None and data["metodo_caja_id"] != movimiento.metodo_caja_id:
+            raise ValueError(
+                "No se puede cambiar la cuenta del gasto: eliminarlo y volver a registrarlo "
+                "(cambiar la cuenta movería el egreso de caja)."
+            )
+        data.pop("metodo_caja_id")
+    if movimiento is not None:
+        for campo in ("monto", "moneda_id", "tasa_cambio", "monto_en_moneda_base", "fecha"):
+            if campo in data:
+                setattr(movimiento, campo, data[campo])
+        if "descripcion" in data:
+            movimiento.observaciones = data["descripcion"]
+
     for key, value in data.items():
         setattr(db_gasto, key, value)
     if usuario is not None:

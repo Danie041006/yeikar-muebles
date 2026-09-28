@@ -33,7 +33,7 @@ def crear_precio(
     current_user: Usuario = Depends(get_current_user),
 ):
     try:
-        return service.crear_precio(db, esquema)
+        return service.crear_precio(db, esquema, usuario=current_user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -45,7 +45,7 @@ def actualizar_precio(
     current_user: Usuario = Depends(get_current_user),
 ):
     try:
-        obj = service.actualizar_precio(db, precio_id, esquema)
+        obj = service.actualizar_precio(db, precio_id, esquema, usuario=current_user)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     if not obj:
@@ -58,6 +58,10 @@ def eliminar_precio(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if not service.eliminar_precio(db, precio_id):
+    try:
+        eliminado = service.eliminar_precio(db, precio_id, usuario=current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not eliminado:
         raise HTTPException(status_code=404, detail="Precio de producción no encontrado")
     return None

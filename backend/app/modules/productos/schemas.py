@@ -257,6 +257,10 @@ class ElementoSeccionBase(BaseModel):
 
 class ElementoSeccionCreate(ElementoSeccionBase):
     seccion_id: int
+    # Mismas cotas que el update: el create aceptaba cantidades/costos
+    # arbitrarios que el motor de costos usa como base autoritativa.
+    cantidad: float = Field(1.0, gt=0, allow_inf_nan=False)
+    precio_unitario: Optional[float] = Field(None, ge=0, le=1_000_000_000, allow_inf_nan=False)
 
 class ElementoSeccionResponse(ElementoSeccionBase):
     id: int
