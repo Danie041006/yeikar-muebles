@@ -65,7 +65,7 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <div className="premium-grid flex min-h-screen items-center justify-center bg-yeikar-tertiary p-6">
+      <div className="premium-grid flex min-h-[100dvh] items-center justify-center bg-yeikar-tertiary p-6">
         <div className="flex w-full max-w-xs flex-col items-center rounded-2xl border border-yeikar-secondary-light/10 bg-white/75 p-8 text-center shadow-card backdrop-blur-xl">
           <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-2xl font-black text-yeikar-neutral shadow-gold">Y</div>
           <div className="mb-4 h-1 w-24 overflow-hidden rounded-full bg-yeikar-tertiary">

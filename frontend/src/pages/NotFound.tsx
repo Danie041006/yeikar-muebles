@@ -4,7 +4,7 @@ import SEO from '../components/SEO';
 
 export default function NotFound() {
   return (
-    <div className="premium-grid flex min-h-screen items-center justify-center bg-yeikar-tertiary p-6">
+    <div className="premium-grid flex min-h-[100dvh] items-center justify-center bg-yeikar-tertiary p-6">
       <SEO
         title="Página no encontrada"
         description="La página que buscas no existe o fue movida."

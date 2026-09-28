@@ -28,7 +28,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
     if (!this.state.hasError) return this.props.children;
 
     return (
-      <div className="flex min-h-screen items-center justify-center bg-yeikar-tertiary p-6">
+      <div className="flex min-h-[100dvh] items-center justify-center bg-yeikar-tertiary p-6">
         <div className="w-full max-w-md rounded-2xl border border-yeikar-secondary-light/10 bg-white p-8 text-center shadow-card">
           <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-xl bg-yeikar-primary font-headline text-2xl font-black text-yeikar-neutral shadow-gold">
             Y

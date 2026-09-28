@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   }, [mobileOpen]);
 
   return (
-    <div className="flex min-h-screen bg-yeikar-tertiary">
+    <div className="flex min-h-[100dvh] bg-yeikar-tertiary">
       <Sidebar mobileOpen={mobileOpen} onClose={() => setMobileOpen(false)} />
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <Navbar onMenuClick={() => setMobileOpen(true)} />

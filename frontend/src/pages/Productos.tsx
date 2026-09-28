@@ -1466,7 +1466,8 @@ export default function Productos() {
                         </div>
 
                         {/* Tabla estilo Excel */}
-                        <table className="w-full border-collapse text-xs">
+                        <div className="overflow-x-auto scroll-touch">
+                        <table className="w-full min-w-[620px] border-collapse text-xs">
                           <tbody>
                             <tr className="bg-slate-100 font-bold text-[10px] uppercase text-yeikar-secondary">
                               <td className="border border-slate-300 px-2 py-1 text-center">MATERIA PRIMA</td>
@@ -1566,6 +1567,7 @@ export default function Productos() {
                              )}
                           </tbody>
                         </table>
+                        </div>
                       </div>
                     ))}
                   </div>

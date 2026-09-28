@@ -1345,7 +1345,8 @@ export default function Gastos() {
               <div className="bg-yeikar-tertiary/20 px-4 py-2 text-xs font-bold uppercase tracking-wide text-yeikar-secondary">
                 Qué compone esta deuda
               </div>
-              <table className="w-full text-[12px]">
+              <div className="overflow-x-auto scroll-touch">
+              <table className="w-full min-w-[520px] text-[12px]">
                 <thead>
                   <tr className="border-b border-yeikar-secondary-light/10 text-[10px] uppercase tracking-wider text-yeikar-neutral/45">
                     <th className="px-3 py-1.5 text-left">Ítem</th>
@@ -1379,6 +1380,7 @@ export default function Gastos() {
                   </tr>
                 </tfoot>
               </table>
+              </div>
             </div>
           )}
 

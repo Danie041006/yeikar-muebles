@@ -247,9 +247,9 @@ export default function Login() {
   };
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-yeikar-tertiary text-yeikar-neutral">
+    <main className="relative min-h-[100dvh] overflow-hidden bg-yeikar-tertiary text-yeikar-neutral">
       <div className="pointer-events-none absolute inset-0 premium-grid opacity-60" />
-      <div className="relative grid min-h-screen lg:grid-cols-[1.08fr_0.92fr]">
+      <div className="relative grid min-h-[100dvh] lg:grid-cols-[1.08fr_0.92fr]">
         <section className="relative hidden overflow-hidden bg-gradient-to-br from-yeikar-neutral via-yeikar-secondary to-yeikar-neutral-dark px-10 py-10 text-white lg:flex lg:flex-col lg:justify-between xl:px-16 xl:py-12">
           <div className="pointer-events-none absolute -right-28 top-1/2 h-[620px] w-[620px] -translate-y-1/2 rounded-full border border-yeikar-primary/10" />
           <div className="pointer-events-none absolute -right-10 top-1/2 h-[440px] w-[440px] -translate-y-1/2 rounded-full border border-yeikar-primary/10" />
@@ -296,7 +296,7 @@ export default function Login() {
           </div>
         </section>
 
-        <section className="relative flex min-h-screen flex-col px-5 py-8 sm:px-10 lg:items-center lg:justify-center lg:px-14 xl:px-24">
+        <section className="relative flex min-h-[100dvh] flex-col px-5 py-8 sm:px-10 lg:items-center lg:justify-center lg:px-14 xl:px-24">
           {/* Banda de marca móvil */}
           <div className="relative -mx-5 -mt-8 mb-7 overflow-hidden bg-gradient-to-b from-yeikar-neutral via-yeikar-secondary to-yeikar-secondary-dark px-5 pb-9 pt-[calc(env(safe-area-inset-top)+1.25rem)] sm:-mx-10 sm:px-10 lg:hidden">
             <div className="pointer-events-none absolute -right-16 -top-10 h-60 w-60 rounded-full border border-yeikar-primary/25" />

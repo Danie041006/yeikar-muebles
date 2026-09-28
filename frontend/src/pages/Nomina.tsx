@@ -652,7 +652,8 @@ export default function Nomina() {
                     </div>
                   </div>
                   {e.piezas.length > 0 && (
-                    <table className="w-full text-xs">
+                    <div className="overflow-x-auto scroll-touch">
+                    <table className="w-full min-w-[520px] text-xs">
                       <thead>
                         <tr className="text-left text-[10px] uppercase text-yeikar-neutral/45 border-b border-yeikar-secondary-light/10">
                           <th className="py-1">Producto</th>
@@ -690,6 +691,7 @@ export default function Nomina() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   )}
                   <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs">
                     <span>Total producción a cobrar: <b className="font-mono text-emerald-700">{fmtCOP(e.total_destajo)}</b></span>

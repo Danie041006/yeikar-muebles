@@ -282,7 +282,8 @@ export default function Calculadora() {
           {resultado && (
             <>
               <div className="bg-yeikar-neutral-light rounded-2xl border border-yeikar-primary/15 overflow-hidden mb-5 shadow-card">
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto scroll-touch">
+              <table className="w-full min-w-[540px] text-sm">
                 <thead>
                   <tr className="border-b border-yeikar-primary/15 text-yeikar-tertiary/60 text-xs uppercase tracking-wider">
                     <th className="px-4 py-3 text-left">Material</th>
@@ -327,6 +328,7 @@ export default function Calculadora() {
                   })}
                 </tbody>
               </table>
+              </div>
 
               {/* Footer desglose */}
               <div className="border-t border-yeikar-primary/15 px-4 py-4 space-y-2">

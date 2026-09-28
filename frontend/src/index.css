@@ -8,6 +8,11 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     background: #F9F7F2;
+    /* iOS/Safari: evita que TODA la página haga scroll horizontal cuando un
+       elemento se pasa de ancho (tablas, grids largos). `clip` a diferencia de
+       `hidden` NO crea un contenedor de scroll, así que no rompe
+       position: sticky (Navbar) ni position: fixed (Sidebar). */
+    overflow-x: clip;
   }
 
   body {
@@ -17,9 +22,19 @@
     -webkit-tap-highlight-color: transparent;
     text-size-adjust: 100%;
     -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
   }
 
-  #root { min-height: 100vh; }
+  /* dvh evita el “salto” de la barra de Safari en iPhone; vh queda de fallback */
+  #root { min-height: 100vh; min-height: 100dvh; }
+
+  /* Los medios nunca deben forzar scroll horizontal en móvil */
+  img, video { max-width: 100%; }
+
+  /* iOS: scroll con inercia en cualquier contenedor desplazable */
+  .overflow-x-auto, .overflow-y-auto, .overflow-auto {
+    -webkit-overflow-scrolling: touch;
+  }
 
   /* iOS: evita el doble-tap zoom y deja los toques sin delay */
   button, [role='button'], select, input, textarea, label {
