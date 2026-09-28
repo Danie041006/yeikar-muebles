@@ -456,6 +456,16 @@ def ver_receta_estructurada(
     return secciones
 
 
+def _exigir_admin_costos(usuario_actual: Usuario) -> None:
+    """Política y costos por sección alimentan el motor de costos: escribirlos
+    queda reservado a Dueño/Administrador (igual que el recálculo masivo)."""
+    if not es_admin_user(usuario_actual):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo Dueño/Administrador pueden modificar la política y los costos de la receta.",
+        )
+
+
 @router.put("/seccion/{seccion_id}/politica", response_model=schemas.PoliticaSeccionResponse, tags=["receta-secciones"])
 def actualizar_politica_seccion(
     seccion_id: int,
@@ -467,6 +477,7 @@ def actualizar_politica_seccion(
     Actualiza la tarifa de mano de obra base o los porcentajes de recargo (liquidación, gastos)
     de una sección específica.
     """
+    _exigir_admin_costos(usuario_actual)
     politica = db.query(model.PoliticaSeccion).filter(model.PoliticaSeccion.seccion_id == seccion_id).first()
     if not politica:
         raise HTTPException(status_code=404, detail="Política de sección no encontrada")
@@ -656,6 +667,7 @@ def crear_costo_produccion_seccion(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     """Agrega un costo de producción a una sección (ej: PREPARADO CAMA, PINTURA CAMA)."""
+    _exigir_admin_costos(usuario_actual)
     seccion = db.query(model.SeccionProducto).filter(model.SeccionProducto.id == seccion_id).first()
     if not seccion:
         raise HTTPException(status_code=404, detail="Sección no encontrada")
@@ -674,6 +686,7 @@ def actualizar_costo_produccion_seccion(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     """Actualiza un costo de producción de una sección."""
+    _exigir_admin_costos(usuario_actual)
     item = db.query(model.CostoProduccionSeccion).filter(model.CostoProduccionSeccion.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Costo de producción no encontrado")
@@ -692,6 +705,7 @@ def eliminar_costo_produccion_seccion(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     """Elimina un costo de producción de una sección."""
+    _exigir_admin_costos(usuario_actual)
     item = db.query(model.CostoProduccionSeccion).filter(model.CostoProduccionSeccion.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Costo de producción no encontrado")
