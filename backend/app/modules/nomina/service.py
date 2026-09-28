@@ -298,6 +298,7 @@ def generar_nomina(db: Session, desde: date, hasta: date) -> schemas.NominaDraft
     fin_dt = datetime.combine(hasta, time.max)
     crudo_mos = (
         db.query(ProduccionCrudoManoObra)
+        .join(ProduccionCrudo, ProduccionCrudo.id == ProduccionCrudoManoObra.produccion_crudo_id)
         .options(
             joinedload(ProduccionCrudoManoObra.empleado),
             joinedload(ProduccionCrudoManoObra.produccion)
@@ -305,6 +306,8 @@ def generar_nomina(db: Session, desde: date, hasta: date) -> schemas.NominaDraft
         )
         .filter(
             ProduccionCrudoManoObra.listo_nomina.is_(True),
+            # La MO de una producción CANCELADA no es pagable.
+            ProduccionCrudo.estado != "CANCELADA",
             ProduccionCrudoManoObra.created_at >= inicio_dt,
             ProduccionCrudoManoObra.created_at <= fin_dt,
         )
@@ -442,12 +445,14 @@ def resumen_semanal(db: Session, desde: date, hasta: date) -> dict:
     fin_dt = datetime.combine(hasta, time.max)
     crudo_mos = (
         db.query(ProduccionCrudoManoObra)
+        .join(ProduccionCrudo, ProduccionCrudo.id == ProduccionCrudoManoObra.produccion_crudo_id)
         .options(
             joinedload(ProduccionCrudoManoObra.empleado),
             joinedload(ProduccionCrudoManoObra.produccion)
             .joinedload(ProduccionCrudo.crudo),
         )
         .filter(
+            ProduccionCrudo.estado != "CANCELADA",
             ProduccionCrudoManoObra.created_at >= inicio_dt,
             ProduccionCrudoManoObra.created_at <= fin_dt,
         )

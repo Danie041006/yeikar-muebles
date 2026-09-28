@@ -17,6 +17,7 @@ from app.modules.adjuntos.service import adjuntos_info
 from app.modules.auditoria.model import AuditEvent
 from app.modules.clients.model import Client
 from app.modules.envios.model import Envio, EnvioAsignacion, EnvioUbicacion
+from app.modules.envios.service import _scope_envios
 from app.modules.facturacion.model import DetalleFactura, Factura
 from app.modules.gastos.model import Gasto
 from app.modules.orders.model import DetallePedido, Pedido
@@ -31,6 +32,8 @@ from app.modules.production.model import (
 from app.modules.quotes.model import Cotizacion, DetalleCotizacion
 from app.modules.reports.model import MetodoCaja, MovimientoCaja
 from app.modules.sales.model import DetalleVenta, Pago, Venta
+from app.modules.users.deps import filtrar_registros_propios
+from app.modules.users.model import Usuario
 
 
 # ---------------------------------------------------------------------------
@@ -66,8 +69,13 @@ def _nombre_item(det):
 # ---------------------------------------------------------------------------
 # Cadena completa de un pedido
 # ---------------------------------------------------------------------------
-def cadena_expediente(db: Session, pedido_id: int, incluir_auditoria: bool = False) -> dict:
-    pedido = (
+def cadena_expediente(
+    db: Session,
+    pedido_id: int,
+    incluir_auditoria: bool = False,
+    usuario: Usuario | None = None,
+) -> dict:
+    query = (
         db.query(Pedido)
         .options(
             joinedload(Pedido.cliente),
@@ -80,8 +88,12 @@ def cadena_expediente(db: Session, pedido_id: int, incluir_auditoria: bool = Fal
             joinedload(Pedido.detalles).joinedload(DetallePedido.material),
         )
         .filter(Pedido.id == pedido_id)
-        .first()
     )
+    # El expediente aplica el mismo alcance por creador que GET /pedido/{id}:
+    # sin esto, cualquier lector del módulo pedidos veía toda la cadena ajena.
+    if usuario is not None:
+        query = filtrar_registros_propios(query, Pedido.creado_por_id, usuario)
+    pedido = query.first()
     if not pedido:
         return None
 
@@ -574,7 +586,12 @@ def _serializar_pedido(pedido: Pedido) -> dict:
 # ---------------------------------------------------------------------------
 # Fichas por entidad de entrada
 # ---------------------------------------------------------------------------
-def expediente_cotizacion(db: Session, cotizacion_id: int, incluir_auditoria: bool = False) -> dict | None:
+def expediente_cotizacion(
+    db: Session,
+    cotizacion_id: int,
+    incluir_auditoria: bool = False,
+    usuario: Usuario | None = None,
+) -> dict | None:
     cotizacion = (
         db.query(Cotizacion)
         .options(
@@ -602,20 +619,36 @@ def expediente_cotizacion(db: Session, cotizacion_id: int, incluir_auditoria: bo
         "auditoria": [],
     }
     if pedido:
-        ficha.update(cadena_expediente(db, pedido.id, incluir_auditoria=incluir_auditoria))
+        # La cotización es de lectura compartida, pero su cadena de pedido
+        # hereda el alcance por creador (se omite si no es del solicitante).
+        sub = cadena_expediente(
+            db, pedido.id, incluir_auditoria=incluir_auditoria, usuario=usuario
+        )
+        if sub:
+            ficha.update(sub)
     return ficha
 
 
-def expediente_factura(db: Session, factura_id: int, incluir_auditoria: bool = False) -> dict | None:
-    factura = (
+def expediente_factura(
+    db: Session,
+    factura_id: int,
+    incluir_auditoria: bool = False,
+    usuario: Usuario | None = None,
+) -> dict | None:
+    query = (
         db.query(Factura)
         .options(joinedload(Factura.creador), joinedload(Factura.pedido))
         .filter(Factura.id == factura_id)
-        .first()
     )
+    # Las facturas se consultan con alcance por creador (igual que /factura/{id}).
+    if usuario is not None:
+        query = filtrar_registros_propios(query, Factura.creado_por_id, usuario)
+    factura = query.first()
     if not factura:
         return None
-    ficha = cadena_expediente(db, factura.pedido_id, incluir_auditoria=incluir_auditoria)
+    ficha = cadena_expediente(
+        db, factura.pedido_id, incluir_auditoria=incluir_auditoria, usuario=usuario
+    )
     if ficha is None:
         return None
     ficha["factura_entrada"] = {
@@ -629,16 +662,26 @@ def expediente_factura(db: Session, factura_id: int, incluir_auditoria: bool = F
     return ficha
 
 
-def expediente_envio(db: Session, envio_id: int, incluir_auditoria: bool = False) -> dict | None:
-    envio = (
+def expediente_envio(
+    db: Session,
+    envio_id: int,
+    incluir_auditoria: bool = False,
+    usuario: Usuario | None = None,
+) -> dict | None:
+    query = (
         db.query(Envio)
         .options(joinedload(Envio.pedido))
         .filter(Envio.id == envio_id)
-        .first()
     )
+    # Mismo alcance que el módulo envíos (conductor ve solo lo asignado).
+    if usuario is not None:
+        query = _scope_envios(query, usuario)
+    envio = query.first()
     if not envio:
         return None
-    ficha = cadena_expediente(db, envio.pedido_id, incluir_auditoria=incluir_auditoria)
+    ficha = cadena_expediente(
+        db, envio.pedido_id, incluir_auditoria=incluir_auditoria, usuario=usuario
+    )
     if ficha is None:
         return None
     ficha["envio_entrada"] = {
@@ -654,7 +697,11 @@ def expediente_envio(db: Session, envio_id: int, incluir_auditoria: bool = False
 # ---------------------------------------------------------------------------
 # Resumen de un cliente (todas sus operaciones)
 # ---------------------------------------------------------------------------
-def expediente_cliente(db: Session, cliente_id: int) -> dict | None:
+def expediente_cliente(
+    db: Session,
+    cliente_id: int,
+    usuario: Usuario | None = None,
+) -> dict | None:
     cliente = db.query(Client).filter(Client.id == cliente_id).first()
     if not cliente:
         return None
@@ -667,7 +714,10 @@ def expediente_cliente(db: Session, cliente_id: int) -> dict | None:
         .limit(200)
         .all()
     )
-    pedidos = db.query(Pedido).filter(Pedido.cliente_id == cliente_id).order_by(Pedido.fecha.desc(), Pedido.id.desc()).limit(200).all()
+    pedidos_q = db.query(Pedido).filter(Pedido.cliente_id == cliente_id)
+    if usuario is not None:
+        pedidos_q = filtrar_registros_propios(pedidos_q, Pedido.creado_por_id, usuario)
+    pedidos = pedidos_q.order_by(Pedido.fecha.desc(), Pedido.id.desc()).limit(200).all()
     ventas = (
         db.query(Venta)
         .options(joinedload(Venta.moneda), joinedload(Venta.pagos))
@@ -676,9 +726,11 @@ def expediente_cliente(db: Session, cliente_id: int) -> dict | None:
         .limit(200)
         .all()
     )
+    facturas_q = db.query(Factura).filter(Factura.cliente_id == cliente_id)
+    if usuario is not None:
+        facturas_q = filtrar_registros_propios(facturas_q, Factura.creado_por_id, usuario)
     facturas = (
-        db.query(Factura)
-        .filter(Factura.cliente_id == cliente_id)
+        facturas_q
         .order_by(Factura.fecha_emision.desc(), Factura.id.desc())
         .limit(200)
         .all()

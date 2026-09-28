@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import get_db
 from app.modules.catalogos.model import RolModulo
-from app.modules.users.model import Usuario
+from app.modules.users.model import Sesion, Usuario
 from app.modules.users import schemas, service
 
 # Roles con acceso total (definidos por código, no editables desde el panel)
@@ -96,14 +96,26 @@ def get_current_user(
         )
         username: str = payload.get("sub")
         token_type: str = payload.get("type", "access")
-        if username is None or token_type != "access":
+        sid = payload.get("sid")
+        # El access token queda atado a su sesión: revocarla (logout, cerrar
+        # sesión, cambio de contraseña) invalida el token de inmediato en vez
+        # de dejarlo vivo hasta su expiración.
+        if username is None or token_type != "access" or sid is None:
             raise credentials_exception
+        sid_int = int(sid)
         token_data = schemas.TokenData(nombre_usuario=username)
-    except JWTError:
+    except (JWTError, TypeError, ValueError):
         raise credentials_exception
 
     user = service.obtener_usuario_por_nombre(db, username=token_data.nombre_usuario)
     if user is None or not user.activo:
+        raise credentials_exception
+    sesion = db.query(Sesion).filter(
+        Sesion.id == sid_int,
+        Sesion.usuario_id == user.id,
+        Sesion.revocada == False,  # noqa: E712
+    ).first()
+    if sesion is None:
         raise credentials_exception
     return user
 

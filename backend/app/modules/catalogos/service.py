@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from app.modules.catalogos import model, schemas
+from app.modules.users.deps import ROLES_SUPER
 
 # ------------------------------------------------------------
 # TipoProducto
@@ -304,7 +305,21 @@ def obtener_roles(db: Session, salto: int = 0, limite: int = 100, buscar: str = 
         )
     return query.offset(salto).limit(limite).all()
 
+def _validar_nombre_rol(db: Session, nombre: str | None, excluir_id: int | None = None) -> None:
+    """El nombre del rol define el acceso total (ROLES_SUPER): no puede ser
+    reservado ni duplicado (un duplicado ambiguo rompería es_admin_user)."""
+    if nombre is None:
+        return
+    if nombre in ROLES_SUPER:
+        raise ValueError(f"El nombre '{nombre}' está reservado para los roles de acceso total.")
+    query = db.query(model.Rol).filter(model.Rol.nombre == nombre)
+    if excluir_id is not None:
+        query = query.filter(model.Rol.id != excluir_id)
+    if query.first():
+        raise ValueError(f"Ya existe un rol llamado '{nombre}'.")
+
 def crear_rol(db: Session, esquema: schemas.RolCreate):
+    _validar_nombre_rol(db, esquema.nombre)
     db_obj = model.Rol(**esquema.model_dump())
     db.add(db_obj)
     db.commit()
@@ -316,6 +331,9 @@ def actualizar_rol(db: Session, id_rol: int, esquema: schemas.RolUpdate):
     if not db_obj:
         return None
     datos = esquema.model_dump(exclude_unset=True)
+    if db_obj.nombre in ROLES_SUPER and datos.get("nombre", db_obj.nombre) != db_obj.nombre:
+        raise ValueError(f"El rol '{db_obj.nombre}' es de acceso total y no se puede renombrar.")
+    _validar_nombre_rol(db, datos.get("nombre"), excluir_id=id_rol)
     for campo, valor in datos.items():
         setattr(db_obj, campo, valor)
     db.commit()

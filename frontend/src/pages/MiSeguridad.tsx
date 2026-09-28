@@ -69,6 +69,7 @@ export default function MiSeguridad() {
   // Huella / passkeys de este usuario
   const [huellas, setHuellas] = useState<Huella[]>([]);
   const [nombreHuella, setNombreHuella] = useState('Este equipo');
+  const [passwordHuella, setPasswordHuella] = useState('');
   const [registrandoHuella, setRegistrandoHuella] = useState(false);
   const [borrandoHuellaId, setBorrandoHuellaId] = useState<number | null>(null);
 
@@ -461,17 +462,26 @@ export default function MiSeguridad() {
               <input id="nombre-huella" type="text" value={nombreHuella}
                 onChange={(e) => setNombreHuella(e.target.value)} className={inputClave} />
             </div>
+            <div className="flex-1">
+              <label htmlFor="pass-huella" className="mb-1 block text-xs font-bold text-yeikar-neutral/60">
+                Tu contraseña (para confirmar)
+              </label>
+              <input id="pass-huella" type="password" value={passwordHuella}
+                onChange={(e) => setPasswordHuella(e.target.value)}
+                autoComplete="current-password" className={inputClave} />
+            </div>
             <button
               onClick={async () => {
                 setRegistrandoHuella(true);
                 setError2FA('');
                 try {
-                  const inicio = await authApi.post('/webauthn/registro/inicio');
+                  const inicio = await authApi.post('/webauthn/registro/inicio', { password: passwordHuella });
                   const respuesta = await startRegistration({ optionsJSON: inicio.data });
                   await authApi.post('/webauthn/registro/fin', {
                     dispositivo: nombreHuella.trim() || 'Este equipo',
                     respuesta,
                   });
+                  setPasswordHuella('');
                   setMensajeGeneral('Huella registrada: ya puedes entrar con ella desde este equipo.');
                   const res = await authApi.get<Huella[]>('/webauthn/huellas');
                   setHuellas(res.data);
@@ -481,7 +491,7 @@ export default function MiSeguridad() {
                   setRegistrandoHuella(false);
                 }
               }}
-              disabled={registrandoHuella}
+              disabled={registrandoHuella || !passwordHuella}
               className="rounded-xl bg-yeikar-primary px-4 py-2.5 text-sm font-bold font-headline text-yeikar-neutral hover:bg-yeikar-primary/90 transition-colors disabled:opacity-50"
             >
               {registrandoHuella ? 'Esperando huella...' : 'Registrar huella en este equipo'}

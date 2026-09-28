@@ -119,6 +119,10 @@ def obtener_facturas(
 # ------------------------------------------------------------
 # Pedidos facturables (venta sin factura; puede tener saldo pendiente)
 # ------------------------------------------------------------
+# Solo estos estados del pedido son facturables (paridad con ventas).
+ESTADOS_PEDIDO_FACTURABLES = {"APROBADO", "PRODUCCION", "TERMINADO", "ENTREGADO"}
+
+
 def pedidos_facturables(db: Session, usuario: Usuario | None = None):
     # Una factura ANULADA no bloquea al pedido: puede re-facturarse (corrección).
     facturados = {
@@ -131,6 +135,7 @@ def pedidos_facturables(db: Session, usuario: Usuario | None = None):
         db.query(Pedido, Venta)
         .join(Venta, Venta.pedido_id == Pedido.id)
         .filter(Venta.estado != "CANCELADA")
+        .filter(Pedido.estado.in_(ESTADOS_PEDIDO_FACTURABLES))
     )
     if usuario is not None:
         query = filtrar_registros_propios(query, Pedido.creado_por_id, usuario)
@@ -191,6 +196,12 @@ def crear_factura_desde_pedido(db: Session, esquema: FacturaCreate, commit: bool
     pedido = pedido_query.with_for_update().first()
     if not pedido:
         raise ValueError("El pedido especificado no existe.")
+    # Un pedido CANCELADO (u otro estado no facturable) no se factura.
+    if pedido.estado not in ESTADOS_PEDIDO_FACTURABLES:
+        raise ValueError(
+            f"No se puede facturar un pedido en estado {pedido.estado}. "
+            "Solo pedidos aprobados, en producción, terminados o entregados."
+        )
 
     # 1. Por defecto solo se facturan pedidos pagados al 100%; un Dueño/Administrador
     #    puede autorizar la emisión puntual con saldo pendiente (decisión caso a caso).

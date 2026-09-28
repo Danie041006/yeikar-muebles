@@ -8,6 +8,7 @@ MATERIAL | CANTIDAD | UNIDAD | V/UNIT | PRECIO TOTAL) al JSON interno
 El usuario NUNCA ve JSON: pega la tabla que devolvió la IA y el sistema
 la interpreta. Se reutiliza la lógica de detección de secciones del motor.
 """
+import math
 import re
 from typing import Optional
 
@@ -102,10 +103,11 @@ def _es_numero(valor: str) -> bool:
     if not v:
         return False
     try:
-        float(v)
-        return True
+        numero = float(v)
     except ValueError:
         return False
+    # 'nan'/'inf' son parseables por float() pero no son números de negocio.
+    return math.isfinite(numero)
 
 
 def _es_fila_encabezado(linea: str) -> bool:
@@ -157,7 +159,9 @@ def _parsear_fila(linea: str) -> Optional[dict]:
     unidad_partes = []
     for t in tokens[1:]:
         if _es_numero(t):
-            numeros.append(float(t.replace(",", ".")))
+            valor = float(t.replace(",", "."))
+            if math.isfinite(valor):
+                numeros.append(valor)
         else:
             unidad_partes.append(t)
 

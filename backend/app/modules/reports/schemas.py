@@ -147,8 +147,10 @@ class MovimientoCajaCreate(MovimientoCajaBase):
 class MovimientoCajaUpdate(BaseModel):
     metodo_caja_id: Optional[int] = None
     fecha: Optional[date] = None
-    tipo: Optional[str] = None
-    monto: Optional[Decimal] = None
+    # Mismas invariantes que el alta: el signo lo da el tipo y el monto siempre
+    # es positivo (un monto negativo invertía la contribución al saldo).
+    tipo: Optional[str] = Field(None, pattern="^(APERTURA|ENTRADA|SALIDA|AJUSTE)$")
+    monto: Optional[Decimal] = Field(None, gt=0)
     observaciones: Optional[str] = None
     referencia: Optional[str] = None
 

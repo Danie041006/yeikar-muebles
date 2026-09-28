@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from app.modules.catalogos.schemas import TipoProductoResponse, UnidadMedidaResponse, MonedaResponse, CategoriaInventarioResponse
@@ -210,7 +210,9 @@ class ElementoSeccionUpdate(BaseModel):
     material_id_normalizado: Optional[int] = None
     cantidad: Optional[float] = Field(None, gt=0)
     unidad_medida: Optional[str] = None
-    precio_unitario: Optional[float] = Field(None, ge=0)
+    # Tope defensivo: el precio del insumo es la base autoritativa del costo
+    # (cost_service lo prefiere sobre Material.costo_base).
+    precio_unitario: Optional[float] = Field(None, ge=0, le=1_000_000_000)
     observaciones: Optional[str] = None
     registrar_sinonimo: Optional[bool] = False
 
@@ -318,9 +320,21 @@ class SeccionProductoResponse(BaseModel):
 
 
 class RecalculateCustomRecipeRequest(BaseModel):
-    ganancia: float = 40.0
-    impuesto: float = 7.0
+    ganancia: float = Field(40.0, ge=0, le=999)
+    impuesto: float = Field(7.0, ge=0, le=100)
     secciones: List[SeccionProductoResponse]
+
+    @model_validator(mode="after")
+    def _validar_rangos(self):
+        for seccion in self.secciones:
+            for elemento in seccion.elementos:
+                if elemento.cantidad is not None and elemento.cantidad <= 0:
+                    raise ValueError("La cantidad de cada insumo debe ser mayor que cero.")
+                if elemento.precio_unitario is not None and not (
+                    0 <= elemento.precio_unitario <= 1_000_000_000
+                ):
+                    raise ValueError("El precio del insumo está fuera de rango.")
+        return self
 
 # ------------------------------------------------------------
 # Importación de estructura de costos pegada desde Excel

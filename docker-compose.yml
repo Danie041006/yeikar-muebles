@@ -45,7 +45,9 @@ services:
       # IP fija de Caddy en la red de compose (ver "networks" al final).
       # Le dice al backend a qué peer confiarle el X-Forwarded-For
       # (rate limit / lockout de login). No ponerla = se ignora XFF.
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-}
+      # IP fija de Caddy (10.200.0.10): sin este valor, todos los clientes
+      # colapsan a la IP del proxy y comparten rate-limit y lockout de login.
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-10.200.0.10}
     depends_on:
       db:
         condition: service_healthy

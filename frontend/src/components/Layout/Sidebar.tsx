@@ -98,8 +98,8 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     ? { name: 'Mis Despachos', path: '/mis-despachos', module: 'envios', icon: Truck }
     : { name: 'Despachos', path: '/envios', module: 'envios', icon: Truck };
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/login', { replace: true });
   };
 

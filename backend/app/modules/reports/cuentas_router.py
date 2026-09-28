@@ -123,7 +123,12 @@ def put_movimiento_cuenta(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    obj = service.actualizar_movimiento_caja(db, movimiento_id, esquema)
+    try:
+        obj = service.actualizar_movimiento_caja(
+            db, movimiento_id, esquema, usuario=current_user
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     if not obj:
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
     return obj
@@ -135,6 +140,12 @@ def delete_movimiento_cuenta(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    if not service.eliminar_movimiento_caja(db, movimiento_id):
+    try:
+        eliminado = service.eliminar_movimiento_caja(
+            db, movimiento_id, usuario=current_user
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    if not eliminado:
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
     return None

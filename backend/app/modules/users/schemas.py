@@ -55,6 +55,11 @@ class CambioPasswordRequest(BaseModel):
 class Codigo2FARequest(BaseModel):
     codigo: str = Field(min_length=4, max_length=16)
 
+class Generar2FARequest(BaseModel):
+    # Obligatorio solo cuando ya hay un 2FA activo: prueba el factor vigente
+    # antes de reemplazarlo.
+    codigo_actual: Optional[str] = Field(None, min_length=4, max_length=16)
+
 class Verificar2FARequest(BaseModel):
     ticket: str
     codigo: str = Field(min_length=4, max_length=16)
@@ -67,6 +72,11 @@ class UsuarioHuellaRequest(BaseModel):
     # Opcional: si viene vacío se hace login sin usuario (passkey
     # discoverable: el navegador ofrece las cuentas de este equipo).
     nombre_usuario: Optional[str] = None
+
+class RegistroHuellaInicioRequest(BaseModel):
+    # Re-autenticación: crear una credencial de login duradera no puede nacer
+    # de una simple sesión bearer robada.
+    password: str = Field(min_length=1, max_length=128)
 
 class RegistroHuellaRequest(BaseModel):
     dispositivo: Optional[str] = None

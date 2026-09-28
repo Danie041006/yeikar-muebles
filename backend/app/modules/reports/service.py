@@ -1197,10 +1197,32 @@ def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, us
     db.refresh(obj)
     return obj
 
-def actualizar_movimiento_caja(db: Session, movimiento_id: int, esquema: schemas.MovimientoCajaUpdate) -> Optional[model.MovimientoCaja]:
+def _bloquear_movimiento_ligado(obj: model.MovimientoCaja, usuario: Optional[Usuario]) -> None:
+    """Un asiento derivado de un pago o transferencia no se edita/borra desde
+    cuentas: desvincularlo del libro dejaría el cobro intacto y la caja sin él.
+    Solo Dueño/Administrador puede (y debe corregir el origen)."""
+    if not (obj.pago_id or obj.transferencia_id):
+        return
+    if usuario is None:
+        return  # llamadas internas ya autorizadas (p. ej. /reports es solo-admin)
+    from app.modules.users.deps import es_admin_user
+
+    if not es_admin_user(usuario):
+        raise ValueError(
+            "Este movimiento fue generado por un pago o una transferencia: "
+            "solo Dueño/Administrador puede editarlo o eliminarlo."
+        )
+
+def actualizar_movimiento_caja(
+    db: Session,
+    movimiento_id: int,
+    esquema: schemas.MovimientoCajaUpdate,
+    usuario: Optional[Usuario] = None,
+) -> Optional[model.MovimientoCaja]:
     obj = db.query(model.MovimientoCaja).filter(model.MovimientoCaja.id == movimiento_id).first()
     if not obj:
         return None
+    _bloquear_movimiento_ligado(obj, usuario)
     datos = esquema.model_dump(exclude_unset=True)
     for campo, valor in datos.items():
         setattr(obj, campo, valor)
@@ -1210,10 +1232,15 @@ def actualizar_movimiento_caja(db: Session, movimiento_id: int, esquema: schemas
     db.refresh(obj)
     return obj
 
-def eliminar_movimiento_caja(db: Session, movimiento_id: int) -> bool:
+def eliminar_movimiento_caja(
+    db: Session,
+    movimiento_id: int,
+    usuario: Optional[Usuario] = None,
+) -> bool:
     obj = db.query(model.MovimientoCaja).filter(model.MovimientoCaja.id == movimiento_id).first()
     if not obj:
         return False
+    _bloquear_movimiento_ligado(obj, usuario)
     # Una transferencia es UNA operación con dos patas: borrar una borra ambas
     # (dejar una sola pata fabricaría dinero o lo haría desaparecer del libro).
     if obj.transferencia_id:
@@ -1233,18 +1260,24 @@ class SaldoInsuficienteError(ValueError):
     """La cuenta origen no tiene saldo suficiente para la transferencia."""
 
 
-def _saldo_cuenta_a_fecha(db: Session, metodo_caja_id: int, moneda_id: int, hasta: date) -> Decimal:
-    """Saldo disponible de una cuenta EN UNA MONEDA hasta la fecha (inclusive):
-    APERTURA/ENTRADA suman, SALIDA resta, AJUSTE suma/resta según el signo."""
-    movs = (
-        db.query(model.MovimientoCaja)
-        .filter(
-            model.MovimientoCaja.metodo_caja_id == metodo_caja_id,
-            model.MovimientoCaja.moneda_id == moneda_id,
-            model.MovimientoCaja.fecha <= hasta,
-        )
-        .all()
+def _saldo_cuenta_a_fecha(
+    db: Session,
+    metodo_caja_id: int,
+    moneda_id: int,
+    hasta: Optional[date] = None,
+) -> Decimal:
+    """Saldo disponible de una cuenta EN UNA MONEDA.
+
+    Con `hasta` cuenta solo movimientos con fecha <= esa fecha; con `hasta=None`
+    usa la posición registrada completa (lo correcto para validar una salida:
+    una pata futura ya asentada no debe poder eludir el chequeo)."""
+    query = db.query(model.MovimientoCaja).filter(
+        model.MovimientoCaja.metodo_caja_id == metodo_caja_id,
+        model.MovimientoCaja.moneda_id == moneda_id,
     )
+    if hasta is not None:
+        query = query.filter(model.MovimientoCaja.fecha <= hasta)
+    movs = query.all()
     saldo = Decimal("0.0")
     for m in movs:
         signo = Decimal("-1") if m.tipo == "SALIDA" else Decimal("1")
@@ -1371,14 +1404,25 @@ def crear_transferencia(
     fecha = esquema.fecha or hoy_ve()
     monto = Decimal(str(esquema.monto))
 
-    origen = db.query(model.MetodoCaja).filter(model.MetodoCaja.id == esquema.cuenta_origen_id).first()
-    destino = db.query(model.MetodoCaja).filter(model.MetodoCaja.id == esquema.cuenta_destino_id).first()
+    if esquema.cuenta_origen_id == esquema.cuenta_destino_id:
+        raise ValueError("La cuenta de origen y la de destino deben ser distintas.")
+    # Bloquea ambas cuentas en orden determinista ANTES de leer el saldo: sin
+    # este lock, dos transferencias simultáneas leían el mismo saldo y ambas
+    # pasaban el chequeo, sobregirando la cuenta origen.
+    cuentas = (
+        db.query(model.MetodoCaja)
+        .filter(model.MetodoCaja.id.in_([esquema.cuenta_origen_id, esquema.cuenta_destino_id]))
+        .order_by(model.MetodoCaja.id)
+        .with_for_update()
+        .all()
+    )
+    por_id = {c.id: c for c in cuentas}
+    origen = por_id.get(esquema.cuenta_origen_id)
+    destino = por_id.get(esquema.cuenta_destino_id)
     if not origen:
         raise ValueError("La cuenta de origen no existe.")
     if not destino:
         raise ValueError("La cuenta de destino no existe.")
-    if origen.id == destino.id:
-        raise ValueError("La cuenta de origen y la de destino deben ser distintas.")
     if not origen.activo or not destino.activo:
         raise ValueError("Ambas cuentas deben estar activas.")
 
@@ -1407,8 +1451,9 @@ def crear_transferencia(
         if monto_entrada <= 0:
             raise ValueError("El monto convertido a la moneda de destino queda en 0. Revisa la tasa.")
 
-    # Saldo disponible en origen (en la moneda que sale) hasta la fecha.
-    saldo_disponible = _saldo_cuenta_a_fecha(db, origen.id, moneda_salida, fecha)
+    # Saldo disponible en origen contra la posición registrada completa:
+    # la fecha elegida para el asiento no puede habilitar el chequeo.
+    saldo_disponible = _saldo_cuenta_a_fecha(db, origen.id, moneda_salida, None)
     if monto > saldo_disponible + Decimal("0.005"):
         raise SaldoInsuficienteError(
             f"Saldo insuficiente en '{origen.nombre}': disponible {saldo_disponible:,.2f}, "

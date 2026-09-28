@@ -10,7 +10,11 @@ from app.modules.sales.schemas import VentaCreate, PagoCreate
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
 from app.modules.users.model import Usuario
-from app.core.state_machine import TRANSICIONES_PEDIDO, validar_transicion
+from app.core.state_machine import (
+    TRANSICIONES_ORDEN_PRODUCCION,
+    TRANSICIONES_PEDIDO,
+    validar_transicion,
+)
 from app.core.hora_ve import hoy_ve
 
 def _snapshot(pedido: model.Pedido) -> dict:
@@ -215,6 +219,27 @@ def actualizar_pedido(
                 )
                 db.add(db_orden)
 
+    # Cancelar el pedido detiene sus derivados vivos: la producción no puede
+    # seguir trabajándose/finalizándose y la venta no sigue cobrable/facturable.
+    if nuevo_estado == "CANCELADO" and estado_anterior != "CANCELADO":
+        from app.modules.production.model import OrdenProduccion
+        from app.modules.sales.model import Venta
+
+        for detalle in db_pedido.detalles:
+            ordenes = db.query(OrdenProduccion).filter(
+                OrdenProduccion.detalle_pedido_id == detalle.id,
+                OrdenProduccion.estado.notin_(("FINALIZADA", "CANCELADA")),
+            ).all()
+            for orden in ordenes:
+                validar_transicion(
+                    TRANSICIONES_ORDEN_PRODUCCION, orden.estado, "CANCELADA", "orden_produccion"
+                )
+                orden.estado = "CANCELADA"
+                orden.actualizado_por_id = usuario.id if usuario is not None else None
+        venta = db.query(Venta).filter(Venta.pedido_id == db_pedido.id).first()
+        if venta and venta.estado != "PAGADA":
+            venta.estado = "CANCELADA"
+
     if usuario is not None:
         db_pedido.actualizado_por_id = usuario.id
     record_event(
@@ -234,6 +259,31 @@ def eliminar_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None)
     db_pedido = obtener_pedido(db, id_pedido, usuario)
     if not db_pedido:
         return False
+    # Un pedido en curso o con documentos derivados se cancela, no se borra:
+    # borrar en cascada destruía el envío (evidencia de entrega) y, con venta/
+    # factura/orden, reventaba con un 400/500 genérico de FK.
+    if db_pedido.estado not in ("COTIZADO", "APROBADO"):
+        raise ValueError(
+            f"No se puede eliminar el pedido #{id_pedido} en estado '{db_pedido.estado}': cancélalo."
+        )
+    from app.modules.envios.model import Envio
+    from app.modules.facturacion.model import Factura
+    from app.modules.production.model import OrdenProduccion
+    from app.modules.sales.model import Venta
+
+    tiene_derivados = (
+        db.query(Envio.id).filter(Envio.pedido_id == id_pedido).first()
+        or db.query(Venta.id).filter(Venta.pedido_id == id_pedido).first()
+        or db.query(Factura.id).filter(Factura.pedido_id == id_pedido).first()
+        or db.query(OrdenProduccion.id)
+        .join(model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id)
+        .filter(model.DetallePedido.pedido_id == id_pedido)
+        .first()
+    )
+    if tiene_derivados:
+        raise ValueError(
+            "El pedido tiene producción, venta, factura o envío asociados: cancélalo en lugar de eliminarlo."
+        )
     record_event(
         db,
         actor=usuario,

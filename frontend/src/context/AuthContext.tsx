@@ -24,7 +24,7 @@ interface AuthContextValue {
   modulos: ModuloAcceso[];
   esAdmin: boolean;
   hasModulo: (modulo: string, gestionar?: boolean) => boolean;
-  logout: () => void;
+  logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -66,7 +66,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const esAdmin = user?.roles?.some((role) => ['Dueño', 'Administrador'].includes(role.nombre)) ?? false;
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
+    // Revoca la sesión en el servidor (apaga el refresh token); si la red
+    // falla, igual limpiamos localmente para no dejar la UI atascada.
+    try {
+      await authApi.post('/logout');
+    } catch {
+      /* sesión ya inválida o sin red: la limpieza local sigue */
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('refresh_token');
     setUser(null);

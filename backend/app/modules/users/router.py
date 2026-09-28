@@ -80,9 +80,16 @@ async def login(
     el ticket dura 5 minutos y sirve solo para /2fa/verificar.
     """
     form = await request.form()
-    username = (form.get("username") or "").strip()
+    username = service.normalizar_nombre_login(form.get("username"))
     password = form.get("password") or ""
     ip = obtener_ip_cliente(request)
+    if username is None:
+        # Nombre imposible (vacío o > 100 chars): 401 sin bcrypt ni escritura.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Usuario o contraseña incorrectos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     if service.usuario_bloqueado(db, username, ip):
         raise HTTPException(
             status_code=429,
@@ -359,6 +366,19 @@ def cerrar_sesion(
         raise HTTPException(status_code=404, detail="Sesión no encontrada")
     return None
 
+@router.post("/logout")
+def logout(
+    token: str = Depends(OAuth2PasswordBearer(tokenUrl="/api/auth/login")),
+    db: Session = Depends(get_db),
+    usuario_actual: model.Usuario = Depends(get_current_user),
+):
+    """Cierra la sesión actual en el servidor (revoca su refresh token): sin
+    esto, cerrar sesión en el navegador dejaba el refresh vivo y renovable."""
+    sid = _sid_del_token(token)
+    if sid is not None:
+        service.revocar_sesion(db, usuario_actual.id, sid)
+    return {"mensaje": "Sesión cerrada."}
+
 @router.post("/sesiones/cerrar-otras")
 def cerrar_otras(
     token: str = Depends(OAuth2PasswordBearer(tokenUrl="/api/auth/login")),
@@ -391,11 +411,16 @@ def cambiar_mi_password(
 # ------------------------------------------------------------
 @router.post("/2fa/generar")
 def generar_2fa(
+    esquema: schemas.Generar2FARequest | None = None,
     db: Session = Depends(get_db),
     usuario_actual: model.Usuario = Depends(get_current_user),
 ):
-    """Genera (o re-genera) el secreto TOTP y devuelve el QR para la app."""
-    service.generar_totp(db, usuario_actual)
+    """Genera (o re-genera) el secreto TOTP y devuelve el QR para la app.
+    Si ya hay un 2FA activo, exige un código vigente para reemplazarlo."""
+    try:
+        service.generar_totp(db, usuario_actual, esquema.codigo_actual if esquema else None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     uri = service.uri_totp(usuario_actual)
     return {"otpauth_uri": uri, "qr_base64": service.qr_totp_base64(uri)}
 
@@ -505,10 +530,17 @@ def resetear_2fa_usuario(
 # ------------------------------------------------------------
 @router.post("/webauthn/registro/inicio")
 def huella_registro_inicio(
+    esquema: schemas.RegistroHuellaInicioRequest,
     db: Session = Depends(get_db),
     usuario_actual: model.Usuario = Depends(get_current_user),
 ):
-    """Opciones WebAuthn para registrar la huella de este equipo."""
+    """Opciones WebAuthn para registrar la huella de este equipo.
+
+    Exige re-autenticación con la contraseña: una credencial de login
+    duradera no debe poder crearse solo con una sesión bearer robada.
+    """
+    if not service.verificar_password(esquema.password, usuario_actual.password_hash):
+        raise HTTPException(status_code=401, detail="Contraseña incorrecta: no se puede registrar la huella.")
     return service.opciones_registro_huella(db, usuario_actual)
 
 @router.post("/webauthn/registro/fin")

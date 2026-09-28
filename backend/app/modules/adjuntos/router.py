@@ -26,6 +26,7 @@ def subir_adjunto(
     optimizada en la BD.
     """
     service.validar_entidad(db, entidad_tipo, entidad_id)
+    service.autorizar_tipo(db, entidad_tipo, usuario_actual, escritura=True)
     contenido = archivo.file.read()
     if len(contenido) > service.MAX_RAW_BYTES:
         raise HTTPException(
@@ -60,6 +61,7 @@ def listar_adjuntos(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
+    service.autorizar_tipo(db, entidad_tipo, usuario_actual, escritura=False)
     publico = entidad_tipo in service.TIPOS_PUBLICOS
     resultado = []
     for adj in service.listar_adjuntos(db, entidad_tipo, entidad_id):
@@ -93,6 +95,7 @@ def contenido_autenticado(
     adj = service.obtener_adjunto(db, id_adjunto)
     if not adj:
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
+    service.autorizar_adjunto(db, adj, usuario_actual, escritura=False)
     return Response(content=adj.archivo, media_type=adj.mime)
 
 
@@ -116,6 +119,10 @@ def eliminar_adjunto(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
+    adj = service.obtener_adjunto(db, id_adjunto)
+    if not adj:
+        raise HTTPException(status_code=404, detail="Adjunto no encontrado")
+    service.autorizar_adjunto(db, adj, usuario_actual, escritura=True)
     if not service.eliminar_adjunto(db, id_adjunto):
         raise HTTPException(status_code=404, detail="Adjunto no encontrado")
     return None

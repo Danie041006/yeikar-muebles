@@ -37,6 +37,14 @@ TRANSICIONES_ETAPA_PRODUCCION = {
     "COMPLETADA": set(),
 }
 
+TRANSICIONES_PRODUCCION_CRUDO = {
+    "PENDIENTE": {"EN_PRODUCCION", "CANCELADA"},
+    "EN_PRODUCCION": {"COMPLETADA", "CANCELADA"},
+    # COMPLETADA terminal: reabrirla volvía a asentar stock/kardex duplicado.
+    "COMPLETADA": set(),
+    "CANCELADA": set(),
+}
+
 TRANSICIONES_ENVIO = {
     "PREPARADO": {"EN_TRANSITO"},
     "EN_TRANSITO": {"ENTREGADO", "FALLIDO"},

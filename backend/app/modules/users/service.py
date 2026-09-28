@@ -192,6 +192,11 @@ def rotar_refresh_token(db: Session, token: str):
     ).with_for_update().first()
     if rt is None or rt.revocado or rt.expires_at < datetime.utcnow():
         return None
+    # Una sesión revocada no puede refrescar: sin esto, cerrar sesión/password
+    # change dejaba una cadena de refresh viva re-vinculándose a la sesión.
+    sesion = db.query(model.Sesion).filter(model.Sesion.refresh_token_id == rt.id).first()
+    if sesion is not None and sesion.revocada:
+        return None
     rt.revocado = True
     db.commit()
     return rt.usuario, rt
@@ -255,17 +260,25 @@ def cerrar_otras_sesiones(db: Session, usuario_id: int, sesion_actual_id: int) -
     return len(otras)
 
 def revocar_todas_las_sesiones(db: Session, usuario_id: int) -> None:
-    """Al cambiar la contraseña: cero sesiones vivas y cero refresh vigentes."""
+    """Al cambiar la contraseña o resetear 2FA: cero sesiones vivas, cero
+    refresh vigentes y las passkeys quedan desactivadas (una credencial
+    durable no debe sobrevivir a la remediación)."""
     db.query(model.Sesion).filter(
         model.Sesion.usuario_id == usuario_id,
         model.Sesion.revocada == False,
     ).update({"revocada": True}, synchronize_session=False)
+    db.query(model.CredencialWebauthn).filter(
+        model.CredencialWebauthn.usuario_id == usuario_id,
+        model.CredencialWebauthn.activa == True,  # noqa: E712
+    ).update({"activa": False}, synchronize_session=False)
     revocar_tokens_usuario(db, usuario_id)
 
 def vincular_sesion_a_nuevo_refresh(db: Session, refresh_viejo_id: int, refresh_nuevo_id: int) -> None:
-    """Rotación de refresh: la misma sesión continúa con el token nuevo."""
+    """Rotación de refresh: la misma sesión continúa con el token nuevo.
+    Nunca re-vincula una sesión revocada (la dejaría con un token vivo)."""
     db.query(model.Sesion).filter(
         model.Sesion.refresh_token_id == refresh_viejo_id,
+        model.Sesion.revocada == False,  # noqa: E712
     ).update(
         {"refresh_token_id": refresh_nuevo_id, "ultimo_uso": func.now()},
         synchronize_session=False,
@@ -314,6 +327,21 @@ ISSUER_2FA = "YEIKAR"
 def _hash_codigo(codigo: str) -> str:
     return hashlib.sha256(codigo.encode("utf-8")).hexdigest()
 
+MAX_USERNAME_LOGIN = 100
+
+
+def normalizar_nombre_login(valor) -> str | None:
+    """Nombre de login usable: no vacío y dentro del VARCHAR(100) de la BD.
+
+    Un username más largo no puede corresponder a ninguna cuenta; se rechaza
+    ANTES de bcrypt y de registrar el intento (antes el INSERT fallaba por
+    varchar, el contador de fallos no subía y el lockout era evadible)."""
+    nombre = (valor or "").strip()
+    if not nombre or len(nombre) > MAX_USERNAME_LOGIN:
+        return None
+    return nombre
+
+
 def dispositivo_confiable(request, usuario: model.Usuario) -> bool:
     """Cookie firmada 'yeikar_dispositivo' (30 días): el equipo ya pasó 2FA."""
     cookie = request.cookies.get("yeikar_dispositivo")
@@ -328,9 +356,12 @@ def dispositivo_confiable(request, usuario: model.Usuario) -> bool:
     except JWTError:
         return False
 
-def generar_totp(db: Session, usuario: model.Usuario) -> str:
-    """Secreto pendiente (o re-generado). Regenerar rota el secreto pero no
-    apaga un 2FA ya activo: quien regenera debe re-escanear el QR en la app."""
+def generar_totp(db: Session, usuario: model.Usuario, codigo_actual: str | None = None) -> str:
+    """Secreto pendiente (o re-generado). Reemplazar un 2FA YA ACTIVO exige
+    probar un código vigente (o de respaldo): una sesión robada no puede
+    apropiarse del segundo factor."""
+    if usuario.totp_habilitado and not verificar_codigo_2fa(db, usuario, codigo_actual or ""):
+        raise ValueError("Confirma un código vigente de tu app (o de respaldo) antes de reemplazar el 2FA.")
     usuario.totp_secret = pyotp.random_base32()
     db.commit()
     return usuario.totp_secret
@@ -406,8 +437,19 @@ def crear_ticket_2fa(usuario: model.Usuario) -> str:
 # multi-worker conviene moverlo a Redis (marcado para el rollout).
 _DESAFIOS: dict = {}
 TTL_DESAFIO = timedelta(minutes=5)
+MAX_DESAFIOS = 10_000
+
+def _limpiar_desafios_vencidos() -> None:
+    ahora = datetime.utcnow()
+    for clave in [k for k, (_, vence) in _DESAFIOS.items() if vence < ahora]:
+        _DESAFIOS.pop(clave, None)
 
 def _guardar_desafio(clave: str, desafio) -> None:
+    # Sin este barrido/tope, los desafíos anónimos no consumidos crecían sin
+    # límite en memoria del worker (el TTL solo se miraba al consumir la clave).
+    _limpiar_desafios_vencidos()
+    while len(_DESAFIOS) >= MAX_DESAFIOS:
+        _DESAFIOS.pop(next(iter(_DESAFIOS)), None)
     _DESAFIOS[clave] = (desafio, datetime.utcnow() + TTL_DESAFIO)
 
 def _tomar_desafio(clave: str):

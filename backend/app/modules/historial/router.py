@@ -30,7 +30,9 @@ def ficha_cotizacion(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    ficha = service.expediente_cotizacion(db, cotizacion_id, incluir_auditoria=_con_auditoria(usuario_actual))
+    ficha = service.expediente_cotizacion(
+        db, cotizacion_id, incluir_auditoria=_con_auditoria(usuario_actual), usuario=usuario_actual
+    )
     if not ficha:
         raise HTTPException(status_code=404, detail="Cotización no encontrada")
     return ficha
@@ -42,7 +44,9 @@ def ficha_pedido(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    ficha = service.cadena_expediente(db, pedido_id, incluir_auditoria=_con_auditoria(usuario_actual))
+    ficha = service.cadena_expediente(
+        db, pedido_id, incluir_auditoria=_con_auditoria(usuario_actual), usuario=usuario_actual
+    )
     if not ficha:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return ficha
@@ -54,7 +58,9 @@ def ficha_factura(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    ficha = service.expediente_factura(db, factura_id, incluir_auditoria=_con_auditoria(usuario_actual))
+    ficha = service.expediente_factura(
+        db, factura_id, incluir_auditoria=_con_auditoria(usuario_actual), usuario=usuario_actual
+    )
     if not ficha:
         raise HTTPException(status_code=404, detail="Factura no encontrada")
     return ficha
@@ -66,7 +72,9 @@ def ficha_envio(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    ficha = service.expediente_envio(db, envio_id, incluir_auditoria=_con_auditoria(usuario_actual))
+    ficha = service.expediente_envio(
+        db, envio_id, incluir_auditoria=_con_auditoria(usuario_actual), usuario=usuario_actual
+    )
     if not ficha:
         raise HTTPException(status_code=404, detail="Envío no encontrado")
     return ficha
@@ -78,7 +86,7 @@ def ficha_cliente(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    ficha = service.expediente_cliente(db, cliente_id)
+    ficha = service.expediente_cliente(db, cliente_id, usuario=usuario_actual)
     if not ficha:
         raise HTTPException(status_code=404, detail="Cliente no encontrado")
     return ficha

@@ -302,6 +302,14 @@ def actualizar_cotizacion(
     if not db_obj:
         return None
     _exigir_escritura_propia(db_obj, usuario)
+    # Una cotización convertida es el documento fuente congelado del pedido:
+    # editarla la dejaba divergente (montos, TRM, renglones, estado).
+    from app.modules.orders.model import Pedido
+    pedido_asociado = db.query(Pedido).filter(Pedido.cotizacion_id == id_cotizacion).first()
+    if pedido_asociado:
+        raise ValueError(
+            f"No se puede editar la cotización porque está asociada al pedido #{pedido_asociado.id}."
+        )
     antes = _snapshot(db_obj)
     datos = esquema.model_dump(exclude_unset=True)
     # Los renglones se reemplazan COMPLETOS (contrato igual que al crear): la

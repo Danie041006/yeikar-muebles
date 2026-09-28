@@ -70,7 +70,10 @@ def eliminar_pedido(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    exito = service.eliminar_pedido(db, id_pedido, usuario_actual)
+    try:
+        exito = service.eliminar_pedido(db, id_pedido, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
     if not exito:
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return None

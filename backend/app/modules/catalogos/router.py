@@ -5,7 +5,7 @@ from typing import List, Optional
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
-from app.modules.users.deps import require_module
+from app.modules.users.deps import require_module, es_admin, ROLES_SUPER
 from app.modules.catalogos import schemas, service
 
 router = APIRouter(dependencies=[Depends(require_module('catalogos', solo_escritura=True))])
@@ -403,9 +403,12 @@ def eliminar_moneda(
 def crear_rol(
     esquema: schemas.RolCreate,
     db: Session = Depends(get_db),
-    usuario_actual: Usuario = Depends(get_current_user)
+    usuario_actual: Usuario = Depends(es_admin)
 ):
-    return service.crear_rol(db, esquema)
+    try:
+        return service.crear_rol(db, esquema)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.get("/rol/", response_model=List[schemas.RolResponse])
 def listar_roles(
@@ -433,9 +436,12 @@ def actualizar_rol(
     id_rol: int,
     esquema: schemas.RolUpdate,
     db: Session = Depends(get_db),
-    usuario_actual: Usuario = Depends(get_current_user)
+    usuario_actual: Usuario = Depends(es_admin)
 ):
-    db_obj = service.actualizar_rol(db, id_rol, esquema)
+    try:
+        db_obj = service.actualizar_rol(db, id_rol, esquema)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not db_obj:
         raise HTTPException(status_code=404, detail="Rol no encontrado")
     return db_obj
@@ -449,7 +455,7 @@ def eliminar_rol(
     db_obj = service.obtener_rol(db, id_rol)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Rol no encontrado")
-    if db_obj.nombre in ("Dueño", "Administrador"):
+    if db_obj.nombre in ROLES_SUPER:
         raise HTTPException(status_code=400, detail=f"El rol '{db_obj.nombre}' es de acceso total y no se puede eliminar")
     exito = service.eliminar_rol(db, id_rol)
     if not exito:

@@ -565,6 +565,16 @@ def actualizar_elemento_seccion(
     datos = esquema.model_dump(exclude_unset=True)
     registrar_sinonimo = datos.pop("registrar_sinonimo", False)
 
+    # El precio del insumo es la base autoritativa del costo del producto:
+    # fijarlo o cambiarlo queda reservado a Dueño/Administrador (igual que el
+    # recálculo masivo de precios), no a cualquier escritor de productos.
+    if "precio_unitario" in datos and datos["precio_unitario"] != elemento.precio_unitario:
+        if not es_admin_user(usuario_actual):
+            raise HTTPException(
+                status_code=403,
+                detail="Solo Dueño/Administrador pueden fijar el precio de un insumo de la receta.",
+            )
+
     if "material_id_normalizado" in datos:
         material_id = datos["material_id_normalizado"]
         if material_id is not None:

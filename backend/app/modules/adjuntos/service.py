@@ -45,6 +45,63 @@ ENTIDADES_VALIDAS = ("PRODUCTO", "CRUDO", "PAGO", "GASTO", "COMPRA")
 # de la cotización). Los comprobantes NUNCA se exponen sin autenticación.
 TIPOS_PUBLICOS = ("PRODUCTO", "CRUDO")
 
+# Módulo(s) cuya autorización cubre cada tipo de entidad. Leer un comprobante
+# exige el mismo permiso de lectura que su registro dueño; mutarlo exige
+# `gestionar`. Sin esto, la ruta de adjuntos era un atajo que saltaba el
+# alcance por módulo y por creador de ventas/gastos/compras.
+MODULO_POR_TIPO = {
+    "PRODUCTO": ("productos",),
+    "CRUDO": ("inventario", "produccion"),
+    "PAGO": ("ventas",),
+    "GASTO": ("gastos",),
+    "COMPRA": ("compras",),
+}
+
+
+def _tiene_acceso(db: Session, usuario, modulos: tuple[str, ...], escritura: bool) -> bool:
+    from app.modules.users.deps import (
+        MODULOS_LECTURA_COMPARTIDA,
+        es_admin_user,
+        obtener_accesos_usuario,
+    )
+
+    if es_admin_user(usuario):
+        return True
+    accesos = obtener_accesos_usuario(db, usuario)
+    for modulo in modulos:
+        if modulo not in accesos:
+            if not escritura and modulo in MODULOS_LECTURA_COMPARTIDA:
+                return True
+            continue
+        if accesos[modulo] or not escritura:
+            return True
+    return False
+
+
+def autorizar_tipo(db: Session, entidad_tipo: str, usuario, escritura: bool = False) -> None:
+    """Autoriza operar sobre adjuntos de una entidad según el módulo dueño."""
+    if entidad_tipo not in ENTIDADES_VALIDAS:
+        raise HTTPException(status_code=400, detail=f"Tipo de entidad inválido: {entidad_tipo}")
+    # Las fotos de catálogo ya se sirven sin autenticación por URL pública:
+    # exigir módulo para leerlas no aportaría confidencialidad.
+    if not escritura and entidad_tipo in TIPOS_PUBLICOS:
+        return
+    if not _tiene_acceso(db, usuario, MODULO_POR_TIPO[entidad_tipo], escritura):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para acceder a los adjuntos de este registro",
+        )
+
+
+def autorizar_adjunto(db: Session, adj: model.Adjunto, usuario, escritura: bool = False) -> None:
+    """Autoriza operar sobre un adjunto concreto: su creador siempre puede; el
+    resto pasa por el módulo dueño del tipo (lectura) o su permiso de gestión."""
+    from app.modules.users.deps import es_admin_user
+
+    if es_admin_user(usuario) or adj.creado_por_id == usuario.id:
+        return
+    autorizar_tipo(db, adj.entidad_tipo, usuario, escritura=escritura)
+
 
 def procesar_imagen(contenido: bytes, entidad_tipo: str):
     """Redimensiona y comprime la imagen según el tipo de entidad.
