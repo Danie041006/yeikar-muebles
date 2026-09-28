@@ -96,6 +96,23 @@ async def login(
             detail="Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.",
         )
 
+    # Ataque distribuido contra la cuenta: se reta con captcha ANTES de
+    # autenticar (el dueño legítimo puede resolverlo e ingresar), en lugar de
+    # bloquear la cuenta para todos con unos pocos fallos ajenos. Si el
+    # captcha no está configurado se mantiene el bloqueo (fail-closed).
+    if service.condicion_distribuida(db, username):
+        if not settings.TURNSTILE_SECRET_KEY:
+            raise HTTPException(
+                status_code=429,
+                detail="Demasiados intentos fallidos. Espera unos minutos e intenta de nuevo.",
+            )
+        token_captcha = form.get("turnstile_token") or ""
+        if not token_captcha or not service.verificar_turnstile(token_captcha, ip):
+            raise HTTPException(
+                status_code=400,
+                detail={"requiere_captcha": True, "mensaje": "Verificación anti-bots requerida."},
+            )
+
     user = service.autenticar_usuario(db, username, password)
     if not user:
         service.registrar_intento(db, username, ip, False)

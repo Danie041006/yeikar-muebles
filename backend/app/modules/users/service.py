@@ -144,10 +144,14 @@ def registrar_intento(db: Session, username: str, ip: str, exito: bool):
     db.commit()
 
 def usuario_bloqueado(db: Session, username: str, ip: str) -> bool:
-    """Anti-brute-force sin DoS trivial:
+    """Anti-brute-force sin DoS trivial. Solo bloquea según el ORIGEN que
+    insiste:
     - por combinación (cuenta, IP): un atacante solo se bloquea a sí mismo;
-    - por IP global: tope duro por origen;
-    - cuenta atacada desde >= 3 IPs distintas en la ventana: brute-force distribuido."""
+    - por IP global: tope duro por origen.
+
+    El ataque distribuido contra una cuenta NO bloquea la cuenta (eso era una
+    denegación de servicio con 3 IPs); se resuelve con captcha en el router
+    (`condicion_distribuida`)."""
     username = username.lower()
     ventana = func.now() - timedelta(minutes=settings.LOGIN_VENTANA_MINUTOS)
     base = db.query(model.LoginIntento).filter(
@@ -161,11 +165,26 @@ def usuario_bloqueado(db: Session, username: str, ip: str) -> bool:
     if fallos_combo >= settings.LOGIN_MAX_INTENTOS:
         return True
     fallos_ip = base.filter(model.LoginIntento.ip == ip).count()
-    if fallos_ip >= settings.LOGIN_MAX_INTENTOS_IP:
-        return True
-    ips_distintas = base.filter(
-        model.LoginIntento.username == username
-    ).with_entities(model.LoginIntento.ip).distinct().count()
+    return fallos_ip >= settings.LOGIN_MAX_INTENTOS_IP
+
+
+def condicion_distribuida(db: Session, username: str) -> bool:
+    """True si una cuenta recibió fallos desde >= N IPs distintas en la ventana
+    (posible brute-force distribuido). El router exige captcha antes de
+    autenticar en vez de bloquear la cuenta para todos."""
+    username = username.lower()
+    ventana = func.now() - timedelta(minutes=settings.LOGIN_VENTANA_MINUTOS)
+    ips_distintas = (
+        db.query(model.LoginIntento)
+        .filter(
+            model.LoginIntento.exito == False,
+            model.LoginIntento.created_at >= ventana,
+            model.LoginIntento.username == username,
+        )
+        .with_entities(model.LoginIntento.ip)
+        .distinct()
+        .count()
+    )
     return ips_distintas >= settings.LOGIN_IP_DISTINTAS_PARA_BLOQUEO
 
 # ------------------------------------------------------------
