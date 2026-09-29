@@ -28,6 +28,8 @@ COPY --from=builder /install /usr/local
 # Copiar código fuente
 COPY . .
 
+RUN chmod +x entrypoint.sh
+
 # Puerto de la aplicación
 EXPOSE 8000
 
@@ -35,7 +37,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/')" || exit 1
 
-# Comando de arranque
+# Comando de arranque: migra el esquema (alembic upgrade head) y luego sirve.
 # --no-proxy-headers: no confiar en X-Forwarded-For (anti-spoofing del rate limit
 # y del lockout de login). La app usa la IP real del socket (el proxy nginx).
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--no-proxy-headers"]
+CMD ["./entrypoint.sh"]
