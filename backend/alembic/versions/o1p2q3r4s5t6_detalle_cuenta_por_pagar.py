@@ -17,21 +17,33 @@ depends_on = None
 
 
 def upgrade():
-    op.create_table(
-        'detalle_cuenta_por_pagar',
-        sa.Column('id', sa.BigInteger(), primary_key=True),
-        sa.Column('cuenta_por_pagar_id', sa.BigInteger(), sa.ForeignKey('cuenta_por_pagar.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('orden', sa.Integer(), nullable=False, server_default='0'),
-        sa.Column('descripcion', sa.String(250), nullable=True),
-        sa.Column('material_id', sa.BigInteger(), sa.ForeignKey('material.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('cantidad', sa.Numeric(12, 2), nullable=False, server_default='1'),
-        sa.Column('precio_unitario', sa.Numeric(15, 2), nullable=False, server_default='0'),
-        sa.Column('cliente_nombre', sa.String(150), nullable=True),
-        sa.Column('cliente_id', sa.BigInteger(), sa.ForeignKey('cliente.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('observaciones', sa.Text(), nullable=True),
+    # IF NOT EXISTS: la tabla pudo crearse con SQL directo en producción antes
+    # de registrar la revisión; el resto de migraciones de esta rama ya usan
+    # este mismo patrón.
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS detalle_cuenta_por_pagar (
+            id BIGSERIAL PRIMARY KEY,
+            cuenta_por_pagar_id BIGINT NOT NULL REFERENCES cuenta_por_pagar(id) ON DELETE CASCADE,
+            orden INTEGER NOT NULL DEFAULT 0,
+            descripcion VARCHAR(250),
+            material_id BIGINT REFERENCES material(id) ON DELETE SET NULL,
+            cantidad NUMERIC(12, 2) NOT NULL DEFAULT 1,
+            precio_unitario NUMERIC(15, 2) NOT NULL DEFAULT 0,
+            cliente_nombre VARCHAR(150),
+            cliente_id BIGINT REFERENCES cliente(id) ON DELETE SET NULL,
+            observaciones TEXT
+        )
+        """
     )
-    op.create_index('ix_detalle_cuenta_por_pagar_cuenta_por_pagar_id', 'detalle_cuenta_por_pagar', ['cuenta_por_pagar_id'])
-    op.create_index('ix_detalle_cuenta_por_pagar_material_id', 'detalle_cuenta_por_pagar', ['material_id'])
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_detalle_cuenta_por_pagar_cuenta_por_pagar_id "
+        "ON detalle_cuenta_por_pagar (cuenta_por_pagar_id)"
+    )
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS ix_detalle_cuenta_por_pagar_material_id "
+        "ON detalle_cuenta_por_pagar (material_id)"
+    )
 
 
 def downgrade():
