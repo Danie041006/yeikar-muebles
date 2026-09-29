@@ -1,0 +1,50 @@
+{
+  "id": "N57",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-05",
+  "cliente": {
+    "nombre": "Hector Ramirez",
+    "rif_cedula": "C.I.V-18.288.479",
+    "direccion": "Vereda 5 Barrio El Paraíso",
+    "telefono": "0424-6521504"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón Dallas Pillow ortopédico de 1.40",
+      "observaciones": null,
+      "precio_unitario": 303,
+      "precio_total_impreso": 303
+    }
+  ],
+  "total_declarado": 303,
+  "abonos": [
+    {
+      "fecha": "2026-09-05",
+      "metodo": "EFECTIVO",
+      "monto": 300,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo 300 dólares"
+    },
+    {
+      "fecha": "2026-09-05",
+      "metodo": "EFECTIVO",
+      "monto": 3,
+      "origen": "IMPRESO",
+      "detalle_literal": "9.750/3250"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-05",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

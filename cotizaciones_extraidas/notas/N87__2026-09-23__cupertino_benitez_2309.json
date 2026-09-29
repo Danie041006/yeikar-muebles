@@ -1,0 +1,35 @@
+{
+  "id": "N87",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-23",
+  "cliente": {
+    "nombre": "Cupertino Benitez",
+    "rif_cedula": "C.C.1100968792",
+    "direccion": "Bolivariano",
+    "telefono": "350-2939549"
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 40,
+      "descripcion": "Láminas de MDF de 9MM",
+      "observaciones": null,
+      "precio_unitario": 125000,
+      "precio_total_impreso": 5000000
+    }
+  ],
+  "total_declarado": 5000000,
+  "abonos": [],
+  "saldo_impreso": 5000000,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-23",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 5000000
+}

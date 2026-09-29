@@ -1,0 +1,43 @@
+{
+  "id": "N88",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-23",
+  "cliente": {
+    "nombre": "Jeison Angulo",
+    "rif_cedula": "C.I. V-15.775.077",
+    "direccion": "Ureña",
+    "telefono": "350-7822429"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Dispensador de agua marca Jaguar",
+      "observaciones": null,
+      "precio_unitario": 138,
+      "precio_total_impreso": 138
+    }
+  ],
+  "total_declarado": 138,
+  "abonos": [
+    {
+      "fecha": "2026-09-26",
+      "metodo": "EFECTIVO",
+      "monto": 138,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-23",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

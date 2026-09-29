@@ -1,0 +1,43 @@
+{
+  "id": "N86",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-22",
+  "cliente": {
+    "nombre": "Gerardo Illera",
+    "rif_cedula": "C.I. V-15.775.551",
+    "direccion": "Ureña",
+    "telefono": "350-7822429"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Lámina de MDF de 15 cortada a la mitad",
+      "observaciones": null,
+      "precio_unitario": 210,
+      "precio_total_impreso": 210
+    }
+  ],
+  "total_declarado": 210,
+  "abonos": [
+    {
+      "fecha": "2026-09-22",
+      "metodo": "EFECTIVO",
+      "monto": 210,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-22",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

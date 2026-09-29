@@ -1,0 +1,52 @@
+{
+  "id": "N68",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-14",
+  "cliente": {
+    "nombre": "Jair Ali Contreras Soto",
+    "rif_cedula": "C.I. V-10.194.474",
+    "direccion": "Urbanización Simón Bolívar Calle 17 Casa 6-8 Frente a Garavito",
+    "telefono": "323-9852369"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Nevera Haceb de 254 litros",
+      "observaciones": null,
+      "precio_unitario": 621,
+      "precio_total_impreso": 621
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Aire de ventana marca Hyundai de 12.000 BTU Luz 110",
+      "observaciones": null,
+      "precio_unitario": 384,
+      "precio_total_impreso": 384
+    }
+  ],
+  "total_declarado": 1000,
+  "abonos": [
+    {
+      "fecha": "2026-09-14",
+      "metodo": "ZELLE",
+      "monto": 1000,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado al Zelle"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-14",
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Descuento $5 (14/9): subtotal 1.005 → venta 1.000"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

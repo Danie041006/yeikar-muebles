@@ -1,0 +1,43 @@
+{
+  "id": "N46",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-01",
+  "cliente": {
+    "nombre": "Rita Chacon",
+    "rif_cedula": "C.C.V-9.139.917",
+    "direccion": "Barrio Sabana Seca, Calle 14-97",
+    "telefono": "0414-7097019"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Cocina de 4 hornillas marca Haceb",
+      "observaciones": null,
+      "precio_unitario": 269,
+      "precio_total_impreso": 269
+    }
+  ],
+  "total_declarado": 269,
+  "abonos": [
+    {
+      "fecha": "2026-09-01",
+      "metodo": "EFECTIVO",
+      "monto": 269,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo 887.700/3.300"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-01",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

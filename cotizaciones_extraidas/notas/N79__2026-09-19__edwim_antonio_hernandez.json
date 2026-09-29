@@ -1,0 +1,57 @@
+{
+  "id": "N79",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-19",
+  "cliente": {
+    "nombre": "Edwim Antonio Hernandez",
+    "rif_cedula": "88.218.384",
+    "direccion": "La Integración Sector 6 Calle 17 Casa #2",
+    "telefono": "3224510224"
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Puerta negro semate",
+      "observaciones": null,
+      "precio_unitario": 1200000,
+      "precio_total_impreso": 1200000
+    }
+  ],
+  "total_declarado": 1200000,
+  "abonos": [
+    {
+      "fecha": "2026-09-19",
+      "metodo": "TRABAJO MITSUBICH",
+      "monto": 150000,
+      "origen": "IMPRESO",
+      "detalle_literal": "Trabajo Mitsubich"
+    },
+    {
+      "fecha": "2026-09-19",
+      "metodo": "NEQUI",
+      "monto": 150000,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono por Nequi"
+    },
+    {
+      "fecha": "2026-09-28",
+      "metodo": "EFECTIVO",
+      "monto": 300000,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo"
+    }
+  ],
+  "saldo_impreso": 600000,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": null,
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 600000
+}

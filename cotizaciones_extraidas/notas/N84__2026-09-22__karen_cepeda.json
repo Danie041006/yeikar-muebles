@@ -1,0 +1,52 @@
+{
+  "id": "N84",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-22",
+  "cliente": {
+    "nombre": "Karen Cepeda",
+    "rif_cedula": "C.I. V-25.639.476",
+    "direccion": "Prados del Este",
+    "telefono": "320-2249791"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 2,
+      "descripcion": "Colchones Euro Pillon de 1,40",
+      "observaciones": null,
+      "precio_unitario": 345,
+      "precio_total_impreso": 690
+    }
+  ],
+  "total_declarado": 690,
+  "abonos": [
+    {
+      "fecha": "2026-09-21",
+      "metodo": "BANCOLOMBIA",
+      "monto": 345,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado por Bancolombia 1.210.000/3250"
+    },
+    {
+      "fecha": "2026-09-22",
+      "metodo": "BANCOLOMBIA",
+      "monto": 345,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado por Bancolombia 1.210.000/3250"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-22",
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "La celda de saldo muestra $345 por fórmula, pero el total está pagado"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

@@ -1,0 +1,51 @@
+{
+  "id": "N80",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-19",
+  "cliente": {
+    "nombre": "Comandante Moreno Marcano",
+    "rif_cedula": null,
+    "direccion": "Comando 212",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 2,
+      "descripcion": "Puertas reparación",
+      "observaciones": null,
+      "precio_unitario": 510000,
+      "precio_total_impreso": 1020000
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Puerta principal con perfil",
+      "observaciones": null,
+      "precio_unitario": 653000,
+      "precio_total_impreso": 653000
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Mueble de TV para televisor de 40\" (1.90 ancho x 2.16 alto)",
+      "observaciones": null,
+      "precio_unitario": 850000,
+      "precio_total_impreso": 850000
+    }
+  ],
+  "total_declarado": 2523000,
+  "abonos": [],
+  "saldo_impreso": 2523000,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": null,
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Sin RIF ni abonos visibles; se asume saldo completo"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 2523000
+}

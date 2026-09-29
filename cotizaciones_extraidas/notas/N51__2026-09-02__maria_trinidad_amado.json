@@ -1,0 +1,57 @@
+{
+  "id": "N51",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-02",
+  "cliente": {
+    "nombre": "Maria Trinidad Amado",
+    "rif_cedula": "C.I. V 14.975614",
+    "direccion": "Barrio El Cuji Calle 3",
+    "telefono": "0414/74054960"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Lavadora de 11 kilos marca Mabe",
+      "observaciones": null,
+      "precio_unitario": 260,
+      "precio_total_impreso": 260
+    }
+  ],
+  "total_declarado": 260,
+  "abonos": [
+    {
+      "fecha": "2026-09-02",
+      "metodo": "EFECTIVO",
+      "monto": 100,
+      "origen": "IMPRESO",
+      "detalle_literal": null
+    },
+    {
+      "fecha": "2026-09-07",
+      "metodo": "EFECTIVO",
+      "monto": 100,
+      "origen": "IMPRESO",
+      "detalle_literal": null
+    },
+    {
+      "fecha": "2026-09-07",
+      "metodo": "EFECTIVO",
+      "monto": 60,
+      "origen": "IMPRESO",
+      "detalle_literal": "195.000/3250 = 60"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-07",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

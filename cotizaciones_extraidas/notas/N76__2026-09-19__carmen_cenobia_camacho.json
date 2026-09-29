@@ -1,0 +1,45 @@
+{
+  "id": "N76",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-19",
+  "cliente": {
+    "nombre": "Carmen Cenobia Camacho",
+    "rif_cedula": null,
+    "direccion": "Ureña, Urbanización La Esperanza",
+    "telefono": "3103202150"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón Lady Best 1,60 Doble Pillow",
+      "observaciones": null,
+      "precio_unitario": 420,
+      "precio_total_impreso": 420
+    }
+  ],
+  "total_declarado": 420,
+  "abonos": [
+    {
+      "fecha": "2026-09-19",
+      "metodo": "NEQUI",
+      "monto": 420,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado al Nequi 1.365.000/3250"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-19",
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Sin RIF en la nota"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

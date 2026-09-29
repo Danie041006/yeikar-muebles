@@ -1,0 +1,43 @@
+{
+  "id": "N92",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-26",
+  "cliente": {
+    "nombre": "Isabel Medina Joves",
+    "rif_cedula": "C.C-11.022.102",
+    "direccion": "Coruma Calle 3 Parte Alta",
+    "telefono": "0412-9300685"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Congelador de 198 litros marca Mabe",
+      "observaciones": null,
+      "precio_unitario": 324,
+      "precio_total_impreso": 324
+    }
+  ],
+  "total_declarado": 324,
+  "abonos": [
+    {
+      "fecha": "2026-09-26",
+      "metodo": "NEQUI",
+      "monto": 30,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono al Nequi 100.000/3.300"
+    }
+  ],
+  "saldo_impreso": 294,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": null,
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 294
+}

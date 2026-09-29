@@ -1,0 +1,43 @@
+{
+  "id": "N72",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-17",
+  "cliente": {
+    "nombre": "Dayerlin Paredes",
+    "rif_cedula": "C.I. V-31.083.907",
+    "direccion": "Las Adjuntas Sector Las Palmas San Antonio",
+    "telefono": "0416-1724378"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón Dallas Pillow ortopédico de 1.60",
+      "observaciones": null,
+      "precio_unitario": 358,
+      "precio_total_impreso": 358
+    }
+  ],
+  "total_declarado": 358,
+  "abonos": [
+    {
+      "fecha": "2026-09-17",
+      "metodo": "EFECTIVO",
+      "monto": 358,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-17",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

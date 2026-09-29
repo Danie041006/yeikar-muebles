@@ -1,0 +1,43 @@
+{
+  "id": "N94",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-28",
+  "cliente": {
+    "nombre": "Maikol Bayona",
+    "rif_cedula": "C.I. V-29.806.985",
+    "direccion": "Al frente de Garavito",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 3,
+      "descripcion": "Cortes de lámina",
+      "observaciones": "El pedazo de lámina lo trajo él",
+      "precio_unitario": 4700,
+      "precio_total_impreso": 14100
+    }
+  ],
+  "total_declarado": 14100,
+  "abonos": [
+    {
+      "fecha": "2026-09-28",
+      "metodo": "EFECTIVO",
+      "monto": 14100,
+      "origen": "IMPRESO",
+      "detalle_literal": "Cancelado 28/09/2026"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-28",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

@@ -1,0 +1,45 @@
+{
+  "id": "N47",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-01",
+  "cliente": {
+    "nombre": "Jaider Cortez Borja",
+    "rif_cedula": "V-10.194.606",
+    "direccion": "Barrio Luis Pineda Calle 10 entre Carrera 11 y 12",
+    "telefono": "4247588297"
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Nevera Haceb de 254 litros",
+      "observaciones": null,
+      "precio_unitario": 1953600,
+      "precio_total_impreso": 1953600
+    }
+  ],
+  "total_declarado": 1953600,
+  "abonos": [
+    {
+      "fecha": "2026-09-01",
+      "metodo": "EFECTIVO",
+      "monto": 600000,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo 600.000/3.300"
+    }
+  ],
+  "saldo_impreso": 1353600,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-02",
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "El recuadro dice PAGADO Y ENTREGADO 02/09, pero la celda de saldo marca $1.353.600 restante"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 1353600
+}

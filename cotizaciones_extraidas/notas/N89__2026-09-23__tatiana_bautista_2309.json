@@ -1,0 +1,43 @@
+{
+  "id": "N89",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-23",
+  "cliente": {
+    "nombre": "Tatiana Bautista",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón Dallas Clásico de 1 metro",
+      "observaciones": null,
+      "precio_unitario": 206,
+      "precio_total_impreso": 206
+    }
+  ],
+  "total_declarado": 206,
+  "abonos": [
+    {
+      "fecha": "2026-09-26",
+      "metodo": "EFECTIVO",
+      "monto": 54,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo 180.000/3300"
+    }
+  ],
+  "saldo_impreso": 152,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-23",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 152
+}

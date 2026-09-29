@@ -1,0 +1,50 @@
+{
+  "id": "N70",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-14",
+  "cliente": {
+    "nombre": "Jennifer Yaritza Cuvides Guevara",
+    "rif_cedula": "C.C. 1090465322",
+    "direccion": "Calle 17 Barrio El Milagro",
+    "telefono": "322-2571372"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Lavadora de 13 KG Mabe",
+      "observaciones": null,
+      "precio_unitario": 302,
+      "precio_total_impreso": 302
+    }
+  ],
+  "total_declarado": 302,
+  "abonos": [
+    {
+      "fecha": "2026-09-14",
+      "metodo": "EFECTIVO",
+      "monto": 100,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo"
+    },
+    {
+      "fecha": "2026-09-14",
+      "metodo": "BANCOLOMBIA",
+      "monto": 202,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono Bancolombia 656.500/3250"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-14",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

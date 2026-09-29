@@ -1,0 +1,59 @@
+{
+  "id": "N66",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-11",
+  "cliente": {
+    "nombre": "Eddy Ascanio",
+    "rif_cedula": "C.I. V-14.975.708",
+    "direccion": "Urbanización Las Villas, Ureña Casa 107 F",
+    "telefono": "3026727310"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Modular modelo Irlandés de 2m x 4m, tapizar en tela Azalea Negro y cojines decorativos en Azalea Negro y Garden Sand",
+      "observaciones": null,
+      "precio_unitario": 2180,
+      "precio_total_impreso": 2180
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Comedor de 6 puestos, base 3D, vidrio de 19 líneas rectangular, silla modelo Leonard pintar base y silla en gris humo y tapizar en Azalea Negro",
+      "observaciones": null,
+      "precio_unitario": 1790,
+      "precio_total_impreso": 1790
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Sofá cama matrimonial modelo de la foto, tapizar en tela Garden Rosa y 2 cojines decorativos en Garden Sand",
+      "observaciones": null,
+      "precio_unitario": 980,
+      "precio_total_impreso": 980
+    }
+  ],
+  "total_declarado": 4800,
+  "abonos": [
+    {
+      "fecha": "2026-09-12",
+      "metodo": "EFECTIVO",
+      "monto": 2400,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo"
+    }
+  ],
+  "saldo_impreso": 2400,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": null,
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Descuento $150 (Sr. Jackson, 12/9): subtotal 4.950 → venta 4.800"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 2400
+}

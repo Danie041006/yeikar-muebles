@@ -1,0 +1,43 @@
+{
+  "id": "N81",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-21",
+  "cliente": {
+    "nombre": "Arbin Carrillo",
+    "rif_cedula": null,
+    "direccion": "Barrio Gonzalo Castellanos",
+    "telefono": "350-2417968"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 2,
+      "descripcion": "Colchones Dallas 1 Pillow de 1,60",
+      "observaciones": null,
+      "precio_unitario": 358,
+      "precio_total_impreso": 716
+    }
+  ],
+  "total_declarado": 716,
+  "abonos": [
+    {
+      "fecha": "2026-09-21",
+      "metodo": "BANCOLOMBIA",
+      "monto": 358,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono al Bancolombia 1.163.000/3.250"
+    }
+  ],
+  "saldo_impreso": 358,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-21",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 358
+}

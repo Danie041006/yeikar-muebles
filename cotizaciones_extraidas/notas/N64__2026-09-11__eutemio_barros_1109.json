@@ -1,0 +1,35 @@
+{
+  "id": "N64",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-11",
+  "cliente": {
+    "nombre": "Eutemio Barros",
+    "rif_cedula": "C.I. V-15.538.418",
+    "direccion": "Barrio San Isidro Calle 6",
+    "telefono": "0424-7312465"
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 2115,
+      "descripcion": "Cmts de madera Apamate",
+      "observaciones": null,
+      "precio_unitario": 150,
+      "precio_total_impreso": 317250
+    }
+  ],
+  "total_declarado": 317250,
+  "abonos": [],
+  "saldo_impreso": 317250,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-11",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 317250
+}

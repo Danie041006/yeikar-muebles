@@ -1,0 +1,86 @@
+{
+  "id": "N69",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-14",
+  "cliente": {
+    "nombre": "Amazonia",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Cama cuna en brillante tal cual a la foto",
+      "observaciones": null,
+      "precio_unitario": 1124,
+      "precio_total_impreso": 1124
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Módulo de baño con sus repisas de 1.43 x 71 con puertas en alto brillo",
+      "observaciones": null,
+      "precio_unitario": 480,
+      "precio_total_impreso": 480
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Clobet modificación de gavetas, hechura de porta maleta, zapatera con vidrio en alto brillo de 1.22 x 72",
+      "observaciones": null,
+      "precio_unitario": 730,
+      "precio_total_impreso": 730
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Clobet de 3.55 metros con 2 nichos y puertas de vidrio",
+      "observaciones": null,
+      "precio_unitario": 1420,
+      "precio_total_impreso": 1420
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Cambio bebé en alto brillo",
+      "observaciones": null,
+      "precio_unitario": 840,
+      "precio_total_impreso": 840
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Módulo muñequero con luces de 2.43 en alto brillo",
+      "observaciones": null,
+      "precio_unitario": 1050,
+      "precio_total_impreso": 1050
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Clobet de 1.42 x 2.08, cambio de gavetas, agregar maletero y zapatera con vidrio en alto brillo",
+      "observaciones": null,
+      "precio_unitario": 865,
+      "precio_total_impreso": 865
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Mecedora con su butaco en color rosa viejo",
+      "observaciones": null,
+      "precio_unitario": 354,
+      "precio_total_impreso": 354
+    }
+  ],
+  "total_declarado": 6863,
+  "abonos": [],
+  "saldo_impreso": 6863,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": null,
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Sin RIF, dirección ni teléfono en la nota"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 6863
+}

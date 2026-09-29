@@ -1,0 +1,45 @@
+{
+  "id": "N61",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-07",
+  "cliente": {
+    "nombre": "Johana Angarita",
+    "rif_cedula": "C.I.V-60.384.003",
+    "direccion": "Barrio Hugo Chávez Frías",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Reparación de modular de 6pts, tapizar en tela Dylan 10 Gris",
+      "observaciones": "Los cojines que por favor los hagan a gusto de la Sra. Carolina",
+      "precio_unitario": 2362000,
+      "precio_total_impreso": 2362000
+    }
+  ],
+  "total_declarado": 2362000,
+  "abonos": [
+    {
+      "fecha": "2026-08-07",
+      "metodo": "ZELLE",
+      "monto": 975000,
+      "origen": "IMPRESO",
+      "detalle_literal": "300*3250 = 975.000"
+    }
+  ],
+  "saldo_impreso": 1387000,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": null,
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "La fecha del abono está manuscrita como 7/8; se registró tal cual (2026-08-07)"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 1387000
+}

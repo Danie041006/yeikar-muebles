@@ -1,0 +1,45 @@
+{
+  "id": "N65",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-11",
+  "cliente": {
+    "nombre": "Eduar Stik",
+    "rif_cedula": null,
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Lavadora de 11 KG marca Mabe",
+      "observaciones": null,
+      "precio_unitario": 254,
+      "precio_total_impreso": 254
+    }
+  ],
+  "total_declarado": 254,
+  "abonos": [
+    {
+      "fecha": "2026-09-11",
+      "metodo": "BANCOLOMBIA",
+      "monto": 254,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado al Bancolombia 825.000/3.250"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-11",
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Sin RIF, dirección ni teléfono en la nota"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

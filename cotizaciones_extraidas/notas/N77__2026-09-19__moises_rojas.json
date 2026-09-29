@@ -1,0 +1,43 @@
+{
+  "id": "N77",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-19",
+  "cliente": {
+    "nombre": "Moises Rojas",
+    "rif_cedula": "C.I. V-14.750.481",
+    "direccion": "San Cristóbal",
+    "telefono": "0414-3646649"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Sofá de 2 pts reparación",
+      "observaciones": null,
+      "precio_unitario": 340,
+      "precio_total_impreso": 340
+    }
+  ],
+  "total_declarado": 340,
+  "abonos": [
+    {
+      "fecha": "2026-09-25",
+      "metodo": "EFECTIVO",
+      "monto": 340,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-19",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

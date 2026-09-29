@@ -1,0 +1,43 @@
+{
+  "id": "N54",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-03",
+  "cliente": {
+    "nombre": "Katerine Diaz",
+    "rif_cedula": "C.I.V-17.817.051",
+    "direccion": "Calle 8 Carrera 10",
+    "telefono": "0414-7591311"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón ortopédico Dallas Pillow de 1.60",
+      "observaciones": null,
+      "precio_unitario": 368,
+      "precio_total_impreso": 368
+    }
+  ],
+  "total_declarado": 368,
+  "abonos": [
+    {
+      "fecha": "2026-09-03",
+      "metodo": "EFECTIVO",
+      "monto": 368,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en bolívares 343.000/932"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-03",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

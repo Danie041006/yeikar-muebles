@@ -1,0 +1,52 @@
+{
+  "id": "N78",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-19",
+  "cliente": {
+    "nombre": "Yanet Garcia Urbina",
+    "rif_cedula": "C.I. V-14.179.790",
+    "direccion": null,
+    "telefono": null
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Tanque congelador de 142 Lts",
+      "observaciones": null,
+      "precio_unitario": 283,
+      "precio_total_impreso": 283
+    }
+  ],
+  "total_declarado": 283,
+  "abonos": [
+    {
+      "fecha": "2026-09-19",
+      "metodo": "EFECTIVO",
+      "monto": 61,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo 200.000/3250"
+    },
+    {
+      "fecha": "2026-09-26",
+      "metodo": "EFECTIVO",
+      "monto": 60,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo 200.000/3300"
+    }
+  ],
+  "saldo_impreso": 162,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": null,
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Sin dirección ni teléfono en la nota"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 162
+}

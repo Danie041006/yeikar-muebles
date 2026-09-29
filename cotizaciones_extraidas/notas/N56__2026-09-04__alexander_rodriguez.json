@@ -1,0 +1,43 @@
+{
+  "id": "N56",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-04",
+  "cliente": {
+    "nombre": "Alexander Rodriguez",
+    "rif_cedula": "C.C-88.191.415",
+    "direccion": "Barrio Integración Sector 6",
+    "telefono": "311-5616569"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Ventilador recargable marca Skin Home de 12\"",
+      "observaciones": null,
+      "precio_unitario": 65,
+      "precio_total_impreso": 65
+    }
+  ],
+  "total_declarado": 65,
+  "abonos": [
+    {
+      "fecha": "2026-09-04",
+      "metodo": "EFECTIVO",
+      "monto": 65,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo 211.000/3250"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-04",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

@@ -1,0 +1,57 @@
+{
+  "id": "N50",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-02",
+  "cliente": {
+    "nombre": "William Mendoza",
+    "rif_cedula": "C.I.V-30.904.756",
+    "direccion": "Palotal parte alta",
+    "telefono": "310-7946248"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Cama modelo Nube matrimonial tapizar en tela Garden Negro",
+      "observaciones": null,
+      "precio_unitario": 1060,
+      "precio_total_impreso": 1060
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón matrimonial Euro Pillon",
+      "observaciones": null,
+      "precio_unitario": 365,
+      "precio_total_impreso": 365
+    }
+  ],
+  "total_declarado": 1425,
+  "abonos": [
+    {
+      "fecha": "2026-09-02",
+      "metodo": "EFECTIVO",
+      "monto": 225,
+      "origen": "IMPRESO",
+      "detalle_literal": null
+    },
+    {
+      "fecha": "2026-09-15",
+      "metodo": "EFECTIVO",
+      "monto": 1200,
+      "origen": "IMPRESO",
+      "detalle_literal": null
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-15",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

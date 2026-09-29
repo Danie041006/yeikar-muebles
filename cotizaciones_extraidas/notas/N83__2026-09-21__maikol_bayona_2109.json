@@ -1,0 +1,50 @@
+{
+  "id": "N83",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-21",
+  "cliente": {
+    "nombre": "Maikol Bayona",
+    "rif_cedula": "C.I. V-29.806.985",
+    "direccion": "Al frente de Garavito",
+    "telefono": null
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 2,
+      "descripcion": "Láminas de MDF de 9",
+      "observaciones": null,
+      "precio_unitario": 135000,
+      "precio_total_impreso": 270000
+    },
+    {
+      "cantidad": 4,
+      "descripcion": "Cortes",
+      "observaciones": null,
+      "precio_unitario": 4700,
+      "precio_total_impreso": 18800
+    }
+  ],
+  "total_declarado": 288800,
+  "abonos": [
+    {
+      "fecha": "2026-09-21",
+      "metodo": "EFECTIVO",
+      "monto": 288800,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-21",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

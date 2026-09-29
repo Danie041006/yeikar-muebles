@@ -1,0 +1,52 @@
+{
+  "id": "N97",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-28",
+  "cliente": {
+    "nombre": "Evelin Moncada",
+    "rif_cedula": "C.I. V-19.676.483",
+    "direccion": "Las Comunas Calle 9",
+    "telefono": "0424-7247476"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón Dallas Pillow de 1.40 ortopédico",
+      "observaciones": null,
+      "precio_unitario": 303,
+      "precio_total_impreso": 303
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón Dallas Pillow de 1.60 ortopédico",
+      "observaciones": null,
+      "precio_unitario": 358,
+      "precio_total_impreso": 358
+    }
+  ],
+  "total_declarado": 646,
+  "abonos": [
+    {
+      "fecha": "2026-09-28",
+      "metodo": "EFECTIVO",
+      "monto": 646,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado en efectivo 2.120.000 / 3.280"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-28",
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Descuento $15 (Sr. Jackson): subtotal 661 → venta 646"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

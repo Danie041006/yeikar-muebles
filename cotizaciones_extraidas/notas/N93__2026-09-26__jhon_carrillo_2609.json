@@ -1,0 +1,50 @@
+{
+  "id": "N93",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-26",
+  "cliente": {
+    "nombre": "Jhon Carrillo",
+    "rif_cedula": "C.I. V-15.538.948",
+    "direccion": "Las Villas",
+    "telefono": "0416-2799894"
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Televisor de 55\" marca TCL",
+      "observaciones": null,
+      "precio_unitario": 1700000,
+      "precio_total_impreso": 1700000
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Colchón Euro Pillon de 1.40",
+      "observaciones": null,
+      "precio_unitario": 1120000,
+      "precio_total_impreso": 1120000
+    }
+  ],
+  "total_declarado": 2820000,
+  "abonos": [
+    {
+      "fecha": "2026-09-26",
+      "metodo": "EFECTIVO",
+      "monto": 1700000,
+      "origen": "IMPRESO",
+      "detalle_literal": "Abono en efectivo"
+    }
+  ],
+  "saldo_impreso": 1120000,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-26",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 1120000
+}

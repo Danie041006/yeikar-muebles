@@ -1,0 +1,43 @@
+{
+  "id": "N53",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-02",
+  "cliente": {
+    "nombre": "Procesadora y Distribuidora Diaguamin C.A",
+    "rif_cedula": "J-30155799-9",
+    "direccion": "Carrera 25 Local #6-74 Barrio Bolívar San Cristóbal",
+    "telefono": "0276-3411294"
+  },
+  "moneda": "COP",
+  "items": [
+    {
+      "cantidad": 3,
+      "descripcion": "Láminas de MDF de 5.5",
+      "observaciones": null,
+      "precio_unitario": 130000,
+      "precio_total_impreso": 390000
+    }
+  ],
+  "total_declarado": 390000,
+  "abonos": [
+    {
+      "fecha": "2026-09-02",
+      "metodo": "EFECTIVO",
+      "monto": 390000,
+      "origen": "IMPRESO",
+      "detalle_literal": null
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-02",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

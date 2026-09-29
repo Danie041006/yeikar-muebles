@@ -1,0 +1,43 @@
+{
+  "id": "N55",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-03",
+  "cliente": {
+    "nombre": "Jose Romero",
+    "rif_cedula": "C.I.V-19.927.894",
+    "direccion": "Barrio Las Comunas",
+    "telefono": "0412-8809182"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Ventilador recargable de pedestal marca Coby 16\"",
+      "observaciones": null,
+      "precio_unitario": 69,
+      "precio_total_impreso": 69
+    }
+  ],
+  "total_declarado": 69,
+  "abonos": [
+    {
+      "fecha": "2026-09-03",
+      "metodo": "EFECTIVO",
+      "monto": 69,
+      "origen": "IMPRESO",
+      "detalle_literal": null
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-03",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

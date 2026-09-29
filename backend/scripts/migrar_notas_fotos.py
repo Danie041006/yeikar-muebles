@@ -136,7 +136,10 @@ def mapear_metodo(metodo_papel, moneda_cod):
         return "BINANCE"  # USDT suele moverse por Binance
     if "NEQUI" in m:
         return "NEQUI"
-    efectivo = "EFECTIVO_VES" if moneda_cod == "VES" else "EFECTIVO_USD"
+    efectivo = (
+        "EFECTIVO_COP" if moneda_cod == "COP"
+        else ("EFECTIVO_VES" if moneda_cod == "VES" else "EFECTIVO_USD")
+    )
     if "EFECTIVO" in m or "OTRO" in m or "ABONO" in m or "DESCUENTO" in m or not m.strip():
         return efectivo
     return efectivo
@@ -220,6 +223,8 @@ def main():
     parser.add_argument("--ejecutar", action="store_true", help="Aplica los cambios (default: dry-run)")
     parser.add_argument("--db-url", help="URL de la BD (default: DATABASE_URL del entorno)")
     parser.add_argument("--solo", help="Lista de ids separados por coma (ej. N01,N16)")
+    parser.add_argument("--forzar", action="store_true",
+                        help="Importa aunque ya exista una cotización del mismo cliente (misma fecha o total)")
     args = parser.parse_args()
 
     if args.db_url:
@@ -337,6 +342,51 @@ def main():
             if db.query(Venta).filter(Venta.observaciones.contains(tag)).first():
                 informe.append((nid, cliente.nombre, "OMITIDA", "Ya migrada (idempotente)", flags))
                 continue
+
+            # ── Guardia anti-duplicados ──
+            # Las notas ya cargadas por OTROS procesos (CxC históricas, cotizador)
+            # no llevan el tag MIGRA-Nxx, así que el chequeo de arriba no las ve.
+            # Si el mismo cliente ya tiene una cotización con la MISMA FECHA o el
+            # MISMO TOTAL (>0), se omite para no duplicar. --forzar lo salta.
+            try:
+                f_nota = date.fromisoformat(str(fecha_nota))
+            except Exception:
+                f_nota = None
+            if not args.forzar:
+                from sqlalchemy import or_
+                filtros = []
+                if f_nota is not None:
+                    filtros.append(Cotizacion.fecha == f_nota)
+                if total_venta and total_venta > 0:
+                    filtros.append(Cotizacion.total_estimado == total_venta)
+                dup = None
+                if filtros:
+                    dup = (
+                        db.query(Cotizacion)
+                        .filter(Cotizacion.cliente_id == cliente.id)
+                        .filter(or_(*filtros))
+                        .order_by(Cotizacion.id)
+                        .first()
+                    )
+                if dup is not None:
+                    informe.append((nid, cliente.nombre, "DUPLICADO?",
+                                    f"ya existe cotización #{dup.id} ({dup.fecha}, total {dup.total_estimado}) — omitida; usa --forzar para importarla igual",
+                                    flags))
+                    continue
+            # Aviso (no bloquea): mismo total y fecha bajo OTRO cliente
+            if f_nota is not None and total_venta and total_venta > 0:
+                otro = (
+                    db.query(Cotizacion)
+                    .filter(Cotizacion.cliente_id != cliente.id,
+                            Cotizacion.total_estimado == total_venta,
+                            Cotizacion.fecha == f_nota)
+                    .order_by(Cotizacion.id)
+                    .first()
+                )
+                if otro is not None:
+                    flags.append(
+                        f"⚠️ Otra cotización #{otro.id} ('{otro.cliente.nombre}') tiene el mismo total y fecha — revisar duplicado"
+                    )
 
             saldo_papel = data.get("saldo_final_manuscrito", data.get("saldo_impreso"))
 

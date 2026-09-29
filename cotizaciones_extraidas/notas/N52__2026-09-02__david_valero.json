@@ -1,0 +1,43 @@
+{
+  "id": "N52",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-09-02",
+  "cliente": {
+    "nombre": "David Valero",
+    "rif_cedula": "C.I.E 1.090.175.121",
+    "direccion": "Calle 10 Av 6 y 7 #10-26 El Caney",
+    "telefono": "313-8705439"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 1,
+      "descripcion": "Aire Split de 12.000 BTU 220V marca Hyundai",
+      "observaciones": null,
+      "precio_unitario": 280,
+      "precio_total_impreso": 280
+    }
+  ],
+  "total_declarado": 280,
+  "abonos": [
+    {
+      "fecha": "2026-09-02",
+      "metodo": "NEQUI",
+      "monto": 280,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado por Nequi 924.000/3.300"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-09-02",
+  "entrega_impresa": null,
+  "inconsistencias": [],
+  "dudas": [],
+  "saldo_para_importar": 0
+}

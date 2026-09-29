@@ -1,0 +1,67 @@
+{
+  "id": "N45",
+  "tipo_documento": "NOTA DE ENTREGA",
+  "emisor": {
+    "nombre": "COMERCIALIZADORA YEIKAR - LILIA CAROLINA BAUTISTA",
+    "rif": "V-18969838-7"
+  },
+  "fecha": "2026-08-17",
+  "cliente": {
+    "nombre": "Crisaura Villa Abreu",
+    "rif_cedula": "C.I. V-12.905.380",
+    "direccion": "Valera, Estado Trujillo",
+    "telefono": "0424-7200587"
+  },
+  "moneda": "USD",
+  "items": [
+    {
+      "cantidad": 3,
+      "descripcion": "Poltronas tapizar en Prana Hielo",
+      "observaciones": null,
+      "precio_unitario": 144,
+      "precio_total_impreso": 432
+    },
+    {
+      "cantidad": 5,
+      "descripcion": "Cojines decorativos en Prana Hielo",
+      "observaciones": null,
+      "precio_unitario": 20,
+      "precio_total_impreso": 100
+    },
+    {
+      "cantidad": 4,
+      "descripcion": "Butacas en Parana Hielo, pintar en dorado",
+      "observaciones": null,
+      "precio_unitario": 240,
+      "precio_total_impreso": 960
+    },
+    {
+      "cantidad": 1,
+      "descripcion": "Sofá cama matrimonial en Prana Negro",
+      "observaciones": null,
+      "precio_unitario": 870,
+      "precio_total_impreso": 870
+    }
+  ],
+  "total_declarado": 2350,
+  "abonos": [
+    {
+      "fecha": "2026-09-25",
+      "metodo": "USDT",
+      "monto": 2350,
+      "origen": "IMPRESO",
+      "detalle_literal": "Pagado al USDT"
+    }
+  ],
+  "saldo_impreso": 0,
+  "saldo_final_manuscrito": null,
+  "saldo_confirmado_por_dueno": null,
+  "fecha_entrega": "2026-08-19",
+  "entrega_impresa": null,
+  "inconsistencias": [
+    "Descuento $12 (25/9, Jefe Jackson): total papel 2.362 → venta 2.350",
+    "El sofá cama se dejó al precio del anterior"
+  ],
+  "dudas": [],
+  "saldo_para_importar": 0
+}
