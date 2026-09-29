@@ -30,10 +30,11 @@ def listar_facturas_venta(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),
     buscar: Optional[str] = Query(None, description="Buscar por estado, observaciones o nombre de cliente"),
+    pedido_id: Optional[int] = Query(None, description="Filtrar por pedido (Venta.pedido_id es único)"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    return service.obtener_ventas(db, salto=salto, limite=limite, buscar=buscar)
+    return service.obtener_ventas(db, salto=salto, limite=limite, buscar=buscar, pedido_id=pedido_id)
 
 @router.get("/cuentas-por-cobrar/", response_model=List[schemas.CuentaPorCobrarResponse])
 def listar_cuentas_por_cobrar(

@@ -94,6 +94,7 @@ ORDEN_LIMPIEZA = [
     "produccion_crudo_uso",
     "produccion_crudo_consumo",
     "produccion_crudo",
+    "movimiento_crudo",
     "producto_crudo_inventario",
     "orden_produccion",
     "envio",
@@ -194,6 +195,20 @@ class Cleaner:
                 if tabla == "detalle_pedido":
                     db.execute(text(
                         f"DELETE FROM orden_produccion WHERE detalle_pedido_id IN ({ids_str})"
+                    ))
+                    db.commit()
+                # Los ítems en crudo tienen hijos con FK RESTRICT (kardex y usos)
+                # que no siempre se registran uno por uno: se limpian aquí para
+                # que el borrado del crudo nunca quede a medias.
+                if tabla == "producto_crudo_inventario":
+                    db.execute(text(
+                        f"DELETE FROM movimiento_crudo WHERE crudo_id IN ({ids_str})"
+                    ))
+                    db.execute(text(
+                        f"DELETE FROM produccion_crudo_uso WHERE crudo_id IN ({ids_str})"
+                    ))
+                    db.execute(text(
+                        f"DELETE FROM produccion_crudo WHERE crudo_id IN ({ids_str})"
                     ))
                     db.commit()
                 db.execute(text(f"DELETE FROM {tabla} WHERE id IN ({ids_str})"))

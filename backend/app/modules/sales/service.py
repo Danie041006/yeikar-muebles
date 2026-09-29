@@ -42,6 +42,7 @@ def obtener_ventas(
     salto: int = 0,
     limite: int = 100,
     buscar: str = None,
+    pedido_id: int | None = None,
 ):
     # Lectura compartida (igual que cotizaciones): todos con el módulo 'ventas'
     # ven todas las facturas. Sin esto, Paola/cobradores no ven los dineros
@@ -56,6 +57,10 @@ def obtener_ventas(
                 Client.nombre.ilike(f"%{buscar}%")
             )
         )
+    # Venta.pedido_id es único: permite resolver la factura de un pedido sin
+    # traer el listado completo y filtrar en el cliente.
+    if pedido_id is not None:
+        query = query.filter(Venta.pedido_id == pedido_id)
     query = query.order_by(Venta.fecha.desc(), Venta.id.desc())
 
     return query.offset(salto).limit(limite).all()

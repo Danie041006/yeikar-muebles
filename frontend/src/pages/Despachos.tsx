@@ -1,19 +1,26 @@
 import React, { useEffect, useState } from 'react';
-import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
+import { useNavigate } from 'react-router-dom';
 import { envioService, Envio, EnvioUpdate } from '../services/envioService';
 import { OrderDetail } from '../services/pedidoService';
 import { getEmpleados } from '../services/empleadosService';
-import { esperarImagenesCargadas } from '../utils/pdfImagenes';
 import LocationTracker from '../components/LocationTracker';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
+
+const PAGE_SIZE = 12;
+
 export default function Despachos() {
-  const toast = useToast();  const [envios, setEnvios] = useState<Envio[]>([]);
+  const toast = useToast();
+  const navigate = useNavigate();
+  const [envios, setEnvios] = useState<Envio[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const searchDeb = useDebouncedValue(search, 400);
   const [activeTab, setActiveTab] = useState<'activos' | 'historicos'>('activos');
+  const [page, setPage] = useState(0);
+  const [total, setTotal] = useState(0);
   // Modal / Assign Form state
   const [assigningEnvio, setAssigningEnvio] = useState<Envio | null>(null);
   const [selectedEmpleadoId, setSelectedEmpleadoId] = useState('');
@@ -44,22 +51,18 @@ export default function Despachos() {
     setFormaPagoGuia('Crédito');
     setLoadingVenta(true);
     setVentaLinkedGuia(null);
+    // La tasa Bs se confirma al momento de generar la guía (no hay tasa del día
+    // fija): se parte de 1 y el operador la ajusta según la tasa vigente.
+    setTasaBsGuia('1');
     try {
-      // Buscar la venta vinculada al pedido de este envío
+      // Resolver la venta vinculada server-side (Venta.pedido_id es único).
       const { ventaService } = await import('../services/ventaService');
-      const ventas = await ventaService.getAll();
-      const ventaMatch = ventas.find(v => v.pedido_id === envio.pedido_id);
+      const ventas = await ventaService.getAll({ pedido_id: envio.pedido_id });
+      const ventaMatch = ventas[0];
       if (ventaMatch) {
         const detalle = await ventaService.getById(ventaMatch.id);
         setVentaLinkedGuia(detalle);
-        // Auto tasa según moneda de la venta
         if (detalle.moneda?.codigo === 'VES') setTasaBsGuia('1');
-        else if (detalle.moneda?.codigo === 'USD') setTasaBsGuia('50');
-        else if (detalle.moneda?.codigo === 'COP') setTasaBsGuia('0.0125');
-        else if (detalle.moneda?.codigo === 'EUR') setTasaBsGuia('55');
-        else setTasaBsGuia('1');
-      } else {
-        setTasaBsGuia('1');
       }
     } catch (e) {
       console.error('No se pudo cargar la venta vinculada:', e);
@@ -70,40 +73,20 @@ export default function Despachos() {
 
   const handleConfirmGuiaPdf = () => {
     if (!showGuiaModal) return;
-    setSelectedEnvioForGuia(showGuiaModal);
+    const envio = showGuiaModal;
+    setSelectedEnvioForGuia(envio);
     setShowGuiaModal(null);
     setIsGeneratingGuia(true);
     setTimeout(async () => {
-      const element = document.getElementById(`pdf-guia-container-${showGuiaModal.id}`);
+      const element = document.getElementById(`pdf-guia-container-${envio.id}`);
       if (!element) { setIsGeneratingGuia(false); return; }
       try {
-        // Las fotos de producto deben estar cargadas antes de capturar.
-        await esperarImagenesCargadas(element);
-        const html2canvas = (await import('html2canvas')).default;
-        const { jsPDF } = await import('jspdf');
-        const canvas = await html2canvas(element, { scale: 2, useCORS: true });
-        const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
-        const pdfW = pdf.internal.pageSize.getWidth();
-        const pdfH = pdf.internal.pageSize.getHeight();
-        const totalH = (canvas.height * pdfW) / canvas.width;
-        if (totalH <= pdfH) {
-          pdf.addImage(canvas.toDataURL('image/jpeg', 0.98), 'JPEG', 0, 0, pdfW, totalH);
-        } else {
-          const pxPerMm = canvas.width / pdfW;
-          const pageHpx = Math.floor(pdfH * pxPerMm);
-          const totalPages = Math.ceil(canvas.height / pageHpx);
-          for (let pg = 0; pg < totalPages; pg++) {
-            const sliceY = pg * pageHpx;
-            const slicePx = Math.min(pageHpx, canvas.height - sliceY);
-            const sc = document.createElement('canvas');
-            sc.width = canvas.width; sc.height = slicePx;
-            const ctx = sc.getContext('2d');
-            if (ctx) ctx.drawImage(canvas, 0, sliceY, canvas.width, slicePx, 0, 0, canvas.width, slicePx);
-            if (pg > 0) pdf.addPage('letter', 'portrait');
-            pdf.addImage(sc.toDataURL('image/jpeg', 0.98), 'JPEG', 0, 0, pdfW, (slicePx / canvas.width) * pdfW);
-          }
-        }
-        pdf.save(`Guia_Despacho_Yeikar_${showGuiaModal.guia_despacho || showGuiaModal.id}.pdf`);
+        const { capturarElementoAPdf } = await import('../utils/pdfCaptura');
+        await capturarElementoAPdf(element, {
+          nombreArchivo: `Guia_Despacho_Yeikar_${envio.guia_despacho || envio.id}.pdf`,
+          scale: 2,
+          margenMm: 0,
+        });
       } catch (err) {
         console.error('Error al generar la Guía de Despacho:', err);
         toast.error('Hubo un error al generar la Guía de Despacho en PDF.');
@@ -121,18 +104,28 @@ export default function Despachos() {
       setLoading(true);
       // Activos = pendientes + en ruta; Históricos = entregados + fallidos.
       const estados = activeTab === 'activos' ? ['PREPARADO', 'EN_TRANSITO'] : ['ENTREGADO', 'FALLIDO'];
-      const [a, b] = await Promise.all(estados.map((e) => envioService.getAll(search || undefined, e)));
-      const data = [...a, ...b];
-      setEnvios(data);
+      const { items, total } = await envioService.getAll({
+        buscar: searchDeb || undefined,
+        estados,
+        salto: page * PAGE_SIZE,
+        limite: PAGE_SIZE,
+      });
+      setEnvios(items);
+      setTotal(total);
     } catch (error) {
       console.error('Error fetching delivery shipments:', error);
     } finally {
       setLoading(false);
     }
   };
+  // Al cambiar la búsqueda se vuelve a la primera página.
+  useEffect(() => {
+    setPage(0);
+  }, [searchDeb]);
   useEffect(() => {
     fetchEnvios();
-  }, [activeTab, search]);
+  }, [activeTab, searchDeb, page]);
+  const totalPaginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const handleOpenAssign = (envio: Envio) => {
     setAssigningEnvio(envio);
     setSelectedEmpleadoId(envio.empleado_id ? envio.empleado_id.toString() : '');
@@ -258,7 +251,7 @@ export default function Despachos() {
         {(['activos', 'historicos'] as const).map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab)}
+            onClick={() => { setActiveTab(tab); setPage(0); }}
             className={`px-5 py-3 text-sm font-headline font-bold border-b-2 transition-all ${
               activeTab === tab
                 ? 'border-yeikar-primary text-yeikar-primary'
@@ -374,7 +367,7 @@ export default function Despachos() {
               {/* Action Buttons */}
               <div className="mt-5 pt-3 border-t border-yeikar-secondary-light/5 flex flex-col gap-2">
                 <button
-                  onClick={() => { window.location.href = `/historial?tipo=envio&id=${envio.id}`; }}
+                  onClick={() => navigate(`/historial?tipo=envio&id=${envio.id}`)}
                   className="w-full bg-yeikar-tertiary/60 hover:bg-yeikar-tertiary text-yeikar-secondary text-xs font-headline font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5"
                 >
                   📂 Expediente completo
@@ -427,6 +420,31 @@ export default function Despachos() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {!loading && envios.length > 0 && totalPaginas > 1 && (
+        <div className="flex items-center justify-between gap-4 pt-2">
+          <span className="text-xs font-mono text-yeikar-neutral/50">
+            Página {page + 1} de {totalPaginas} · {total} despacho{total === 1 ? '' : 's'}
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              disabled={page === 0}
+              className="rounded-xl border border-yeikar-secondary-light/10 bg-white px-4 py-2 text-xs font-bold text-yeikar-secondary shadow-sm transition-colors hover:border-yeikar-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Anterior
+            </button>
+            <button
+              type="button"
+              onClick={() => setPage((p) => Math.min(totalPaginas - 1, p + 1))}
+              disabled={page >= totalPaginas - 1}
+              className="rounded-xl border border-yeikar-secondary-light/10 bg-white px-4 py-2 text-xs font-bold text-yeikar-secondary shadow-sm transition-colors hover:border-yeikar-primary/40 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Siguiente
+            </button>
+          </div>
         </div>
       )}
       {/* Assign Driver Modal */}
@@ -676,7 +694,7 @@ export default function Despachos() {
               <div className="relative z-10 flex flex-col justify-between min-h-[255mm]">
                 <div>
                   {/* Encabezado */}
-                  <div className="flex justify-between items-start pb-3 border-b-2 border-stone-800">
+                  <div data-pdf-item="true" className="flex justify-between items-start pb-3 border-b-2 border-stone-800">
                     <div className="space-y-0.5 max-w-[60%]">
                       <img src="/Logo-yeikar.png" alt="Yeikar" className="h-10 object-contain mb-1" />
                       <h1 className="font-serif font-black text-stone-900 text-sm tracking-widest uppercase">Comercializadora Yeikar</h1>
@@ -698,7 +716,7 @@ export default function Despachos() {
                   </div>
 
                   {/* Datos del Destinatario — conforme al físico */}
-                  <div className="border border-stone-300 rounded-sm mt-2 mb-1 text-[9px]">
+                  <div data-pdf-item="true" className="border border-stone-300 rounded-sm mt-2 mb-1 text-[9px]">
                     <div className="grid grid-cols-3 border-b border-stone-200">
                       <div className="col-span-2 px-2 py-1 border-r border-stone-200">
                         <span className="font-bold text-stone-500 uppercase text-[7px] block">Nombre y Apellido o Razón Social</span>
@@ -736,7 +754,7 @@ export default function Despachos() {
                   </div>
 
                   {/* Tabla de Productos con Precio Unitario y Monto */}
-                  <div className="mb-2 border border-stone-300 overflow-hidden">
+                  <div data-pdf-item="true" className="mb-2 border border-stone-300 overflow-hidden">
                     <table className="w-full border-collapse text-[9px]">
                       <thead>
                         <tr className="bg-stone-800 text-stone-100 uppercase text-[7.5px] tracking-wider">
@@ -815,7 +833,7 @@ export default function Despachos() {
                 {/* Sección Inferior: Transporte + Desglose Fiscal + Firmas */}
                 <div>
                   {/* Transporte — conforme al físico */}
-                  <div className="border border-stone-300 text-[8.5px] font-mono mb-2">
+                  <div data-pdf-item="true" className="border border-stone-300 text-[8.5px] font-mono mb-2">
                     <div className="grid grid-cols-3 border-b border-stone-200">
                       <div className="px-2 py-1 border-r border-stone-200">
                         <span className="font-bold text-stone-500 uppercase text-[7px] block">Transportado en:</span>
@@ -843,7 +861,7 @@ export default function Despachos() {
                   </div>
 
                   {/* Pie: Leyenda Legal (izq) + Desglose Fiscal SENIAT (der) */}
-                  <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div data-pdf-item="true" className="grid grid-cols-2 gap-3 mb-3">
                     <div className="text-[7.5px] text-stone-600 space-y-0.5">
                       <p className="font-bold text-stone-800 uppercase tracking-wider">Esta Guía de Despacho va sin enmienda ni tachadura.</p>
                       <p className="italic">ORIGINAL · Documento legal habilitado para amparar el traslado de bienes y mercancías Comercializadora Yeikar.</p>
@@ -886,7 +904,7 @@ export default function Despachos() {
                   </div>
 
                   {/* Firmas */}
-                  <div className="grid grid-cols-3 gap-6 pt-2 border-t border-stone-300">
+                  <div data-pdf-item="true" className="grid grid-cols-3 gap-6 pt-2 border-t border-stone-300">
                     <div className="text-center">
                       <div className="w-28 border-t border-stone-400 mx-auto mb-1" />
                       <div className="text-[7.5px] font-serif font-bold uppercase tracking-wider text-stone-800">FIRMA DEL CONDUCTOR</div>

@@ -99,6 +99,11 @@ export default function CostosOrdenEnVivo({ data, loading, compacto = false }: {
                             {ins.captura}
                           </span>
                         )}
+                        {ins.es_crudo && (
+                          <span className="ml-2 text-[10px] font-bold text-emerald-600 uppercase">
+                            EN CRUDO
+                          </span>
+                        )}
                         {ins.es_pendiente && (
                           <span className="ml-2 text-[10px] font-bold text-amber-600 uppercase">
                             PEDIDO · PROVISIONAL

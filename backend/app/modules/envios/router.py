@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -52,21 +52,29 @@ def listar_mis_asignaciones(
 
 @router.get("/", response_model=None)
 def listar_envios(
+    response: Response,
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),
     buscar: Optional[str] = Query(None, description="Buscar por cliente, guia, direccion u observaciones"),
     estado: Optional[str] = Query(None, description="PREPARADO, EN_TRANSITO, ENTREGADO, FALLIDO"),
+    estados: Optional[str] = Query(None, description="Varios estados separados por coma (p. ej. PREPARADO,EN_TRANSITO)"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
+    lista_estados = [e.strip() for e in estados.split(",") if e.strip()] if estados else None
     envios = service.obtener_envios(
         db,
         salto=salto,
         limite=limite,
         buscar=buscar,
         estado=estado,
+        estados=lista_estados,
         usuario=usuario_actual,
     )
+    total = service.contar_envios(
+        db, buscar=buscar, estado=estado, estados=lista_estados, usuario=usuario_actual
+    )
+    response.headers["X-Total-Count"] = str(total)
     return [_serialize_envio(envio, usuario_actual) for envio in envios]
 
 

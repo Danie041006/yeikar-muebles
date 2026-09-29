@@ -289,6 +289,9 @@ function SeccionProduccion({ detalles }: { detalles: Expediente['detalles_pedido
               {p.costo && (
                 <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 rounded-xl bg-yeikar-secondary/5 border border-yeikar-secondary-light/10 p-3">
                   <Fila k="Materiales" v={dinero(p.costo.costo_material)} mono />
+                  {(p.costo.costo_crudo ?? 0) > 0 && (
+                    <Fila k="Crudo asignado" v={dinero(p.costo.costo_crudo)} mono />
+                  )}
                   <Fila k="Mano de obra" v={dinero(p.costo.costo_mano_obra)} mono />
                   <Fila k="Gastos" v={dinero(p.costo.costo_gastos)} mono />
                   <Fila k="Costo total" v={dinero(p.costo.costo_total)} mono />

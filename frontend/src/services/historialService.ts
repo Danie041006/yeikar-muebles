@@ -100,6 +100,8 @@ export interface EtapaExp {
 
 export interface CostoExp {
   costo_material: number;
+  /** Costo de las piezas en crudo asignadas al pedido. */
+  costo_crudo?: number | null;
   costo_mano_obra: number;
   costo_gastos: number;
   precio_impuestos_base?: number | null;

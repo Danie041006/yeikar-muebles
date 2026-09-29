@@ -28,13 +28,15 @@ Reglas (decisiones del dueño):
 import logging
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.modules.production.model import (
     ConsumoMaterial,
     EtapaProduccion,
     ManoObra,
     OrdenProduccion,
+    ProductoCrudoInventario,
+    ProduccionCrudoUso,
 )
 from app.modules.orders.model import DetallePedido
 from app.modules.productos.model import (
@@ -190,14 +192,34 @@ def generar_estructura_desde_orden(db: Session, orden_id: int) -> bool:
         sec = seccion_de_etapa.get(etapa.id, "EBANISTERIA")
         manos_por_seccion.setdefault(sec, []).append(mo)
 
-    if not consumos_por_seccion and not manos_por_seccion:
+    # 3) Piezas en crudo asignadas al pedido: cuentan como insumo de su sección
+    #    con el costo real congelado al asignar (materiales + mano de obra del
+    #    crudo). Sus materiales internos NO se re-descuentan: ya se gastaron al
+    #    producir el crudo, así que no hay doble conteo.
+    crudos_por_seccion: dict[str, list[ProduccionCrudoUso]] = {}
+    if orden.detalle_pedido_id:
+        for uso in (
+            db.query(ProduccionCrudoUso)
+            .options(
+                joinedload(ProduccionCrudoUso.crudo).joinedload(ProductoCrudoInventario.area)
+            )
+            .filter(ProduccionCrudoUso.detalle_pedido_id == orden.detalle_pedido_id)
+            .all()
+        ):
+            sec = uso.seccion or _normalizar_seccion(
+                uso.crudo.area.nombre if uso.crudo and uso.crudo.area else None
+            )
+            crudos_por_seccion.setdefault(sec, []).append(uso)
+
+    if not consumos_por_seccion and not manos_por_seccion and not crudos_por_seccion:
         return False
 
-    # 3) Crear/llenar secciones en el orden de flujo de producción.
+    # 4) Crear/llenar secciones en el orden de flujo de producción.
     claves_consumos = list(consumos_por_seccion.keys())
     claves_mo = [(sec, None) for sec in manos_por_seccion]
+    claves_crudos = [(sec, None) for sec in crudos_por_seccion]
     claves_ordenadas = sorted(
-        set(claves_consumos) | set(claves_mo),
+        set(claves_consumos) | set(claves_mo) | set(claves_crudos),
         key=lambda c: (orden_secciones.index(c[0]) if c[0] in orden_secciones else 999, c[1] or ""),
     )
 
@@ -277,6 +299,32 @@ def generar_estructura_desde_orden(db: Session, orden_id: int) -> bool:
                 precio_unitario=precio_promedio if precio_promedio > 0 else None,
                 costo_subtotal=(cantidad_por_unidad * precio_promedio) if precio_promedio > 0 else None,
                 observaciones=origen_note,
+            ))
+
+    # 4b) Elementos de crudo por sección: cantidad por unidad × costo unitario
+    #     real del crudo. El marcador [crudo_uso N] permite actualizarlos sin
+    #     duplicar si el crudo se asigna después de finalizar la orden.
+    for sec_norm, usos in crudos_por_seccion.items():
+        seccion = seccion_obj.get((sec_norm, None))
+        if not seccion:
+            continue
+        for uso in usos:
+            cantidad_por_unidad = _r4(Decimal(str(uso.cantidad)) / unidades) if unidades else Decimal("0")
+            costo_u = Decimal("0")
+            if uso.costo_unitario is not None:
+                costo_u = Decimal(str(uso.costo_unitario))
+            elif uso.crudo and uso.crudo.costo_unitario is not None:
+                costo_u = Decimal(str(uso.crudo.costo_unitario))
+            db.add(ElementoSeccion(
+                seccion_id=seccion.id,
+                nombre_insumo_original=uso.crudo.nombre if uso.crudo else f"Crudo #{uso.crudo_id}",
+                material_id_normalizado=None,
+                estado_resolucion="MAPEADO",
+                cantidad=cantidad_por_unidad,
+                unidad_medida="UND",
+                precio_unitario=costo_u if costo_u > 0 else None,
+                costo_subtotal=(cantidad_por_unidad * costo_u) if costo_u > 0 else None,
+                observaciones=f"{origen_note} [crudo_uso {uso.id}]",
             ))
 
     # 5) Costos de producción (mano de obra real) por sección.

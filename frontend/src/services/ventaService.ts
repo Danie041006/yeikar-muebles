@@ -187,8 +187,8 @@ export const labelMetodoPago = (metodos: MetodoPagoOption[] | undefined, valor: 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export const ventaService = {
-  /** Listar todas las ventas */
-  getAll: async (params?: { buscar?: string; salto?: number; limite?: number }): Promise<Venta[]> => {
+  /** Listar todas las ventas. `pedido_id` resuelve la factura de un pedido (única). */
+  getAll: async (params?: { buscar?: string; pedido_id?: number; salto?: number; limite?: number }): Promise<Venta[]> => {
     const res = await api.get<Venta[]>('/venta/', { params });
     return res.data;
   },

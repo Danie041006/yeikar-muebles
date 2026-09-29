@@ -133,6 +133,13 @@ docker compose up -d --build    # builds backend + frontend + db
 - `ALLOWED_ORIGINS` default includes `localhost:5173` (Vite dev) — add yours if using a different port
 - The `backend/` Dockerfile uses Python 3.11, not 3.13 — dev uses whatever is installed
 
+## Rendimiento / offline (VPS + Venezuela)
+
+- **Catálogos con caché SWR**: `api.ts` cachea en memoria los GET de `/catalogos/*` (sin params) con stale-while-revalidate (TTL 10 min, dedup en vuelo) y sirve la copia anterior si el servidor no responde. NO añadas fetches de catálogos nuevos en componentes: ya hay caché. Endpoints de datos (facturas, pedidos, inventario…) NO se cachean.
+- **Autocomplete server-side**: los selectores grandes (material, cliente, producto, empleado, proveedor) usan `SearchSelect` con `loadOptions` + `useDebouncedValue`; los listados usan `buscar` + paginación + `X-Total-Count` (ver `hooks/useDebouncedValue.ts`). No cargues catálogos completos al montar ni filtres en memoria listas grandes.
+- **PWA**: `vite.config.ts` genera service worker que precachea el shell (carga instantánea, la interfaz abre sin red) y cachea `/api/v1/catalogos/` con NetworkFirst (catálogos disponibles sin internet). El manifest vive en `public/site.webmanifest`.
+- **Backend**: GZipMiddleware activo (`app/main.py`, ~95% menos de payload en catálogos); pool de BD con `pool_pre_ping` + `pool_recycle=3600` (`app/db/session.py`) — clave para un VPS con cortes de red. En VPS corre uvicorn persistente (no serverless) → sin cold starts.
+
 ## Deployment (Vercel)
 
 - Production se despliega AUTOMÁTICAMENTE en cada `git push` a `main` (GitHub integrado con Vercel). No hace falta `vercel --prod`.

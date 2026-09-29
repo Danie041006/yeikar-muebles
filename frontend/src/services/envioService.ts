@@ -106,15 +106,28 @@ export interface EnvioReparto {
   observaciones?: string | null;
   pedido?: PedidoReparto | null;
 }
+export interface ListarEnviosParams {
+  buscar?: string;
+  estado?: string;
+  /** Varios estados a la vez (se envían como CSV al backend). */
+  estados?: string[];
+  salto?: number;
+  limite?: number;
+}
+
 export const envioService = {
-  getAll: async (buscar?: string, estado?: string): Promise<Envio[]> => {
+  /** Listar envíos (paginado + búsqueda server-side). Devuelve el total vía X-Total-Count. */
+  getAll: async (params: ListarEnviosParams = {}): Promise<{ items: Envio[]; total: number }> => {
     const response = await api.get<Envio[]>('/envio/', {
       params: {
-        ...(buscar ? { buscar } : {}),
-        ...(estado ? { estado } : {}),
+        ...(params.buscar ? { buscar: params.buscar } : {}),
+        ...(params.estado ? { estado: params.estado } : {}),
+        ...(params.estados?.length ? { estados: params.estados.join(',') } : {}),
+        salto: params.salto ?? 0,
+        limite: params.limite ?? 100,
       },
     });
-    return response.data;
+    return { items: response.data, total: Number(response.headers['x-total-count']) || response.data.length };
   },
   getById: async (id: number): Promise<Envio> => {
     const response = await api.get<Envio>(`/envio/${id}`);

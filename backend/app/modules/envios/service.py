@@ -76,25 +76,22 @@ def obtener_envio(db: Session, id_envio: int, usuario: Usuario | None = None):
     return _scope_envios(query, usuario).first()
 
 
-def obtener_envios(
+def _query_envios(
     db: Session,
-    salto: int = 0,
-    limite: int = 100,
     buscar: str | None = None,
     estado: str | None = None,
+    estados: list[str] | None = None,
     usuario: Usuario | None = None,
 ):
-    query = db.query(Envio).options(
-        joinedload(Envio.pedido).joinedload(Pedido.cliente),
-        joinedload(Envio.pedido).joinedload(Pedido.detalles),
-        joinedload(Envio.empleado),
-        joinedload(Envio.creador),
-        joinedload(Envio.asignado_por),
-    )
+    """Query base con scope y filtros, compartida por listado y conteo."""
+    query = db.query(Envio)
     query = _scope_envios(query, usuario)
 
     if estado:
         query = query.filter(Envio.estado == estado)
+
+    if estados:
+        query = query.filter(Envio.estado.in_(estados))
 
     if buscar:
         query = query.join(Envio.pedido).join(Pedido.cliente).filter(
@@ -106,7 +103,36 @@ def obtener_envios(
             )
         )
 
+    return query
+
+
+def obtener_envios(
+    db: Session,
+    salto: int = 0,
+    limite: int = 100,
+    buscar: str | None = None,
+    estado: str | None = None,
+    estados: list[str] | None = None,
+    usuario: Usuario | None = None,
+):
+    query = _query_envios(db, buscar=buscar, estado=estado, estados=estados, usuario=usuario).options(
+        joinedload(Envio.pedido).joinedload(Pedido.cliente),
+        joinedload(Envio.pedido).joinedload(Pedido.detalles),
+        joinedload(Envio.empleado),
+        joinedload(Envio.creador),
+        joinedload(Envio.asignado_por),
+    )
     return query.order_by(Envio.id.desc()).offset(salto).limit(limite).all()
+
+
+def contar_envios(
+    db: Session,
+    buscar: str | None = None,
+    estado: str | None = None,
+    estados: list[str] | None = None,
+    usuario: Usuario | None = None,
+) -> int:
+    return _query_envios(db, buscar=buscar, estado=estado, estados=estados, usuario=usuario).count()
 
 
 def crear_envio(db: Session, esquema: schemas.EnvioCreate, usuario: Usuario | None = None):

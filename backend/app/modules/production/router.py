@@ -554,6 +554,7 @@ def calcular_costo(
         return service.calcular_y_guardar_costo(
             db,
             orden_id,
+            usuario=usuario_actual,
             ganancia_porcentaje=esquema.ganancia_porcentaje,
             costo_gastos=esquema.costo_gastos,
             precio_impuestos_base=esquema.precio_impuestos_base
@@ -781,6 +782,22 @@ def eliminar_mano_obra_crudo(
 # ------------------------------------------------------------
 # Asignar crudo a un detalle de pedido (solo descuenta stock + trazabilidad)
 # ------------------------------------------------------------
+@router.delete("/crudo-uso/{uso_id}", status_code=status.HTTP_204_NO_CONTENT)
+def desasignar_crudo(
+    uso_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Revierte una asignación de crudo: devuelve la pieza al stock y elimina el
+    uso congelado (corrige una asignación equivocada)."""
+    try:
+        service.desasignar_crudo_de_detalle(db, uso_id, usuario_actual)
+    except ValueError as e:
+        detalle = 404 if "no existe o no está disponible" in str(e) else 400
+        raise HTTPException(status_code=detalle, detail=str(e))
+    return None
+
+
 @router.post("/crudo/{crudo_id}/asignar/{detalle_pedido_id}", response_model=schemas.CrudoUsoResponse, status_code=status.HTTP_201_CREATED)
 def asignar_crudo(
     crudo_id: int,

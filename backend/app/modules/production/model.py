@@ -216,6 +216,9 @@ class CostoProduccion(Base):
     # del detalle. Se congela al calcular el costo para la comparativa vs real.
     costo_estimado = Column(Numeric(15, 2), nullable=True)
     costo_material = Column(Numeric(15, 2), default=0.0, nullable=False)
+    # Costo de las piezas en crudo asignadas al pedido (congelado al asignar):
+    # materiales + mano de obra del crudo. Cuenta una sola vez en el mueble.
+    costo_crudo = Column(Numeric(15, 2), default=0.0, nullable=False, server_default="0")
     costo_mano_obra = Column(Numeric(15, 2), default=0.0, nullable=False)
     costo_gastos = Column(Numeric(15, 2), default=0.0, nullable=False)
     precio_impuestos_base = Column(Numeric(15, 2), default=0.0, nullable=False)
@@ -441,7 +444,15 @@ class ProduccionCrudoConsumo(Base):
 class ProduccionCrudoUso(Base):
     """Trazabilidad de cuándo una pieza de crudo se asigna a un detalle de pedido.
     Al asignar se DESCUENTA stock del ítem en crudo; NO se marcan etapas ni se
-    descuentan materiales de nuevo (esos ya se descontaron al producir el crudo)."""
+    descuentan materiales de nuevo (esos ya se descontaron al producir el crudo).
+
+    El costo del crudo SÍ se traslada al mueble: al asignar se CONGELA su costo
+    unitario (`costo_unitario`, costo real de fabricar el crudo: materiales +
+    mano de obra) y la sección de la que proviene, para que el costo real del
+    pedido y la estructura del producto lo incluyan UNA sola vez. Sin ese
+    congelamiento, un cambio posterior del costo del crudo reescribiría el
+    pasado. Los materiales internos del crudo NO se vuelven a descontar aquí:
+    ya se descontaron al producir el crudo, así que no hay doble conteo."""
 
     __tablename__ = "produccion_crudo_uso"
 
@@ -451,6 +462,13 @@ class ProduccionCrudoUso(Base):
     )
     detalle_pedido_id = Column(BigInteger, ForeignKey("detalle_pedido.id"), nullable=False, index=True)
     cantidad = Column(Numeric(12, 2), nullable=False, default=1)
+    # Costo unitario del crudo CONGELADO al asignar (costo real de su producción).
+    # NULL = asignación antigua (antes de costear el crudo hacia el pedido).
+    costo_unitario = Column(Numeric(15, 2), nullable=True)
+    # costo_unitario × cantidad, ya redondeado, para sumar sin recalcular.
+    costo_total = Column(Numeric(15, 2), nullable=True)
+    # Sección normalizada a la que se imputa el crudo (del área del ítem).
+    seccion = Column(String(50), nullable=True)
     creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
 
     created_at = Column(DateTime, server_default=func.now())
@@ -458,6 +476,10 @@ class ProduccionCrudoUso(Base):
     crudo = relationship("ProductoCrudoInventario")
     detalle_pedido = relationship("DetallePedido")
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
+
+    @property
+    def crudo_nombre(self):
+        return self.crudo.nombre if self.crudo else None
 
 
 class ProduccionCrudoManoObra(Base):

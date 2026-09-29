@@ -110,6 +110,8 @@ export interface CostoProduccion {
   id: number;
   orden_produccion_id: number;
   costo_material: number;
+  /** Costo de las piezas en crudo asignadas al pedido (congelado al asignar). */
+  costo_crudo?: number;
   costo_mano_obra: number;
   costo_gastos: number;
   precio_impuestos_base: number;
@@ -548,8 +550,13 @@ export interface ProduccionCrudoManoObraCreate {
 export interface CrudoUso {
   id: number;
   crudo_id: number;
+  crudo_nombre?: string | null;
   detalle_pedido_id: number;
   cantidad: number;
+  /** Costo real del crudo congelado al asignar (materiales + mano de obra). */
+  costo_unitario?: number | null;
+  costo_total?: number | null;
+  seccion?: string | null;
   creado_por_id?: number;
   created_at?: string;
 }
@@ -696,6 +703,8 @@ export interface CostosEnVivoSeccion {
     /** Pedido sin confirmar uso: el costo es provisional (entregado, no usado). */
     es_pendiente?: boolean;
     cantidad_pedida?: number | null;
+    /** Pieza en crudo asignada al pedido: su costo real entra al mueble. */
+    es_crudo?: boolean;
   }[];
   produccion: {
     nombre: string;

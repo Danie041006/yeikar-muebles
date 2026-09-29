@@ -56,7 +56,7 @@ export default function Expediente() {
       else if (tab === 'pedidos') setPedidos(await pedidoService.getAll(q || undefined, false));
       else if (tab === 'facturas') setFacturas((await facturacionService.getAll()).items);
       else if (tab === 'clientes') setClientes(await clienteService.getAll(q || undefined));
-      else if (tab === 'envios') setEnvios(await envioService.getAll(q || undefined));
+      else if (tab === 'envios') setEnvios((await envioService.getAll({ buscar: q || undefined })).items);
     } catch (e) {
       console.error('Error cargando expedientes:', e);
     } finally {

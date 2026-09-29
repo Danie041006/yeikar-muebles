@@ -33,6 +33,8 @@ from app.modules.users.model import Usuario
 from app.core.state_machine import (
     TRANSICIONES_ORDEN_PRODUCCION,
     TRANSICIONES_ETAPA_PRODUCCION,
+    TRANSICIONES_PEDIDO,
+    TRANSICIONES_PRODUCCION_CRUDO,
     validar_transicion,
 )
 from app.core.hora_ve import ahora_ve, hoy_ve
@@ -42,6 +44,10 @@ from app.modules.production.unidades import resolver_cantidad_consumo, nota_capt
 
 def _redondear2(v: Decimal) -> Decimal:
     return v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _redondear4(v: Decimal) -> Decimal:
+    return v.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
 
 def _scope_orders(query, usuario: Usuario | None):
@@ -427,7 +433,9 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
                 ).count()
                 todas_finalizadas = n_detalles > 0 and n_ordenes_finalizadas == n_detalles
 
-                if todas_finalizadas and pedido.estado not in ("TERMINADO", "ENTREGADO"):
+                # Solo desde un estado legal hacia TERMINADO: antes, un pedido
+                # CANCELADO "resucitaba" a TERMINADO y generaba envío.
+                if todas_finalizadas and "TERMINADO" in TRANSICIONES_PEDIDO.get(pedido.estado, set()):
                     pedido.estado = "TERMINADO"
                     # Generar envío automático
                     from app.modules.envios.service import crear_envio_automatico
@@ -888,7 +896,15 @@ def confirmar_consumo_material(
     from app.modules.inventory import laminas
     from app.modules.inventory.model import Inventario, SobranteLamina
 
-    db_consumo = obtener_consumo_material(db, id_consumo, usuario)
+    # FOR UPDATE: dos confirmaciones simultáneas se serializan; la segunda ve
+    # CONFIRMADO y cae en el 400 en vez de duplicar stock/gastos.
+    db_consumo = (
+        _scope_consumos(
+            db.query(ConsumoMaterial).filter(ConsumoMaterial.id == id_consumo), usuario
+        )
+        .with_for_update(of=ConsumoMaterial)
+        .first()
+    )
     if not db_consumo:
         raise ValueError("El consumo no existe o no está disponible para este usuario.")
     if db_consumo.estado != "PENDIENTE":
@@ -1422,7 +1438,38 @@ def eliminar_consumo_material(db: Session, id_consumo: int, usuario: Usuario | N
 
     etapa_id = db_consumo.etapa_produccion_id
     material_id = db_consumo.material_id
-    cantidad = db_consumo.cantidad
+    cantidad = Decimal(str(db_consumo.cantidad or 0))
+
+    etapa = db.query(EtapaProduccion).filter(EtapaProduccion.id == etapa_id).first()
+    orden = (
+        db.query(OrdenProduccion).filter(OrdenProduccion.id == etapa.orden_produccion_id).first()
+        if etapa else None
+    )
+    finalizada = bool(orden and orden.estado == "FINALIZADA")
+
+    # Si la orden ya está FINALIZADA y su receta generada incluye este insumo,
+    # revertir dejaría el producto con material que ya no se consumió. Se
+    # rechaza ANTES de tocar stock/gasto (fail-closed).
+    if finalizada and orden is not None:
+        from app.modules.production.estructura_generador import _producto_de_orden
+        from app.modules.productos.model import ElementoSeccion, SeccionProducto
+
+        producto = _producto_de_orden(db, orden)
+        if producto is not None:
+            generada = (
+                db.query(ElementoSeccion.id)
+                .join(SeccionProducto, SeccionProducto.id == ElementoSeccion.seccion_id)
+                .filter(
+                    SeccionProducto.producto_id == producto.id,
+                    ElementoSeccion.observaciones.like(f"%Generada desde producción (orden #{orden.id}%"),
+                )
+                .first()
+            )
+            if generada:
+                raise ValueError(
+                    "La receta del producto fue generada desde esta orden finalizada: "
+                    "ajusta la estructura de costos antes de revertir el consumo."
+                )
 
     # C6: reponer el stock descontado por el consumo (movimiento inverso ENTRADA).
     # Si la reversa falla, la eliminación FALLA (rollback): nunca se deja el
@@ -1431,7 +1478,12 @@ def eliminar_consumo_material(db: Session, id_consumo: int, usuario: Usuario | N
     ubicacion = db.query(Ubicacion).filter(Ubicacion.nombre == "Depósito Principal").first()
     ubicacion_id = ubicacion.id if ubicacion else 1
 
-    if db_consumo.largo_corte_cm and db_consumo.ancho_corte_cm:
+    if cantidad <= 0:
+        # Pedido abierto (cantidad 0): nunca descontó stock ni generó gasto,
+        # así que no hay nada que revertir. Antes el ENTRADA con cantidad 0
+        # violaba el gt>0 del esquema y hacía imposible borrar el pedido.
+        pass
+    elif db_consumo.largo_corte_cm and db_consumo.ancho_corte_cm:
         # Consumo por cortes: reversa exacta de láminas/sobrantes.
         from app.modules.inventory.cortes_service import revertir_consumo_por_cortes
         material_rev = db.query(Material).filter(Material.id == material_id).first()
@@ -1476,6 +1528,10 @@ def eliminar_consumo_material(db: Session, id_consumo: int, usuario: Usuario | N
     )
     db.delete(db_consumo)
     db.commit()
+
+    # El costo congelado (expediente, GET /costo) deja de contar el insumo.
+    if finalizada and orden is not None:
+        calcular_y_guardar_costo(db, orden.id)
     return True
 
 
@@ -1642,6 +1698,191 @@ def _costo_estimado_orden(db: Session, orden: OrdenProduccion) -> Optional[Decim
     return Decimal(str(producto.precio_costo_base)) * unidades
 
 
+# ------------------------------------------------------------
+# Costo de las piezas en crudo asignadas al pedido
+# ------------------------------------------------------------
+# El crudo consumido en un pedido cuenta como costo del mueble: su costo real
+# (materiales + mano de obra de su fabricación) se CONGELA al asignarlo en
+# `produccion_crudo_uso`. A diferencia de un material, sus insumos NO se
+# descuentan otra vez aquí: ya se descontaron al producir el crudo, así que el
+# mueble lo cuenta una sola vez y no hay doble conteo.
+def _seccion_de_crudo(crudo) -> str:
+    return _normalizar_seccion(crudo.area.nombre if crudo and crudo.area else None)
+
+
+def _usos_crudo_de_detalle(db: Session, detalle_pedido_id: int | None):
+    if not detalle_pedido_id:
+        return []
+    return (
+        db.query(ProduccionCrudoUso)
+        .options(joinedload(ProduccionCrudoUso.crudo).joinedload(ProductoCrudoInventario.area))
+        .filter(ProduccionCrudoUso.detalle_pedido_id == detalle_pedido_id)
+        .all()
+    )
+
+
+def _usos_crudo_de_orden(db: Session, orden: OrdenProduccion):
+    if not orden:
+        return []
+    return _usos_crudo_de_detalle(db, orden.detalle_pedido_id)
+
+
+def _costo_uso_crudo(uso: ProduccionCrudoUso) -> Decimal:
+    """Costo congelado del uso. Para asignaciones antiguas (sin snapshot) cae al
+    costo vivo del crudo, para no perder el dato."""
+    if uso.costo_total is not None:
+        return Decimal(str(uso.costo_total))
+    if uso.costo_unitario is not None:
+        return _redondear2(Decimal(str(uso.costo_unitario)) * Decimal(str(uso.cantidad)))
+    crudo = uso.crudo
+    if crudo is not None and crudo.costo_unitario is not None:
+        return _redondear2(Decimal(str(crudo.costo_unitario)) * Decimal(str(uso.cantidad)))
+    return Decimal("0")
+
+
+def _seccion_uso_crudo(uso: ProduccionCrudoUso) -> str:
+    return uso.seccion or _seccion_de_crudo(uso.crudo)
+
+
+def _costo_crudo_de_orden(db: Session, orden: OrdenProduccion) -> Decimal:
+    total = Decimal("0")
+    for uso in _usos_crudo_de_orden(db, orden):
+        total += _costo_uso_crudo(uso)
+    return _redondear2(total)
+
+
+def _crudos_por_seccion(db: Session, detalle_pedido_id: int | None) -> dict[str, list]:
+    """Agrupa los usos de crudo por sección normalizada (para gastos y costos)."""
+    agrupados: dict[str, list] = {}
+    for uso in _usos_crudo_de_detalle(db, detalle_pedido_id):
+        agrupados.setdefault(_seccion_uso_crudo(uso), []).append(uso)
+    return agrupados
+
+
+def _sincronizar_crudo_en_orden_finalizada(db: Session, detalle_pedido_id: int, usuario=None) -> None:
+    """Si la orden del detalle YA está FINALIZADA, incorpora el crudo recién
+    asignado al costo guardado y —solo si la estructura del producto nació de
+    ESTA orden— a la estructura de costes. Idempotente vía marcador
+    `[crudo_uso N]`: nunca duplica ni pisa una estructura manual.
+
+    El camino normal (asignar antes de finalizar) no necesita esto: el
+    generador de estructura y el cálculo de costo ya incluyen el crudo."""
+    from app.modules.production.estructura_generador import (
+        _nombre_seccion,
+        _normalizar_seccion as _norm_gen,
+        _producto_de_orden,
+    )
+    from app.modules.productos.model import (
+        SeccionProducto,
+        ElementoSeccion,
+        PoliticaSeccion,
+        ReglaGastoSeccion,
+    )
+
+    orden = (
+        db.query(OrdenProduccion)
+        .filter(OrdenProduccion.detalle_pedido_id == detalle_pedido_id)
+        .first()
+    )
+    if not orden or orden.estado != "FINALIZADA":
+        return
+
+    # 1) El costo guardado de la orden debe reflejar el crudo.
+    calcular_y_guardar_costo(db, orden.id)  # hace commit
+
+    # 2) Estructura: solo si fue generada por ESTA orden (jamás una manual).
+    producto = _producto_de_orden(db, orden)
+    if not producto:
+        return
+    marcador_orden = f"Generada desde producción (orden #{orden.id}"
+    generada = (
+        db.query(ElementoSeccion.id)
+        .join(SeccionProducto, SeccionProducto.id == ElementoSeccion.seccion_id)
+        .filter(
+            SeccionProducto.producto_id == producto.id,
+            ElementoSeccion.observaciones.like(f"%{marcador_orden}%"),
+        )
+        .first()
+    )
+    if not generada:
+        return
+
+    unidades = Decimal("1")
+    detalle = db.query(DetallePedido).filter(DetallePedido.id == detalle_pedido_id).first()
+    if detalle and detalle.cantidad:
+        unidades = Decimal(str(detalle.cantidad))
+
+    for uso in _usos_crudo_de_detalle(db, detalle_pedido_id):
+        marcador = f"[crudo_uso {uso.id}]"
+        existente = (
+            db.query(ElementoSeccion)
+            .join(SeccionProducto, SeccionProducto.id == ElementoSeccion.seccion_id)
+            .filter(
+                SeccionProducto.producto_id == producto.id,
+                ElementoSeccion.observaciones.like(f"%{marcador}%"),
+            )
+            .first()
+        )
+        sec_norm = _seccion_uso_crudo(uso)
+        nombre_sec = _nombre_seccion(sec_norm, None)
+        seccion = (
+            db.query(SeccionProducto)
+            .filter(
+                SeccionProducto.producto_id == producto.id,
+                SeccionProducto.nombre == nombre_sec,
+            )
+            .first()
+        )
+        if not seccion:
+            pos = (
+                db.query(SeccionProducto)
+                .filter(SeccionProducto.producto_id == producto.id)
+                .count()
+            ) + 1
+            seccion = SeccionProducto(producto_id=producto.id, nombre=nombre_sec, orden=pos)
+            db.add(seccion)
+            db.flush()
+            pct = Decimal("10.00")
+            regla = db.query(ReglaGastoSeccion).filter(
+                ReglaGastoSeccion.seccion == _norm_gen(nombre_sec)
+            ).first()
+            if regla and regla.porcentaje_gasto is not None:
+                pct = Decimal(str(regla.porcentaje_gasto))
+            db.add(PoliticaSeccion(
+                seccion_id=seccion.id,
+                mano_obra_base=Decimal("0"),
+                pct_liquidacion_mo=Decimal("5.00"),
+                pct_gastos_seccion=pct,
+            ))
+            db.flush()
+        cantidad_u = _redondear4(Decimal(str(uso.cantidad)) / unidades) if unidades else Decimal("0")
+        precio_u = Decimal(str(uso.costo_unitario)) if uso.costo_unitario is not None else None
+        subtotal = _redondear2(cantidad_u * precio_u) if precio_u is not None else None
+        obs = f"Generada desde producción (orden #{orden.id}, {unidades} ud) {marcador}"
+        if existente:
+            existente.seccion_id = seccion.id
+            existente.cantidad = cantidad_u
+            existente.precio_unitario = precio_u
+            existente.costo_subtotal = subtotal
+            existente.observaciones = obs
+        else:
+            db.add(ElementoSeccion(
+                seccion_id=seccion.id,
+                nombre_insumo_original=uso.crudo.nombre if uso.crudo else f"Crudo #{uso.crudo_id}",
+                material_id_normalizado=None,
+                estado_resolucion="MAPEADO",
+                cantidad=cantidad_u,
+                unidad_medida="UND",
+                precio_unitario=precio_u,
+                costo_subtotal=subtotal,
+                observaciones=obs,
+            ))
+    db.flush()
+    from app.modules.productos.cost_service import actualizar_snapshot_desde_estructura
+    actualizar_snapshot_desde_estructura(db, producto.id)
+    db.commit()
+
+
 def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = None) -> Optional[dict]:
     """Desglose de costos EN VIVO de una orden (vista estilo Excel, por sección):
     insumos + producción (base × recargo) + gastos de sección → total sección
@@ -1708,6 +1949,10 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
             continue
         manos_por_seccion.setdefault(seccion_de_etapa.get(etapa.id, "EBANISTERIA"), []).append(mo)
 
+    # Piezas en crudo asignadas al pedido: su costo real (congelado al asignar)
+    # entra como un insumo más de la sección de la que proviene el crudo.
+    crudos_por_seccion = _crudos_por_seccion(db, orden.detalle_pedido_id)
+
     # % de gastos por sección normalizada (regla global; default 10%).
     pct_gastos: dict[str, Decimal] = {
         r.seccion: Decimal(str(r.porcentaje_gasto)) for r in db.query(ReglaGastoSeccion).all()
@@ -1715,8 +1960,9 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
 
     claves_consumos = list(consumos_por_seccion.keys())
     claves_mo = [(sec, None) for sec in manos_por_seccion]
+    claves_crudos = [(sec, None) for sec in crudos_por_seccion]
     claves_ordenadas = sorted(
-        set(claves_consumos) | set(claves_mo),
+        set(claves_consumos) | set(claves_mo) | set(claves_crudos),
         key=lambda c: (orden_secciones.index(c[0]) if c[0] in orden_secciones else 999, c[1] or ""),
     )
 
@@ -1765,6 +2011,29 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
                 "es_pendiente": c.estado == "PENDIENTE",
                 "cantidad_pedida": float(c.cantidad_pedida) if c.cantidad_pedida is not None else None,
             })
+
+        # Piezas en crudo de esta sección: un renglón por uso, con el costo real
+        # de fabricar el crudo (materiales + mano de obra), contado UNA vez.
+        if comp is None:
+            for uso in crudos_por_seccion.get(sec_norm, []):
+                cantidad = Decimal(str(uso.cantidad))
+                total = _costo_uso_crudo(uso)
+                # V/unit derivado del total congelado (consistente aun en
+                # asignaciones antiguas sin snapshot).
+                costo_u = _redondear2(total / cantidad) if cantidad > 0 else Decimal("0")
+                totales["materiales"] += total
+                insumos.append({
+                    "nombre": uso.crudo.nombre if uso.crudo else f"Crudo #{uso.crudo_id}",
+                    "cantidad": float(cantidad),
+                    "unidad": "UND",
+                    "v_unit": float(costo_u),
+                    "total": float(total),
+                    "captura": "Pieza en crudo asignada al pedido",
+                    "es_excedente": False,
+                    "es_retrabajo": False,
+                    "motivo": None,
+                    "es_crudo": True,
+                })
 
         # La mano de obra cae SOLO en la sección base de su área (sin
         # componente), igual que el generador de estructura: "EBANISTERÍA" y
@@ -1879,6 +2148,16 @@ def _gastos_seccion_orden(db: Session, orden_id: int) -> Decimal:
         total_mo = _redondear2(Decimal(str(mo.monto)) * (Decimal("1") + recargo))
         subtotales[clave] = subtotales.get(clave, Decimal("0")) + total_mo
 
+    # Piezas en crudo asignadas al pedido: su costo real (congelado) suma al
+    # subtotal de su sección, así los gastos de sección aplican igual que a un
+    # material. Cuenta una sola vez (los insumos del crudo ya se gastaron al
+    # producir el crudo y NO se vuelven a descontar aquí).
+    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == orden_id).first()
+    if orden and orden.detalle_pedido_id:
+        for uso in _usos_crudo_de_detalle(db, orden.detalle_pedido_id):
+            clave = (_seccion_uso_crudo(uso), None)
+            subtotales[clave] = subtotales.get(clave, Decimal("0")) + _costo_uso_crudo(uso)
+
     pct_gastos = {
         r.seccion: Decimal(str(r.porcentaje_gasto)) for r in db.query(ReglaGastoSeccion).all()
     }
@@ -1891,10 +2170,24 @@ def _gastos_seccion_orden(db: Session, orden_id: int) -> Decimal:
     return _redondear2(total)
 
 
-def calcular_y_guardar_costo(db: Session, orden_id: int, ganancia_porcentaje: float = 0.0, costo_gastos: float | None = None, precio_impuestos_base: float = 0.0):
+def calcular_y_guardar_costo(
+    db: Session,
+    orden_id: int,
+    usuario: Usuario | None = None,
+    ganancia_porcentaje: float = 0.0,
+    costo_gastos: float | None = None,
+    precio_impuestos_base: float = 0.0,
+):
+    # Alcance por creador: igual que el resto del módulo, salvo Dueño/Admin.
+    # Llamadas internas (finalizar, sincronizar crudo) pasan usuario=None y ya
+    # operan sobre una orden cargada con alcance.
     # FOR UPDATE: serializa los cálculos concurrentes sobre la misma orden para
     # que el get-or-create de CostoProduccion no genere duplicados.
-    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == orden_id).with_for_update().first()
+    orden = (
+        _scope_orders(db.query(OrdenProduccion).filter(OrdenProduccion.id == orden_id), usuario)
+        .with_for_update()
+        .first()
+    )
     if not orden:
         raise ValueError("La orden de produccion especificada no existe.")
     # Sin gastos explícitos: se calculan automáticamente por sección
@@ -1919,8 +2212,12 @@ def calcular_y_guardar_costo(db: Session, orden_id: int, ganancia_porcentaje: fl
     for mo in mano_obras:
         recargo = Decimal(str(mo.porcentaje_recargo)) / Decimal("100") if mo.porcentaje_recargo else Decimal("0")
         costo_mano_obra += Decimal(str(mo.monto)) * (Decimal("1") + recargo)
+    # Piezas en crudo asignadas al pedido: costo real congelado al asignar.
+    # Sus materiales NO se re-descuentan (ya se descontaron al producir el
+    # crudo), así que no hay doble conteo.
+    costo_crudo = _costo_crudo_de_orden(db, orden)
     # Calcular costo total y precio de venta
-    costo_total = costo_material + costo_mano_obra + Decimal(str(costo_gastos))
+    costo_total = costo_material + costo_crudo + costo_mano_obra + Decimal(str(costo_gastos))
     ganancia_factor = Decimal(str(ganancia_porcentaje)) / Decimal("100")
     precio_venta_calculado = _redondear2(
         costo_total * (Decimal("1") + ganancia_factor) + Decimal(str(precio_impuestos_base))
@@ -1931,6 +2228,7 @@ def calcular_y_guardar_costo(db: Session, orden_id: int, ganancia_porcentaje: fl
         db_costo = CostoProduccion(orden_produccion_id=orden_id)
         db.add(db_costo)
     db_costo.costo_material = _redondear2(costo_material)
+    db_costo.costo_crudo = _redondear2(costo_crudo)
     db_costo.costo_mano_obra = _redondear2(costo_mano_obra)
     db_costo.costo_gastos = Decimal(str(costo_gastos))
     db_costo.precio_impuestos_base = Decimal(str(precio_impuestos_base))
@@ -2277,6 +2575,57 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
     return consumo
 
 
+def _revertir_produccion_crudo_cancelada(db, pc, usuario=None) -> None:
+    """Revierte los consumos de una producción de crudo cancelada: devuelve el
+    stock (movimiento inverso exacto por fila), borra el gasto automático y
+    deslista la mano de obra no pagada para que no entre a nómina."""
+    from app.modules.gastos.model import Gasto
+    from app.modules.inventory.cortes_service import revertir_consumo_por_cortes
+    from app.modules.inventory.schemas import MovimientoCreate
+
+    ubicacion = db.query(Ubicacion).filter(Ubicacion.nombre == "Depósito Principal").first()
+    ubicacion_id = ubicacion.id if ubicacion else 1
+
+    for consumo in list(pc.consumos):
+        cantidad = Decimal(str(consumo.cantidad or 0))
+        if cantidad <= 0:
+            pass
+        elif consumo.largo_corte_cm and consumo.ancho_corte_cm:
+            material = db.query(Material).filter(Material.id == consumo.material_id).first()
+            if material is None:
+                raise ValueError("El material del consumo ya no existe; no se puede revertir.")
+            revertir_consumo_por_cortes(
+                db,
+                material=material,
+                consumo_id=consumo.id,
+                consumo_tipo="produccion_crudo",
+                cantidad_cortes=cantidad,
+                largo_corte_cm=consumo.largo_corte_cm,
+                ancho_corte_cm=consumo.ancho_corte_cm,
+                origen_sobrante_id=consumo.origen_sobrante_id,
+                laminas_consumidas=consumo.laminas_consumidas,
+                ubicacion_id=ubicacion_id,
+            )
+        else:
+            registrar_movimiento(db, MovimientoCreate(
+                material_id=consumo.material_id,
+                ubicacion_id=ubicacion_id,
+                tipo="ENTRADA",
+                cantidad=cantidad,
+                referencia_tipo="produccion_crudo",
+                referencia_id=consumo.id,
+                observaciones=f"Reversa por cancelación de producción de crudo #{pc.id}",
+            ))
+        db.query(Gasto).filter(
+            Gasto.observaciones.like(f"%[consumo_crudo {consumo.id}]%"),
+        ).delete(synchronize_session=False)
+        db.delete(consumo)
+    pc.costo_total = Decimal("0")
+    for mo in pc.mano_obras or []:
+        if not mo.pagado:
+            mo.listo_nomina = False
+
+
 def cambiar_estado_produccion_crudo(db, produccion_id, estado: str, usuario=None):
     pc = obtener_produccion_crudo(db, produccion_id)
     if not pc:
@@ -2284,11 +2633,13 @@ def cambiar_estado_produccion_crudo(db, produccion_id, estado: str, usuario=None
     estado = estado.upper()
     if estado not in ("PENDIENTE", "EN_PRODUCCION", "COMPLETADA", "CANCELADA"):
         raise ValueError(f"Estado inválido: {estado}")
+    # Matriz de transiciones: COMPLETADA y CANCELADA son terminales. Antes
+    # EN_PRODUCCION aceptaba cualquier origen y reabrir una COMPLETADA volvía a
+    # asentar stock/kardex; el guard de "ya completada" no se alcanzaba.
+    validar_transicion(TRANSICIONES_PRODUCCION_CRUDO, pc.estado, estado, "produccion_crudo")
     if estado == pc.estado:
         return pc
     if estado == "COMPLETADA":
-        if pc.estado == "CANCELADA":
-            raise ValueError("Una producción cancelada no puede completarse.")
         # Serializa dos "finalizar" simultáneos: re-lee con FOR UPDATE para no
         # generar egresos duplicados por una carrera de lecturas.
         pc = (
@@ -2314,7 +2665,26 @@ def cambiar_estado_produccion_crudo(db, produccion_id, estado: str, usuario=None
             .with_for_update()
             .first()
         )
-        crudo.cantidad = Decimal(str(crudo.cantidad)) + Decimal(str(pc.cantidad))
+        # Costo real unitario de ESTA producción = (materiales consumidos + mano
+        # de obra con recargo) / piezas fabricadas. El costo del crudo se
+        # actualiza como promedio ponderado por stock (igual que el
+        # costo_promedio de producto_inventario): así las piezas ya producidas
+        # conservan su costo y las nuevas entran con el suyo.
+        stock_antes = Decimal(str(crudo.cantidad))
+        piezas_nuevas = Decimal(str(pc.cantidad))
+        costo_produccion = Decimal(str(pc.costo_total or 0)) + pc.mano_obra_total
+        costo_unitario_nuevo = (
+            _redondear2(costo_produccion / piezas_nuevas) if piezas_nuevas > 0 else Decimal("0")
+        )
+        stock_final = stock_antes + piezas_nuevas
+        if stock_final > 0:
+            costo_previo = Decimal(str(crudo.costo_unitario or 0))
+            crudo.costo_unitario = _redondear2(
+                (stock_antes * costo_previo + piezas_nuevas * costo_unitario_nuevo) / stock_final
+            )
+        else:
+            crudo.costo_unitario = costo_unitario_nuevo
+        crudo.cantidad = stock_final
         crudo.activo = True
         # Kardex: la producción completada también queda en el historial.
         db.add(MovimientoCrudo(
@@ -2334,8 +2704,8 @@ def cambiar_estado_produccion_crudo(db, produccion_id, estado: str, usuario=None
         pc.actualizado_por_id = usuario.id if usuario else None
         db.add(crudo)
     elif estado == "CANCELADA":
-        if pc.estado == "COMPLETADA":
-            raise ValueError("No se puede cancelar una producción ya completada (revierte inventario y gastos).")
+        # Cancelar corrige de verdad: revierte stock y gasto de los consumos.
+        _revertir_produccion_crudo_cancelada(db, pc, usuario)
         pc.estado = "CANCELADA"
         pc.actualizado_por_id = usuario.id if usuario else None
     elif estado == "EN_PRODUCCION":
@@ -2500,9 +2870,10 @@ def eliminar_mano_obra_crudo(db, mano_obra_id, usuario=None):
 
 
 def asignar_crudo_a_detalle(db, crudo_id, detalle_pedido_id, usuario=None):
-    """Asigna una pieza de crudo a un detalle de pedido: SOLO descuenta stock del
-    ítem en crudo y registra trazabilidad. NO marca etapas y NO descuenta
-    materiales (esos ya se descontaron al producir el crudo)."""
+    """Asigna una pieza de crudo a un detalle de pedido: descuenta stock del ítem
+    en crudo, registra trazabilidad y CONGELA el costo real del crudo en el uso
+    para que el mueble lo contabilice. NO marca etapas y NO descuenta materiales
+    (esos ya se descontaron al producir el crudo: no hay doble conteo)."""
     detalle = db.query(DetallePedido).filter(DetallePedido.id == detalle_pedido_id).with_for_update().first()
     if not detalle:
         raise ValueError("El detalle de pedido no existe.")
@@ -2521,10 +2892,16 @@ def asignar_crudo_a_detalle(db, crudo_id, detalle_pedido_id, usuario=None):
     if crudo.cantidad <= 0:
         crudo.cantidad = Decimal("0")
         crudo.activo = False
+    # Congelar el costo real del crudo: materiales + mano de obra de su
+    # fabricación (costo_unitario ya es el promedio ponderado del stock).
+    costo_u = Decimal(str(crudo.costo_unitario)) if crudo.costo_unitario is not None else Decimal("0")
     uso = ProduccionCrudoUso(
         crudo_id=crudo.id,
         detalle_pedido_id=detalle.id,
         cantidad=cantidad,
+        costo_unitario=costo_u,
+        costo_total=_redondear2(costo_u * cantidad),
+        seccion=_seccion_de_crudo(crudo),
         creado_por_id=usuario.id if usuario else None,
     )
     db.add(uso)
@@ -2540,11 +2917,76 @@ def asignar_crudo_a_detalle(db, crudo_id, detalle_pedido_id, usuario=None):
     ))
     record_event(
         db, actor=usuario, action="UPDATE", entity_type="producto_crudo", entity_id=crudo.id,
-        after={"descontado": float(cantidad), "detalle_pedido_id": detalle.id},
+        after={"descontado": float(cantidad), "detalle_pedido_id": detalle.id,
+               "costo_unitario": float(costo_u)},
     )
     db.commit()
     db.refresh(uso)
+    # Si la orden del detalle ya estaba finalizada, incorpora el crudo al costo
+    # guardado (y a la estructura generada) para que no quede desfasado. Un fallo
+    # aquí NO rompe la asignación (el stock y el uso ya quedaron guardados).
+    try:
+        _sincronizar_crudo_en_orden_finalizada(db, detalle.id, usuario)
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "No se pudo sincronizar el crudo con la orden finalizada del detalle #%s",
+            detalle.id,
+        )
+        db.rollback()
+    db.refresh(uso)
     return uso
+
+
+def desasignar_crudo_de_detalle(db: Session, uso_id: int, usuario: Usuario | None = None) -> bool:
+    """Revierte una asignación de crudo: devuelve la pieza al stock del ítem,
+    elimina el uso congelado y resincroniza el costo si la orden ya finalizó.
+
+    Corrige una asignación equivocada (antes solo se podía compensar stock con
+    un movimiento manual, y el uso congelado seguía contando en el costo)."""
+    query = db.query(ProduccionCrudoUso).filter(ProduccionCrudoUso.id == uso_id)
+    if usuario is not None:
+        query = filtrar_registros_propios(
+            query.join(DetallePedido, DetallePedido.id == ProduccionCrudoUso.detalle_pedido_id)
+            .join(Pedido, Pedido.id == DetallePedido.pedido_id),
+            Pedido.creado_por_id,
+            usuario,
+        )
+    uso = query.with_for_update(of=ProduccionCrudoUso).first()
+    if not uso:
+        raise ValueError("La asignación de crudo no existe o no está disponible para este usuario.")
+    crudo = (
+        db.query(ProductoCrudoInventario)
+        .filter(ProductoCrudoInventario.id == uso.crudo_id)
+        .with_for_update()
+        .first()
+    )
+    if not crudo:
+        raise ValueError("El ítem en crudo ya no existe; no se puede revertir la asignación.")
+    cantidad = Decimal(str(uso.cantidad or 0))
+    crudo.cantidad = Decimal(str(crudo.cantidad or 0)) + cantidad
+    crudo.activo = True
+    detalle_id = uso.detalle_pedido_id
+    db.add(MovimientoCrudo(
+        crudo_id=crudo.id,
+        tipo="ENTRADA",
+        cantidad=cantidad,
+        referencia_tipo="ASIGNACION",
+        referencia_id=detalle_id,
+        observaciones=f"Reversa de asignación al pedido (detalle #{detalle_id})",
+        creado_por_id=usuario.id if usuario else None,
+    ))
+    record_event(
+        db, actor=usuario, action="DELETE", entity_type="produccion_crudo_uso", entity_id=uso.id,
+        before={"crudo_id": crudo.id, "detalle_pedido_id": detalle_id, "cantidad": float(cantidad)},
+    )
+    db.delete(uso)
+    db.commit()
+    try:
+        _sincronizar_crudo_en_orden_finalizada(db, detalle_id, usuario)
+    except Exception:  # noqa: BLE001
+        logger.exception("No se pudo resincronizar el crudo tras desasignar el uso #%s", uso_id)
+        db.rollback()
+    return True
 
 
 # ------------------------------------------------------------

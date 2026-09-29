@@ -246,6 +246,8 @@ class EtapaProduccionResponse(EtapaProduccionBase):
 # ------------------------------------------------------------
 class CostoProduccionBase(BaseModel):
     costo_material: float = Field(ge=0)
+    # Costo de las piezas en crudo asignadas al pedido (congelado al asignar).
+    costo_crudo: float = 0.0
     costo_mano_obra: float = Field(ge=0)
     costo_gastos: float = Field(ge=0)
     precio_impuestos_base: float = Field(ge=0)
@@ -591,8 +593,14 @@ class ProduccionCrudoResponse(BaseModel):
 class CrudoUsoResponse(BaseModel):
     id: int
     crudo_id: int
+    crudo_nombre: Optional[str] = None
     detalle_pedido_id: int
     cantidad: float
+    # Costo congelado al asignar (lo que el crudo costó de verdad): así el
+    # mueble lo contabiliza una sola vez, sin recalcular hacia atrás.
+    costo_unitario: Optional[float] = None
+    costo_total: Optional[float] = None
+    seccion: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:

@@ -244,6 +244,7 @@ def _produccion_por_detalle(db: Session, pedido: Pedido) -> list[dict]:
 def _serializar_costo(costo: CostoProduccion) -> dict:
     return {
         "costo_material": _f(costo.costo_material),
+        "costo_crudo": _f(costo.costo_crudo),
         "costo_mano_obra": _f(costo.costo_mano_obra),
         "costo_gastos": _f(costo.costo_gastos),
         "precio_impuestos_base": _f(costo.precio_impuestos_base),
