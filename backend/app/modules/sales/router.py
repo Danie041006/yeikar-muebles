@@ -43,6 +43,13 @@ def listar_cuentas_por_cobrar(
 ):
     return service.obtener_cuentas_por_cobrar(db)
 
+@router.get("/cuentas-por-cobrar/por-categoria", response_model=schemas.ReporteDeudaCategoriaResponse)
+def listar_cuentas_por_cobrar_por_categoria(
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    return service.obtener_cuentas_por_cobrar_por_categoria(db)
+
 @router.get("/{id}", response_model=schemas.VentaDetalleResponse)
 def ver_factura_venta(
     id: int,

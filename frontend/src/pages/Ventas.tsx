@@ -10,6 +10,11 @@ import {
   DetalleVenta,
   CuentaPorCobrar,
   Pago,
+  ReporteDeudaCategoria,
+  ClienteDeuda,
+  CategoriaDeuda,
+  ItemDeuda,
+  GrupoDuplicado,
   METODOS_PAGO,
   cargarMetodosPago,
   labelMetodoPago,
@@ -68,6 +73,7 @@ interface CobroPendiente {
   descontado: number;
   saldo: number;
   codigo: string;
+  items: ItemDeuda[];
 }
 
 function progresoCobro(total: number, pagado: number): number {
@@ -201,7 +207,7 @@ function BloqueDeuda({
   );
 }
 
-function BloquePedido({ venta }: { venta: Venta }) {
+function BloquePedido({ venta, items, codigo }: { venta: Venta; items: ItemDeuda[]; codigo: string }) {
   return (
     <div className="rounded-xl bg-white/90 p-3">
       <p className="font-headline text-xs font-black uppercase tracking-widest text-yeikar-secondary">
@@ -214,6 +220,29 @@ function BloquePedido({ venta }: { venta: Venta }) {
       <p className="mt-1 font-mono text-xs text-yeikar-neutral/60">
         Venta #{venta.id} · {fmtFechaVE(venta.fecha)}
       </p>
+
+      <p className="mt-3 font-headline text-[11px] font-black uppercase tracking-widest text-yeikar-secondary/80">
+        Por qué se debe
+      </p>
+      {items.length === 0 ? (
+        <p className="mt-1 font-mono text-xs text-yeikar-neutral/50">Sin renglones registrados.</p>
+      ) : (
+        <ul className="mt-1 space-y-1">
+          {items.map((it, i) => (
+            <li
+              key={i}
+              className="flex items-start justify-between gap-2 border-b border-yeikar-secondary-light/10 pb-1 last:border-0"
+            >
+              <span className="min-w-0 text-xs leading-snug text-yeikar-neutral/80">
+                <span className="font-mono font-bold text-yeikar-secondary">{it.cantidad}×</span> {it.descripcion}
+              </span>
+              <span className="shrink-0 font-mono text-xs font-bold text-yeikar-neutral/80">
+                {formatCurrency(it.cantidad * it.precio, codigo)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -237,7 +266,7 @@ function PanelCobro({
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <BloqueDeuda total={total} pagado={pagado} descontado={descontado} saldo={saldo} codigo={codigo} />
-        <BloquePedido venta={venta} />
+        <BloquePedido venta={venta} items={cobro.items} codigo={codigo} />
       </div>
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-[11px] text-yeikar-neutral/50">El cobro se registra en el detalle, con recibo opcional.</p>
@@ -327,6 +356,109 @@ function SeccionCobros({
         </div>
       )}
     </section>
+  );
+}
+
+// ─── Vista: deuda por persona y categoría ─────────────────────────────────────
+function FilaCategoria({ cat, codigo }: { cat: CategoriaDeuda; codigo: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-yeikar-secondary-light/10 py-1.5 last:border-0">
+      <span className="min-w-0 text-xs font-semibold text-yeikar-neutral/80">{cat.categoria}</span>
+      <span className="flex shrink-0 items-center gap-3 font-mono text-xs">
+        <span className="text-emerald-700">Pagado {formatCurrency(cat.pagado, codigo)}</span>
+        <span className="font-black text-yeikar-neutral">{formatCurrency(cat.saldo, codigo)}</span>
+      </span>
+    </div>
+  );
+}
+
+function ClienteCategoriaCard({ cliente, codigo }: { cliente: ClienteDeuda; codigo: string }) {
+  const [abierta, setAbierta] = useState(false);
+  return (
+    <div className="overflow-hidden rounded-2xl border border-yeikar-secondary-light/15 bg-white shadow-card">
+      <button
+        type="button"
+        onClick={() => setAbierta((a) => !a)}
+        aria-expanded={abierta}
+        className="flex w-full items-center justify-between gap-3 p-4 text-left"
+      >
+        <span className="min-w-0">
+          <span className="block truncate font-headline text-[15px] font-black tracking-tight text-yeikar-neutral">
+            {cliente.cliente_nombre}
+          </span>
+          <span className="mt-0.5 block font-mono text-xs text-yeikar-neutral/55">
+            Pagado {formatCurrency(cliente.pagado, codigo)} de {formatCurrency(cliente.total, codigo)}
+          </span>
+        </span>
+        <span className="shrink-0 text-right">
+          <span className="block font-headline text-xl font-black tracking-tight text-yeikar-neutral">
+            {formatCurrency(cliente.saldo, codigo)}
+          </span>
+          <span className="block text-[10px] font-bold uppercase tracking-widest text-yeikar-neutral/40">saldo</span>
+        </span>
+      </button>
+      {abierta && (
+        <div className="border-t border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 px-4 pb-2 pt-1">
+          {cliente.categorias.map((cat) => (
+            <FilaCategoria key={cat.categoria} cat={cat} codigo={codigo} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AvisoDuplicados({ grupos, codigo }: { grupos: GrupoDuplicado[]; codigo: string }) {
+  if (grupos.length === 0) return null;
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <p className="font-headline text-xs font-black uppercase tracking-widest text-amber-700">
+        Posibles mismos clientes (nombres parecidos)
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {grupos.map((g, i) => (
+          <li key={i} className="text-xs text-amber-900">
+            {g.clientes.map((c) => `${c.cliente_nombre} (${formatCurrency(c.saldo, codigo)})`).join('  ·  ')}
+            <span className="ml-1 font-mono font-bold">= {formatCurrency(g.saldo_total, codigo)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[11px] text-amber-700/80">Revisa si es la misma persona; por ahora no se unifican solas.</p>
+    </div>
+  );
+}
+
+function VistaPorCategoria({ reporte, loading }: { reporte: ReporteDeudaCategoria | null; loading: boolean }) {
+  if (loading) return <Spinner />;
+  if (!reporte || reporte.monedas.length === 0) {
+    return <EmptyState title="Sin deudas" description="No hay cuentas por cobrar pendientes." compact />;
+  }
+  return (
+    <div className="space-y-6">
+      {reporte.monedas.map((m) => (
+        <section key={m.moneda_codigo} className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-headline text-lg font-black tracking-tight text-yeikar-neutral">
+              Deudas en {nombreMoneda(m.moneda_codigo)}
+            </h2>
+            <div className="flex items-center gap-3 font-mono text-xs">
+              <span className="text-yeikar-neutral/60">
+                {m.total_clientes} cliente{m.total_clientes !== 1 ? 's' : ''}
+              </span>
+              <span className="rounded-full bg-yeikar-secondary px-3 py-1 font-bold text-yeikar-tertiary">
+                {formatCurrency(m.total_saldo, m.moneda_codigo)} {nombreMoneda(m.moneda_codigo).toLowerCase()}
+              </span>
+            </div>
+          </div>
+          <AvisoDuplicados grupos={m.posibles_duplicados} codigo={m.moneda_codigo} />
+          <div className="grid gap-3 md:grid-cols-2">
+            {m.clientes.map((c) => (
+              <ClienteCategoriaCard key={c.cliente_id} cliente={c} codigo={m.moneda_codigo} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -1456,6 +1588,11 @@ export default function Ventas() {
   const [cuentas, setCuentas] = useState<CuentaPorCobrar[]>([]);
   const [cobroAbiertoId, setCobroAbiertoId] = useState<number | null>(null);
 
+  // Vista: lista de cobros (por venta) o resumen por categoría.
+  const [vista, setVista] = useState<'lista' | 'categoria'>('lista');
+  const [reporte, setReporte] = useState<ReporteDeudaCategoria | null>(null);
+  const [reporteLoading, setReporteLoading] = useState(false);
+
   // Modales
   const [detalleVentaId, setDetalleVentaId] = useState<number | null>(null);
 
@@ -1494,6 +1631,21 @@ export default function Ventas() {
     setCobroAbiertoId(null);
   }, [filtroEstado, filtroGrupo, busqueda]);
 
+  const cargarReporte = useCallback(async () => {
+    try {
+      setReporteLoading(true);
+      setReporte(await ventaService.getCuentasPorCategoria());
+    } catch {
+      setReporte(null);
+    } finally {
+      setReporteLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (vista === 'categoria' && reporte === null) cargarReporte();
+  }, [vista, reporte, cargarReporte]);
+
   const ventasFiltradas = filtroEstado === 'COBROS'
     ? ventas.filter((v) => v.estado === 'PENDIENTE' || v.estado === 'ABONADA')
     : filtroEstado
@@ -1514,7 +1666,7 @@ export default function Ventas() {
     const descontado = cuenta ? Number(cuenta.total_descontado ?? 0) : 0;
     const saldo = cuenta ? Number(cuenta.saldo_pendiente) : Math.max(total - pagado, 0);
     const codigo = cuenta?.moneda_codigo ?? v.moneda?.codigo ?? 'USD';
-    return { venta: v, total, pagado, descontado, saldo, codigo };
+    return { venta: v, total, pagado, descontado, saldo, codigo, items: cuenta?.items ?? [] };
   };
   const cobrosEntregados = ventasEntregadas.map(combinarVentaConCuenta);
   const cobrosEnProceso = ventasEnProceso.map(combinarVentaConCuenta);
@@ -1634,10 +1786,17 @@ export default function Ventas() {
             </PillFiltro>
           ))}
         </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-bold text-yeikar-neutral/50 font-mono">VISTA:</span>
+          <PillFiltro activo={vista === 'lista'} onClick={() => setVista('lista')}>Cobros</PillFiltro>
+          <PillFiltro activo={vista === 'categoria'} onClick={() => setVista('categoria')}>Por categoría</PillFiltro>
+        </div>
       </div>
 
+      {vista === 'categoria' && <VistaPorCategoria reporte={reporte} loading={reporteLoading} />}
+
       {/* ── GRUPO: Entregados (dinero en la calle) ── */}
-      {filtroGrupo !== 'proceso' && (
+      {vista === 'lista' && filtroGrupo !== 'proceso' && (
         filtroEstado === 'COBROS' ? (
           <SeccionCobros
             tono="urgente"
@@ -1679,7 +1838,7 @@ export default function Ventas() {
       )}
 
       {/* ── GRUPO: En proceso (aún no entregados) ── */}
-      {filtroGrupo !== 'entregados' && (
+      {vista === 'lista' && filtroGrupo !== 'entregados' && (
         filtroEstado === 'COBROS' ? (
           <SeccionCobros
             tono="proceso"

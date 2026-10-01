@@ -83,6 +83,12 @@ export interface VentaDetalle extends Venta {
   tasa_cambio?: number;
 }
 
+export interface ItemDeuda {
+  descripcion: string;
+  cantidad: number;
+  precio: number;
+}
+
 export interface CuentaPorCobrar {
   venta_id: number;
   pedido_id: number;
@@ -94,6 +100,49 @@ export interface CuentaPorCobrar {
   saldo_pendiente: number;
   moneda_codigo: string;
   pedido_estado?: string | null;
+  /** Renglones del pedido: por qué se debe lo que se debe. */
+  items?: ItemDeuda[];
+}
+
+// ─── Deuda por categoría (reporte) ────────────────────────────────────────────
+export interface CategoriaDeuda {
+  categoria: string;
+  total: number;
+  pagado: number;
+  saldo: number;
+}
+
+export interface ClienteDeuda {
+  cliente_id: number;
+  cliente_nombre: string;
+  total: number;
+  pagado: number;
+  saldo: number;
+  categorias: CategoriaDeuda[];
+}
+
+export interface ClienteDuplicado {
+  cliente_id: number;
+  cliente_nombre: string;
+  saldo: number;
+}
+
+export interface GrupoDuplicado {
+  clave: string;
+  clientes: ClienteDuplicado[];
+  saldo_total: number;
+}
+
+export interface ReporteMonedaDeuda {
+  moneda_codigo: string;
+  total_saldo: number;
+  total_clientes: number;
+  clientes: ClienteDeuda[];
+  posibles_duplicados: GrupoDuplicado[];
+}
+
+export interface ReporteDeudaCategoria {
+  monedas: ReporteMonedaDeuda[];
 }
 
 export interface VentaCreate {
@@ -208,6 +257,12 @@ export const ventaService = {
   /** Cuentas por cobrar (ventas PENDIENTE o ABONADA) */
   getCuentasPorCobrar: async (): Promise<CuentaPorCobrar[]> => {
     const res = await api.get<CuentaPorCobrar[]>('/venta/cuentas-por-cobrar/');
+    return res.data;
+  },
+
+  /** Deuda por persona y categoría (con abonos prorrateados) */
+  getCuentasPorCategoria: async (): Promise<ReporteDeudaCategoria> => {
+    const res = await api.get<ReporteDeudaCategoria>('/venta/cuentas-por-cobrar/por-categoria');
     return res.data;
   },
 

@@ -1,8 +1,11 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from datetime import date, datetime
 from decimal import Decimal
+from collections import defaultdict
 import math
+import re
+import unicodedata
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
 from app.core.hora_ve import hoy_ve
 from app.modules.sales.model import Venta, DetalleVenta, Pago, DescuentoVenta
@@ -10,6 +13,8 @@ from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, Desc
 from app.modules.orders.model import Pedido, DetallePedido
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
+from app.modules.quotes.model import Cotizacion, DetalleCotizacion
+from app.modules.productos.model import Producto, Material
 from app.modules.tasas_cambio import service as tasa_cambio_service
 from app.modules.tasas_cambio.model import TasaCambio
 from app.modules.productos import service as productos_service
@@ -634,41 +639,339 @@ def anular_descuento(db: Session, id_descuento: int, usuario: Usuario | None = N
 # ------------------------------------------------------------
 # Reporte de Cuentas por Cobrar
 # ------------------------------------------------------------
+# ------------------------------------------------------------
+# Cuentas por cobrar: motivo (renglones), categorías y duplicados
+# ------------------------------------------------------------
+def _normalizar_texto(texto: str) -> str:
+    s = unicodedata.normalize("NFKD", texto or "")
+    s = s.encode("ascii", "ignore").decode().upper()
+    return re.sub(r"[^A-Z0-9]+", " ", s).strip()
+
+
+# Orden importa: gana la primera coincidencia ("LAMINA DE MDF" → Tableros,
+# no Madera; "TANQUE CONGELADOR" → Electrodomésticos).
+_CATEGORIAS_TEXTO = (
+    ("Tableros y MDF", ("MDF", "LAMINA", "TABLERO", "MELAMINA", "TRIPLAY", "AGLOMERADO", "DUROPACK")),
+    ("Madera", ("MADERA", "APAMATE", "CMTS", "BLOQUE", "VIGA", "LISTON", "MACHIMBRE")),
+    ("Colchones", ("COLCHON", "PILLON", "PILLOW", "ALMOHADA")),
+    ("Electrodomésticos", ("NEVERA", "AIRE", "SPLIT", "LAVADORA", "SECADORA", "CONGELADOR", "TELEVISOR", "VENTILADOR", "COCINA", "MICROONDAS", "DISPENSADOR", "TANQUE", "REFRIGERADOR", "HIUNDAY", "HYUNDAI", "MABE", "HACEB", "SAMSUNG")),
+    ("Muebles a medida", ("CAMA", "CUNA", "CLOSET", "CLOBET", "MODULAR", "COMEDOR", "SOFA", "POLTRONA", "BUTACA", "MESEDORA", "MESADOR", "MESADETV", "MUEBLE", "PUERTA", "ESPEJO", "REPARACION", "TAPIZ", "MESA", "NOCHE", "SECCIONAL", "WUALPANEL")),
+    ("Herrajes y accesorios", ("HERRAJE", "BISAGRA", "RODACHIN", "PATA", "TIRADOR", "CLIK", "GRILLO", "CARGADOR", "PORTAVASOS", "RIEL", "MANIJA")),
+    ("Servicios", ("FLETE", "ENVIO", "INSTALACION", "TRANSPORTE", "DOMICILIO")),
+)
+
+
+def _categoria_por_texto(texto: str) -> str:
+    n = _normalizar_texto(texto)
+    for categoria, claves in _CATEGORIAS_TEXTO:
+        for clave in claves:
+            if re.search(rf"\b{re.escape(clave)}", n):
+                return categoria
+    return "Sin categoría"
+
+
+def _nombre_linea(det) -> str:
+    """Nombre legible de un renglón (producto → material → texto → ítem a medida)."""
+    producto = getattr(det, "producto", None)
+    if producto is not None and getattr(producto, "nombre", None):
+        return producto.nombre
+    material = getattr(det, "material", None)
+    if material is not None and getattr(material, "nombre", None):
+        return material.nombre
+    desc = getattr(det, "descripcion_especifica", None) or getattr(det, "observaciones", None)
+    if desc and str(desc).strip():
+        return str(desc).strip()
+    if getattr(det, "producto_id", None):
+        return f"Producto #{det.producto_id}"
+    if getattr(det, "material_id", None):
+        return f"Material #{det.material_id}"
+    return "Ítem a medida"
+
+
+def _categoria_linea(det) -> str:
+    """Categoría del renglón: catálogo del producto/material → departamento → texto."""
+    producto = getattr(det, "producto", None)
+    if producto is not None and getattr(producto, "categoria_inventario", None):
+        return producto.categoria_inventario.nombre
+    material = getattr(det, "material", None)
+    if material is not None:
+        if getattr(material, "categoria_inventario", None):
+            return material.categoria_inventario.nombre
+        if getattr(material, "departamento", None):
+            return material.departamento
+    return _categoria_por_texto(_nombre_linea(det))
+
+
+def _cobros_base_por_venta(db: Session, venta_ids: list[int]) -> tuple[dict, dict]:
+    """(pagado, descontado) por venta en su moneda, agregado en 2 queries."""
+    if not venta_ids:
+        return {}, {}
+    pagos = dict(
+        db.query(Pago.venta_id, func.coalesce(func.sum(Pago.monto_en_moneda_base), 0))
+        .filter(Pago.venta_id.in_(venta_ids))
+        .group_by(Pago.venta_id)
+        .all()
+    )
+    descuentos = dict(
+        db.query(DescuentoVenta.venta_id, func.coalesce(func.sum(DescuentoVenta.monto_en_moneda_base), 0))
+        .filter(DescuentoVenta.venta_id.in_(venta_ids))
+        .group_by(DescuentoVenta.venta_id)
+        .all()
+    )
+    return pagos, descuentos
+
+
+def _lineas_por_venta(db: Session, ventas: list) -> dict:
+    """Renglones de cada venta: detalle_venta → detalle_pedido → detalle_cotizacion.
+
+    Las notas históricas pueden no tener detalle de venta ni de pedido; el
+    motivo original vive en la cotización.
+    """
+    resultado: dict[int, list] = {}
+    if not ventas:
+        return resultado
+
+    venta_ids = [v.id for v in ventas]
+    dv_opts = (
+        joinedload(DetalleVenta.producto).joinedload(Producto.categoria_inventario),
+        joinedload(DetalleVenta.material).joinedload(Material.categoria_inventario),
+    )
+    for d in (db.query(DetalleVenta).options(*dv_opts)
+              .filter(DetalleVenta.venta_id.in_(venta_ids)).all()):
+        resultado.setdefault(d.venta_id, []).append(d)
+
+    faltan = [v for v in ventas if not resultado.get(v.id)]
+    pedidos = [v.pedido for v in faltan if v.pedido is not None]
+    pedido_ids = sorted({p.id for p in pedidos})
+    if pedido_ids:
+        dp_opts = (
+            joinedload(DetallePedido.producto).joinedload(Producto.categoria_inventario),
+            joinedload(DetallePedido.material).joinedload(Material.categoria_inventario),
+        )
+        por_pedido: dict[int, list] = defaultdict(list)
+        for d in (db.query(DetallePedido).options(*dp_opts)
+                  .filter(DetallePedido.pedido_id.in_(pedido_ids)).all()):
+            por_pedido[d.pedido_id].append(d)
+        for v in faltan:
+            if v.pedido is not None and por_pedido.get(v.pedido.id):
+                resultado[v.id] = por_pedido[v.pedido.id]
+
+    restantes = [v for v in faltan if not resultado.get(v.id)]
+    cot_ids = sorted({v.pedido.cotizacion_id for v in restantes
+                      if v.pedido is not None and v.pedido.cotizacion_id})
+    if cot_ids:
+        dc_opts = (
+            joinedload(DetalleCotizacion.producto).joinedload(Producto.categoria_inventario),
+            joinedload(DetalleCotizacion.material).joinedload(Material.categoria_inventario),
+        )
+        por_cot: dict[int, list] = defaultdict(list)
+        for d in (db.query(DetalleCotizacion).options(*dc_opts)
+                  .filter(DetalleCotizacion.cotizacion_id.in_(cot_ids)).all()):
+            por_cot[d.cotizacion_id].append(d)
+        for v in restantes:
+            if v.pedido is not None and por_cot.get(v.pedido.cotizacion_id):
+                resultado[v.id] = por_cot[v.pedido.cotizacion_id]
+
+    return resultado
+
+
+def _grupos_duplicados(clientes: list[dict]) -> list[dict]:
+    """Agrupa clientes cuyo nombre normalizado coincide o se contiene (>=60%).
+
+    Solo es un AVISO: nombres escritos distinto podrían ser la misma persona.
+    """
+    n = len(clientes)
+    if n < 2:
+        return []
+    claves = [_normalizar_texto(c["cliente_nombre"]) for c in clientes]
+    padre = list(range(n))
+
+    def find(x):
+        while padre[x] != x:
+            padre[x] = padre[padre[x]]
+            x = padre[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            padre[rb] = ra
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            a, b = claves[i], claves[j]
+            if not a or not b:
+                continue
+            corto, largo = (a, b) if len(a) <= len(b) else (b, a)
+            if a == b or (corto in largo and len(corto) / len(largo) >= 0.6):
+                union(i, j)
+
+    por_raiz: dict[int, list] = defaultdict(list)
+    for i in range(n):
+        por_raiz[find(i)].append(i)
+
+    grupos = []
+    for idxs in por_raiz.values():
+        if len(idxs) < 2:
+            continue
+        grupos.append({
+            "clave": claves[idxs[0]],
+            "clientes": [
+                {"cliente_id": clientes[i]["cliente_id"],
+                 "cliente_nombre": clientes[i]["cliente_nombre"],
+                 "saldo": clientes[i]["saldo"]}
+                for i in idxs
+            ],
+            "saldo_total": round(sum(clientes[i]["saldo"] for i in idxs), 2),
+        })
+    grupos.sort(key=lambda g: -g["saldo_total"])
+    return grupos
+
+
 def obtener_cuentas_por_cobrar(db: Session):
-    # Obtener todas las ventas pendientes o abonadas (pedido precargado para
-    # exponer su estado sin N+1: define si la cuenta está entregada o en proceso).
+    # Obtener todas las ventas pendientes o abonadas (cliente/moneda/pedido
+    # precargados para exponer estado y evitar N+1).
     ventas = (
         db.query(Venta)
-        .options(joinedload(Venta.pedido))
+        .options(joinedload(Venta.pedido), joinedload(Venta.cliente), joinedload(Venta.moneda))
         .filter(Venta.estado.in_(["PENDIENTE", "ABONADA"]))
         .all()
     )
+    if not ventas:
+        return []
+
+    pagos, descuentos = _cobros_base_por_venta(db, [v.id for v in ventas])
+    lineas = _lineas_por_venta(db, ventas)
 
     cuentas = []
     for v in ventas:
-        # Usar monto_en_moneda_base para calcular pagado y descontado en la moneda de la venta
-        total_pagado, total_descontado = _totales_cobro(db, v.id)
+        total_pagado = float(pagos.get(v.id, 0) or 0)
+        total_descontado = float(descuentos.get(v.id, 0) or 0)
         saldo_pendiente = float(v.total) - total_pagado - total_descontado
+        if saldo_pendiente <= 0.0:
+            continue
 
-        if saldo_pendiente > 0.0:
-            # Obtener nombre de cliente y codigo de moneda
-            cliente_nombre = v.cliente.nombre if v.cliente else "Desconocido"
-            moneda_codigo = v.moneda.codigo if v.moneda else "COP"
-
-            cuentas.append({
-                "venta_id": v.id,
-                "pedido_id": v.pedido_id,
-                "cliente_nombre": cliente_nombre,
-                "fecha": v.fecha,
-                "total": float(v.total),
-                "total_pagado": total_pagado,
-                "total_descontado": total_descontado,
-                "saldo_pendiente": saldo_pendiente,
-                "moneda_codigo": moneda_codigo,
-                "pedido_estado": v.pedido_estado,
-            })
+        items = [
+            {
+                "descripcion": _nombre_linea(d),
+                "cantidad": float(d.cantidad or 0),
+                "precio": float(d.precio or 0),
+            }
+            for d in lineas.get(v.id, [])
+        ]
+        cuentas.append({
+            "venta_id": v.id,
+            "pedido_id": v.pedido_id,
+            "cliente_nombre": v.cliente.nombre if v.cliente else "Desconocido",
+            "fecha": v.fecha,
+            "total": float(v.total),
+            "total_pagado": total_pagado,
+            "total_descontado": total_descontado,
+            "saldo_pendiente": saldo_pendiente,
+            "moneda_codigo": v.moneda.codigo if v.moneda else "COP",
+            "pedido_estado": v.pedido_estado,
+            "items": items,
+        })
 
     return cuentas
+
+
+def obtener_cuentas_por_cobrar_por_categoria(db: Session):
+    """Deuda agrupada por persona y categoría, con abonos prorrateados.
+
+    Los abonos son por venta (no por renglón), así que se reparten entre las
+    líneas según su peso (cantidad × precio). Separado por moneda.
+    """
+    ventas = (
+        db.query(Venta)
+        .options(joinedload(Venta.pedido), joinedload(Venta.cliente), joinedload(Venta.moneda))
+        .filter(Venta.estado.in_(["PENDIENTE", "ABONADA"]))
+        .all()
+    )
+    if not ventas:
+        return {"monedas": []}
+
+    pagos, descuentos = _cobros_base_por_venta(db, [v.id for v in ventas])
+    lineas = _lineas_por_venta(db, ventas)
+
+    # moneda → cliente_id → acumuladores
+    datos: dict[str, dict[int, dict]] = defaultdict(lambda: defaultdict(lambda: {
+        "cliente_id": None,
+        "cliente_nombre": "",
+        "total": 0.0,
+        "pagado": 0.0,
+        "saldo": 0.0,
+        "categorias": defaultdict(lambda: {"total": 0.0, "pagado": 0.0, "saldo": 0.0}),
+    }))
+
+    for v in ventas:
+        total = float(v.total)
+        pagado = float(pagos.get(v.id, 0) or 0)
+        descontado = float(descuentos.get(v.id, 0) or 0)
+        saldo = total - pagado - descontado
+        if saldo <= 0.0:
+            continue
+
+        cod = v.moneda.codigo if v.moneda else "COP"
+        reg = datos[cod][v.cliente_id]
+        reg["cliente_id"] = v.cliente_id
+        reg["cliente_nombre"] = v.cliente.nombre if v.cliente else f"Cliente #{v.cliente_id}"
+        reg["total"] += total
+        reg["pagado"] += pagado
+        reg["saldo"] += saldo
+
+        pesos = []
+        for d in lineas.get(v.id, []):
+            lt = float(d.cantidad or 0) * float(d.precio or 0)
+            if lt > 0:
+                pesos.append((d, lt))
+        suma = sum(lt for _, lt in pesos)
+
+        if not pesos or suma <= 0:
+            cat = reg["categorias"]["Sin categoría"]
+            cat["total"] += total
+            cat["pagado"] += pagado
+            cat["saldo"] += saldo
+        else:
+            for d, lt in pesos:
+                frac = lt / suma
+                cat = reg["categorias"][_categoria_linea(d)]
+                cat["total"] += total * frac
+                cat["pagado"] += pagado * frac
+                cat["saldo"] += saldo * frac
+
+    salida = []
+    for cod, clientes in datos.items():
+        lista = []
+        for cid, reg in clientes.items():
+            categorias = [
+                {
+                    "categoria": nombre,
+                    "total": round(acc["total"], 2),
+                    "pagado": round(acc["pagado"], 2),
+                    "saldo": round(acc["saldo"], 2),
+                }
+                for nombre, acc in sorted(reg["categorias"].items(), key=lambda kv: -kv[1]["saldo"])
+            ]
+            lista.append({
+                "cliente_id": cid,
+                "cliente_nombre": reg["cliente_nombre"],
+                "total": round(reg["total"], 2),
+                "pagado": round(reg["pagado"], 2),
+                "saldo": round(reg["saldo"], 2),
+                "categorias": categorias,
+            })
+        lista.sort(key=lambda c: -c["saldo"])
+        salida.append({
+            "moneda_codigo": cod,
+            "total_saldo": round(sum(c["saldo"] for c in lista), 2),
+            "total_clientes": len(lista),
+            "clientes": lista,
+            "posibles_duplicados": _grupos_duplicados(lista),
+        })
+
+    salida.sort(key=lambda m: m["moneda_codigo"])
+    return {"monedas": salida}
 
 
 # ------------------------------------------------------------

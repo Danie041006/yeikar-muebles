@@ -176,6 +176,13 @@ class VentaDetalleResponse(VentaResponse):
 # ------------------------------------------------------------
 # Cuentas por Cobrar
 # ------------------------------------------------------------
+class ItemDeudaResponse(BaseModel):
+    """Renglón del pedido que explica la deuda (por qué debe lo que debe)."""
+    descripcion: str
+    cantidad: float
+    precio: float
+
+
 class CuentaPorCobrarResponse(BaseModel):
     venta_id: int
     pedido_id: int
@@ -187,6 +194,51 @@ class CuentaPorCobrarResponse(BaseModel):
     saldo_pendiente: float
     moneda_codigo: str
     pedido_estado: Optional[str] = None
+    # Renglones del pedido (venta → pedido → cotización) para ver el motivo.
+    items: List[ItemDeudaResponse] = []
 
     class Config:
         from_attributes = True
+
+
+# ------------------------------------------------------------
+# Deuda por categoría (reporte de solo lectura)
+# ------------------------------------------------------------
+class CategoriaDeudaResponse(BaseModel):
+    categoria: str
+    total: float
+    pagado: float
+    saldo: float
+
+
+class ClienteDeudaResponse(BaseModel):
+    cliente_id: int
+    cliente_nombre: str
+    total: float
+    pagado: float
+    saldo: float
+    categorias: List[CategoriaDeudaResponse]
+
+
+class ClienteDuplicadoResponse(BaseModel):
+    cliente_id: int
+    cliente_nombre: str
+    saldo: float
+
+
+class GrupoDuplicadoResponse(BaseModel):
+    clave: str
+    clientes: List[ClienteDuplicadoResponse]
+    saldo_total: float
+
+
+class ReporteMonedaDeudaResponse(BaseModel):
+    moneda_codigo: str
+    total_saldo: float
+    total_clientes: int
+    clientes: List[ClienteDeudaResponse]
+    posibles_duplicados: List[GrupoDuplicadoResponse]
+
+
+class ReporteDeudaCategoriaResponse(BaseModel):
+    monedas: List[ReporteMonedaDeudaResponse]
