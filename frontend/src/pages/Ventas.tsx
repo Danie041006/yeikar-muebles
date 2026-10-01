@@ -26,6 +26,7 @@ import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, conver
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { fmtFechaVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
+import { motion, AnimatePresence } from 'framer-motion';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 // ─── Badges helpers ───────────────────────────────────────────────────────────
@@ -276,30 +277,78 @@ function PanelCobro({
   );
 }
 
-function TarjetaCobro({
-  cobro,
-  abierta,
-  onToggle,
-  onCobrar,
-}: {
-  cobro: CobroPendiente;
-  abierta: boolean;
-  onToggle: () => void;
-  onCobrar: () => void;
-}) {
-  const entregado = cobro.venta.pedido_estado === 'ENTREGADO';
-  const buttonId = `btn-cobro-${cobro.venta.id}`;
-  const panelId = `panel-cobro-${cobro.venta.id}`;
+function TarjetaCobro({ cobro, onOpen }: { cobro: CobroPendiente; onOpen: () => void }) {
+  const { venta, total, pagado, saldo, codigo } = cobro;
+  const entregado = venta.pedido_estado === 'ENTREGADO';
+  const progreso = progresoCobro(total, pagado);
+  const items = cobro.items ?? [];
 
   return (
-    <div
-      className={`relative overflow-hidden rounded-2xl border bg-white shadow-card transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lift ${
-        abierta ? 'border-yeikar-primary/50 ring-2 ring-yeikar-primary/15' : 'border-yeikar-secondary-light/15'
-      } ${entregado ? 'border-l-4 border-l-amber-400' : 'border-l-4 border-l-yeikar-secondary/50'}`}
+    <motion.button
+      type="button"
+      onClick={onOpen}
+      whileHover={{ y: -3 }}
+      whileTap={{ scale: 0.99 }}
+      className={`group block w-full overflow-hidden rounded-2xl border border-yeikar-secondary-light/15 bg-white text-left shadow-card transition-shadow hover:shadow-lift ${
+        entregado ? 'border-l-4 border-l-amber-400' : 'border-l-4 border-l-yeikar-secondary/50'
+      }`}
     >
-      <ResumenCobro cobro={cobro} buttonId={buttonId} panelId={panelId} abierta={abierta} onToggle={onToggle} />
-      {abierta && <PanelCobro cobro={cobro} buttonId={buttonId} onCobrar={onCobrar} />}
-    </div>
+      <span className={`block p-4 sm:p-5 ${entregado ? 'bg-gradient-to-br from-amber-50/80 via-white to-white' : 'bg-white'}`}>
+        <span className="flex items-start justify-between gap-3">
+          <span className="min-w-0">
+            <span className="block truncate font-headline text-[15px] font-black tracking-tight text-yeikar-neutral">
+              {venta.cliente?.nombre ?? `Cliente #${venta.cliente_id}`}
+            </span>
+            <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <Badge text={venta.estado} className={ESTADO_VENTA_STYLE[venta.estado] ?? ''} />
+              <ChipPedido venta={venta} />
+            </span>
+          </span>
+          <svg
+            className="mt-1 h-5 w-5 shrink-0 text-yeikar-neutral/30 transition-transform group-hover:translate-x-0.5 group-hover:text-yeikar-primary"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
+
+        <span className="mt-3 block">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-yeikar-neutral/45">
+            Saldo por cobrar
+          </span>
+          <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
+            <span className="font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
+              {formatCurrency(saldo, codigo)}
+            </span>
+            <span className="font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
+              {nombreMoneda(codigo).toLowerCase()}
+            </span>
+          </span>
+          <span className="mt-0.5 block font-mono text-xs text-yeikar-neutral/55">
+            Pagado {formatCurrency(pagado, codigo)} de {formatCurrency(total, codigo)} · Venta #{venta.id}
+          </span>
+        </span>
+
+        <span className="mt-3 block h-2 overflow-hidden rounded-full bg-yeikar-tertiary/40">
+          <span
+            className="block h-full rounded-full bg-gradient-to-r from-yeikar-primary via-amber-400 to-emerald-500 transition-all"
+            style={{ width: `${progreso}%` }}
+          />
+        </span>
+      </span>
+
+      <span className="flex items-center justify-between border-t border-yeikar-secondary-light/10 px-4 py-2 text-[11px] font-bold text-yeikar-neutral/45">
+        <span>{items.length > 0 ? `${items.length} artículo${items.length !== 1 ? 's' : ''}` : 'Sin renglones'}</span>
+        <span className="flex items-center gap-1 text-yeikar-secondary">
+          Ver pedido y cobrar
+          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 5l7 7-7 7" />
+          </svg>
+        </span>
+      </span>
+    </motion.button>
   );
 }
 
@@ -312,8 +361,6 @@ function SeccionCobros({
   vacio,
   loading,
   cobros,
-  abiertoId,
-  onToggle,
   onCobrar,
 }: {
   titulo: string;
@@ -324,8 +371,6 @@ function SeccionCobros({
   vacio: string;
   loading: boolean;
   cobros: CobroPendiente[];
-  abiertoId: number | null;
-  onToggle: (id: number) => void;
   onCobrar: (id: number) => void;
 }) {
   return (
@@ -345,13 +390,7 @@ function SeccionCobros({
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           {cobros.map((cobro) => (
-            <TarjetaCobro
-              key={cobro.venta.id}
-              cobro={cobro}
-              abierta={abiertoId === cobro.venta.id}
-              onToggle={() => onToggle(cobro.venta.id)}
-              onCobrar={() => onCobrar(cobro.venta.id)}
-            />
+            <TarjetaCobro key={cobro.venta.id} cobro={cobro} onOpen={() => onCobrar(cobro.venta.id)} />
           ))}
         </div>
       )}
@@ -500,6 +539,8 @@ function ModalDetalle({
   const [monedas, setMonedas] = useState<{ id: number; codigo: string; nombre: string; simbolo: string }[]>([]);  const cuerpoRef = useRef<HTMLDivElement>(null);
   // Métodos de pago: cuentas reales (metodo_caja) con fallback al estático.
   const [metodosPago, setMetodosPago] = useState<MetodoPagoOption[]>(METODOS_PAGO.map((m) => ({ ...m })));
+  // Pestañas de la pantalla de detalle: primero el producto, luego la cobranza.
+  const [tab, setTab] = useState<'producto' | 'cobranza'>('producto');
 
   // Al abrir cualquier formulario, la vista enfocada arranca arriba
   useEffect(() => {
@@ -575,6 +616,7 @@ function ModalDetalle({
     : descMontoNum;
 
   const abrirDescForm = () => {
+    setTab('cobranza');
     setShowDescForm(true);
     setShowForm(false);
     setDescError('');
@@ -724,8 +766,22 @@ function ModalDetalle({
     !!detalle && detalle.moneda?.codigo !== 'COP' && tasaVenta > 1 && Number.isFinite(base) && base > 0;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl border border-yeikar-secondary-light/10 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <motion.div
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/50 backdrop-blur-sm sm:items-center sm:p-4"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18 }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ y: 28, opacity: 0, scale: 0.98 }}
+        animate={{ y: 0, opacity: 1, scale: 1 }}
+        exit={{ y: 16, opacity: 0 }}
+        transition={{ type: 'spring', stiffness: 280, damping: 28 }}
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-full w-full flex-col overflow-hidden border border-yeikar-secondary-light/10 bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:max-w-3xl sm:rounded-2xl"
+      >
         {/* Header */}
         <div className="bg-yeikar-neutral p-5 text-yeikar-tertiary">
           <div className="flex items-start justify-between gap-3">
@@ -779,6 +835,32 @@ function ModalDetalle({
           )}
         </div>
 
+        {/* Pestañas: primero el producto, luego la cobranza */}
+        <div className="flex border-b border-yeikar-secondary-light/10 bg-white px-3">
+          {([
+            { key: 'producto', label: 'Producto y pedido' },
+            { key: 'cobranza', label: 'Cobranza' },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              className={`relative px-4 py-3 font-headline text-sm font-bold transition-colors ${
+                tab === t.key ? 'text-yeikar-secondary' : 'text-yeikar-neutral/40 hover:text-yeikar-neutral/70'
+              }`}
+            >
+              {t.label}
+              {tab === t.key && (
+                <motion.span
+                  layoutId="tab-detalle-underline"
+                  className="absolute inset-x-3 -bottom-px h-0.5 rounded-full bg-yeikar-primary"
+                  transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                />
+              )}
+            </button>
+          ))}
+        </div>
+
         {/* Body */}
         <div ref={cuerpoRef} className="overflow-y-auto flex-1 p-5 space-y-5">
           {loading || !detalle ? (
@@ -816,8 +898,52 @@ function ModalDetalle({
                 </div>
               ) : (
               <>
-              {/* Héroe del saldo */}
-              <div className="overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white">
+              {/* ── TAB Producto: resumen + pedido ── */}
+              <div className={`space-y-4 ${tab === 'producto' ? '' : 'hidden'}`}>
+                <div className="flex items-center justify-between gap-3 rounded-2xl border border-yeikar-secondary-light/15 bg-yeikar-tertiary/20 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-[10px] font-bold uppercase tracking-[0.2em] text-yeikar-neutral/45">
+                      Saldo por cobrar
+                    </p>
+                    <p className="mt-0.5 font-headline text-2xl font-black tracking-tight text-yeikar-neutral">
+                      {detalle.moneda?.simbolo}{Number(detalle.saldo_pendiente).toLocaleString('es-ES')}
+                      <span className="ml-1.5 align-middle font-body text-xs font-semibold tracking-normal text-yeikar-neutral/50">
+                        {nombreMoneda(detalle.moneda?.codigo).toLowerCase()}
+                      </span>
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right font-mono text-[11px] leading-relaxed text-yeikar-neutral/55">
+                    <p>
+                      Pagado <span className="font-bold text-emerald-700">{detalle.moneda?.simbolo}{Number(detalle.total_pagado).toLocaleString('es-ES')}</span>
+                      {' '}de {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
+                    </p>
+                    <p className="font-bold text-yeikar-neutral/70">
+                      {detalle.pagos.length} cobro{detalle.pagos.length !== 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-yeikar-secondary-light/15 bg-white p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-headline text-sm font-black text-yeikar-secondary">Pedido #{detalle.pedido_id}</p>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 font-mono text-[11px] font-bold ${
+                        detalle.pedido_estado === 'ENTREGADO'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                          : 'border-yeikar-secondary-light/20 bg-yeikar-tertiary/25 text-yeikar-secondary'
+                      }`}
+                    >
+                      {detalle.pedido_estado === 'ENTREGADO' ? 'Entregado' : 'En proceso'}
+                    </span>
+                  </div>
+                  <p className="mt-1 font-mono text-xs text-yeikar-neutral/60">
+                    {detalle.cliente?.nombre} · {fmtFechaVE(detalle.fecha)} · Venta #{detalle.id}
+                  </p>
+                </div>
+              </div>
+
+              {/* Héroe del saldo (cobranza) */}
+              <div className={`overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 via-white to-white ${tab === 'cobranza' ? '' : 'hidden'}`}>
                 <div className="p-4 sm:p-5">
                   <div className="flex items-center justify-between">
                     <p className="font-mono text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700">
@@ -873,7 +999,7 @@ function ModalDetalle({
               </div>
 
               {/* Qué incluye la venta */}
-              <div>
+              <div className={tab === 'producto' ? '' : 'hidden'}>
                 <h4 className="font-headline font-bold text-sm text-yeikar-secondary mb-2 uppercase tracking-wider">
                   Qué incluye la venta ({detalle.detalles.length})
                 </h4>
@@ -910,10 +1036,18 @@ function ModalDetalle({
                     </div>
                   ))}
                 </div>
+                {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && (
+                  <button
+                    onClick={() => setTab('cobranza')}
+                    className="mt-3 w-full py-3 bg-gradient-to-r from-yeikar-primary to-amber-500 text-yeikar-neutral font-black font-headline rounded-2xl hover:brightness-105 active:scale-[0.99] transition-all shadow-lift"
+                  >
+                    Ir a cobranza → registrar cobro
+                  </button>
+                )}
               </div>
 
-              {/* Cobros */}
-              <div>
+              {/* Cobros (cobranza) */}
+              <div className={tab === 'cobranza' ? '' : 'hidden'}>
                 <h4 className="font-headline font-bold text-sm text-yeikar-secondary mb-2 uppercase tracking-wider">
                   Cobros ({detalle.pagos.length})
                 </h4>
@@ -987,7 +1121,7 @@ function ModalDetalle({
                 )}
               </div>
               {/* Descuentos otorgados al cobrar (no mueven caja) */}
-              {(detalle.descuentos ?? []).length > 0 && (
+              {(detalle.descuentos ?? []).length > 0 && tab === 'cobranza' && (
                 <div>
                   <h4 className="font-headline font-bold text-sm text-yeikar-secondary mb-2 uppercase tracking-wider">
                     Descuentos ({(detalle.descuentos ?? []).length})
@@ -1048,7 +1182,7 @@ function ModalDetalle({
                   </div>
                 </div>
               )}
-              {descError && !showDescForm && (
+              {descError && !showDescForm && tab === 'cobranza' && (
                 <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
                   {descError}
                 </p>
@@ -1057,10 +1191,10 @@ function ModalDetalle({
               )}
 
               {/* Registrar cobro / descuento */}
-              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && !showForm && !showDescForm && (
+              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && !showForm && !showDescForm && tab === 'cobranza' && (
                 <div className="sticky bottom-0 -mx-1 bg-gradient-to-t from-white via-white to-transparent px-1 pb-1 pt-4 space-y-2">
                   <button
-                    onClick={() => setShowForm(true)}
+                    onClick={() => { setTab('cobranza'); setShowForm(true); }}
                     className="w-full py-3 bg-gradient-to-r from-yeikar-primary to-amber-500 text-yeikar-neutral font-black font-headline rounded-2xl hover:brightness-105 active:scale-[0.99] transition-all shadow-lift"
                   >
                     + Registrar cobro
@@ -1435,7 +1569,7 @@ function ModalDetalle({
             </>
           )}
         </div>
-      </div>
+      </motion.div>
 
       {/* Visor de recibo (comprobante digital ampliado) */}
       {reciboVer && (
@@ -1458,7 +1592,7 @@ function ModalDetalle({
           </div>
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -1586,7 +1720,6 @@ export default function Ventas() {
   const [ventas, setVentas] = useState<Venta[]>([]);
   const [ventasLoading, setVentasLoading] = useState(false);
   const [cuentas, setCuentas] = useState<CuentaPorCobrar[]>([]);
-  const [cobroAbiertoId, setCobroAbiertoId] = useState<number | null>(null);
 
   // Vista: lista de cobros (por venta) o resumen por categoría.
   const [vista, setVista] = useState<'lista' | 'categoria'>('lista');
@@ -1626,10 +1759,6 @@ export default function Ventas() {
     const t = setTimeout(() => cargarVentas(busqueda.trim() || undefined), 300);
     return () => clearTimeout(t);
   }, [busqueda, cargarVentas]);
-
-  useEffect(() => {
-    setCobroAbiertoId(null);
-  }, [filtroEstado, filtroGrupo, busqueda]);
 
   const cargarReporte = useCallback(async () => {
     try {
@@ -1811,8 +1940,6 @@ export default function Ventas() {
             vacio="No hay entregas pendientes de cobro. Todo cobrado."
             loading={ventasLoading}
             cobros={cobrosEntregados}
-            abiertoId={cobroAbiertoId}
-            onToggle={(id) => setCobroAbiertoId((abierto) => (abierto === id ? null : id))}
             onCobrar={(id) => setDetalleVentaId(id)}
           />
         ) : (
@@ -1854,8 +1981,6 @@ export default function Ventas() {
             vacio="No hay ventas en proceso pendientes de cobro."
             loading={ventasLoading}
             cobros={cobrosEnProceso}
-            abiertoId={cobroAbiertoId}
-            onToggle={(id) => setCobroAbiertoId((abierto) => (abierto === id ? null : id))}
             onCobrar={(id) => setDetalleVentaId(id)}
           />
         ) : (
@@ -1881,14 +2006,17 @@ export default function Ventas() {
         )
       )}
 
-      {/* Modales */}
-      {detalleVentaId !== null && (
-        <ModalDetalle
-          ventaId={detalleVentaId}
-          onClose={() => setDetalleVentaId(null)}
-          onPagoRegistrado={() => cargarVentas(busqueda.trim() || undefined)}
-        />
-      )}
+      {/* Pantalla de detalle + cobro */}
+      <AnimatePresence>
+        {detalleVentaId !== null && (
+          <ModalDetalle
+            key={detalleVentaId}
+            ventaId={detalleVentaId}
+            onClose={() => setDetalleVentaId(null)}
+            onPagoRegistrado={() => cargarVentas(busqueda.trim() || undefined)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
