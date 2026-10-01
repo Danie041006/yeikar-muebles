@@ -1353,6 +1353,12 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
     area_base = ancho_base * largo_base
     area_nueva = nuevo_ancho * nuevo_largo
 
+    # N.º de piezas de la línea (2 poltronas, 3 sillas...). La receta se define
+    # por UNIDAD; aquí se calcula además el TOTAL del lote (`cantidad_total`)
+    # para que el operario pida el material de todas las piezas sin multiplicar
+    # a mano. `cantidad_esperada` se mantiene POR UNIDAD: es el costo individual.
+    piezas = Decimal(str(detalle.cantidad)) if (detalle and detalle.cantidad) else Decimal("1")
+
     receta = (
         db.query(ProductoMaterial)
         .options(joinedload(ProductoMaterial.material).joinedload(MatModel.unidad_medida))
@@ -1366,17 +1372,19 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         mat = pm.material
         if not mat:
             continue
-        cantidad = _calcular_cantidad_material(
+        cantidad_unitaria = _calcular_cantidad_material(
             pm, nuevo_ancho, nuevo_largo, ancho_base, largo_base, area_base, area_nueva, None
         )
+        cantidad_total = cantidad_unitaria * piezas
         item = {
             "material_id": mat.id,
             "nombre": mat.nombre,
             "seccion": _normalizar_seccion(pm.seccion),
             "tipo_escala": pm.tipo_escala or "FIJO",
-            "condicion_cumplida": bool(cantidad > 0 or not pm.condicion_activacion),
+            "condicion_cumplida": bool(cantidad_unitaria > 0 or not pm.condicion_activacion),
             "cantidad_base": float(pm.cantidad_base),
-            "cantidad_esperada": float(cantidad),
+            "cantidad_esperada": float(cantidad_unitaria),
+            "cantidad_total": float(cantidad_total),
             "unidad": mat.unidad_medida.abreviatura if mat.unidad_medida else "",
             "costo_unitario": float(mat.costo_base),
         }
@@ -1390,7 +1398,7 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
                 area_corte = Decimal(str(pm.largo_corte_cm)) * Decimal(str(pm.ancho_corte_cm))
                 area_lamina = Decimal(str(mat.largo_cm)) * Decimal(str(mat.ancho_cm))
                 if area_lamina > 0:
-                    item["laminas_equivalentes"] = float((cantidad * area_corte / area_lamina).quantize(Decimal("0.0001")))
+                    item["laminas_equivalentes"] = float((cantidad_total * area_corte / area_lamina).quantize(Decimal("0.0001")))
                 item["costo_por_corte"] = float(laminas_motor.costo_por_corte(mat.costo_base, area_corte, area_lamina)) if area_lamina > 0 else float(mat.costo_base)
         materiales.append(item)
 
@@ -1427,6 +1435,8 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         "cliente_telefono": cliente.telefono if cliente else None,
         "fecha_entrega_estimada": str(pedido.fecha_entrega_estimada) if pedido and pedido.fecha_entrega_estimada else None,
         "cantidad": float(detalle.cantidad) if detalle else 1.0,
+        # N.º de piezas idénticas de la línea (1 en órdenes sin pedido).
+        "piezas": float(piezas),
         "producto_fotos": fotos,
     }
 

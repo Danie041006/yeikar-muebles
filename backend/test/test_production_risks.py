@@ -931,6 +931,73 @@ def test_c15_referencia_receta_escalada_por_area(client, cleaner, db):
     )
 
 
+def test_c15b_referencia_receta_total_por_piezas(client, cleaner, db):
+    """Con 2 piezas idénticas (cantidad=2) la receta debe exponer el TOTAL del
+    lote (`cantidad_total` = receta × 2) y mantener el valor POR UNIDAD
+    (`cantidad_esperada`), para que el operario pida todo sin multiplicar a
+    mano y el costo individual siga disponible."""
+    areas = [r[0] for r in db.execute(text("SELECT id FROM area ORDER BY id LIMIT 3"))]
+    area1 = areas[0]
+
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)  # ancho_base 1.60, largo_base 1.90
+    material = crear_material(client, cleaner, costo_base=5000.0)
+    crear_receta(client, cleaner, producto["id"], material["id"],
+                 cantidad_base=3.0, tipo_escala="FIJO", seccion="TAPICERIA")
+
+    r_cot = client.post("/api/v1/cotizacion/", json={
+        "cliente_id": cliente["id"],
+        "fecha": str(datetime.today().date()),
+        "estado": "BORRADOR",
+        "total_estimado": 200000,
+        "moneda_id": 1,
+        "tasa_cambio": 1.0,
+        "observaciones": _uniq("cot15b"),
+        "detalles": [
+            {"producto_id": producto["id"], "cantidad": 2, "precio": 100000,
+             "ancho": 1.60, "largo": 1.90},
+        ],
+    }, headers=ADMIN_HEADERS)
+    assert r_cot.status_code == 201, f"cotización → {r_cot.status_code}: {r_cot.text}"
+    cot = r_cot.json()
+    cleaner.registrar("cotizacion", cot["id"])
+
+    r_conv = client.post(
+        f"/api/v1/pedido/convertir/{cot['id']}",
+        json={"detalles": [{"producto_id": producto["id"], "cantidad": 2,
+                            "precio": 100000, "costo_unitario": 1000, "porcentaje_ganancia": 40}],
+              "adelanto": None},
+        headers=ADMIN_HEADERS,
+    )
+    assert r_conv.status_code == 201, f"convertir → {r_conv.status_code}: {r_conv.text}"
+    pedido = r_conv.json()
+    cleaner.registrar("pedido", pedido["id"])
+    for d in pedido["detalles"]:
+        cleaner.registrar("detalle_pedido", d["id"])
+    registrar_venta_de_pedido(client, cleaner, pedido["id"])
+    orden = crear_orden_desde_pedido(client, cleaner, pedido["detalles"][0]["id"])
+
+    r_etapa = client.post("/api/v1/produccion/etapa/", json={
+        "orden_produccion_id": orden["id"], "area_id": area1,
+        "empleado_responsable_id": 1, "estado": "ASIGNADA", "observaciones": "c15b"},
+        headers=ADMIN_HEADERS)
+    assert r_etapa.status_code == 201, f"etapa → {r_etapa.status_code}: {r_etapa.text}"
+    etapa_id = r_etapa.json()["id"]
+    cleaner.registrar("etapa_produccion", etapa_id)
+
+    r = client.get(f"/api/v1/produccion/etapa/{etapa_id}/referencia-receta",
+                   headers=ADMIN_HEADERS)
+    assert r.status_code == 200, f"referencia-receta → {r.status_code}: {r.text}"
+    data = r.json()
+
+    assert data["piezas"] == pytest.approx(2.0), data
+    materiales = [m for m in data["materiales"] if m["material_id"] == material["id"]]
+    assert materiales, f"El material debe estar en la receta: {data['materiales']}"
+    m = materiales[0]
+    assert m["cantidad_esperada"] == pytest.approx(3.0), f"unitario: {m}"
+    assert m["cantidad_total"] == pytest.approx(6.0), f"total del lote: {m}"
+
+
 # ---------------------------------------------------------------------------
 # M1 — Reversa de stock al cancelar compra RECIBIDA (no existe DELETE)
 # ---------------------------------------------------------------------------

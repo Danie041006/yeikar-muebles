@@ -386,7 +386,11 @@ class MaterialReferencia(BaseModel):
     tipo_escala: str
     condicion_cumplida: bool
     cantidad_base: float
+    # `cantidad_esperada` = receta POR UNIDAD (costo individual).
+    # `cantidad_total`  = receta × n.º de piezas de la línea (lo que sale del
+    # depósito para el lote completo). Los consumos se registran contra el total.
     cantidad_esperada: float
+    cantidad_total: float
     unidad: str
     costo_unitario: float
     # Solo para tipo_escala=CORTE (materiales laminares)
@@ -424,6 +428,8 @@ class ReferenciaRecetaResponse(BaseModel):
     cliente_telefono: Optional[str] = None
     fecha_entrega_estimada: Optional[str] = None
     cantidad: Optional[float] = None
+    # N.º de piezas idénticas de la línea (1 si la orden no tiene pedido).
+    piezas: Optional[float] = None
     producto_fotos: List[FotoReferencia] = []
 
 

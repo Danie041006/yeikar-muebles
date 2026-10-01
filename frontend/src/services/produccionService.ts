@@ -186,7 +186,10 @@ export interface MaterialReferencia {
   tipo_escala: string;
   condicion_cumplida: boolean;
   cantidad_base: number;
+  /** Receta POR UNIDAD (costo individual). */
   cantidad_esperada: number;
+  /** Receta × n.º de piezas de la línea (total del lote que sale del depósito). */
+  cantidad_total: number;
   unidad: string;
   costo_unitario: number;
   // Solo para tipo_escala=CORTE (materiales laminares)
@@ -224,6 +227,8 @@ export interface ReferenciaReceta {
   cliente_telefono?: string | null;
   fecha_entrega_estimada?: string | null;
   cantidad?: number | null;
+  /** N.º de piezas idénticas de la línea (1 si la orden no tiene pedido). */
+  piezas?: number | null;
   producto_fotos?: FotoReferencia[];
 }
 

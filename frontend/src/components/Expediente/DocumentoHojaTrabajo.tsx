@@ -341,9 +341,14 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
                         {m.unidad || '—'}
                       </td>
 
-                      {/* Cantidad esperada */}
+                      {/* Cantidad esperada (total del lote = receta × piezas) */}
                       <td className="px-2 py-1 text-center font-mono font-black text-stone-950 text-[10.5px] border-r border-stone-200">
-                        {fmt(m.cantidad_esperada)}
+                        {fmt(m.cantidad_total ?? m.cantidad_esperada)}
+                        {(hoja.piezas ?? hoja.cantidad ?? 1) > 1 && (
+                          <span className="block text-[6.5px] font-normal text-stone-500 font-mono leading-none">
+                            {fmt(m.cantidad_esperada)}/pieza × {fmt(hoja.piezas ?? hoja.cantidad ?? 1)}
+                          </span>
+                        )}
                         {m.cantidad_esperada !== m.cantidad_base && (
                           <span className="block text-[6.5px] font-normal text-stone-400 font-mono leading-none">
                             base {fmt(m.cantidad_base)}

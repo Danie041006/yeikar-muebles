@@ -915,14 +915,24 @@ export default function EtapaModal({
                     {referenciaReceta?.dimensiones.ancho && referenciaReceta?.dimensiones.largo && (
                       <span className="text-[10px] font-mono text-yeikar-neutral/40 shrink-0">
                         {referenciaReceta.dimensiones.ancho}m × {referenciaReceta.dimensiones.largo}m
+                        {(referenciaReceta.piezas ?? referenciaReceta.cantidad ?? 1) > 1 && (
+                          <span className="ml-1.5 font-bold text-yeikar-secondary">
+                            × {fmtNum(referenciaReceta.piezas ?? referenciaReceta.cantidad ?? 1)} piezas
+                          </span>
+                        )}
                       </span>
                     )}
                   </div>
                   <div className="divide-y divide-yeikar-secondary-light/5">
                     {matsSeccionActiva.map((m, i) => {
                       const reg = registradoPorMaterial[m.material_id] || { cantidad: 0, pendientes: 0 };
-                      const pct = m.cantidad_esperada > 0 ? Math.min(100, (reg.cantidad / m.cantidad_esperada) * 100) : 0;
-                      const faltante = m.cantidad_esperada - reg.cantidad;
+                      // Se compara contra el TOTAL del lote (receta × n.º de
+                      // piezas). `cantidad_esperada` queda como referencia por
+                      // unidad (costo individual).
+                      const esperadoLote = m.cantidad_total ?? m.cantidad_esperada;
+                      const piezasLote = referenciaReceta?.piezas ?? referenciaReceta?.cantidad ?? 1;
+                      const pct = esperadoLote > 0 ? Math.min(100, (reg.cantidad / esperadoLote) * 100) : 0;
+                      const faltante = esperadoLote - reg.cantidad;
                       const unidad = m.es_corte ? 'cortes' : m.unidad;
                       return (
                         <div key={`${m.material_id}-${i}`} className={`px-4 py-2.5 ${m.condicion_cumplida ? '' : 'opacity-50'}`}>
@@ -930,7 +940,7 @@ export default function EtapaModal({
                             <span className="font-bold text-yeikar-secondary text-sm">{m.nombre}</span>
                             {m.es_corte && m.ancho_corte_cm && m.largo_corte_cm && (
                               <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1.5 py-0.5">
-                                {fmtNum(m.cantidad_esperada)} corte(s) de {m.ancho_corte_cm}×{m.largo_corte_cm} cm
+                                {fmtNum(esperadoLote)} corte(s) de {m.ancho_corte_cm}×{m.largo_corte_cm} cm
                               </span>
                             )}
                             {!m.condicion_cumplida && (
@@ -938,11 +948,14 @@ export default function EtapaModal({
                             )}
                             <span className="flex-1" />
                             <span className="font-mono text-xs text-yeikar-neutral/60">
-                              Esperado <b className="text-yeikar-secondary">{fmtNum(m.cantidad_esperada)}</b> {unidad}
-                              {' · '}Registrado <b className={reg.cantidad >= m.cantidad_esperada && m.cantidad_esperada > 0 ? 'text-emerald-600' : 'text-yeikar-secondary'}>{fmtNum(reg.cantidad)}</b> {unidad}
+                              Esperado <b className="text-yeikar-secondary">{fmtNum(esperadoLote)}</b> {unidad}
+                              {' · '}Registrado <b className={reg.cantidad >= esperadoLote && esperadoLote > 0 ? 'text-emerald-600' : 'text-yeikar-secondary'}>{fmtNum(reg.cantidad)}</b> {unidad}
+                              {piezasLote > 1 && (
+                                <span className="text-yeikar-neutral/40"> ({fmtNum(m.cantidad_esperada)} {unidad}/pieza × {fmtNum(piezasLote)})</span>
+                              )}
                             </span>
                           </div>
-                          {m.condicion_cumplida && m.cantidad_esperada > 0 && (
+                          {m.condicion_cumplida && esperadoLote > 0 && (
                             <div className="flex items-center gap-2 mt-1.5">
                               <div className="flex-1 h-1.5 bg-white rounded-full overflow-hidden border border-yeikar-secondary-light/10">
                                 <div
@@ -984,7 +997,7 @@ export default function EtapaModal({
                                 <div key={`${m.material_id}-${i}`} className="flex items-center justify-between text-[11px] bg-white/70 border border-yeikar-secondary-light/5 px-2.5 py-1.5 rounded-lg">
                                   <span className="font-semibold text-yeikar-secondary truncate">{m.nombre}</span>
                                   <span className="font-mono text-yeikar-neutral/50 shrink-0 ml-2">
-                                    {fmtNum(m.cantidad_esperada)} {m.es_corte ? 'cortes' : m.unidad}
+                                    {fmtNum(m.cantidad_total ?? m.cantidad_esperada)} {m.es_corte ? 'cortes' : m.unidad}
                                   </span>
                                 </div>
                               ))}
