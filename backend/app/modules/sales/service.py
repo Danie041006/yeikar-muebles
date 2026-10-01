@@ -721,11 +721,17 @@ def _cobros_base_por_venta(db: Session, venta_ids: list[int]) -> tuple[dict, dic
     return pagos, descuentos
 
 
+def _lineas_utiles(lineas) -> bool:
+    """True si hay renglones y al menos uno diga QUÉ es (no 'Ítem a medida')."""
+    return bool(lineas) and any(_nombre_linea(d) != "Ítem a medida" for d in lineas)
+
+
 def _lineas_por_venta(db: Session, ventas: list) -> dict:
     """Renglones de cada venta: detalle_venta → detalle_pedido → detalle_cotizacion.
 
-    Las notas históricas pueden no tener detalle de venta ni de pedido; el
-    motivo original vive en la cotización.
+    Se exige que la fuente diga qué se vendió: las notas históricas copian
+    detalle_venta SIN descripción (el texto vive en la cotización), así que un
+    renglón anónimo no vale y se sigue bajando hasta encontrar el nombre real.
     """
     resultado: dict[int, list] = {}
     if not ventas:
@@ -736,27 +742,29 @@ def _lineas_por_venta(db: Session, ventas: list) -> dict:
         joinedload(DetalleVenta.producto).joinedload(Producto.categoria_inventario),
         joinedload(DetalleVenta.material).joinedload(Material.categoria_inventario),
     )
+    por_venta: dict[int, list] = defaultdict(list)
     for d in (db.query(DetalleVenta).options(*dv_opts)
               .filter(DetalleVenta.venta_id.in_(venta_ids)).all()):
-        resultado.setdefault(d.venta_id, []).append(d)
+        por_venta[d.venta_id].append(d)
 
-    faltan = [v for v in ventas if not resultado.get(v.id)]
+    faltan = [v for v in ventas if not _lineas_utiles(por_venta.get(v.id))]
     pedidos = [v.pedido for v in faltan if v.pedido is not None]
     pedido_ids = sorted({p.id for p in pedidos})
+
+    por_pedido: dict[int, list] = {}
     if pedido_ids:
         dp_opts = (
             joinedload(DetallePedido.producto).joinedload(Producto.categoria_inventario),
             joinedload(DetallePedido.material).joinedload(Material.categoria_inventario),
         )
-        por_pedido: dict[int, list] = defaultdict(list)
         for d in (db.query(DetallePedido).options(*dp_opts)
                   .filter(DetallePedido.pedido_id.in_(pedido_ids)).all()):
-            por_pedido[d.pedido_id].append(d)
+            por_pedido.setdefault(d.pedido_id, []).append(d)
         for v in faltan:
-            if v.pedido is not None and por_pedido.get(v.pedido.id):
+            if v.pedido is not None and _lineas_utiles(por_pedido.get(v.pedido.id)):
                 resultado[v.id] = por_pedido[v.pedido.id]
 
-    restantes = [v for v in faltan if not resultado.get(v.id)]
+    restantes = [v for v in faltan if v.id not in resultado]
     cot_ids = sorted({v.pedido.cotizacion_id for v in restantes
                       if v.pedido is not None and v.pedido.cotizacion_id})
     if cot_ids:
@@ -764,13 +772,19 @@ def _lineas_por_venta(db: Session, ventas: list) -> dict:
             joinedload(DetalleCotizacion.producto).joinedload(Producto.categoria_inventario),
             joinedload(DetalleCotizacion.material).joinedload(Material.categoria_inventario),
         )
-        por_cot: dict[int, list] = defaultdict(list)
+        por_cot: dict[int, list] = {}
         for d in (db.query(DetalleCotizacion).options(*dc_opts)
                   .filter(DetalleCotizacion.cotizacion_id.in_(cot_ids)).all()):
-            por_cot[d.cotizacion_id].append(d)
+            por_cot.setdefault(d.cotizacion_id, []).append(d)
         for v in restantes:
             if v.pedido is not None and por_cot.get(v.pedido.cotizacion_id):
                 resultado[v.id] = por_cot[v.pedido.cotizacion_id]
+
+    # Último recurso: si ninguna fuente dice qué se vendió, mostrar igual los
+    # renglones de la venta (mejor una deuda sin motivo que sin renglones).
+    for v in ventas:
+        if v.id not in resultado and por_venta.get(v.id):
+            resultado[v.id] = por_venta[v.id]
 
     return resultado
 

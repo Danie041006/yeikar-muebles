@@ -471,6 +471,7 @@ def main():
                     tipo_item=clasificar_tipo(desc),
                     cantidad=Decimal(str(item.get("cantidad") or 0)) or Decimal("1"),
                     precio=Decimal(str(item.get("precio_unitario") or 0)),
+                    descripcion_especifica=obs,
                 ))
             for p in pagos:
                 metodo = mapear_metodo(p.get("metodo"), moneda_cod)
