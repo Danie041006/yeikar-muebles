@@ -3,13 +3,14 @@ from sqlalchemy import or_, func
 from datetime import date, datetime
 from decimal import Decimal
 from collections import defaultdict
+from typing import Optional
 import math
 import re
 import unicodedata
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
 from app.core.hora_ve import hoy_ve
 from app.modules.sales.model import Venta, DetalleVenta, Pago, DescuentoVenta
-from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, DescuentoCreate
+from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, DescuentoCreate, DetalleVentaResponse
 from app.modules.orders.model import Pedido, DetallePedido
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
@@ -787,6 +788,72 @@ def _lineas_por_venta(db: Session, ventas: list) -> dict:
             resultado[v.id] = por_venta[v.id]
 
     return resultado
+
+
+def _descripcion_de_origen(det) -> Optional[str]:
+    desc = getattr(det, "descripcion_especifica", None) or getattr(det, "observaciones", None)
+    texto = str(desc).strip() if desc else ""
+    return texto or None
+
+
+def detalles_venta_mostrar(db: Session, venta: Venta) -> list[DetalleVentaResponse]:
+    """Renglones de la venta con el texto TAL CUAL se anotó, para el detalle.
+
+    Si el renglón de venta no trae descripción (notas migradas), la toma del
+    pedido y, si no, de la cotización. Si la venta no tiene renglones, los
+    sintetiza desde el pedido/cotización para no mostrar una venta vacía.
+    """
+    pedido = venta.pedido
+    lineas_pedido = list(pedido.detalles) if pedido else []
+    cot = pedido.cotizacion if pedido else None
+    lineas_cot = list(cot.detalles) if cot else []
+
+    usados_ped: set[int] = set()
+
+    def buscar_desc(cantidad, precio, tipo) -> Optional[str]:
+        for i, dp in enumerate(lineas_pedido):
+            if i in usados_ped:
+                continue
+            if (float(dp.cantidad) == float(cantidad)
+                    and float(dp.precio) == float(precio)
+                    and (dp.tipo_item or "FABRICADO") == (tipo or "FABRICADO")):
+                txt = _descripcion_de_origen(dp)
+                if txt:
+                    usados_ped.add(i)
+                    return txt
+        for dc in lineas_cot:
+            if float(dc.cantidad) == float(cantidad) and float(dc.precio) == float(precio):
+                txt = _descripcion_de_origen(dc)
+                if txt:
+                    return txt
+        return None
+
+    if venta.detalles:
+        salida = []
+        for d in venta.detalles:
+            r = DetalleVentaResponse.model_validate(d)
+            if not r.producto_id and not r.material_id and not (r.descripcion_especifica or "").strip():
+                txt = buscar_desc(r.cantidad, r.precio, r.tipo_item)
+                if txt:
+                    r.descripcion_especifica = txt
+            salida.append(r)
+        return salida
+
+    # Sin renglones de venta: mostrar el pedido (o la cotización) tal cual.
+    fuente = lineas_pedido or lineas_cot
+    salida = []
+    for i, det in enumerate(fuente, start=1):
+        salida.append(DetalleVentaResponse(
+            id=-i,
+            venta_id=venta.id,
+            producto_id=None,
+            material_id=None,
+            tipo_item=(getattr(det, "tipo_item", None) or "FABRICADO"),
+            cantidad=float(det.cantidad or 0) or 1.0,
+            precio=float(det.precio or 0),
+            descripcion_especifica=_descripcion_de_origen(det) or "Ítem a medida",
+        ))
+    return salida
 
 
 def _grupos_duplicados(clientes: list[dict]) -> list[dict]:

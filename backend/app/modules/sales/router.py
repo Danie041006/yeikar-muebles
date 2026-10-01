@@ -59,15 +59,17 @@ def ver_factura_venta(
     db_obj = service.obtener_venta(db, id)
     if not db_obj:
         raise HTTPException(status_code=404, detail="Factura de venta no encontrada")
-    
-    # Calcular y asignar campos acumulados para la respuesta
-    # Usar monto_en_moneda_base para reflejar correctamente abonos en otra moneda
+
+    # Calcular campos acumulados y rellenar las descripciones del detalle con
+    # el texto tal cual se anotó (pedido/cotización) cuando falta.
     total_pagado = sum(float(p.monto_en_moneda_base) for p in db_obj.pagos)
     total_descontado = sum(float(d.monto_en_moneda_base) for d in db_obj.descuentos)
-    db_obj.total_pagado = total_pagado
-    db_obj.total_descontado = total_descontado
-    db_obj.saldo_pendiente = float(db_obj.total) - total_pagado - total_descontado
-    return db_obj
+    resp = schemas.VentaDetalleResponse.model_validate(db_obj)
+    resp.total_pagado = total_pagado
+    resp.total_descontado = total_descontado
+    resp.saldo_pendiente = float(db_obj.total) - total_pagado - total_descontado
+    resp.detalles = service.detalles_venta_mostrar(db, db_obj)
+    return resp
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def eliminar_factura_venta(
