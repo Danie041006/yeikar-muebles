@@ -25,12 +25,51 @@ from app.db.session import session_local
 # ---------------------------------------------------------------------------
 # Tokens JWT firmados (patrón ya usado en test_iqe.py)
 # ---------------------------------------------------------------------------
+# `get_current_user` exige un `sid` de una Sesion viva (revocación real), así
+# que al firmar los tokens se crea una sesión de test que se borra al final.
+_TEST_SESSION_IDS: list[int] = []
+
+
+def crear_sesion_de_test(username: str) -> int | None:
+    """Crea una Sesion viva para el usuario (None si el usuario no existe)."""
+    from app.modules.users.model import Sesion, Usuario
+
+    db = session_local()
+    try:
+        usuario = db.query(Usuario).filter(Usuario.nombre_usuario == username).first()
+        if usuario is None:
+            return None
+        sesion = Sesion(usuario_id=usuario.id, ip="testclient", user_agent="pytest")
+        db.add(sesion)
+        db.commit()
+        db.refresh(sesion)
+        _TEST_SESSION_IDS.append(sesion.id)
+        return sesion.id
+    finally:
+        db.close()
+
+
 def _firmar_token(username: str) -> str:
-    return jwt.encode(
-        {"sub": username, "type": "access", "exp": datetime.utcnow() + timedelta(hours=1)},
-        settings.SECRET_KEY,
-        algorithm=settings.ALGORITHM,
-    )
+    sid = crear_sesion_de_test(username)
+    payload = {"sub": username, "type": "access", "exp": datetime.utcnow() + timedelta(hours=1)}
+    if sid is not None:
+        payload["sid"] = sid
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _limpiar_sesiones_de_test():
+    yield
+    if not _TEST_SESSION_IDS:
+        return
+    from app.modules.users.model import Sesion
+
+    db = session_local()
+    try:
+        db.query(Sesion).filter(Sesion.id.in_(_TEST_SESSION_IDS)).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
 
 
 # Usuarios reales de la BD: jackson (Dueño), daniel (Ventas)
@@ -130,6 +169,7 @@ ORDEN_LIMPIEZA = [
     "credencial_webauthn",
     "refresh_token",
     "usuario",
+    "movimiento_caja",
     "metodo_caja",
 ]
 
@@ -173,7 +213,7 @@ class Cleaner:
     def cleanup(self, db):
         from sqlalchemy import text
         errores = []
-        refs = [r[5:] for r in (self._ids.get("movimiento_caja") or set()) if r.startswith("REF::")]
+        refs = [str(r)[5:] for r in (self._ids.get("movimiento_caja") or set()) if str(r).startswith("REF::")]
         if refs:
             try:
                 for ref in refs:

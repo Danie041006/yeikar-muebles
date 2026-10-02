@@ -465,22 +465,34 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
     )
 
     # 4. Validar metodo de pago valido y su coherencia con la moneda del pago.
-    #    Un pago en USD no puede entrar a la caja de pesos: el arqueo físico
-    #    jamás cuadraría. Métodos → moneda esperada.
-    metodos_validos = ['EFECTIVO_COP', 'EFECTIVO_USD', 'EFECTIVO_VES', 'BANCOLOMBIA', 'BANCARIBE', 'ZELLE', 'BINANCE']
-    if esquema.metodo_pago not in metodos_validos:
-        raise ValueError(f"Metodo de pago invalido. Debe ser uno de: {metodos_validos}")
-    METODO_MONEDA = {
+    #    Cualquier cuenta ACTIVA del catálogo (metodo_caja) es un método válido:
+    #    el usuario crea cuentas propias (Bancolombia Andrea, Banesco Jackson...)
+    #    y todas sirven para cobrar. Un pago en USD no puede entrar a la caja
+    #    de pesos: el arqueo físico jamás cuadraría. La moneda esperada es la
+    #    moneda propia de la cuenta.
+    from app.modules.reports.model import MetodoCaja
+    cuenta_metodo = (
+        db.query(MetodoCaja)
+        .filter(MetodoCaja.codigo == esquema.metodo_pago)
+        .first()
+    )
+    if not cuenta_metodo or not cuenta_metodo.activo:
+        raise ValueError(
+            f"El método de pago '{esquema.metodo_pago}' no corresponde a ninguna cuenta activa. "
+            "Verifica las cuentas en Cuentas y Medios de Pago."
+        )
+    METODO_MONEDA_LEGACY = {
         "EFECTIVO_COP": 1, "BANCOLOMBIA": 1,
         "EFECTIVO_USD": 2, "ZELLE": 2, "BINANCE": 2,
         "EFECTIVO_VES": 3, "BANCARIBE": 3,
     }
-    moneda_esperada = METODO_MONEDA.get(esquema.metodo_pago)
-    if esquema.moneda_id != moneda_esperada:
+    moneda_esperada = cuenta_metodo.moneda_id or METODO_MONEDA_LEGACY.get(esquema.metodo_pago)
+    if moneda_esperada is not None and esquema.moneda_id != moneda_esperada:
+        codigos = {1: "COP", 2: "USD", 3: "VES", 4: "EUR"}
         raise ValueError(
-            f"El método de pago '{esquema.metodo_pago}' corresponde a la moneda COP/USD/VES "
-            f"esperada, pero el pago se registró en la moneda {esquema.moneda_id}. "
-            "Usa un método compatible (p. ej. ZELLE o EFECTIVO_USD para pagos en USD)."
+            f"El método de pago '{cuenta_metodo.nombre}' es una cuenta en "
+            f"{codigos.get(moneda_esperada, f'moneda {moneda_esperada}')}, pero el pago "
+            "se registró en otra moneda. Usa un método compatible con la moneda del pago."
         )
 
     # 4b. (validación de tasa absurda y ±50% contra la registrada: ya aplicada

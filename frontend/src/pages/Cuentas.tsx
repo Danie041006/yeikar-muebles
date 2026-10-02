@@ -66,7 +66,7 @@ export default function Cuentas() {
 
   const [showCuentaModal, setShowCuentaModal] = useState(false);
   const [editCuenta, setEditCuenta] = useState<MetodoCaja | null>(null);
-  const [cuentaForm, setCuentaForm] = useState({ nombre: '', codigo: '', orden: 1 });
+  const [cuentaForm, setCuentaForm] = useState<{ nombre: string; codigo: string; orden: number; moneda_id: number | null }>({ nombre: '', codigo: '', orden: 1, moneda_id: null });
 
   const [showMovModal, setShowMovModal] = useState(false);
   const [editMov, setEditMov] = useState<MovimientoCaja | null>(null);
@@ -119,8 +119,8 @@ export default function Cuentas() {
   const abrirCuenta = (cuenta?: MetodoCaja) => {
     setEditCuenta(cuenta ?? null);
     setCuentaForm(cuenta
-      ? { nombre: cuenta.nombre, codigo: cuenta.codigo, orden: cuenta.orden }
-      : { nombre: '', codigo: '', orden: resumen.length + 1 });
+      ? { nombre: cuenta.nombre, codigo: cuenta.codigo, orden: cuenta.orden, moneda_id: cuenta.moneda_id ?? null }
+      : { nombre: '', codigo: '', orden: resumen.length + 1, moneda_id: monedaCopId });
     setShowCuentaModal(true);
   };
 
@@ -129,18 +129,24 @@ export default function Cuentas() {
       setError('Nombre y código son obligatorios.');
       return;
     }
+    if (!cuentaForm.moneda_id) {
+      setError('Selecciona la moneda de la cuenta.');
+      return;
+    }
     try {
       if (editCuenta) {
         await cuentasService.actualizarCuenta(editCuenta.id, {
           nombre: cuentaForm.nombre.trim(),
           codigo: cuentaForm.codigo.trim().toUpperCase(),
           orden: cuentaForm.orden,
+          moneda_id: cuentaForm.moneda_id,
         });
       } else {
         await cuentasService.crearCuenta({
           nombre: cuentaForm.nombre.trim(),
           codigo: cuentaForm.codigo.trim().toUpperCase(),
           orden: cuentaForm.orden,
+          moneda_id: cuentaForm.moneda_id,
         });
       }
       setShowCuentaModal(false);
@@ -535,6 +541,17 @@ export default function Cuentas() {
               onChange={(e) => setCuentaForm({ ...cuentaForm, codigo: e.target.value })}
               placeholder="Ej: ZELLE, NEQUI"
             />
+          </Field>
+          <Field label="Moneda" required hint="Solo se podrán cobrar pagos en esta moneda hacia esta cuenta.">
+            <Select
+              value={cuentaForm.moneda_id ?? ''}
+              onChange={(e) => setCuentaForm({ ...cuentaForm, moneda_id: e.target.value ? Number(e.target.value) : null })}
+            >
+              <option value="">Seleccione...</option>
+              {monedas.map((m) => (
+                <option key={m.id} value={m.id}>{m.codigo} — {m.nombre}</option>
+              ))}
+            </Select>
           </Field>
           <Field label="Orden">
             <Input

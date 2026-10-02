@@ -118,7 +118,7 @@ export const cuentasService = {
   },
 
   // CRUD de cuentas (medios de pago)
-  crearCuenta: async (data: { nombre: string; codigo: string; orden?: number }): Promise<MetodoCaja> => {
+  crearCuenta: async (data: { nombre: string; codigo: string; orden?: number; moneda_id?: number | null }): Promise<MetodoCaja> => {
     const res = await api.post<MetodoCaja>('/cuenta/', data);
     return res.data;
   },

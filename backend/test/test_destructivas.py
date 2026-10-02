@@ -43,6 +43,7 @@ try:
         crear_producto,
         crear_cotizacion,
         crear_orden_desde_pedido,
+        crear_sesion_de_test,
     )
 except ImportError:  # pragma: no cover
     pytest.fail("No se pudo importar conftest")
@@ -89,6 +90,7 @@ def test_jwt_claims_manipulados_no_otorgan_privilegios(client):
     """Firmar sub=daniel (Ventas) + es_admin=true no debe dar acceso admin."""
     tok = _firmar_payload({
         "sub": "daniel", "type": "access", "es_admin": True,
+        "sid": crear_sesion_de_test("daniel"),
         "exp": datetime.utcnow() + timedelta(hours=1),
     })
     r = client.get("/api/auth/users", headers={"Authorization": f"Bearer {tok}"})

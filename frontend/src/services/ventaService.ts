@@ -204,7 +204,7 @@ export const METODOS_PAGO = [
   { value: 'BINANCE', label: 'Binance', moneda: 'USD' },
   { value: 'NEQUI', label: 'Nequi', moneda: 'COP' },
   { value: 'SOFITASA', label: 'Sofitasa', moneda: 'COP' },
-  { value: 'BANESCO', label: 'Banesco', moneda: 'COP' },
+  { value: 'BANESCO', label: 'Banesco', moneda: 'VES' },
 ] as const;
 
 export type MetodoPagoOption = { value: string; label: string; moneda: string };

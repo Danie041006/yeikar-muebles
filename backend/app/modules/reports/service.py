@@ -1126,21 +1126,27 @@ def listar_metodos_caja(db: Session) -> List[model.MetodoCaja]:
 def crear_metodo_caja(db: Session, esquema: schemas.MetodoCajaCreate) -> model.MetodoCaja:
     CODIGO_MONEDA = {"EFECTIVO_USD": 2, "ZELLE": 2, "BINANCE": 2, "EFECTIVO_VES": 3, "BANCARIBE": 3}
     moneda_id = esquema.moneda_id or CODIGO_MONEDA.get(esquema.codigo, 1)
-    obj = model.MetodoCaja(**esquema.model_dump(), moneda_id=moneda_id)
+    datos = esquema.model_dump()
+    datos["moneda_id"] = moneda_id
+    obj = model.MetodoCaja(**datos)
     db.add(obj)
     db.flush()
-    from app.core.caja import registrar_movimiento_caja
-    registrar_movimiento_caja(
-        db,
-        metodo_caja_id=obj.id,
-        tipo="APERTURA",
-        monto=1_000_000.0 if moneda_id == 1 else 0.0,
-        moneda_id=moneda_id,
-        tasa_cambio=1.0,
-        fecha=hoy_ve(),
-        referencia="Saldo inicial por defecto",
-        observaciones=f"Apertura por defecto: {1_000_000 if moneda_id == 1 else 0} {'COP' if moneda_id == 1 else 'USD'}",
-    )
+    moneda = db.query(Moneda).filter(Moneda.id == moneda_id).first()
+    codigo_moneda = moneda.codigo if moneda else "COP"
+    monto_inicial = 1_000_000.0 if moneda_id == 1 else 0.0
+    if monto_inicial > 0:
+        from app.core.caja import registrar_movimiento_caja
+        registrar_movimiento_caja(
+            db,
+            metodo_caja_id=obj.id,
+            tipo="APERTURA",
+            monto=monto_inicial,
+            moneda_id=moneda_id,
+            tasa_cambio=1.0,
+            fecha=hoy_ve(),
+            referencia="Saldo inicial por defecto",
+            observaciones=f"Apertura por defecto: {monto_inicial:,.0f} {codigo_moneda}",
+        )
     db.commit()
     db.refresh(obj)
     return obj
