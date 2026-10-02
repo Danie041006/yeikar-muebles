@@ -155,6 +155,8 @@ function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdati
             ? stage.orden.detalle_pedido.producto.nombre 
             : stage.orden?.producto?.nombre
             ? stage.orden.producto.nombre 
+            : stage.orden?.detalle_pedido?.descripcion_especifica
+            ? stage.orden.detalle_pedido.descripcion_especifica
             : stage.orden_produccion_id 
             ? `Orden de Producción #${stage.orden_produccion_id}` 
             : 'Producto en Fabricación'}
@@ -629,7 +631,11 @@ export default function ProduccionKanban() {
       stage.orden?.detalle_pedido?.producto?.nombre?.toLowerCase().includes(term) ||
       stage.orden?.producto?.nombre?.toLowerCase().includes(term) ||
       false;
-    return idMatch || obsMatch || empMatch || clientMatch || prodMatch;
+    // Muebles a la medida (producto_id NULL): el diseño solo existe en el texto
+    // de la línea del pedido, así que es lo único que hay contra el que buscar.
+    const descMatch =
+      stage.orden?.detalle_pedido?.descripcion_especifica?.toLowerCase().includes(term) || false;
+    return idMatch || obsMatch || empMatch || clientMatch || prodMatch || descMatch;
   });
 
   return (
@@ -716,7 +722,7 @@ export default function ProduccionKanban() {
                       <div className="space-y-0.5">
                         <span className="text-[10px] font-mono text-amber-700 font-bold">ORDEN #{o.id}</span>
                         <p className="text-sm font-bold text-amber-900 leading-tight">
-                          {o.producto?.nombre || o.detalle_pedido?.producto?.nombre || `Producto #${o.detalle_pedido_id ?? o.producto_id}`}
+                          {o.producto?.nombre || o.detalle_pedido?.producto?.nombre || o.detalle_pedido?.descripcion_especifica || `Producto #${o.detalle_pedido_id ?? o.producto_id}`}
                         </p>
                       </div>
                       <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${

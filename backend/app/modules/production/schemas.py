@@ -330,6 +330,11 @@ class DetalleDePedidoBasico(BaseModel):
     largo: Optional[float] = None
     producto: Optional[ProductoResponse] = None
     pedido: Optional[PedidoBasicoEnDetalle] = None
+    # Muebles a la medida: producto_id es NULL y el diseño vive aquí. Sin este
+    # campo el Kanban los rotula "Orden de Producción #N" en vez del mueble.
+    descripcion_especifica: Optional[str] = None
+    observaciones: Optional[str] = None
+    tipo_item: Optional[str] = None
 
     class Config:
         from_attributes = True

@@ -175,6 +175,9 @@ export interface DetallePedidoBasico {
   cantidad?: number;
   ancho?: number;
   largo?: number;
+  descripcion_especifica?: string | null;
+  observaciones?: string | null;
+  tipo_item?: string | null;
   producto?: ProductoBasico;
   pedido?: PedidoBasico;
 }

@@ -643,6 +643,7 @@ export default function EtapaModal({
   const productoNombre =
     stage.orden?.detalle_pedido?.producto?.nombre ||
     stage.orden?.producto?.nombre ||
+    stage.orden?.detalle_pedido?.descripcion_especifica ||
     `Orden de Producción #${stage.orden_produccion_id}`;
   const detalle = stage.orden?.detalle_pedido;
   const medidas = detalle?.ancho && detalle?.largo
