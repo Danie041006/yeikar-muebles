@@ -34,6 +34,8 @@ export interface Product {
   /** Precio de referencia en la moneda declarada (moneda_id), NO en COP. */
   precio_costo_base?: number | null;
   precio_venta_base?: number | null;
+  /** Categoría para el desglose del inventario (COLCHONES, ELECTRODOMÉSTICOS, PLÁSTICOS...). */
+  categoria_inventario_id?: number | null;
   tipo_producto?: TipoProducto;
   /** Fotos de referencia del mueble. */
   fotos?: AdjuntoInfo[];

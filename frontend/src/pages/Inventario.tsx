@@ -49,7 +49,7 @@ interface Material {
   fotos?: { id?: number; mime?: string; url?: string }[];
 }
 
-type Tab = 'insumos' | 'sobrantes' | 'productos' | 'exhibicion' | 'crudo';
+type Tab = 'insumos' | 'sobrantes' | 'productos' | 'plasticos' | 'exhibicion' | 'crudo';
 
 const TIPOS_MOVIMIENTO = ['ENTRADA', 'SALIDA', 'AJUSTE', 'DAÑO', 'DEVOLUCION'];
 
@@ -75,6 +75,9 @@ const TIPO_BTN_ACTIVO: Record<string, string> = {
 const quitarAcentos = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const esNombreExhibicion = (nombre?: string | null) =>
   !!nombre && quitarAcentos(nombre).toUpperCase().includes('EXHIBIC');
+/** Rubro PLÁSTICOS: mismo nombre en tipo_producto y categoria_inventario. */
+const esNombrePlasticos = (nombre?: string | null) =>
+  !!nombre && quitarAcentos(nombre).toUpperCase() === 'PLASTICOS';
 
 const MONEDA_BASE_ID = 1; // COP
 
@@ -204,7 +207,7 @@ export default function Inventario() {
   // Tab del modal de producto (movimiento / editar / historial).
   const [detalleTabProducto, setDetalleTabProducto] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
   // Edición inline del producto (tab EDITAR del modal).
-  const [editProducto, setEditProducto] = useState({ nombre: '', precio_venta_base: '', precio_costo_base: '', stock_minimo: '', categoria_inventario_id: '' });
+  const [editProducto, setEditProducto] = useState({ nombre: '', codigo: '', precio_venta_base: '', precio_costo_base: '', stock_minimo: '', categoria_inventario_id: '' });
   const [savingEditProd, setSavingEditProd] = useState(false);
 
   // ---- Crudo: panel de detalle con movimientos (misma UI que insumos) ----
@@ -307,6 +310,7 @@ export default function Inventario() {
     nombre: '',
     codigo: '',
     costo_base: '',             // Precio lista del proveedor (opcional)
+    precio_venta: '',           // Precio de venta al público (opcional)
     descuento_porcentaje: '',   // % Descuento por pronto pago / al mayor (opcional)
     stock_minimo: '8',
     cantidad_inicial: '1',
@@ -600,10 +604,23 @@ export default function Inventario() {
     }
   };
 
-  // ---- Crear producto de REVENTA (comprado para revender) ----
+  // ---- Crear producto comprado para revender (REVENTA o PLÁSTICOS) ----
   const handleCreateProducto = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProducto.nombre.trim()) return;
+    // El rubro lo define la pestaña activa: Plásticos tiene tipo y categoría
+    // propios, pero la mecánica (stock, costo, gasto de compra) es la de reventa.
+    const esPlastico = tab === 'plasticos';
+    const tipoRubro = esPlastico
+      ? tiposProducto.find((t) => esNombrePlasticos(t.nombre))
+      : undefined;
+    const categoriaRubro = esPlastico
+      ? categoriasProducto.find((c) => esNombrePlasticos(c.nombre))
+      : undefined;
+    if (esPlastico && (!tipoRubro || !categoriaRubro)) {
+      toast.error('No se encontró el catálogo de PLÁSTICOS. Recarga la página e intenta de nuevo.');
+      return;
+    }
     const pagoModal = parsePagoKey(newProducto.cuenta_pago_id);
     const prodMonedaNueva = parseInt(newProducto.moneda_id || String(MONEDA_BASE_ID)) || MONEDA_BASE_ID;
     const pagoMid = pagoModal.monedaId ?? prodMonedaNueva;
@@ -624,6 +641,7 @@ export default function Inventario() {
     const costoNeto = costoBruto > 0 && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
       : (costoBruto > 0 ? costoBruto : undefined);
+    const precioVenta = parseFloat(newProducto.precio_venta || '0') || 0;
     const detalleDesc = costoBruto > 0 && pctDesc > 0
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${simboloPrecio}${costoBruto.toFixed(2)} → Neto: ${simboloPrecio}${costoNeto?.toFixed(2)})`
       : '';
@@ -633,10 +651,10 @@ export default function Inventario() {
       const creado = await productosService.crearProducto({
         nombre: newProducto.nombre.toUpperCase().trim(),
         codigo: newProducto.codigo ? newProducto.codigo.trim() : undefined,
-        tipo_producto_id: 2, // Revendido
-        descripcion: 'Producto de reventa',
+        tipo_producto_id: esPlastico ? tipoRubro!.id : 2, // 2 = Revendido
+        descripcion: esPlastico ? 'Producto de plástico' : 'Producto de reventa',
         activo: true,
-        // Un reventa no tiene dimensiones de mueble: se omiten (null en BD)
+        // Un producto comprado no tiene dimensiones de mueble: se omiten (null en BD)
         ancho_base: undefined,
         largo_base: undefined,
         stock_minimo: newProducto.stock_minimo ? parseFloat(newProducto.stock_minimo) : 8.0,
@@ -644,7 +662,9 @@ export default function Inventario() {
         // Precios de referencia en la moneda elegida (USD por defecto)
         moneda_id: parseInt(newProducto.moneda_id || '1') || 1,
         precio_costo_base: costoNeto,
-        precio_venta_base: undefined,
+        precio_venta_base: precioVenta > 0 ? precioVenta : undefined,
+        // El rubro PLÁSTICOS se separa por categoría de inventario (pestaña propia)
+        categoria_inventario_id: esPlastico ? categoriaRubro!.id : undefined,
       });
       // Foto de referencia (opcional): se sube y el servidor la optimiza
       if (fotoProducto && creado.id) {
@@ -658,6 +678,7 @@ export default function Inventario() {
         nombre: '',
         codigo: '',
         costo_base: '',
+        precio_venta: '',
         descuento_porcentaje: '',
         stock_minimo: '8',
         cantidad_inicial: '1',
@@ -682,7 +703,7 @@ export default function Inventario() {
             pagado_desde_metodo_caja_id: pagoModal.cuentaId ?? undefined,
             moneda_pago_id: pagoModal.monedaId ?? undefined,
             tasa_pago: pagoModal.cuentaId && parseFloat(newProducto.tasa_pago || '0') > 0 ? parseFloat(newProducto.tasa_pago) : undefined,
-            observaciones: ['Carga inicial de producto de reventa', detalleDesc].filter(Boolean).join(' · '),
+            observaciones: [`Carga inicial de producto de ${esPlastico ? 'plástico' : 'reventa'}`, detalleDesc].filter(Boolean).join(' · '),
           });
         }
       }
@@ -925,6 +946,7 @@ export default function Inventario() {
     const prod = productosTodos.find(x => x.id === p.id) ?? productosExh.find(x => x.id === p.id) ?? productos.find(x => x.id === p.id);
     setEditProducto({
       nombre: prod?.nombre ?? '',
+      codigo: prod?.codigo ?? '',
       precio_venta_base: prod?.precio_venta_base != null ? String(prod.precio_venta_base) : '',
       precio_costo_base: prod?.precio_costo_base != null ? String(prod.precio_costo_base) : '',
       stock_minimo: prod?.stock_minimo != null ? String(prod.stock_minimo) : '8',
@@ -958,6 +980,7 @@ export default function Inventario() {
       setSavingEditProd(true);
       await productosService.actualizarProducto(selectedProductoId, {
         nombre: editProducto.nombre.toUpperCase().trim(),
+        codigo: editProducto.codigo.trim().toUpperCase() || undefined,
         precio_venta_base: editProducto.precio_venta_base ? parseFloat(editProducto.precio_venta_base) : undefined,
         precio_costo_base: editProducto.precio_costo_base ? parseFloat(editProducto.precio_costo_base) : undefined,
         stock_minimo: editProducto.stock_minimo ? parseFloat(editProducto.stock_minimo) : undefined,
@@ -1241,12 +1264,28 @@ export default function Inventario() {
     if (!stockMapProducto.has(item.producto_id)) stockMapProducto.set(item.producto_id, item);
   });
 
-  // Productos de REVENTA (colchones, neveras, etc.) — no los muebles fabricados
-  const productosReventa = productos.filter(p => p.es_reventa);
+  // Productos comprados para revender. PLÁSTICOS vive en su pestaña propia:
+  // se separa por categoría de inventario (misma mecánica de stock/venta).
+  const categoriaPlasticosId = categoriasProducto.find(c => esNombrePlasticos(c.nombre))?.id ?? null;
+  const esProductoPlastico = (p: Product) =>
+    categoriaPlasticosId != null && p.categoria_inventario_id === categoriaPlasticosId;
+  const productosReventa = productos.filter(p => p.es_reventa && !esProductoPlastico(p));
+  const terminoProducto = searchProducto.toLowerCase();
+  // La búsqueda cubre nombre y código (el código es clave para las promociones).
+  const coincideProducto = (p: Product) =>
+    p.nombre.toLowerCase().includes(terminoProducto) ||
+    (p.codigo || '').toLowerCase().includes(terminoProducto);
   const filteredProductos = [...productosReventa]
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-    .filter((p) => p.nombre.toLowerCase().includes(searchProducto.toLowerCase()))
+    .filter(coincideProducto)
     .filter((p) => !filtroCatProducto || p.categoria_inventario_id === filtroCatProducto);
+  const productosPlasticos = productos.filter(p => p.es_reventa && esProductoPlastico(p));
+  const filteredProductosPlasticos = [...productosPlasticos]
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+    .filter(coincideProducto);
+  const idsProductosPlasticos = new Set(productosPlasticos.map(p => p.id));
+  const alertasPlasticos = alertasProductos.filter(a => idsProductosPlasticos.has(a.producto_id));
+  const alertasReventa = alertasProductos.filter(a => !idsProductosPlasticos.has(a.producto_id));
 
   // ---- Exhibición: piezas del showroom ----
   // Fuente: productos marcados es_exhibicion (aunque aún no tengan stock) +
@@ -1532,6 +1571,20 @@ export default function Inventario() {
       },
       mobileLabel: 'Último precio',
     },
+    {
+      key: 'precio_venta',
+      header: 'Precio Venta',
+      render: (p) => (
+        p.precio_venta_base != null && Number(p.precio_venta_base) > 0 ? (
+          <span className="font-mono text-xs font-bold text-yeikar-secondary">
+            {simboloMonedaProducto(p)}{Number(p.precio_venta_base).toLocaleString('es-ES')}
+          </span>
+        ) : (
+          <span className="italic text-yeikar-neutral/30">—</span>
+        )
+      ),
+      mobileLabel: 'Precio venta',
+    },
   ];
 
   /** Valor de una pieza de exhibición (cantidad × precio USD de referencia). */
@@ -1626,12 +1679,12 @@ export default function Inventario() {
                Registrar Sobrante
             </button>
           )}
-          {tab === 'productos' && (
+          {(tab === 'productos' || tab === 'plasticos') && (
             <button
               onClick={() => setShowProductoModal(true)}
               className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
             >
-               Nuevo Producto de Reventa
+               {tab === 'plasticos' ? 'Nuevo Producto de Plástico' : 'Nuevo Producto de Reventa'}
             </button>
           )}
           {tab === 'exhibicion' && (
@@ -1661,6 +1714,7 @@ export default function Inventario() {
           ['insumos', 'Insumos (Materiales)'],
           ['sobrantes', 'Sobrantes de Láminas'],
           ['productos', 'Productos de Reventa'],
+          ['plasticos', 'Plásticos'],
           ['exhibicion', 'Productos terminados'],
           ['crudo', 'Productos en Crudo'],
         ] as [Tab, string][]).map(([key, label]) => (
@@ -1677,8 +1731,11 @@ export default function Inventario() {
             {key === 'insumos' && alertas.length > 0 && (
               <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{alertas.length}</span>
             )}
-            {key === 'productos' && alertasProductos.length > 0 && (
-              <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{alertasProductos.length}</span>
+            {key === 'productos' && alertasReventa.length > 0 && (
+              <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{alertasReventa.length}</span>
+            )}
+            {key === 'plasticos' && alertasPlasticos.length > 0 && (
+              <span className="ml-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{alertasPlasticos.length}</span>
             )}
             {key === 'exhibicion' && filasExhibicion.length > 0 && (
               <span className="ml-2 bg-yeikar-secondary/10 text-yeikar-secondary text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filasExhibicion.length}</span>
@@ -1703,10 +1760,12 @@ export default function Inventario() {
                   ? 'Productos en Crudo'
                   : tab === 'exhibicion'
                     ? 'Piezas en Exhibición'
-                    : 'Productos Registrados'}
+                    : tab === 'plasticos'
+                      ? 'Productos Plásticos'
+                      : 'Productos Registrados'}
           </p>
           <p className="text-3xl font-black font-headline text-yeikar-secondary">
-            {tab === 'insumos' ? materiales.length : tab === 'sobrantes' ? sobrantes.length : tab === 'crudo' ? crudo.length : tab === 'exhibicion' ? piezasEnExhibicion.toLocaleString('es-ES') : productosReventa.length}
+            {tab === 'insumos' ? materiales.length : tab === 'sobrantes' ? sobrantes.length : tab === 'crudo' ? crudo.length : tab === 'exhibicion' ? piezasEnExhibicion.toLocaleString('es-ES') : tab === 'plasticos' ? productosPlasticos.length : productosReventa.length}
           </p>
         </div>
 
@@ -1721,7 +1780,7 @@ export default function Inventario() {
             <>
               <p className="text-xs font-mono uppercase tracking-widest text-yeikar-neutral/50 mb-1">Alertas de Stock Bajo</p>
               <p className="text-3xl font-black font-headline text-red-500">
-                {tab === 'insumos' ? alertas.length : tab === 'crudo' ? 0 : tab === 'sobrantes' ? 0 : alertasProductos.length}
+                {tab === 'insumos' ? alertas.length : tab === 'crudo' ? 0 : tab === 'sobrantes' ? 0 : tab === 'plasticos' ? alertasPlasticos.length : alertasReventa.length}
               </p>
             </>
           )}
@@ -1742,9 +1801,9 @@ export default function Inventario() {
             <div className="relative w-full sm:w-72">
               <input
                 type="text"
-                placeholder={tab === 'insumos' ? 'Buscar material...' : tab === 'sobrantes' ? 'Buscar sobrante...' : tab === 'exhibicion' ? 'Buscar pieza...' : 'Buscar producto...'}
-                value={tab === 'productos' ? searchProducto : tab === 'exhibicion' ? searchExhibicion : search}
-                onChange={(e) => tab === 'productos' ? setSearchProducto(e.target.value) : tab === 'exhibicion' ? setSearchExhibicion(e.target.value) : setSearch(e.target.value)}
+                placeholder={tab === 'insumos' ? 'Buscar material...' : tab === 'sobrantes' ? 'Buscar sobrante...' : tab === 'exhibicion' ? 'Buscar pieza...' : tab === 'plasticos' ? 'Buscar por nombre o código...' : 'Buscar producto...'}
+                value={tab === 'productos' || tab === 'plasticos' ? searchProducto : tab === 'exhibicion' ? searchExhibicion : search}
+                onChange={(e) => (tab === 'productos' || tab === 'plasticos') ? setSearchProducto(e.target.value) : tab === 'exhibicion' ? setSearchExhibicion(e.target.value) : setSearch(e.target.value)}
                 className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl pl-10 pr-4 py-2 text-sm text-yeikar-neutral placeholder-yeikar-neutral/40 focus:outline-none focus:border-yeikar-primary"
               />
               <svg className="absolute left-3 top-3 w-4 h-4 text-yeikar-neutral/40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1819,7 +1878,7 @@ export default function Inventario() {
                 ))}
               </div>
             )}
-            {tab === 'productos' && categoriasProducto.length > 0 && (
+            {tab === 'productos' && categoriasProducto.some((c) => !esNombrePlasticos(c.nombre)) && (
               <div className="flex flex-wrap gap-1.5">
                 <button
                   onClick={() => setFiltroCatProducto(null)}
@@ -1831,7 +1890,7 @@ export default function Inventario() {
                 >
                   Todos
                 </button>
-                {categoriasProducto.map((c) => (
+                {categoriasProducto.filter((c) => !esNombrePlasticos(c.nombre)).map((c) => (
                   <button
                     key={c.id}
                     onClick={() => setFiltroCatProducto(filtroCatProducto === c.id ? null : c.id)}
@@ -1954,6 +2013,22 @@ export default function Inventario() {
               empty={
                 <div className="p-8 text-center text-sm italic text-yeikar-neutral/40">
                   No hay ítems en crudo. Crea uno con "Nuevo en Crudo"". Luego usa "Nueva Producción" para registrar su fabricación y consumos.
+                </div>
+              }
+            />
+          ) : tab === 'plasticos' ? (
+            <ResponsiveDataTable
+              columns={productoColumns}
+              rows={filteredProductosPlasticos}
+              rowKey={(p) => p.id}
+              cardBadge={(p) => {
+                const { s, c, low } = productoStock(p);
+                return stockPill(!!s, c, low);
+              }}
+              onRowClick={(p) => handleOpenProducto(p)}
+              empty={
+                <div className="p-8 text-center text-sm italic text-yeikar-neutral/40">
+                  {searchProducto ? `Sin resultados para "${searchProducto}"` : 'No hay productos de plástico. Crea uno con "Nuevo Producto de Plástico" (se compran y se revenden).'}
                 </div>
               }
             />
@@ -2426,7 +2501,7 @@ export default function Inventario() {
         })()}
 
         {/* ================= MODAL DETALLE DE PRODUCTO (misma UI que insumos) ================= */}
-        {(tab === 'productos' || tab === 'exhibicion') && selectedProductoId && productoSeleccionado && (() => {
+        {(tab === 'productos' || tab === 'plasticos' || tab === 'exhibicion') && selectedProductoId && productoSeleccionado && (() => {
           const { c: stockProd, low: stockLow } = productoStock(productoSeleccionado);
           const esExh = tab === 'exhibicion';
           const monCod = productoSeleccionado?.moneda?.codigo ?? 'COP';
@@ -2815,6 +2890,10 @@ export default function Inventario() {
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-yeikar-secondary">Nombre</label>
                     <input type="text" required value={editProducto.nombre} onChange={(e) => setEditProducto((p) => ({ ...p, nombre: e.target.value }))} className={inputCls.replace('font-mono', '')} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Código</label>
+                    <input type="text" value={editProducto.codigo} onChange={(e) => setEditProducto((p) => ({ ...p, codigo: e.target.value }))} className={inputCls} placeholder="Ej. 042-3794-4" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -3271,36 +3350,53 @@ export default function Inventario() {
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10">
             <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
-              <h3 className="font-headline font-black text-lg">Nuevo Producto de Reventa</h3>
-              <p className="text-xs text-white/70">Producto que se compra y revende (colchón, nevera, electrodoméstico...)</p>
+              <h3 className="font-headline font-black text-lg">
+                {tab === 'plasticos' ? 'Nuevo Producto de Plástico' : 'Nuevo Producto de Reventa'}
+              </h3>
+              <p className="text-xs text-white/70">
+                {tab === 'plasticos'
+                  ? 'Producto de plástico que se compra y revende (código clave para promociones).'
+                  : 'Producto que se compra y revende (colchón, nevera, electrodoméstico...)'}
+              </p>
             </div>
             <form onSubmit={handleCreateProducto} className="p-6 space-y-4 font-body">
               <div>
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre del Producto *</label>
-                <input type="text" required placeholder="Ej. COLCHON QUEEN, NEVERA 12 PIES..." value={newProducto.nombre} onChange={(e) => setNewProducto(prev => ({ ...prev, nombre: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase" />
+                <input type="text" required placeholder={tab === 'plasticos' ? 'Ej. CESTA ROPA REDONDA GALAXY, PIPOTE 120 LTS...' : 'Ej. COLCHON QUEEN, NEVERA 12 PIES...'} value={newProducto.nombre} onChange={(e) => setNewProducto(prev => ({ ...prev, nombre: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase" />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Código <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
-                  <input type="text" placeholder="Ej. COL-Q, NV-12" value={newProducto.codigo} onChange={(e) => setNewProducto(prev => ({ ...prev, codigo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
+                  <input type="text" placeholder="Ej. 042-3794-4" value={newProducto.codigo} onChange={(e) => setNewProducto(prev => ({ ...prev, codigo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad que Entra</label>
+                  <input type="number" min="0" step="1" placeholder="1" value={newProducto.cantidad_inicial} onChange={(e) => setNewProducto(prev => ({ ...prev, cantidad_inicial: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Stock Mínimo <span className="text-yeikar-neutral/40 font-normal">(Alerta)</span></label>
                   <input type="number" min="0" step="0.5" value={newProducto.stock_minimo} onChange={(e) => setNewProducto(prev => ({ ...prev, stock_minimo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda de los Precios *</label>
+                  <SearchSelect
+                    value={newProducto.moneda_id}
+                    onChange={(v) => setNewProducto(prev => ({ ...prev, moneda_id: String(v) }))}
+                    options={monedas.map((m) => ({ value: m.id, label: `${m.codigo} (${m.simbolo})` }))}
+                    placeholder="Seleccionar..."
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda de los Precios *</label>
-                <SearchSelect
-                  value={newProducto.moneda_id}
-                  onChange={(v) => setNewProducto(prev => ({ ...prev, moneda_id: String(v) }))}
-                  options={monedas.map((m) => ({ value: m.id, label: `${m.codigo} (${m.simbolo})` }))}
-                  placeholder="Seleccionar..."
-                />
-                <p className="text-[10px] text-yeikar-neutral/40 mt-1">En qué moneda compraste este producto (p. ej. USD para importados).</p>
-              </div>
-              {/* Costo de Compra y Descuento Opcional */}
+              <p className="text-[10px] text-yeikar-neutral/40 -mt-2">
+                La cantidad entra al inventario al crear el producto (después puedes sumar o restar con movimientos). La moneda es en la que compraste (USD para importados).
+              </p>
+              {/* Precios: opcionales, se pueden completar después desde el detalle */}
               <div className="bg-yeikar-tertiary/15 border border-yeikar-secondary-light/10 rounded-2xl p-4 space-y-3">
+                <p className="text-[11px] font-headline font-black uppercase tracking-wider text-yeikar-secondary">
+                  Precios <span className="text-yeikar-neutral/40 font-normal normal-case tracking-normal">(opcional — los puedes completar después desde el producto)</span>
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-yeikar-secondary mb-1">
@@ -3322,15 +3418,15 @@ export default function Inventario() {
 
                   <div>
                     <label className="block text-xs font-bold text-yeikar-secondary mb-1">
-                      % Descuento por pago completo / mayor
+                      % Descuento <span className="text-yeikar-neutral/40 font-normal">(combinado)</span>
                     </label>
                     <div className="relative">
                       <input
                         type="number"
                         min="0"
                         max="100"
-                        step="0.1"
-                        placeholder="Ej: 10"
+                        step="0.01"
+                        placeholder="Ej: 36.95"
                         value={newProducto.descuento_porcentaje}
                         onChange={(e) => setNewProducto(prev => ({ ...prev, descuento_porcentaje: e.target.value }))}
                         className="w-full pr-8 pl-3 py-2.5 bg-white border border-yeikar-secondary-light/15 rounded-xl text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
@@ -3338,6 +3434,27 @@ export default function Inventario() {
                       <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-yeikar-neutral/40">%</span>
                     </div>
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                    Precio de Venta <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-yeikar-neutral/40">{simboloPrecio}</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={newProducto.precio_venta}
+                      onChange={(e) => setNewProducto(prev => ({ ...prev, precio_venta: e.target.value }))}
+                      className="w-full pl-8 pr-3 py-2.5 bg-white border border-yeikar-secondary-light/15 rounded-xl text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
+                    />
+                  </div>
+                  <p className="text-[10px] text-yeikar-neutral/40 mt-1">
+                    Precio al público en la misma moneda. También puedes fijarlo después desde Productos.
+                  </p>
                 </div>
 
                 {/* Desglose de Descuento si aplica */}
@@ -3363,19 +3480,41 @@ export default function Inventario() {
                     </div>
                   );
                 })()}
+
+                {/* Ganancia en vivo vs. precio de venta */}
+                {(() => {
+                  const bruto = parseFloat(newProducto.costo_base || '0') || 0;
+                  const desc = parseFloat(newProducto.descuento_porcentaje || '0') || 0;
+                  const neto = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
+                  const venta = parseFloat(newProducto.precio_venta || '0') || 0;
+                  const cant = parseFloat(newProducto.cantidad_inicial || '0') || 0;
+                  if (neto <= 0) return null;
+                  if (venta <= 0) {
+                    return (
+                      <p className="text-[10px] text-yeikar-neutral/50 bg-white border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
+                        Con costo neto de {simboloPrecio}{neto.toFixed(2)}, un <b>60% de ganancia</b> daría un precio de venta de ≈ {simboloPrecio}{(neto * 1.6).toFixed(2)}.
+                      </p>
+                    );
+                  }
+                  const ganancia = venta - neto;
+                  const pct = (ganancia / neto) * 100;
+                  return (
+                    <div className={`rounded-xl p-2.5 text-xs space-y-1 border ${ganancia >= 0 ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-900'}`}>
+                      <div className="flex justify-between font-bold">
+                        <span>Ganancia por unidad:</span>
+                        <span className="font-mono">{simboloPrecio}{ganancia.toFixed(2)} ({pct.toFixed(1)}%)</span>
+                      </div>
+                      {cant > 0 && (
+                        <div className="flex justify-between text-[11px]">
+                          <span>Total de la compra ({cant} × neto):</span>
+                          <span className="font-mono">{simboloPrecio}{(neto * cant).toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad Inicial</label>
-                  <input type="number" min="0" step="1" placeholder="1" value={newProducto.cantidad_inicial} onChange={(e) => setNewProducto(prev => ({ ...prev, cantidad_inicial: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
-                <div className="flex items-end">
-                  <p className="text-[10px] text-yeikar-neutral/40 leading-tight pb-1">
-                    Unidades que entran al inventario al crear el producto. Después puedes agregar más o descontar con movimientos.
-                  </p>
-                </div>
-              </div>
               {/* Foto de referencia (opcional) */}
               <div>
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de Referencia <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
