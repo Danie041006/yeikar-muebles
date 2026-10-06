@@ -839,6 +839,48 @@ export default function Cotizaciones() {
     setProductSelectorTargetIndex(null);
   };
 
+  /** Mueble a la medida: la fila contextual del selector usa el texto
+   *  escrito como descripción y el precio se digita a mano (sin catálogo). */
+  const handleSelectPersonalizado = (nombre: string) => {
+    const descripcion = nombre.trim();
+    if (!descripcion) return;
+    const aMedida: CotizacionItemForm = {
+      producto_id: '',
+      material_id: '',
+      tipo_item: 'FABRICADO',
+      cantidad: 1,
+      ancho: '1',
+      largo: '1',
+      ganancia: '',
+      impuesto: '0',
+      descripcion_especifica: descripcion,
+      observaciones: '',
+      calcResult: null,
+      calcLoading: false,
+      receta_personalizada: null,
+    };
+    if (productSelectorTargetIndex !== null && productSelectorTargetIndex >= 0) {
+      setItems((prev) => {
+        const next = [...prev];
+        next[productSelectorTargetIndex] = {
+          ...next[productSelectorTargetIndex],
+          producto_id: '',
+          material_id: '',
+          tipo_item: 'FABRICADO',
+          descripcion_especifica: descripcion,
+          calcResult: null,
+          calcLoading: false,
+          receta_personalizada: null,
+        };
+        return next;
+      });
+    } else {
+      setItems((prev) => [...prev, aMedida]);
+    }
+    setIsProductSelectorOpen(false);
+    setProductSelectorTargetIndex(null);
+  };
+
   const removeItem = (index: number) => {
     setItems((prev) => {
       const next = prev.filter((_, i) => i !== index);
@@ -1090,16 +1132,19 @@ export default function Cotizaciones() {
       return;
     }
 
-    // INSUMO exige material_id; FABRICADO/REVENTA exigen producto_id;
-    // REPARACION/SERVICIO exigen descripción (no llevan producto).
+    // INSUMO exige material_id; REVENTA exige producto_id; FABRICADO exige
+    // producto_id O descripción (mueble a la medida); REPARACION/SERVICIO
+    // exigen descripción (no llevan producto).
     const hasInvalidItem = items.some((item) => {
       if (item.tipo_item === 'INSUMO') return !item.material_id;
       if (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO')
         return !(item.descripcion_especifica && item.descripcion_especifica.trim());
+      if (item.tipo_item === 'FABRICADO' && !item.producto_id)
+        return !(item.descripcion_especifica && item.descripcion_especifica.trim());
       return !item.producto_id;
     });
     if (hasInvalidItem) {
-      setErrorForm('Por favor selecciona el producto o material de todos los renglones, o escribe la descripción de los de reparación/servicio.');
+      setErrorForm('Por favor selecciona el producto o material de todos los renglones, o escribe la descripción de los a medida/reparación/servicio.');
       return;
     }
 
@@ -1124,17 +1169,40 @@ export default function Cotizaciones() {
       return;
     }
 
-    // Moneda extranjera SIEMPRE exige TRM contable (>0 y ≠1): el ERP guarda el
-    // valor en pesos (total_en_moneda_base) y con 1.0 fabricaría 1 USD = 1 COP.
-    if (selectedMonedaId !== 1 && !(tasaCambio > 0 && tasaCambio !== 1)) {
+    // La TRM solo se exige cuando hay conversión REAL (renglones en moneda
+    // distinta a la de la cotización). Cotizar en USD productos que ya están
+    // en USD no pide tasa ninguna: el backend resuelve el valor contable con
+    // la última tasa disponible sin preguntar.
+    if (selectedMonedaId !== 1 && necesitaTasaCotizacion && !(tasaCambio > 0 && tasaCambio !== 1)) {
       setErrorForm(
-        `Indica la TRM (1 ${currencyCode} = X COP) para registrar el valor en pesos. Escríbela aquí o regístrala en Catálogos → Tasas de cambio.`,
+        `Indica la tasa (1 ${currencyCode} = X COP) para convertir los renglones que no están en ${currencyCode}.`,
       );
       return;
     }
 
     let globalTotal = 0;
     const detalles: QuoteDetail[] = items.map((item) => {
+      // Mueble a la medida: sin producto NI material; descripción libre y
+      // precio manual. El costo estimado es opcional (solo referencia).
+      if (item.tipo_item === 'FABRICADO' && !item.producto_id) {
+        const r = item.calcResult;
+        const precioMoneda = Math.round(convertirAPrecioCotizacion(Number(r?.precio_venta) || 0, r?.moneda_codigo || currencyCode) * 100) / 100;
+        const subtotal = precioMoneda * item.cantidad;
+        globalTotal += subtotal;
+        const costoEstimado = Number(r?.costo_total) || 0;
+        return {
+          producto_id: null,
+          material_id: null,
+          tipo_item: 'FABRICADO',
+          cantidad: item.cantidad,
+          precio: precioMoneda,
+          ancho: Number(item.ancho) || 1.0,
+          largo: Number(item.largo) || 1.0,
+          descripcion_especifica: item.descripcion_especifica?.trim() || null,
+          observaciones: item.observaciones || null,
+          costo_total: costoEstimado > 0 ? costoEstimado * item.cantidad : null,
+        };
+      }
       if (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') {
         const r = item.calcResult;
         const precioMoneda = Math.round(convertirAPrecioCotizacion(Number(r?.precio_venta) || 0, r?.moneda_codigo || currencyCode) * 100) / 100;
@@ -1219,6 +1287,10 @@ export default function Cotizaciones() {
       if (item.es_obsequio) {
         return `${item.cantidad}x ${selectedProd?.nombre || 'Plástico'} (obsequio)`;
       }
+      if (!selectedProd && item.descripcion_especifica) {
+        // Mueble a la medida: la descripción ES el nombre del renglón.
+        return `${item.cantidad}x ${item.descripcion_especifica.trim().slice(0, 80)}`;
+      }
       return `${item.cantidad}x ${selectedProd?.nombre || 'Mueble'} (${item.ancho}x${item.largo}m)`;
     }).join(', ');
     
@@ -1237,8 +1309,8 @@ export default function Cotizaciones() {
       estado: editingQuote ? editingQuote.estado : 'BORRADOR',
       total_estimado: totalEstimado,
       moneda_id: selectedMonedaId,
-      // En moneda extranjera la tasa SIEMPRE sale (conversión o TRM contable):
-      // el backend la usa para valorar la cotización en pesos. En COP es 1.
+      // En moneda extranjera el backend resuelve el valor contable en pesos
+      // (tasa indicada → TRM registrada → última usada). En COP es 1.
       tasa_cambio: selectedMonedaId === 1 ? 1 : tasaCambio,
       observaciones: finalObs,
       detalles
@@ -2000,23 +2072,9 @@ export default function Cotizaciones() {
                   </div>
                 )}
                 {selectedMonedaId !== 1 && !necesitaTasaCotizacion && (
-                  <div>
-                    <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
-                      TRM contable (1 {currencyCode} = X COP) *
-                    </label>
-                    <input
-                      type="number"
-                      step="0.000001"
-                      min="0.000001"
-                      value={tasaCambio && tasaCambio !== 1 ? tasaCambio : ''}
-                      onChange={(e) => setTasaCambio(Number(e.target.value) || 1)}
-                      placeholder="Ej. 4200"
-                      className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm font-mono"
-                    />
-                    <p className="mt-1 text-[11px] text-stone-500 font-mono">
-                      Solo para el valor en pesos en la contabilidad. Tus precios en {currencyCode} no cambian.
-                    </p>
-                  </div>
+                  <p className="sm:col-start-2 self-end text-[11px] text-stone-400 font-mono -mt-1">
+                    Todo el pedido está en {currencyCode}: no se necesita tasa de cambio.
+                  </p>
                 )}
               </div>
 
@@ -2338,6 +2396,81 @@ export default function Cotizaciones() {
                               El mueble entra al taller (Tapicería, etc.): al finalizar la orden se conocerá el costo real y el margen se compara con este estimado.
                             </p>
                           )}
+                        </div>
+                      );
+                    }
+
+                    // ── A MEDIDA: FABRICADO sin producto (descripción + precio manual) ──
+                    // Así entra un juego completo de la nota de papel: un renglón,
+                    // un precio global, y el taller recibe las piezas detectadas.
+                    if (item.tipo_item === 'FABRICADO' && !item.producto_id) {
+                      const precioManual = Number(item.calcResult?.precio_venta) || 0;
+                      const subtotal = precioManual * item.cantidad;
+                      const aplicarLibre = (precio: number, costo: number) => {
+                        updateItemField(index, 'calcResult', {
+                          costo_materiales: costo,
+                          costo_mano_obra: 0,
+                          costo_gastos_indirectos: 0,
+                          costo_total: costo,
+                          impuesto_porcentaje: 0,
+                          impuestos: 0,
+                          base_con_impuestos: precio,
+                          precio_sugerido: precio,
+                          precio_venta: precio,
+                          materiales_detalle: [],
+                          moneda_codigo: currencyCode,
+                        });
+                      };
+                      return (
+                        <div key={index} className="bg-white p-4 rounded-2xl border border-yeikar-secondary-light/15 relative space-y-3 shadow-sm border-l-4 border-l-sky-500">
+                          <div className="flex items-center justify-between border-b border-yeikar-secondary-light/10 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-sky-600 text-white text-[10px] font-bold flex items-center justify-center font-mono">{index + 1}</span>
+                              <span className="text-xs font-bold font-headline text-stone-700 uppercase tracking-wider">Renglón {index + 1}</span>
+                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-sky-100 text-sky-800">A medida</span>
+                            </div>
+                            <button type="button" onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700 text-xs font-bold hover:bg-red-50 px-2 py-0.5 rounded-md transition-colors">Eliminar</button>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                              Descripción del mueble / juego *
+                            </label>
+                            <textarea
+                              value={item.descripcion_especifica || ''}
+                              onChange={(e) => updateItemField(index, 'descripcion_especifica', e.target.value)}
+                              rows={2}
+                              placeholder="Ej: Juego de sala: sofá de 3 puestos + 2 poltronas, tapizado en tela…"
+                              className="w-full p-2 border border-stone-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 items-end">
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Cantidad</label>
+                              <input type="number" min="1" value={item.cantidad}
+                                onChange={(e) => updateItemField(index, 'cantidad', parseInt(e.target.value) || 1)}
+                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Precio de venta *</label>
+                              <input type="number" step="0.01" min="0" value={precioManual > 0 ? precioManual : ''} placeholder={`${currencyCode}`}
+                                onChange={(e) => aplicarLibre(parseFloat(e.target.value) || 0, Number(item.calcResult?.costo_total) || 0)}
+                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Costo estimado (COP)</label>
+                              <input type="number" step="0.01" min="0" value={(item.calcResult?.costo_total && item.calcResult.costo_total > 0) ? Number(item.calcResult.costo_total) : ''}
+                                placeholder="Opcional"
+                                onChange={(e) => aplicarLibre(precioManual, parseFloat(e.target.value) || 0)}
+                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono" />
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline">Subtotal</span>
+                              <div className="text-sm font-bold font-mono text-yeikar-secondary">{formatCurrency(subtotal, currencyCode)}</div>
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-sky-900/80 bg-sky-50/60 border border-sky-100 rounded-lg px-3 py-1.5">
+                            Se fabrica a medida: al pasar a producción, el taller verá las piezas del mueble (sofá, poltronas…) detectadas de la descripción, y registrará los materiales y la mano de obra reales.
+                          </p>
                         </div>
                       );
                     }
@@ -3581,6 +3714,7 @@ export default function Cotizaciones() {
             : null
         }
         onSelectProduct={handleSelectProductFromModal}
+        onSelectPersonalizado={handleSelectPersonalizado}
         currencyCode={currencyCode}
         tasaCambio={tasaCambio}
         selectedMonedaId={selectedMonedaId}

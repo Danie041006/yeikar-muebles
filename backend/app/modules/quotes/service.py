@@ -36,27 +36,36 @@ def _trm_registrada(db: Session, moneda_id: int, fecha: date) -> Decimal | None:
 
 
 def _trm_cotizacion(db: Session, moneda_id: int, fecha: date, tasa_indicada) -> Decimal:
-    """Tasa moneda → COP de una cotización no-COP.
+    """Tasa moneda → COP de una cotización no-COP (valor CONTABLE en pesos).
 
-    Guarda: una cotización USD guardada con tasa 1.0 (el default del
-    formulario) heredaba la equivalencia 1 USD = 1 COP a la venta, a los
-    pagos y a la caja. Si la tasa llega 1.0 (o vacía) se sustituye por la
-    TRM registrada en el catálogo; si el catálogo no tiene ninguna, se
-    rechaza: sin TRM real no hay forma de valorar la cotización en COP.
-    """
+    Cadena de resolución: la tasa indicada por el usuario (si es real, >0 y ≠1)
+    → la TRM registrada en el catálogo → la última tasa real usada en
+    cotizaciones de esa moneda → 1.0. NUNCA bloquea el guardado: la TRM solo
+    se le pide al usuario cuando hay conversión real (renglones en otra
+    moneda); una cotización en la misma moneda de sus productos no debe
+    preguntarla (el valor contable es una aproximación de reportes)."""
     tasa = Decimal(str(tasa_indicada)) if tasa_indicada else Decimal("0.0")
     if tasa > 0 and tasa != Decimal("1.0"):
         return tasa
-    # Tasa vacía o 1.0 (default del formulario): sustituir por la TRM
-    # registrada; sin catálogo no hay forma de valorar la cotización en COP.
+    # Tasa vacía o 1.0 (default del formulario): sustituir por la TRM registrada
     trm = _trm_registrada(db, moneda_id, fecha)
-    if not trm:
-        raise ValueError(
-            "Indica la TRM (1 unidad de esta moneda = X COP) para registrar el "
-            "valor en pesos de la cotización. Regístrala en Catálogos → Tasas de "
-            "cambio, o escríbela en el formulario."
+    if trm:
+        return trm
+    # ...o por la última tasa real que se usó en cotizaciones de esa moneda
+    ultima = (
+        db.query(model.Cotizacion.tasa_cambio)
+        .filter(
+            model.Cotizacion.moneda_id == moneda_id,
+            model.Cotizacion.tasa_cambio > 1,
         )
-    return trm
+        .order_by(model.Cotizacion.fecha.desc(), model.Cotizacion.id.desc())
+        .first()
+    )
+    if ultima and ultima[0] and Decimal(str(ultima[0])) > 1:
+        return Decimal(str(ultima[0]))
+    # Sin nada registrado ni usado: 1.0 (mismo fallback que
+    # obtener_tasa_moneda_a_cop; el valor contable se corrige al registrar una TRM)
+    return Decimal("1.0")
 
 
 def _exigir_escritura_propia(cotizacion: model.Cotizacion, usuario: Usuario | None) -> None:
