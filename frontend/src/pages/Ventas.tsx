@@ -1017,6 +1017,9 @@ function ModalDetalle({
                           {d.tipo_item === 'INSUMO' && (
                             <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">Insumo</span>
                           )}
+                          {d.es_obsequio && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">Obsequio</span>
+                          )}
                           {d.tipo_item === 'REVENTA' && !esItemAMedida(d) && (
                             <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">Reventa</span>
                           )}

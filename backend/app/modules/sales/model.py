@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String
+from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -75,6 +75,8 @@ class DetalleVenta(Base):
     # Descripción del ítem cuando no hay producto (muebles a medida, notas
     # históricas). Se copia del pedido al facturar; el catálogo manda si hay.
     descripcion_especifica = Column(Text, nullable=True)
+    # Promo obsequio: línea del plástico de regalo (precio 0, 1 por colchón)
+    es_obsequio = Column(Boolean, nullable=False, server_default="false")
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

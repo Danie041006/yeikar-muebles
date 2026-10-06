@@ -20,6 +20,7 @@ class DetallePedidoBase(BaseModel):
     acabado: Optional[str] = None
     descripcion_especifica: Optional[str] = None
     observaciones: Optional[str] = None
+    es_obsequio: bool = False
 
 class DetallePedidoCreate(DetallePedidoBase):
     @model_validator(mode="after")

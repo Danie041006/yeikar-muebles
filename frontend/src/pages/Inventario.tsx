@@ -75,9 +75,10 @@ const TIPO_BTN_ACTIVO: Record<string, string> = {
 const quitarAcentos = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const esNombreExhibicion = (nombre?: string | null) =>
   !!nombre && quitarAcentos(nombre).toUpperCase().includes('EXHIBIC');
-/** Rubro PLÁSTICOS: mismo nombre en tipo_producto y categoria_inventario. */
+/** Rubro PLÁSTICOS: mismo nombre en tipo_producto y categoria_inventario.
+ *  Las categorías se subdividen por línea (PLÁSTICOS HOGAR / PLÁSTICOS DURARESINA). */
 const esNombrePlasticos = (nombre?: string | null) =>
-  !!nombre && quitarAcentos(nombre).toUpperCase() === 'PLASTICOS';
+  !!nombre && quitarAcentos(nombre).toUpperCase().startsWith('PLASTICOS');
 
 const MONEDA_BASE_ID = 1; // COP
 
@@ -309,6 +310,7 @@ export default function Inventario() {
   const [newProducto, setNewProducto] = useState({
     nombre: '',
     codigo: '',
+    linea: '',                 // Línea de plástico: categoria_inventario HOGAR / DURARESINA
     costo_base: '',             // Precio lista del proveedor (opcional)
     precio_venta: '',           // Precio de venta al público (opcional)
     descuento_porcentaje: '',   // % Descuento por pronto pago / al mayor (opcional)
@@ -614,11 +616,16 @@ export default function Inventario() {
     const tipoRubro = esPlastico
       ? tiposProducto.find((t) => esNombrePlasticos(t.nombre))
       : undefined;
+    const categoriasPlasticos = categoriasProducto.filter((c) => esNombrePlasticos(c.nombre));
     const categoriaRubro = esPlastico
-      ? categoriasProducto.find((c) => esNombrePlasticos(c.nombre))
+      ? categoriasPlasticos.find((c) => String(c.id) === newProducto.linea)
       : undefined;
     if (esPlastico && (!tipoRubro || !categoriaRubro)) {
-      toast.error('No se encontró el catálogo de PLÁSTICOS. Recarga la página e intenta de nuevo.');
+      toast.error(
+        categoriasPlasticos.length === 0
+          ? 'No se encontró el catálogo de PLÁSTICOS. Recarga la página e intenta de nuevo.'
+          : 'Selecciona la línea del plástico (HOGAR / DURARESINA).'
+      );
       return;
     }
     const pagoModal = parsePagoKey(newProducto.cuenta_pago_id);
@@ -677,6 +684,7 @@ export default function Inventario() {
       setNewProducto({
         nombre: '',
         codigo: '',
+        linea: '',
         costo_base: '',
         precio_venta: '',
         descuento_porcentaje: '',
@@ -1266,9 +1274,12 @@ export default function Inventario() {
 
   // Productos comprados para revender. PLÁSTICOS vive en su pestaña propia:
   // se separa por categoría de inventario (misma mecánica de stock/venta).
-  const categoriaPlasticosId = categoriasProducto.find(c => esNombrePlasticos(c.nombre))?.id ?? null;
+  // Las líneas (HOGAR / DURARESINA) son categorías PLÁSTICOS*.
+  const categoriasPlasticosIds = new Set(
+    categoriasProducto.filter(c => esNombrePlasticos(c.nombre)).map(c => c.id)
+  );
   const esProductoPlastico = (p: Product) =>
-    categoriaPlasticosId != null && p.categoria_inventario_id === categoriaPlasticosId;
+    categoriasPlasticosIds.size > 0 && p.categoria_inventario_id != null && categoriasPlasticosIds.has(p.categoria_inventario_id);
   const productosReventa = productos.filter(p => p.es_reventa && !esProductoPlastico(p));
   const terminoProducto = searchProducto.toLowerCase();
   // La búsqueda cubre nombre y código (el código es clave para las promociones).
@@ -1282,7 +1293,8 @@ export default function Inventario() {
   const productosPlasticos = productos.filter(p => p.es_reventa && esProductoPlastico(p));
   const filteredProductosPlasticos = [...productosPlasticos]
     .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
-    .filter(coincideProducto);
+    .filter(coincideProducto)
+    .filter((p) => !filtroCatProducto || p.categoria_inventario_id === filtroCatProducto);
   const idsProductosPlasticos = new Set(productosPlasticos.map(p => p.id));
   const alertasPlasticos = alertasProductos.filter(a => idsProductosPlasticos.has(a.producto_id));
   const alertasReventa = alertasProductos.filter(a => !idsProductosPlasticos.has(a.producto_id));
@@ -1720,7 +1732,7 @@ export default function Inventario() {
         ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
-            onClick={() => setTab(key)}
+            onClick={() => { setTab(key); setFiltroCatProducto(null); }}
             className={`px-5 py-2.5 rounded-t-xl font-headline font-bold text-sm transition-colors ${
               tab === key
                 ? 'bg-yeikar-primary/10 text-yeikar-primary border-b-2 border-yeikar-primary'
@@ -1901,6 +1913,33 @@ export default function Inventario() {
                     }`}
                   >
                     {c.nombre}
+                  </button>
+                ))}
+              </div>
+            )}
+            {tab === 'plasticos' && categoriasProducto.some((c) => esNombrePlasticos(c.nombre)) && (
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  onClick={() => setFiltroCatProducto(null)}
+                  className={`text-[11px] font-bold px-3 py-1 rounded-full border transition-colors ${
+                    !filtroCatProducto
+                      ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary'
+                      : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-secondary/30'
+                  }`}
+                >
+                  Todas las líneas
+                </button>
+                {categoriasProducto.filter((c) => esNombrePlasticos(c.nombre)).map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => setFiltroCatProducto(filtroCatProducto === c.id ? null : c.id)}
+                    className={`text-[11px] font-bold px-3 py-1 rounded-full border transition-colors ${
+                      filtroCatProducto === c.id
+                        ? 'bg-yeikar-secondary text-yeikar-tertiary border-yeikar-secondary'
+                        : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-secondary/30'
+                    }`}
+                  >
+                    {c.nombre.replace(/^PLÁSTICOS\s*/i, '')}
                   </button>
                 ))}
               </div>
@@ -3364,6 +3403,22 @@ export default function Inventario() {
                 <label className="block text-xs font-bold text-yeikar-secondary mb-1">Nombre del Producto *</label>
                 <input type="text" required placeholder={tab === 'plasticos' ? 'Ej. CESTA ROPA REDONDA GALAXY, PIPOTE 120 LTS...' : 'Ej. COLCHON QUEEN, NEVERA 12 PIES...'} value={newProducto.nombre} onChange={(e) => setNewProducto(prev => ({ ...prev, nombre: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase" />
               </div>
+              {tab === 'plasticos' && (
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Línea *</label>
+                  <select
+                    required
+                    value={newProducto.linea}
+                    onChange={(e) => setNewProducto(prev => ({ ...prev, linea: e.target.value }))}
+                    className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                  >
+                    <option value="">Selecciona línea...</option>
+                    {categoriasProducto.filter((c) => esNombrePlasticos(c.nombre)).map((c) => (
+                      <option key={c.id} value={c.id}>{c.nombre.replace(/^PLÁSTICOS\s*/i, '')}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Código <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>

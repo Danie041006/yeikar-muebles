@@ -17,6 +17,7 @@ export interface OrderDetail {
   acabado?: string;
   descripcion_especifica?: string;
   observaciones?: string;
+  es_obsequio?: boolean;
   producto?: Product;
   material?: { id: number; nombre: string; costo_base: number; unidad_medida?: { abreviatura: string } };
 }
@@ -54,6 +55,7 @@ export interface ConvertDetail {
   acabado?: string;
   descripcion_especifica?: string;
   observaciones?: string;
+  es_obsequio?: boolean;
 }
 
 export interface ConvertQuoteBody {

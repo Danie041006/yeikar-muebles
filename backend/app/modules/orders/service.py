@@ -28,6 +28,49 @@ def _snapshot(pedido: model.Pedido) -> dict:
     }
 
 
+def _auto_agregar_obsequios(db: Session, db_pedido: model.Pedido, detalles_dicts: list):
+    """Promo obsequio: por cada renglón REVENTA cuyo producto tenga una promo
+    activa se agrega 1 obsequio por unidad comprada (precio 0, es_obsequio=True).
+
+    Idempotente: si el renglón del obsequio ya existe (venga marcado o no) no
+    se duplica. Si varios colchones comparten el mismo plástico, sus cantidades
+    se acumulan en UNA sola línea de regalo. Corre DESPUÉS de crear los
+    detalles y antes del flush/venta final.
+    """
+    from app.modules.productos.model import PromocionObsequio
+
+    promos = {
+        p.colchon_id: p.obsequio_id
+        for p in db.query(PromocionObsequio).filter(PromocionObsequio.activo.is_(True)).all()
+    }
+    if not promos:
+        return
+    presentes = {d.producto_id for d in db_pedido.detalles if d.producto_id}
+    pendientes: dict[int, float] = {}
+    for det in detalles_dicts:
+        producto_id = det.get("producto_id")
+        if not producto_id:
+            continue
+        if det.get("tipo_item", "FABRICADO") != "REVENTA":
+            continue
+        obsequio_id = promos.get(producto_id)
+        if obsequio_id is None or obsequio_id in presentes:
+            continue
+        pendientes[obsequio_id] = pendientes.get(obsequio_id, 0.0) + float(det.get("cantidad", 1) or 1)
+    for obsequio_id, cantidad in pendientes.items():
+        # append a la relación (no solo db.add): la factura automática de la
+        # conversión se construye con pedido.detalles en la MISMA transacción
+        # y sin esto el regalo no llegaría a la venta/descuento de stock.
+        db_pedido.detalles.append(model.DetallePedido(
+            producto_id=obsequio_id,
+            tipo_item="REVENTA",
+            cantidad=cantidad,
+            precio=0.0,
+            descripcion_especifica="OBSEQUIO PROMO",
+            es_obsequio=True,
+        ))
+
+
 def obtener_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
     query = db.query(model.Pedido).filter(model.Pedido.id == id_pedido)
     if usuario is not None:
@@ -106,12 +149,17 @@ def crear_pedido(db: Session, esquema: schemas.PedidoCreate, usuario: Usuario | 
     db.flush()  # Para obtener el db_pedido.id
 
     # Crear detalles
+    detalles_creados = []
     for detalle_esquema in esquema.detalles:
         db_detalle = model.DetallePedido(
             pedido_id=db_pedido.id,
             **detalle_esquema.model_dump()
         )
         db.add(db_detalle)
+        detalles_creados.append(detalle_esquema.model_dump())
+
+    db.flush()
+    _auto_agregar_obsequios(db, db_pedido, detalles_creados)
 
     record_event(
         db,
@@ -514,6 +562,12 @@ def convertir_cotizacion_a_pedido(
         )
         db.add(db_detalle)
     db.flush()
+
+    # Promo obsequio: si la cotización no trajo el plástico de regalo, se
+    # agrega aquí (1 obsequio por cada colchón con promo activa).
+    _auto_agregar_obsequios(db, db_pedido, [
+        d if isinstance(d, dict) else d.model_dump() for d in detalles
+    ])
 
     # El pedido nació en PRODUCCION: generar las órdenes de producción de las
     # líneas FABRICADO (REVENTA/INSUMO no se fabrican). Mismo criterio que

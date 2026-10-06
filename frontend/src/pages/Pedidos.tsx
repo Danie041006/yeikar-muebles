@@ -475,6 +475,13 @@ export default function Pedidos() {
                             >
                               Insumo
                             </span>
+                          ) : det.es_obsequio ? (
+                            <span
+                              className="bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                              title="Obsequio de promoción: va con el colchón, no se cobra"
+                            >
+                              Obsequio
+                            </span>
                           ) : det.producto?.es_reventa ? (
                             <span
                               className="bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"

@@ -168,6 +168,11 @@ def crear_venta_desde_pedido(
             else:
                 costo_unit = 0.0
         costo_unit_moneda = costo_unit * factor_costo_a_moneda
+        es_obsequio = bool(dp.es_obsequio)
+        if es_obsequio:
+            # El regalo ya está cobrado dentro del precio del colchón: la
+            # utilidad del renglón no debe mostrarse en negativo.
+            costo_unit_moneda = 0.0
         pct_ganancia = float(dp.porcentaje_ganancia) if dp.porcentaje_ganancia is not None else (
             min(999.99, round(((float(dp.precio) - costo_unit_moneda) / costo_unit_moneda) * 100, 2)) if costo_unit_moneda > 0 else 0.0
         )
@@ -180,8 +185,9 @@ def crear_venta_desde_pedido(
             precio=dp.precio,
             costo_unitario=costo_unit,
             porcentaje_ganancia=pct_ganancia,
-            utilidad=round(float(dp.precio) - costo_unit_moneda, 2),
+            utilidad=0.0 if es_obsequio else round(float(dp.precio) - costo_unit_moneda, 2),
             descuento=0.0,
+            es_obsequio=es_obsequio,
             descripcion_especifica=dp.descripcion_especifica,
         )
         db.add(db_detalle)
@@ -1173,6 +1179,13 @@ def _aplicar_costo_real_a_detalles(
     for detalle in detalles_venta:
         costo_real = costo_real_por_producto.get(detalle.producto_id)
         if (detalle.tipo_item or "FABRICADO") != "REVENTA" or costo_real is None:
+            continue
+        # Obsequio: el regalo ya se cobró en el colchón; su renglón no altera
+        # utilidad (queda 0) aunque sí se registra su costo real.
+        if detalle.es_obsequio:
+            detalle.costo_unitario = convertir_a_moneda_base(
+                db, detalle.producto.moneda_id if detalle.producto else None, float(costo_real)
+            )
             continue
         producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
         costo_base = convertir_a_moneda_base(

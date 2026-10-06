@@ -233,6 +233,29 @@ class MaterialSinonimo(Base):
     material = relationship("Material")
 
 
+class PromocionObsequio(Base):
+    """Promo "obsequio": por cada unidad del producto `colchon_id` (reventa)
+    se regala 1 unidad del `obsequio_id` (plástico). La línea del obsequio se
+    agrega con precio 0 al pedido, así el descuento de stock al facturar es el
+    flujo normal de REVENTA (SALIDA trazable) sin tocar la lógica existente.
+
+    No se usa el campo codigo como vínculo: colchones y plásticos comparten
+    códigos (el código del colchón ES el código de su obsequio) y varios
+    colchones apuntan al mismo plástico."""
+
+    __tablename__ = "promocion_obsequio"
+
+    id          = Column(BigInteger, primary_key=True, index=True)
+    colchon_id  = Column(BigInteger, ForeignKey("producto.id", ondelete="CASCADE"), nullable=False, unique=True)
+    obsequio_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=False)
+    activo      = Column(Boolean, default=True, nullable=False, server_default="true", index=True)
+    created_at  = Column(DateTime, server_default=func.now())
+    updated_at  = Column(DateTime, onupdate=func.now())
+
+    colchon  = relationship("Producto", foreign_keys=[colchon_id])
+    obsequio = relationship("Producto", foreign_keys=[obsequio_id])
+
+
 class SeccionProducto(Base):
     """
     Sección / Área productiva dentro de un producto (ej: EBANISTERÍA, PINTURA, TERMINACIÓN, TAPICERÍA, NOCHEROS EN CRUDO).

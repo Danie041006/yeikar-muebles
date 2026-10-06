@@ -353,3 +353,22 @@ class ImportarEstructuraTextoIn(BaseModel):
     ganancia_porcentaje: float = Field(40.0, ge=0, le=999)
     impuesto_porcentaje: float = Field(7.0, ge=0, le=100)
     dry_run: bool = True
+
+# ------------------------------------------------------------
+# Promoción obsequio (colchón -> plástico de regalo)
+# ------------------------------------------------------------
+class PromocionObsequioCreate(BaseModel):
+    colchon_id: int
+    obsequio_id: int
+    activo: bool = True
+
+class PromocionObsequioResponse(BaseModel):
+    id: int
+    colchon_id: int
+    obsequio_id: int
+    activo: bool
+    colchon_nombre: Optional[str] = None
+    obsequio_nombre: Optional[str] = None
+
+    class Config:
+        from_attributes = True

@@ -155,6 +155,15 @@ export interface GrupoDuplicados {
   items: MaterialDuplicadoInfo[];
 }
 
+export interface PromocionObsequio {
+  id: number;
+  colchon_id: number;
+  obsequio_id: number;
+  activo: boolean;
+  colchon_nombre?: string | null;
+  obsequio_nombre?: string | null;
+}
+
 export const productosService = {
   getProductos: async (search?: string, options?: { es_reventa?: boolean; es_exhibicion?: boolean; limite?: number }): Promise<Product[]> => {
     const params: Record<string, unknown> = {};
@@ -168,6 +177,14 @@ export const productosService = {
 
   getById: async (id: number): Promise<Product> => {
     const response = await api.get<Product>(`/producto/${id}`);
+    return response.data;
+  },
+
+  /** Promos activas colchón → plástico de regalo (para el cotizador). */
+  getPromocionesObsequio: async (soloActivas = true): Promise<PromocionObsequio[]> => {
+    const response = await api.get<PromocionObsequio[]>('/promocion-obsequio', {
+      params: { solo_activas: soloActivas },
+    });
     return response.data;
   },
 

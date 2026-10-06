@@ -431,3 +431,51 @@ def eliminar_seccion_producto(db: Session, seccion_id: int):
     db.delete(seccion)
     db.commit()
     return True
+
+# ------------------------------------------------------------
+# Promoción obsequio (colchón -> plástico de regalo)
+# ------------------------------------------------------------
+def listar_promociones_obsequio(db: Session, solo_activas: bool = False):
+    from app.modules.productos.model import PromocionObsequio
+    query = db.query(PromocionObsequio)
+    if solo_activas:
+        query = query.filter(PromocionObsequio.activo.is_(True))
+    return query.all()
+
+
+def crear_promocion_obsequio(db: Session, esquema):
+    from app.modules.productos.model import PromocionObsequio, Producto
+
+    colchon = db.query(Producto).filter(Producto.id == esquema.colchon_id).first()
+    if not colchon:
+        raise ValueError(f"El colchón #{esquema.colchon_id} no existe.")
+    obsequio = db.query(Producto).filter(Producto.id == esquema.obsequio_id).first()
+    if not obsequio:
+        raise ValueError(f"El obsequio #{esquema.obsequio_id} no existe.")
+    if obsequio.id == colchon.id:
+        raise ValueError("El colchón y el obsequio no pueden ser el mismo producto.")
+    # Upsert: solo hay una promo por colchón (unique colchon_id)
+    promo = db.query(PromocionObsequio).filter(PromocionObsequio.colchon_id == esquema.colchon_id).first()
+    if promo:
+        promo.obsequio_id = esquema.obsequio_id
+        promo.activo = esquema.activo
+    else:
+        promo = PromocionObsequio(
+            colchon_id=esquema.colchon_id,
+            obsequio_id=esquema.obsequio_id,
+            activo=esquema.activo,
+        )
+        db.add(promo)
+    db.commit()
+    db.refresh(promo)
+    return promo
+
+
+def eliminar_promocion_obsequio(db: Session, id_promo: int) -> bool:
+    from app.modules.productos.model import PromocionObsequio
+    promo = db.query(PromocionObsequio).filter(PromocionObsequio.id == id_promo).first()
+    if not promo:
+        return False
+    db.delete(promo)
+    db.commit()
+    return True

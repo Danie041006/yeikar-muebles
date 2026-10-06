@@ -46,6 +46,8 @@ class DetalleCotizacion(Base):
     ancho = Column(Numeric(10, 2), nullable=True)
     largo = Column(Numeric(10, 2), nullable=True)
     observaciones = Column(Text, nullable=True)
+    # Promo obsequio: línea del plástico de regalo (precio 0, 1 por colchón)
+    es_obsequio = Column(Boolean, nullable=False, server_default="false")
     costo_materiales = Column(Numeric(15, 2), nullable=True)
     costo_mano_obra = Column(Numeric(15, 2), nullable=True)
     costo_gastos = Column(Numeric(15, 2), nullable=True)

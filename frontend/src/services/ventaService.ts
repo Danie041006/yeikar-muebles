@@ -36,6 +36,8 @@ export interface DetalleVenta {
   utilidad?: number;
   /** Descripción del ítem cuando no hay producto ni material (a medida). */
   descripcion_especifica?: string | null;
+  /** Renglón de regalo de promoción (colchón → plástico), precio 0. */
+  es_obsequio?: boolean;
   producto?: ProductoInfo;
   material?: { id: number; nombre: string; costo_base: number; unidad_medida?: { abreviatura: string } };
 }

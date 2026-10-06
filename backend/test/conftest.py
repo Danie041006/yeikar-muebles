@@ -125,6 +125,7 @@ ORDEN_LIMPIEZA = [
     "venta",
     "detalle_factura",
     "factura",
+    "promocion_obsequio",
     "mano_obra",
     "consumo_material",
     "etapa_asignado_adicional",
@@ -249,6 +250,20 @@ class Cleaner:
                     ))
                     db.execute(text(
                         f"DELETE FROM produccion_crudo WHERE crudo_id IN ({ids_str})"
+                    ))
+                    db.commit()
+                # Los productos de reventa acumulan movimientos/inventario y
+                # promos con FK RESTRICT (algunos generados por la venta, sin id
+                # conocido por el test): se limpian aquí antes de borrar.
+                if tabla == "producto":
+                    db.execute(text(
+                        f"DELETE FROM promocion_obsequio WHERE colchon_id IN ({ids_str}) OR obsequio_id IN ({ids_str})"
+                    ))
+                    db.execute(text(
+                        f"DELETE FROM movimiento_producto_inventario WHERE producto_id IN ({ids_str})"
+                    ))
+                    db.execute(text(
+                        f"DELETE FROM producto_inventario WHERE producto_id IN ({ids_str})"
                     ))
                     db.commit()
                 db.execute(text(f"DELETE FROM {tabla} WHERE id IN ({ids_str})"))

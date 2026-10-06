@@ -12,7 +12,7 @@ import EstructuraCostos from '../components/EstructuraCostos';
 import DocumentoCotizacion from '../components/Expediente/DocumentoCotizacion';
 
 import api from '../services/api';
-import { productosService, type Material } from '../services/productosService';
+import { productosService, type Material, type PromocionObsequio } from '../services/productosService';
 import { inventarioService } from '../services/inventarioService';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -39,6 +39,8 @@ interface CotizacionItemForm {
   receta_personalizada?: any[] | null;
   /** Costo real del insumo suelto (COP): compra + pasada, desde la última entrada. */
   insumoCosto?: { costo_compra: number; pasada_unitaria: number; costo_real: number } | null;
+  /** Promo obsequio: renglón del plástico de regalo (precio 0, ligado al colchón). */
+  es_obsequio?: boolean;
 }
 
 /** Convierte los detalles de una cotización guardada al estado del formulario
@@ -92,6 +94,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
       calcResult,
       calcLoading: false,
       receta_personalizada: d.receta_personalizada || null,
+      es_obsequio: d.es_obsequio || false,
     };
   });
 }
@@ -107,6 +110,95 @@ const ordenarProductosPorTipo = (prods: Product[]): Product[] =>
     return a.nombre.localeCompare(b.nombre);
   });
 
+// ── Promo obsequio (colchón → plástico) ────────────────────────────────────
+// El renglón del obsequio viaja en la cotización a precio 0 y marcado
+// es_obsequio: el backend lo detecta como ya presente y no lo duplica al
+// convertir el pedido; al facturar descuenta el stock del plástico.
+
+type PromosPorColchon = Map<number, PromocionObsequio>;
+
+/** Unidades totales por obsequio según los renglones de colchón con promo. */
+function totalesObsequioPorPromo(
+  items: CotizacionItemForm[],
+  promos: PromosPorColchon,
+): Map<number, number> {
+  const totales = new Map<number, number>();
+  for (const it of items) {
+    if (it.es_obsequio || it.tipo_item !== 'REVENTA' || !it.producto_id) continue;
+    const promo = promos.get(Number(it.producto_id));
+    if (!promo) continue;
+    totales.set(promo.obsequio_id, (totales.get(promo.obsequio_id) || 0) + (it.cantidad || 0));
+  }
+  return totales;
+}
+
+/** Ajusta la cantidad de los renglones de obsequio (o los quita si el colchón
+ *  ya no está). NO agrega renglones nuevos: eso ocurre al seleccionar el
+ *  colchón (asegurarObsequio). Devuelve el MISMO arreglo si no hubo cambios. */
+function sincronizarCantidadesObsequio(
+  items: CotizacionItemForm[],
+  promos: PromosPorColchon,
+): CotizacionItemForm[] {
+  if (promos.size === 0) return items;
+  const totales = totalesObsequioPorPromo(items, promos);
+  let cambio = false;
+  const next: CotizacionItemForm[] = [];
+  for (const it of items) {
+    if (it.es_obsequio && it.producto_id) {
+      const total = totales.get(Number(it.producto_id)) || 0;
+      if (total <= 0) {
+        cambio = true;
+        continue; // el colchón ya no está: se va el regalo
+      }
+      if (it.cantidad !== total) {
+        next.push({ ...it, cantidad: total });
+        cambio = true;
+        continue;
+      }
+    }
+    next.push(it);
+  }
+  return cambio ? next : items;
+}
+
+/** Al seleccionar un colchón con promo, agrega su renglón de obsequio (una
+ *  sola vez, justo después del colchón) y sincroniza cantidades. */
+function asegurarObsequio(
+  items: CotizacionItemForm[],
+  colchonId: number,
+  promos: PromosPorColchon,
+): CotizacionItemForm[] {
+  const promo = promos.get(colchonId);
+  if (!promo) return sincronizarCantidadesObsequio(items, promos);
+  const yaExiste = items.some(
+    (it) => it.es_obsequio && Number(it.producto_id) === promo.obsequio_id,
+  );
+  if (yaExiste) return sincronizarCantidadesObsequio(items, promos);
+  const total = totalesObsequioPorPromo(items, promos).get(promo.obsequio_id) || 0;
+  if (total <= 0) return items;
+  const nuevo: CotizacionItemForm = {
+    producto_id: String(promo.obsequio_id),
+    material_id: '',
+    tipo_item: 'REVENTA',
+    cantidad: total,
+    ancho: '',
+    largo: '',
+    ganancia: '',
+    impuesto: '',
+    observaciones: '',
+    calcResult: null,
+    calcLoading: false,
+    receta_personalizada: null,
+    es_obsequio: true,
+  };
+  let insertAt = items.length;
+  items.forEach((it, i) => {
+    if (!it.es_obsequio && Number(it.producto_id) === colchonId) insertAt = i + 1;
+  });
+  const next = [...items.slice(0, insertAt), nuevo, ...items.slice(insertAt)];
+  return sincronizarCantidadesObsequio(next, promos);
+}
+
 export default function Cotizaciones() {
   const toast = useToast();
   const { user, esAdmin } = useAuth();
@@ -117,6 +209,21 @@ export default function Cotizaciones() {
   const [clients, setClients] = useState<Client[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [materiales, setMateriales] = useState<any[]>([]);
+
+  // Promos activas colchón → plástico de regalo (una vez al montar)
+  const [promosObsequio, setPromosObsequio] = useState<PromocionObsequio[]>([]);
+  useEffect(() => {
+    let active = true;
+    productosService.getPromocionesObsequio(true)
+      .then((r) => { if (active) setPromosObsequio(r); })
+      .catch(() => { if (active) setPromosObsequio([]); });
+    return () => { active = false; };
+  }, []);
+  const promosPorColchon = useMemo<PromosPorColchon>(() => {
+    const m: PromosPorColchon = new Map();
+    for (const p of promosObsequio) m.set(p.colchon_id, p);
+    return m;
+  }, [promosObsequio]);
   
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
@@ -429,6 +536,11 @@ export default function Cotizaciones() {
   };
 
   const updateItemField = (index: number, field: keyof CotizacionItemForm, value: any) => {
+    // El renglón de obsequio es de solo lectura salvo cantidad (que sigue al
+    // colchón): no se le cambia producto, dimensiones, ganancia ni impuestos.
+    if (items[index]?.es_obsequio && field !== 'cantidad' && field !== 'observaciones') {
+      return;
+    }
     setItems((prevItems) => {
       const newItems = [...prevItems];
       newItems[index] = { ...newItems[index], [field]: value };
@@ -441,6 +553,16 @@ export default function Cotizaciones() {
           newItems[index].largo = String(selectedProd.largo_base ?? 1);
         }
         newItems[index].receta_personalizada = null;
+        // Promo obsequio: si el nuevo producto es un colchón con promo, se
+        // agrega el renglón del plástico; si dejó de serlo, se ajusta/quita.
+        const promo = promosPorColchon.get(Number(value));
+        if (promo) return asegurarObsequio(newItems, Number(value), promosPorColchon);
+        return sincronizarCantidadesObsequio(newItems, promosPorColchon);
+      }
+
+      // Cambió la cantidad del colchón (o el tipo): el regalo la sigue.
+      if (field === 'cantidad' || field === 'tipo_item') {
+        return sincronizarCantidadesObsequio(newItems, promosPorColchon);
       }
       
       return newItems;
@@ -641,6 +763,8 @@ export default function Cotizaciones() {
       // Editar un renglón existente: bloquear el catálogo a SU clase de
       // producto (un renglón de reventa no se reemplaza por un mueble).
       const item = items[index];
+      // El obsequio de promo va amarrado a su colchón: no se cambia a mano.
+      if (item && item.es_obsequio) return;
       if (item && item.tipo_item === 'INSUMO') {
         setProductSelectorModo('todos');
       } else if (item && item.tipo_item === 'REVENTA') {
@@ -680,7 +804,8 @@ export default function Cotizaciones() {
         const next = [...prev, newItem];
         const nextIdx = next.length - 1;
         calculateItemPrice(nextIdx, String(product.id), newItem.ancho, newItem.largo, newItem.ganancia, null, newItem.impuesto);
-        return next;
+        // Colchón con promo: el plástico de regalo entra a la cotización.
+        return asegurarObsequio(next, product.id, promosPorColchon);
       });
     }
     setIsProductSelectorOpen(false);
@@ -691,7 +816,9 @@ export default function Cotizaciones() {
     setItems((prev) => {
       const next = prev.filter((_, i) => i !== index);
       setDesgloseIndex((di) => (di >= next.length ? Math.max(0, next.length - 1) : di));
-      return next;
+      // Si se quitó el colchón, su obsequio se va; si se quitó el obsequio,
+      // queda quitado (no se re-agrega solo).
+      return sincronizarCantidadesObsequio(next, promosPorColchon);
     });
   };
 
@@ -722,7 +849,10 @@ export default function Cotizaciones() {
     setSelectedMonedaId(quote.moneda_id || 1);
     setTasaCambio(quote.tasa_cambio || 1);
     setTasasDia({});
-    setItems(itemsDesdeCotizacion(quote, quote.moneda?.codigo || 'COP'));
+    setItems(sincronizarCantidadesObsequio(
+      itemsDesdeCotizacion(quote, quote.moneda?.codigo || 'COP'),
+      promosPorColchon,
+    ));
     setError('');
     setErrorForm('');
     setIsFormOpen(true);
@@ -946,6 +1076,8 @@ export default function Cotizaciones() {
     // día de un producto en moneda extranjera, el precio convertido es inválido.
     // Aplica también a insumos (el precio tecleado no puede ser 0).
     const itemSinPrecio = items.find((it) => {
+      // El obsequio de promo va a precio 0 por diseño.
+      if (it.es_obsequio) return false;
       if (!it.calcResult) return true;
       const p = precioRenglonEnMoneda(it);
       return !(isFinite(p) && p > 0);
@@ -1003,6 +1135,7 @@ export default function Cotizaciones() {
       const precioMoneda = conv(r ? r.precio_venta : 0.0);
       const subtotal = precioMoneda * item.cantidad;
       globalTotal += subtotal;
+      const esObsequio = !!item.es_obsequio;
 
       return {
         producto_id: Number(item.producto_id),
@@ -1012,10 +1145,13 @@ export default function Cotizaciones() {
         ancho: Number(item.ancho) || 1.0,
         largo: Number(item.largo) || 1.0,
         observaciones: item.observaciones || null,
-        costo_materiales: conv(r?.costo_materiales || 0.0) * item.cantidad,
-        costo_mano_obra: conv(r?.costo_mano_obra || 0.0) * item.cantidad,
-        costo_gastos: conv(r?.costo_gastos_indirectos || 0.0) * item.cantidad,
-        costo_total: conv(r?.costo_total || 0.0) * item.cantidad,
+        // El obsequio no lleva costos propios: el backend toma el costo real
+        // del inventario al facturar y su utilidad se neutraliza.
+        es_obsequio: esObsequio || undefined,
+        costo_materiales: esObsequio ? null : conv(r?.costo_materiales || 0.0) * item.cantidad,
+        costo_mano_obra: esObsequio ? null : conv(r?.costo_mano_obra || 0.0) * item.cantidad,
+        costo_gastos: esObsequio ? null : conv(r?.costo_gastos_indirectos || 0.0) * item.cantidad,
+        costo_total: esObsequio ? null : conv(r?.costo_total || 0.0) * item.cantidad,
         receta_personalizada: item.receta_personalizada || null,
       };
     });
@@ -1027,6 +1163,9 @@ export default function Cotizaciones() {
         return `${item.cantidad}x ${mat?.nombre || 'Insumo'}`;
       }
       const selectedProd = products.find(p => p.id === Number(item.producto_id));
+      if (item.es_obsequio) {
+        return `${item.cantidad}x ${selectedProd?.nombre || 'Plástico'} (obsequio)`;
+      }
       return `${item.cantidad}x ${selectedProd?.nombre || 'Mueble'} (${item.ancho}x${item.largo}m)`;
     }).join(', ');
     
@@ -1225,6 +1364,7 @@ export default function Cotizaciones() {
           ancho: det.ancho ?? undefined,
           largo: det.largo ?? undefined,
           observaciones: det.observaciones ?? undefined,
+          es_obsequio: det.es_obsequio || undefined,
         }));
       } else {
         const match = selectedQuoteForConvert.observaciones?.match(/Producto: (.*) \((.*)x(.*)m\)/);
@@ -1721,10 +1861,21 @@ export default function Cotizaciones() {
           <div className="bg-white rounded-none sm:rounded-xl border border-yeikar-secondary-light/10 shadow-2xl w-full max-w-5xl overflow-y-auto md:overflow-hidden flex flex-col md:flex-row max-h-[100dvh] sm:max-h-[90vh]">
             {/* Form Inputs — ÚNICO contenedor de scroll en desktop */}
             <form onSubmit={handleSaveQuote} className="p-4 sm:p-6 space-y-4 flex-1 min-w-0 md:max-h-[90vh] md:overflow-y-auto">
-              <div className="bg-yeikar-neutral -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 p-4 text-yeikar-tertiary flex items-center justify-between mb-4 sticky top-0 z-10">
+              <div className="bg-yeikar-neutral -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 p-4 text-yeikar-tertiary flex items-center justify-between mb-4 sticky top-0 z-10 sm:rounded-t-xl">
                 <h3 className="font-headline font-bold text-lg text-yeikar-primary">
                   {editingQuote ? 'Editar Cotización' : 'Nueva Cotización'}
                 </h3>
+                <button
+                  type="button"
+                  onClick={() => setIsFormOpen(false)}
+                  className="text-yeikar-tertiary/60 hover:text-white transition-colors p-1 -mr-1"
+                  title="Cerrar sin guardar"
+                  aria-label="Cerrar"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
               </div>
 
               <div>
@@ -1859,7 +2010,7 @@ export default function Cotizaciones() {
                       Seleccione los modelos del catálogo e ingrese dimensiones y condiciones
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto sm:justify-end">
                     <button
                       type="button"
                       onClick={() => handleOpenProductSelector(undefined, 'fabricados')}
@@ -1911,6 +2062,10 @@ export default function Cotizaciones() {
                 <div className="space-y-4">
                   {items.map((item, index) => {
                     const selectedProd = item.tipo_item !== 'INSUMO' ? products.find((p) => p.id === Number(item.producto_id)) : null;
+                    // Colchón con promo: el plástico que se puede llevar.
+                    const promoColchon = !item.es_obsequio && item.tipo_item !== 'INSUMO' && item.producto_id
+                      ? promosPorColchon.get(Number(item.producto_id))
+                      : undefined;
 
                     // ── INSUMO: card simplificado ──
                     if (item.tipo_item === 'INSUMO') {
@@ -2058,6 +2213,19 @@ export default function Cotizaciones() {
                             <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-yeikar-tertiary text-yeikar-secondary border border-yeikar-secondary-light/10">
                                 {esItemStock(selectedProd) ? 'De stock' : 'Fabricado'}
                               </span>
+                              {item.es_obsequio && (
+                                <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
+                                  Obsequio promo
+                                </span>
+                              )}
+                              {promoColchon && (
+                                <span
+                                  className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200"
+                                  title="Promoción: por este colchón el cliente se lleva el plástico sin costo"
+                                >
+                                  Incluye obsequio: {promoColchon.obsequio_nombre}
+                                </span>
+                              )}
                               {item.calcResult?.fuente_precio === 'estimado_sin_estructura' && (
                                 <span
                                   className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-yeikar-primary/10 text-yeikar-primary-dark border border-yeikar-primary/25"
@@ -2138,6 +2306,12 @@ export default function Cotizaciones() {
                         )}
 
                         {/* Quantity, Dimensions & Commercial Params */}
+                        {item.es_obsequio && (
+                          <p className="text-[11px] text-fuchsia-800 bg-fuchsia-50/60 border border-fuchsia-100 rounded-lg px-3 py-1.5">
+                            Obsequio de promoción: va incluido con el colchón, no se cobra.
+                            Al facturar sale del inventario de plásticos.
+                          </p>
+                        )}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
                           <div>
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
@@ -2186,7 +2360,7 @@ export default function Cotizaciones() {
                                 <span className="block text-[10px] text-yeikar-secondary bg-yeikar-tertiary border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-2 w-full font-medium">
                                   Reventa comercial {baseMostrar ? `· Costo ref: ${baseMostrar}` : ''}
                                 </span>
-                                {!item.calcResult && item.producto_id && (
+                                {!item.calcResult && item.producto_id && !item.es_obsequio && (
                                   <span className="block text-[10px] font-bold text-amber-700">
                                     Confirma la tasa del día en el formulario ↑
                                   </span>
@@ -2195,6 +2369,7 @@ export default function Cotizaciones() {
                             </div>
                           )}
 
+                          {!item.es_obsequio && (
                           <div>
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
                               % Ganancia
@@ -2206,10 +2381,12 @@ export default function Cotizaciones() {
                               className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
                             />
                           </div>
+                          )}
                         </div>
 
                         {/* Secondary row: Taxes, Observations, Recipe Structure, Subtotal */}
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center pt-1 border-t border-yeikar-secondary-light/10">
+                          {!item.es_obsequio && (
                           <div className="sm:col-span-2">
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1" title="Impuestos adicionales sobre el costo">
                               % Impuestos
@@ -2222,6 +2399,7 @@ export default function Cotizaciones() {
                               className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
                             />
                           </div>
+                          )}
 
                           <div className="sm:col-span-5">
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
@@ -2340,7 +2518,7 @@ export default function Cotizaciones() {
 
             {/* Calculations Breakdown — en móvil queda dentro del scroll del modal;
                 en desktop es columna propia con su propio scroll acotado */}
-            <div className="w-full md:w-80 bg-yeikar-neutral text-yeikar-tertiary p-4 sm:p-6 flex flex-col justify-between border-t md:border-t-0 md:border-l border-yeikar-secondary/20 shrink-0 md:max-h-[90vh] md:overflow-y-auto">
+            <div className="w-full md:w-72 xl:w-80 bg-yeikar-neutral text-yeikar-tertiary p-4 sm:p-6 flex flex-col justify-between border-t md:border-t-0 md:border-l border-yeikar-secondary/20 shrink-0 md:max-h-[90vh] md:overflow-y-auto">
               <div className="space-y-6">
                 <div>
                   <h4 className="font-headline font-bold text-sm text-yeikar-primary tracking-wider uppercase mb-3">

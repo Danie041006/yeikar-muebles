@@ -46,6 +46,7 @@ class DetalleVentaResponse(DetalleVentaBase):
     utilidad: Optional[float] = None
     descuento: Optional[float] = None
     descripcion_especifica: Optional[str] = None
+    es_obsequio: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     producto: Optional[ProductoResponse] = None

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String
+from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -51,6 +51,8 @@ class DetallePedido(Base):
     acabado = Column(String(100), nullable=True)
     descripcion_especifica = Column(Text, nullable=True)
     observaciones = Column(Text, nullable=True)
+    # Promo obsequio: línea del plástico de regalo (precio 0, 1 por colchón)
+    es_obsequio = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 

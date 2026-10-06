@@ -40,6 +40,7 @@ class DetalleCotizacionBase(BaseModel):
     ancho: Optional[float] = Field(None, ge=0)
     largo: Optional[float] = Field(None, ge=0)
     observaciones: Optional[str] = None
+    es_obsequio: bool = False
     costo_materiales: Optional[float] = Field(None, ge=0)
     costo_mano_obra: Optional[float] = Field(None, ge=0)
     costo_gastos: Optional[float] = Field(None, ge=0)

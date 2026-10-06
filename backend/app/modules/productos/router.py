@@ -817,3 +817,51 @@ def recalcular_receta_personalizada(
     }
 
 
+
+# ------------------------------------------------------------
+# Promoción obsequio (colchón -> plástico de regalo)
+# ------------------------------------------------------------
+def _promo_response(db: Session, promo):
+    """Respuesta con nombres resueltos (la tabla solo guarda ids)."""
+    return schemas.PromocionObsequioResponse(
+        id=promo.id,
+        colchon_id=promo.colchon_id,
+        obsequio_id=promo.obsequio_id,
+        activo=promo.activo,
+        colchon_nombre=promo.colchon.nombre if promo.colchon else None,
+        obsequio_nombre=promo.obsequio.nombre if promo.obsequio else None,
+    )
+
+@router.get("/promocion-obsequio", response_model=List[schemas.PromocionObsequioResponse])
+def listar_promociones_obsequio(
+    solo_activas: bool = Query(False),
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user),
+):
+    promos = service.listar_promociones_obsequio(db, solo_activas=solo_activas)
+    return [_promo_response(db, p) for p in promos]
+
+@router.post("/promocion-obsequio", response_model=schemas.PromocionObsequioResponse, status_code=status.HTTP_201_CREATED)
+def crear_promocion_obsequio(
+    esquema: schemas.PromocionObsequioCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user),
+):
+    if not es_admin_user(usuario_actual):
+        raise HTTPException(status_code=403, detail="Solo un administrador puede gestionar promociones.")
+    try:
+        promo = service.crear_promocion_obsequio(db, esquema)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _promo_response(db, promo)
+
+@router.delete("/promocion-obsequio/{id_promo}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_promocion_obsequio(
+    id_promo: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user),
+):
+    if not es_admin_user(usuario_actual):
+        raise HTTPException(status_code=403, detail="Solo un administrador puede gestionar promociones.")
+    if not service.eliminar_promocion_obsequio(db, id_promo):
+        raise HTTPException(status_code=404, detail="Promoción no encontrada.")

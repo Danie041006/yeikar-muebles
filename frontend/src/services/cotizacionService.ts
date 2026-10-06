@@ -50,6 +50,8 @@ export interface QuoteDetail {
   costo_gastos?: number | null;
   costo_total?: number | null;
   receta_personalizada?: any;
+  /** Renglón de regalo de promoción (colchón → plástico), precio 0. */
+  es_obsequio?: boolean;
 }
 
 export interface Quote {
