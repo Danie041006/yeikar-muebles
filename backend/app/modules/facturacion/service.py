@@ -290,7 +290,7 @@ def crear_factura_desde_pedido(db: Session, esquema: FacturaCreate, commit: bool
             descripcion=(
                 dp.producto.nombre if dp.producto
                 else (dp.material.nombre if dp.material else None)
-            ),
+            ) or dp.descripcion_especifica or (dp.observaciones or "Servicio"),
             cantidad=float(dp.cantidad),
             precio_usd=linea.precio_usd,
             subtotal_usd=subtotal_usd,

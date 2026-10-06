@@ -27,6 +27,9 @@ export default function Despachos() {
   const [direccionEntrega, setDireccionEntrega] = useState('');
   const [guiaDespacho, setGuiaDespacho] = useState('');
   const [observaciones, setObservaciones] = useState('');
+  // Costo real del flete (opcional): monto y moneda en la que se pagó.
+  const [costoFlete, setCostoFlete] = useState('');
+  const [monedaFleteId, setMonedaFleteId] = useState('1');
   // Fallido Form state
   const [failingEnvio, setFailingEnvio] = useState<Envio | null>(null);
   const [fallaObservaciones, setFallaObservaciones] = useState('');
@@ -132,6 +135,8 @@ export default function Despachos() {
     setDireccionEntrega(envio.direccion_entrega || envio.pedido?.cliente?.direccion || '');
     setGuiaDespacho(envio.guia_despacho || '');
     setObservaciones(envio.observaciones || '');
+    setCostoFlete(envio.costo_flete ? String(envio.costo_flete) : '');
+    setMonedaFleteId(envio.moneda_flete_id ? String(envio.moneda_flete_id) : '1');
   };
   const handleAssignSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -141,6 +146,8 @@ export default function Despachos() {
       direccion_entrega: direccionEntrega || null,
       guia_despacho: guiaDespacho || null,
       observaciones: observaciones || null,
+      costo_flete: costoFlete ? parseFloat(costoFlete) : null,
+      moneda_flete_id: monedaFleteId ? parseInt(monedaFleteId) : null,
       estado: 'EN_TRANSITO', // automatically set in transit upon assignment/dispatch
       fecha_salida: new Date().toISOString(),
     };
@@ -316,7 +323,11 @@ export default function Despachos() {
                   <div className="space-y-1">
                     {envio.pedido?.detalles?.map((det: OrderDetail) => (
                       <div key={det.id} className="text-xs text-yeikar-secondary/85 flex justify-between">
-                        <span>• {det.tipo_item === 'INSUMO' ? det.material?.nombre || 'Insumo' : det.producto?.nombre || 'Producto'}</span>
+                        <span>• {(det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+                          ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+                          : det.tipo_item === 'INSUMO'
+                            ? det.material?.nombre || 'Insumo'
+                            : det.producto?.nombre || 'Producto'}</span>
                         <span className="font-mono font-bold">x{det.cantidad}</span>
                       </div>
                     ))}
@@ -344,6 +355,11 @@ export default function Despachos() {
                 {envio.guia_despacho && (
                   <div className="text-xs text-yeikar-neutral/70 font-mono">
                     Guía de Despacho: <span className="font-bold text-yeikar-secondary">#{envio.guia_despacho}</span>
+                  </div>
+                )}
+                {envio.costo_flete != null && envio.costo_flete > 0 && (
+                  <div className="text-xs text-yeikar-neutral/70 font-mono">
+                    Costo flete: <span className="font-bold text-yeikar-primary-dark">${envio.costo_flete.toLocaleString()} {envio.moneda_flete?.codigo || 'COP'}</span>
                   </div>
                 )}
                 {/* Fechas */}
@@ -494,6 +510,37 @@ export default function Despachos() {
                   className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
                 />
               </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Costo del flete (opcional)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="Lo que costó llevarlo"
+                    value={costoFlete}
+                    onChange={(e) => setCostoFlete(e.target.value)}
+                    className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Moneda</label>
+                  <select
+                    value={monedaFleteId}
+                    onChange={(e) => setMonedaFleteId(e.target.value)}
+                    className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
+                  >
+                    <option value="1">COP</option>
+                    <option value="2">USD</option>
+                    <option value="3">VES</option>
+                  </select>
+                </div>
+              </div>
+              {costoFlete && parseFloat(costoFlete) > 0 && (
+                <p className="text-[11px] text-yeikar-neutral/50">
+                  Este costo se resta al margen real del pedido (cobrado − producción − flete).
+                </p>
+              )}
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Observaciones</label>
                 <textarea
@@ -767,18 +814,23 @@ export default function Despachos() {
                       <tbody className="divide-y divide-stone-200">
                         {selectedEnvioForGuia.pedido?.detalles?.map((det: OrderDetail, i: number) => {
                           // Buscar precio en la venta: INSUMO se empareja por
-                          // material_id; producto, por producto_id (nunca null==null).
+                          // material_id; producto, por producto_id (nunca null==null);
+                          // REPARACION/SERVICIO, por descripción.
                           const detVenta = venta?.detalles?.find(dv =>
                             det.tipo_item === 'INSUMO'
                               ? dv.material_id != null && dv.material_id === det.material_id
-                              : dv.producto_id != null && dv.producto_id === det.producto_id
+                              : (det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+                                ? dv.descripcion_especifica === det.descripcion_especifica
+                                : dv.producto_id != null && dv.producto_id === det.producto_id
                           );
                           const precio = detVenta ? Number(detVenta.precio) : 0;
                           const monto = precio * det.cantidad;
                           const foto = det.producto?.fotos?.[0]?.url ?? null;
                           const nombreDet = det.tipo_item === 'INSUMO'
                             ? det.material?.nombre || 'Insumo'
-                            : det.producto?.nombre || 'Mueble Yeikar';
+                            : (det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+                              ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+                              : det.producto?.nombre || 'Mueble Yeikar';
                           return (
                             <tr key={det.id || i} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                               <td className="px-2 py-1.5 text-center font-mono font-bold border-r border-stone-200">{det.cantidad}</td>

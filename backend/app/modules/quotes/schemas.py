@@ -30,15 +30,18 @@ class ClienteRapidoResponse(BaseModel):
     observaciones: Optional[str] = None
 
 
+TIPOS_ITEM = ("FABRICADO", "REVENTA", "INSUMO", "REPARACION", "SERVICIO")
+
 class DetalleCotizacionBase(BaseModel):
     producto_id: Optional[int] = None
     material_id: Optional[int] = None
-    tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO)$")
+    tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO|REPARACION|SERVICIO)$")
     cantidad: float = Field(gt=0)
     precio: float = Field(ge=0)
     alto: Optional[float] = Field(None, ge=0)
     ancho: Optional[float] = Field(None, ge=0)
     largo: Optional[float] = Field(None, ge=0)
+    descripcion_especifica: Optional[str] = None
     observaciones: Optional[str] = None
     es_obsequio: bool = False
     costo_materiales: Optional[float] = Field(None, ge=0)
@@ -59,6 +62,13 @@ class DetalleCotizacionCreate(DetalleCotizacionBase):
                 raise ValueError("material_id es requerido para tipo_item INSUMO")
             if self.producto_id:
                 raise ValueError("producto_id no debe enviarse para tipo_item INSUMO")
+        elif self.tipo_item in ("REPARACION", "SERVICIO"):
+            if self.producto_id:
+                raise ValueError("producto_id no debe enviarse para tipo_item REPARACION/SERVICIO")
+            if self.material_id:
+                raise ValueError("material_id no debe enviarse para tipo_item REPARACION/SERVICIO")
+            if not (self.descripcion_especifica or self.observaciones):
+                raise ValueError("La descripción es obligatoria para tipo_item REPARACION/SERVICIO")
         else:
             if not self.producto_id:
                 raise ValueError("producto_id es requerido para tipo_item FABRICADO/REVENTA")

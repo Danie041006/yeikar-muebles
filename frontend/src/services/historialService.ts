@@ -23,7 +23,7 @@ export interface ClienteExp {
 export interface DetalleCotizacionExp {
   producto_id?: number | null;
   material_id?: number | null;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   producto_nombre?: string | null;
   cantidad: number;
   precio: number;
@@ -126,7 +126,7 @@ export interface DetallePedidoExp {
   id: number;
   producto_id?: number | null;
   material_id?: number | null;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   producto_nombre?: string | null;
   cantidad: number;
   precio: number;
@@ -175,7 +175,7 @@ export interface VentaExp {
   detalles: {
     producto_id?: number | null;
     material_id?: number | null;
-    tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+    tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
     producto_nombre?: string | null;
     cantidad: number;
     precio: number;
@@ -213,7 +213,7 @@ export interface FacturaExp {
   detalles?: {
     producto_id?: number | null;
     material_id?: number | null;
-    tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+    tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
     producto_nombre?: string | null;
     descripcion?: string | null;
     cantidad: number;

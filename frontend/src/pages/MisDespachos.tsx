@@ -216,7 +216,11 @@ export default function MisDespachos() {
                     {envio.pedido?.detalles?.map((det) => (
                       <div key={det.id} className="text-xs text-yeikar-secondary/85">
                         <div className="flex justify-between">
-                          <span className="font-medium">• {det.tipo_item === 'INSUMO' ? det.material?.nombre || 'Insumo' : det.producto?.nombre || 'Producto'}</span>
+                          <span className="font-medium">• {(det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+                          ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+                          : det.tipo_item === 'INSUMO'
+                            ? det.material?.nombre || 'Insumo'
+                            : det.producto?.nombre || 'Producto'}</span>
                           <span className="font-mono font-bold">x{det.cantidad}</span>
                         </div>
                         {det.tipo_item !== 'INSUMO' && (det.ancho || det.largo) && (

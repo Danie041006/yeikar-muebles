@@ -38,6 +38,17 @@ def listar_pedidos(
         solo_mes_actual=solo_mes_actual, mes=mes, anio=anio, usuario=usuario_actual
     )
 
+@router.get("/{id_pedido}/rentabilidad", response_model=schemas.RentabilidadPedidoResponse)
+def rentabilidad_pedido(
+    id_pedido: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    db_obj = service.obtener_rentabilidad_pedido(db, id_pedido, usuario_actual)
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    return db_obj
+
 @router.get("/{id_pedido}", response_model=schemas.PedidoResponse)
 def ver_pedido(
     id_pedido: int,

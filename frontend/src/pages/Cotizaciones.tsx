@@ -21,18 +21,19 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
-import { Package, Sparkles, Plus, Loader2 } from 'lucide-react';
+import { Package, Sparkles, Plus, Loader2, Wrench, Truck } from 'lucide-react';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 interface CotizacionItemForm {
   producto_id: string;
   material_id: string;
-  tipo_item: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   cantidad: number;
   ancho: string;
   largo: string;
   ganancia: string;
   impuesto: string;
+  descripcion_especifica?: string;
   observaciones: string;
   calcResult: CalculationResult | null;
   calcLoading: boolean;
@@ -74,6 +75,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
         largo: '',
         ganancia: '',
         impuesto: '',
+        descripcion_especifica: '',
         observaciones: d.observaciones || '',
         calcResult,
         calcLoading: false,
@@ -90,6 +92,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
       largo: d.largo ? String(d.largo) : '',
       ganancia: '',
       impuesto: '',
+      descripcion_especifica: d.descripcion_especifica || d.observaciones || '',
       observaciones: d.observaciones || '',
       calcResult,
       calcLoading: false,
@@ -185,6 +188,7 @@ function asegurarObsequio(
     largo: '',
     ganancia: '',
     impuesto: '',
+    descripcion_especifica: 'OBSEQUIO PROMO',
     observaciones: '',
     calcResult: null,
     calcLoading: false,
@@ -564,7 +568,7 @@ export default function Cotizaciones() {
       if (field === 'cantidad' || field === 'tipo_item') {
         return sincronizarCantidadesObsequio(newItems, promosPorColchon);
       }
-      
+
       return newItems;
     });
 
@@ -753,18 +757,41 @@ export default function Cotizaciones() {
   const addItemInsumo = () => {
     setItems((prev) => [
       ...prev,
-      { producto_id: '', material_id: '', tipo_item: 'INSUMO', cantidad: 1, ancho: '', largo: '', ganancia: '', impuesto: '0', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
+      { producto_id: '', material_id: '', tipo_item: 'INSUMO', cantidad: 1, ancho: '', largo: '', ganancia: '', impuesto: '0', descripcion_especifica: '', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
     ]);
   };
 
+  // Reparación: la pieza ya existe (es del cliente), se describe el trabajo y
+  // entra al taller (Tapicería, etc.). SERVICIO: cobro libre (flete/instalación).
+  const nuevoItemLibre = (tipo_item: 'REPARACION' | 'SERVICIO', descripcion = ''): CotizacionItemForm => ({
+    producto_id: '',
+    material_id: '',
+    tipo_item,
+    cantidad: 1,
+    ancho: '',
+    largo: '',
+    ganancia: '',
+    impuesto: '0',
+    descripcion_especifica: descripcion,
+    observaciones: '',
+    calcResult: null,
+    calcLoading: false,
+    receta_personalizada: null,
+  });
+
+  const addItemReparacion = () => setItems((prev) => [...prev, nuevoItemLibre('REPARACION')]);
+  const addItemServicio = (descripcion = '') => setItems((prev) => [...prev, nuevoItemLibre('SERVICIO', descripcion)]);
+
   const handleOpenProductSelector = (index?: number, modo: 'todos' | 'fabricados' | 'reventa' | 'exhibicion' = 'fabricados') => {
     if (index !== undefined) {
+      const item = items[index];
+      // Reparación/Servicio no tienen producto: el selector no aplica.
+      if (item && (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO')) return;
+      // El obsequio de promo va amarrado a su colchón: no se cambia a mano.
+      if (item && item.es_obsequio) return;
       setProductSelectorTargetIndex(index);
       // Editar un renglón existente: bloquear el catálogo a SU clase de
       // producto (un renglón de reventa no se reemplaza por un mueble).
-      const item = items[index];
-      // El obsequio de promo va amarrado a su colchón: no se cambia a mano.
-      if (item && item.es_obsequio) return;
       if (item && item.tipo_item === 'INSUMO') {
         setProductSelectorModo('todos');
       } else if (item && item.tipo_item === 'REVENTA') {
@@ -1063,12 +1090,16 @@ export default function Cotizaciones() {
       return;
     }
 
-    // INSUMO exige material_id; FABRICADO/REVENTA exigen producto_id.
-    const hasInvalidItem = items.some((item) =>
-      item.tipo_item === 'INSUMO' ? !item.material_id : !item.producto_id
-    );
+    // INSUMO exige material_id; FABRICADO/REVENTA exigen producto_id;
+    // REPARACION/SERVICIO exigen descripción (no llevan producto).
+    const hasInvalidItem = items.some((item) => {
+      if (item.tipo_item === 'INSUMO') return !item.material_id;
+      if (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO')
+        return !(item.descripcion_especifica && item.descripcion_especifica.trim());
+      return !item.producto_id;
+    });
     if (hasInvalidItem) {
-      setErrorForm('Por favor selecciona el producto o material de todos los renglones.');
+      setErrorForm('Por favor selecciona el producto o material de todos los renglones, o escribe la descripción de los de reparación/servicio.');
       return;
     }
 
@@ -1104,6 +1135,25 @@ export default function Cotizaciones() {
 
     let globalTotal = 0;
     const detalles: QuoteDetail[] = items.map((item) => {
+      if (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') {
+        const r = item.calcResult;
+        const precioMoneda = Math.round(convertirAPrecioCotizacion(Number(r?.precio_venta) || 0, r?.moneda_codigo || currencyCode) * 100) / 100;
+        const subtotal = precioMoneda * item.cantidad;
+        globalTotal += subtotal;
+        return {
+          producto_id: null,
+          material_id: null,
+          tipo_item: item.tipo_item,
+          cantidad: item.cantidad,
+          precio: precioMoneda,
+          descripcion_especifica: item.descripcion_especifica?.trim() || null,
+          observaciones: item.observaciones || null,
+          costo_materiales: item.tipo_item === 'REPARACION' ? Number(r?.costo_materiales || 0) * item.cantidad : null,
+          costo_mano_obra: item.tipo_item === 'REPARACION' ? Number(r?.costo_mano_obra || 0) * item.cantidad : null,
+          costo_gastos: item.tipo_item === 'REPARACION' ? Number(r?.costo_gastos_indirectos || 0) * item.cantidad : null,
+          costo_total: Number(r?.costo_total || 0) * item.cantidad,
+        };
+      }
       if (item.tipo_item === 'INSUMO') {
         // El material se lista en COP (moneda base); se convierte a la moneda
         // de la cotización igual que cualquier otro renglón.
@@ -1158,6 +1208,9 @@ export default function Cotizaciones() {
 
     // Auto-generate preview description in observaciones field
     const itemsDescription = items.map((item) => {
+      if (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') {
+        return `${item.cantidad}x ${item.descripcion_especifica?.trim() || (item.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio')}`;
+      }
       if (item.tipo_item === 'INSUMO') {
         const mat = materiales.find((m) => m.id === Number(item.material_id));
         return `${item.cantidad}x ${mat?.nombre || 'Insumo'}`;
@@ -1363,6 +1416,7 @@ export default function Cotizaciones() {
           precio: det.precio,
           ancho: det.ancho ?? undefined,
           largo: det.largo ?? undefined,
+          descripcion_especifica: det.descripcion_especifica ?? det.observaciones ?? undefined,
           observaciones: det.observaciones ?? undefined,
           es_obsequio: det.es_obsequio || undefined,
         }));
@@ -2049,6 +2103,24 @@ export default function Cotizaciones() {
                     </button>
                     <button
                       type="button"
+                      onClick={addItemReparacion}
+                      className="bg-white text-amber-700 border border-amber-600 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-amber-50 transition-all flex items-center gap-1.5 shadow-sm"
+                      title="Reparar/tapizar un mueble existente del cliente (entra al taller)"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>+ Reparación</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => addItemServicio('Flete / Envío')}
+                      className="bg-white text-stone-700 border border-stone-400 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-stone-50 transition-all flex items-center gap-1.5 shadow-sm"
+                      title="Cobro opcional de flete, envío, instalación u otro servicio"
+                    >
+                      <Truck className="w-3.5 h-3.5" />
+                      <span>+ Flete / Servicio</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={abrirNuevoProducto}
                       className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral text-xs font-bold px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-md hover:shadow"
                       title="Crear un producto nuevo (con foto y precio) y agregarlo al renglón"
@@ -2189,6 +2261,87 @@ export default function Cotizaciones() {
                       );
                     }
 
+                    // ── REPARACION / SERVICIO: pieza del cliente o cobro libre ──
+                    if (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') {
+                      const esReparacion = item.tipo_item === 'REPARACION';
+                      const precioManual = Number(item.calcResult?.precio_venta) || 0;
+                      const subtotal = precioManual * item.cantidad;
+                      const aplicarLibre = (precio: number, costo: number) => {
+                        updateItemField(index, 'calcResult', {
+                          costo_materiales: esReparacion ? costo : 0,
+                          costo_mano_obra: esReparacion ? costo : 0,
+                          costo_gastos_indirectos: 0,
+                          costo_total: costo,
+                          impuesto_porcentaje: 0,
+                          impuestos: 0,
+                          base_con_impuestos: precio,
+                          precio_sugerido: precio,
+                          precio_venta: precio,
+                          materiales_detalle: [],
+                          moneda_codigo: currencyCode,
+                        });
+                      };
+                      return (
+                        <div key={index} className="bg-white p-4 rounded-2xl border border-yeikar-secondary-light/15 relative space-y-3 shadow-sm border-l-4 border-l-amber-500">
+                          <div className="flex items-center justify-between border-b border-yeikar-secondary-light/10 pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-amber-600 text-white text-[10px] font-bold flex items-center justify-center font-mono">{index + 1}</span>
+                              <span className="text-xs font-bold font-headline text-stone-700 uppercase tracking-wider">Renglón {index + 1}</span>
+                              <span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-md ${esReparacion ? 'bg-amber-100 text-amber-800' : 'bg-stone-100 text-stone-700'}`}>
+                                {esReparacion ? 'Reparación' : 'Servicio'}
+                              </span>
+                              {!esReparacion && (
+                                <span className="text-[9px] text-stone-400">Cobro opcional (flete, instalación…)</span>
+                              )}
+                            </div>
+                            <button type="button" onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700 text-xs font-bold hover:bg-red-50 px-2 py-0.5 rounded-md transition-colors">Eliminar</button>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                              {esReparacion ? 'Mueble a reparar / trabajo a realizar *' : 'Descripción del servicio (p. ej. flete a zona) *'}
+                            </label>
+                            <textarea
+                              value={item.descripcion_especifica || ''}
+                              onChange={(e) => updateItemField(index, 'descripcion_especifica', e.target.value)}
+                              rows={2}
+                              placeholder={esReparacion ? 'Ej: Tapizar sofá de 3 puestos con tela lino beige y retapizar cojines' : 'Ej: Flete / Envío de mueble a distancia'}
+                              className="w-full p-2 border border-stone-200 rounded-lg bg-white text-sm focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 items-end">
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Cantidad</label>
+                              <input type="number" min="1" value={item.cantidad}
+                                onChange={(e) => updateItemField(index, 'cantidad', parseInt(e.target.value) || 1)}
+                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Precio de venta *</label>
+                              <input type="number" step="0.01" min="0" value={precioManual > 0 ? precioManual : ''} placeholder={`${currencyCode}`}
+                                onChange={(e) => aplicarLibre(parseFloat(e.target.value) || 0, Number(item.calcResult?.costo_total) || 0)}
+                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Costo estimado (COP)</label>
+                              <input type="number" step="0.01" min="0" value={(item.calcResult?.costo_total && item.calcResult.costo_total > 0) ? Number(item.calcResult.costo_total) : ''}
+                                placeholder="Opcional"
+                                onChange={(e) => aplicarLibre(precioManual, parseFloat(e.target.value) || 0)}
+                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono" />
+                            </div>
+                            <div className="text-right">
+                              <span className="text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline">Subtotal</span>
+                              <div className="text-sm font-bold font-mono text-yeikar-secondary">{formatCurrency(subtotal, currencyCode)}</div>
+                            </div>
+                          </div>
+                          {esReparacion && (
+                            <p className="text-[11px] text-amber-800/80 bg-amber-50/60 border border-amber-100 rounded-lg px-3 py-1.5">
+                              El mueble entra al taller (Tapicería, etc.): al finalizar la orden se conocerá el costo real y el margen se compara con este estimado.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    }
+
                     // ── FABRICADO / REVENTA ──
                     const basePrecio = Number(selectedProd?.precio_venta_base ?? selectedProd?.precio_costo_base ?? 0);
                     const monedaExtranjera = selectedProd?.moneda && selectedProd.moneda.codigo !== 'COP' ? selectedProd.moneda.codigo : null;
@@ -2212,20 +2365,20 @@ export default function Cotizaciones() {
                             </span>
                             <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-yeikar-tertiary text-yeikar-secondary border border-yeikar-secondary-light/10">
                                 {esItemStock(selectedProd) ? 'De stock' : 'Fabricado'}
+                            </span>
+                            {item.es_obsequio && (
+                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
+                                Obsequio promo
                               </span>
-                              {item.es_obsequio && (
-                                <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
-                                  Obsequio promo
-                                </span>
-                              )}
-                              {promoColchon && (
-                                <span
-                                  className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200"
-                                  title="Promoción: por este colchón el cliente se lleva el plástico sin costo"
-                                >
-                                  Incluye obsequio: {promoColchon.obsequio_nombre}
-                                </span>
-                              )}
+                            )}
+                            {promoColchon && (
+                              <span
+                                className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200"
+                                title="Promoción: por este colchón el cliente se lleva el plástico sin costo"
+                              >
+                                Incluye obsequio: {promoColchon.obsequio_nombre}
+                              </span>
+                            )}
                               {item.calcResult?.fuente_precio === 'estimado_sin_estructura' && (
                                 <span
                                   className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-yeikar-primary/10 text-yeikar-primary-dark border border-yeikar-primary/25"
@@ -2473,7 +2626,8 @@ export default function Cotizaciones() {
                       <p className="text-xs text-stone-500 max-w-sm mx-auto leading-relaxed">
                         Usá los botones de arriba para armar la cotización:{' '}
                         <b>+ Mueble</b> (catálogo), <b>+ Reventa</b> (stock), <b>+ Exhibición</b> (showroom),{' '}
-                        <b>+ Insumo</b> (material suelto) o <b>+ Producto nuevo</b> (crear y cotizar al instante).
+                        <b>+ Insumo</b> (material suelto), <b>+ Reparación</b>, <b>+ Flete/Servicio</b> o{' '}
+                        <b>+ Producto nuevo</b> (crear y cotizar al instante).
                       </p>
                     </div>
                   )}
@@ -2552,10 +2706,11 @@ export default function Cotizaciones() {
                         const mat = item.tipo_item === 'INSUMO'
                           ? materiales.find(m => m.id === Number(item.material_id))
                           : null;
-                        const label = mat?.nombre || prod?.nombre || 'Renglón';
+                        const libre = (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') ? item.descripcion_especifica?.trim() : null;
+                        const label = libre || mat?.nombre || prod?.nombre || 'Renglón';
                         return (
                           <option key={idx} value={idx} className="bg-yeikar-neutral text-yeikar-tertiary">
-                            Renglón {idx + 1}: {label}{item.tipo_item !== 'INSUMO' ? ` (${item.ancho}x${item.largo}m)` : ' (Insumo)'}
+                            Renglón {idx + 1}: {label}{item.tipo_item === 'INSUMO' ? ' (Insumo)' : (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') ? ` (${item.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'})` : ` (${item.ancho}x${item.largo}m)`}
                           </option>
                         );
                       })}
@@ -2999,7 +3154,9 @@ export default function Cotizaciones() {
                           ...d,
                           // Sin producto ni insumo (importación histórica): la
                           // descripción ES el nombre — fusionados en un solo campo.
-                          producto_nombre: prod?.nombre ?? mat?.nombre ?? d.observaciones ?? 'Ítem a medida',
+                          producto_nombre: (d.tipo_item === 'REPARACION' || d.tipo_item === 'SERVICIO')
+                          ? (d.descripcion_especifica || d.observaciones || (d.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+                          : (prod?.nombre ?? mat?.nombre ?? d.observaciones ?? 'Ítem a medida'),
                           foto: prod?.fotos?.[0]?.url ?? null,
                         };
                       }) ?? [],

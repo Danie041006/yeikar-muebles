@@ -15,7 +15,7 @@ import {
   type DataColumn,
 } from '../components/ui';
 import { useToast } from '../context/ToastContext';
-import { pedidoService, Order } from '../services/pedidoService';
+import { pedidoService, Order, RentabilidadPedido } from '../services/pedidoService';
 
 export default function Pedidos() {
   const navigate = useNavigate();
@@ -30,6 +30,19 @@ export default function Pedidos() {
   const [error, setError] = useState('');
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [rentabilidad, setRentabilidad] = useState<RentabilidadPedido | null>(null);
+  const [rentabilidadLoading, setRentabilidadLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selectedOrder) { setRentabilidad(null); return; }
+    let active = true;
+    setRentabilidadLoading(true);
+    pedidoService.getRentabilidad(selectedOrder.id)
+      .then((r) => { if (active) setRentabilidad(r); })
+      .catch(() => { if (active) setRentabilidad(null); })
+      .finally(() => { if (active) setRentabilidadLoading(false); });
+    return () => { active = false; };
+  }, [selectedOrder]);
 
   // Deep-link ?pedido=N (desde una cotización convertida): carga la lista y
   // abre el detalle de ese pedido al llegar. Si no está en el listado visible
@@ -142,10 +155,11 @@ export default function Pedidos() {
     CANCELADO: 'Cancelado',
   };
 
-  // Un pedido "sin producción" no tiene líneas FABRICADO (solo reventa,
-  // insumos o piezas de exhibición): no pasa por PRODUCCION.
+  // Un pedido "sin producción" no tiene líneas a fabricar/reparar (solo
+  // reventa, insumos, servicios o piezas de exhibición): no pasa por PRODUCCION.
+  const esProducible = (tipo?: string) => (tipo || 'FABRICADO') === 'FABRICADO' || (tipo || 'FABRICADO') === 'REPARACION';
   const tieneFabricables = (order: Order) =>
-    (order.detalles ?? []).some((d) => (d.tipo_item || 'FABRICADO') === 'FABRICADO');
+    (order.detalles ?? []).some((d) => esProducible(d.tipo_item));
 
   const opcionesEstado = (estado: string, order?: Order) => {
     const sinProduccion = order ? !tieneFabricables(order) : false;
@@ -464,9 +478,11 @@ export default function Pedidos() {
                       <div className="flex justify-between font-headline font-bold text-sm">
                         <span className="flex items-center gap-2">
                           <span className="text-yeikar-secondary">
-                            {det.tipo_item === 'INSUMO'
-                              ? det.material?.nombre || `Material #${det.material_id}`
-                              : det.producto?.nombre || 'Producto Personalizado'}
+                            {(det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+                              ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+                              : det.tipo_item === 'INSUMO'
+                                ? det.material?.nombre || `Material #${det.material_id}`
+                                : det.producto?.nombre || 'Producto Personalizado'}
                           </span>
                           {det.tipo_item === 'INSUMO' ? (
                             <span
@@ -474,6 +490,20 @@ export default function Pedidos() {
                               title="Insumo de inventario: descuenta stock, no pasa por producción"
                             >
                               Insumo
+                            </span>
+                          ) : det.tipo_item === 'REPARACION' ? (
+                            <span
+                              className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                              title="Reparación de un mueble existente: entra al taller"
+                            >
+                              Reparación
+                            </span>
+                          ) : det.tipo_item === 'SERVICIO' ? (
+                            <span
+                              className="bg-stone-50 text-stone-700 border border-stone-200 px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider"
+                              title="Servicio cobrado (flete, instalación…)"
+                            >
+                              Servicio
                             </span>
                           ) : det.es_obsequio ? (
                             <span
@@ -502,11 +532,13 @@ export default function Pedidos() {
                           ${Number(det.precio).toLocaleString()} COP
                         </span>
                       </div>
-                      <div className="grid grid-cols-3 text-xs text-yeikar-neutral/50 font-mono">
-                        <div>Ancho: {det.ancho}m</div>
-                        <div>Largo: {det.largo}m</div>
-                        <div>Cantidad: {det.cantidad}</div>
-                      </div>
+                      {det.tipo_item !== 'SERVICIO' && (
+                        <div className="grid grid-cols-3 text-xs text-yeikar-neutral/50 font-mono">
+                          <div>Ancho: {det.ancho}m</div>
+                          <div>Largo: {det.largo}m</div>
+                          <div>Cantidad: {det.cantidad}</div>
+                        </div>
+                      )}
                       {det.observaciones && (
                         <p className="text-xs text-yeikar-neutral/60 italic mt-1 border-t border-yeikar-secondary-light/5 pt-1">
                           {det.observaciones}
@@ -519,6 +551,53 @@ export default function Pedidos() {
                 )}
               </div>
             </div>
+
+            {rentabilidad && (
+              <div className="rounded-2xl border border-yeikar-secondary-light/15 bg-yeikar-tertiary/20 p-4 space-y-2">
+                <h4 className="font-headline font-bold text-sm text-yeikar-secondary uppercase tracking-wider flex items-center gap-2">
+                  Margen del Pedido
+                  {rentabilidad.tiene_produccion && (
+                    <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800">real vs estimado</span>
+                  )}
+                </h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs font-mono">
+                  <div>
+                    <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Total cobrado</span>
+                    <b className="text-yeikar-secondary">${rentabilidad.total_cobrado_base.toLocaleString()} COP</b>
+                  </div>
+                  <div>
+                    <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Costo estimado</span>
+                    <b className="text-yeikar-primary-dark">${rentabilidad.costo_estimado_produccion.toLocaleString()} COP</b>
+                  </div>
+                  <div>
+                    <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Costo real (producción)</span>
+                    <b className="text-yeikar-primary-dark">${rentabilidad.costo_real_produccion.toLocaleString()} COP</b>
+                  </div>
+                  {rentabilidad.flete_real_base > 0 && (
+                    <div>
+                      <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Flete real</span>
+                      <b className="text-yeikar-primary-dark">${rentabilidad.flete_real_base.toLocaleString()} COP</b>
+                    </div>
+                  )}
+                  <div>
+                    <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Margen estimado</span>
+                    <b className={rentabilidad.margen_estimado >= 0 ? 'text-emerald-600' : 'text-red-600'}>${rentabilidad.margen_estimado.toLocaleString()} COP</b>
+                  </div>
+                  <div>
+                    <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Margen real</span>
+                    <b className={rentabilidad.margen_real >= 0 ? 'text-emerald-600' : 'text-red-600'}>${rentabilidad.margen_real.toLocaleString()} COP</b>
+                  </div>
+                </div>
+                {rentabilidad.diferencia_costo !== 0 && (
+                  <p className={`text-[11px] ${rentabilidad.diferencia_costo > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    El costo real difiere del estimado en {rentabilidad.diferencia_costo > 0 ? '+' : ''}{rentabilidad.diferencia_costo.toLocaleString()} COP.
+                  </p>
+                )}
+              </div>
+            )}
+            {rentabilidadLoading && (
+              <div className="text-xs text-yeikar-neutral/50 animate-pulse">Calculando margen…</div>
+            )}
           </div>
         )}
       </Modal>

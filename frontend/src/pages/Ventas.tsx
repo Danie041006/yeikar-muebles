@@ -1023,7 +1023,13 @@ function ModalDetalle({
                           {d.tipo_item === 'REVENTA' && !esItemAMedida(d) && (
                             <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200">Reventa</span>
                           )}
-                          {esItemAMedida(d) && (
+                          {d.tipo_item === 'REPARACION' && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">Reparación</span>
+                          )}
+                          {d.tipo_item === 'SERVICIO' && (
+                            <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-stone-50 text-stone-700 border border-stone-200">Servicio</span>
+                          )}
+                          {esItemAMedida(d) && d.tipo_item !== 'REPARACION' && d.tipo_item !== 'SERVICIO' && (
                             <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">A medida</span>
                           )}
                         </span>

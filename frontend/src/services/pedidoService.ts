@@ -2,12 +2,14 @@ import api from './api';
 import { Client } from './clienteService';
 import { Product } from './cotizacionService';
 
+export type TipoItem = 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
+
 export interface OrderDetail {
   id: number;
   pedido_id: number;
   producto_id?: number | null;
   material_id?: number | null;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: TipoItem;
   cantidad: number;
   precio: number;
   alto?: number;
@@ -45,7 +47,7 @@ export interface OrderUpdate {
 export interface ConvertDetail {
   producto_id?: number | null;
   material_id?: number | null;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: TipoItem;
   cantidad: number;
   precio: number;
   alto?: number;
@@ -56,6 +58,22 @@ export interface ConvertDetail {
   descripcion_especifica?: string;
   observaciones?: string;
   es_obsequio?: boolean;
+}
+
+export interface RentabilidadPedido {
+  pedido_id: number;
+  moneda_id: number;
+  moneda_codigo?: string | null;
+  total_cobrado: number;
+  total_cobrado_base: number;
+  costo_estimado_produccion: number;
+  costo_real_produccion: number;
+  diferencia_costo: number;
+  flete_cobrado_base: number;
+  flete_real_base: number;
+  margen_estimado: number;
+  margen_real: number;
+  tiene_produccion: boolean;
 }
 
 export interface ConvertQuoteBody {
@@ -85,6 +103,11 @@ export const pedidoService = {
 
   getById: async (id: number): Promise<Order> => {
     const response = await api.get<Order>(`/pedido/${id}`);
+    return response.data;
+  },
+
+  getRentabilidad: async (id: number): Promise<RentabilidadPedido> => {
+    const response = await api.get<RentabilidadPedido>(`/pedido/${id}/rentabilidad`);
     return response.data;
   },
 

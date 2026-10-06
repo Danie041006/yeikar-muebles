@@ -17,6 +17,56 @@ from app.core.state_machine import (
 )
 from app.core.hora_ve import hoy_ve
 
+# Tipos de línea que entran a producción (fabricar un mueble nuevo o reparar
+# uno existente). REPARACION crea una OrdenProduccion SIN producto (la pieza es
+# del cliente); SERVICIO (flete/instalación) NO se fabrica.
+def _es_producible(tipo_item) -> bool:
+    return (tipo_item or "FABRICADO") in ("FABRICADO", "REPARACION")
+
+
+def _auto_agregar_obsequios(db: Session, db_pedido: model.Pedido, detalles_dicts: list):
+    """Promo obsequio: por cada renglón REVENTA cuyo producto tenga una promo
+    activa se agrega 1 obsequio por unidad comprada (precio 0, es_obsequio=True).
+
+    Idempotente: si el renglón del obsequio ya existe (venga marcado o no) no
+    se duplica. Si varios colchones comparten el mismo plástico, sus cantidades
+    se acumulan en UNA sola línea de regalo. Corre DESPUÉS de crear los
+    detalles y antes del flush/venta final.
+    """
+    from app.modules.productos.model import PromocionObsequio
+
+    promos = {
+        p.colchon_id: p.obsequio_id
+        for p in db.query(PromocionObsequio).filter(PromocionObsequio.activo.is_(True)).all()
+    }
+    if not promos:
+        return
+    presentes = {d.producto_id for d in db_pedido.detalles if d.producto_id}
+    pendientes: dict[int, float] = {}
+    for det in detalles_dicts:
+        producto_id = det.get("producto_id")
+        if not producto_id:
+            continue
+        if det.get("tipo_item", "FABRICADO") != "REVENTA":
+            continue
+        obsequio_id = promos.get(producto_id)
+        if obsequio_id is None or obsequio_id in presentes:
+            continue
+        pendientes[obsequio_id] = pendientes.get(obsequio_id, 0.0) + float(det.get("cantidad", 1) or 1)
+    for obsequio_id, cantidad in pendientes.items():
+        # append a la relación (no solo db.add): la factura automática de la
+        # conversión se construye con pedido.detalles en la MISMA transacción
+        # y sin esto el regalo no llegaría a la venta/descuento de stock.
+        db_pedido.detalles.append(model.DetallePedido(
+            producto_id=obsequio_id,
+            tipo_item="REVENTA",
+            cantidad=cantidad,
+            precio=0.0,
+            descripcion_especifica="OBSEQUIO PROMO",
+            es_obsequio=True,
+        ))
+
+
 def _snapshot(pedido: model.Pedido) -> dict:
     return {
         "cotizacion_id": pedido.cotizacion_id,
@@ -202,10 +252,7 @@ def actualizar_pedido(
         # puede ir APROBADO → TERMINADO directamente. Con fabricables se exige
         # el flujo normal (PRODUCCION → TERMINADO).
         if estado_anterior == "APROBADO" and nuevo_estado == "TERMINADO":
-            fabricables = [
-                d for d in db_pedido.detalles
-                if (d.tipo_item or "FABRICADO") == "FABRICADO"
-            ]
+            fabricables = [d for d in db_pedido.detalles if _es_producible(d.tipo_item)]
             if fabricables:
                 raise ValueError(
                     "Este pedido tiene muebles a fabricar: debe pasar por PRODUCCION "
@@ -218,10 +265,7 @@ def actualizar_pedido(
         # bloquear el cierre del pedido.
         if estado_anterior == "PRODUCCION" and nuevo_estado == "TERMINADO":
             from app.modules.production.model import OrdenProduccion
-            detalles_fabricables = [
-                d for d in db_pedido.detalles
-                if (d.tipo_item or "FABRICADO") == "FABRICADO"
-            ]
+            detalles_fabricables = [d for d in db_pedido.detalles if _es_producible(d.tipo_item)]
             n_ordenes_finalizadas = db.query(OrdenProduccion).join(
                 model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id
             ).filter(
@@ -253,7 +297,7 @@ def actualizar_pedido(
         from datetime import date
 
         for detalle in db_pedido.detalles:
-            if (detalle.tipo_item or "FABRICADO") != "FABRICADO":
+            if not _es_producible(detalle.tipo_item):
                 continue
             existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
             if not existente:
@@ -431,8 +475,13 @@ def convertir_cotizacion_a_pedido(
         cantidad_enviada = float(detalle_dict.get("cantidad", 0) or 0)
         cantidad_cotizada = float(dc.cantidad)
         if abs(precio_enviado - precio_cotizado) > 0.01 or abs(cantidad_enviada - cantidad_cotizada) > 0.001:
+            # Muebles a la medida: producto_id y material_id son NULL, así que
+            # no hay id que mostrar. Antes `ref` quedaba sin asignar y el
+            # mensaje de error reventaba con UnboundLocalError.
+            ref = detalle_dict.get("material_id") or detalle_dict.get("producto_id")
+            ref_txt = f"id={ref}" if ref else "personalizado (sin producto asociado)"
             raise ValueError(
-                f"El ítem (tipo={tipo}, id={ref}) no coincide con la cotización: "
+                f"El ítem ({ref_txt}) no coincide con la cotización: "
                 f"se cotizó {cantidad_cotizada:g} × {precio_cotizado:,.2f} y se envía "
                 f"{cantidad_enviada:g} × {precio_enviado:,.2f}. "
                 "El pedido debe copiar exactamente los precios y cantidades cotizados."
@@ -488,8 +537,7 @@ def convertir_cotizacion_a_pedido(
     # a fabricar (reventa/insumos/exhibición) nace APROBADO: no tiene
     # producción, y desde ahí va directo a TERMINADO (envío automático).
     tiene_fabricables = any(
-        (d.get("tipo_item", "FABRICADO") if isinstance(d, dict) else (d.tipo_item or "FABRICADO"))
-        == "FABRICADO"
+        _es_producible(d.get("tipo_item", "FABRICADO") if isinstance(d, dict) else d.tipo_item)
         for d in detalles
     )
     estado_pedido = "PRODUCCION" if tiene_fabricables else "APROBADO"
@@ -506,42 +554,60 @@ def convertir_cotizacion_a_pedido(
     db.add(db_pedido)
     db.flush()
 
-    for detalle in detalles:
+    cotizacion_detalles = db_cotizacion.detalles or []
+    for idx, detalle in enumerate(detalles):
         detalle_dict = dict(detalle) if isinstance(detalle, dict) else detalle.model_dump()
         tipo = detalle_dict.get("tipo_item", "FABRICADO")
-        # Validar que el producto o material exista
+        dc_cot = cotizacion_detalles[idx] if idx < len(cotizacion_detalles) else None
+        # Validar que el producto o material exista (REPARACION/SERVICIO no
+        # referencian producto ni material: la pieza es del cliente o es un
+        # cobro de flete/instalación).
         if tipo == "INSUMO":
             from app.modules.productos.model import Material as MaterialModel
             if not db.query(MaterialModel.id).filter(MaterialModel.id == detalle_dict.get("material_id")).first():
                 raise ValueError(f"El material con id {detalle_dict.get('material_id')} no existe.")
-        else:
+        elif tipo not in ("REPARACION", "SERVICIO"):
             from app.modules.productos.model import Producto as ProductoModel
             if not db.query(ProductoModel.id).filter(ProductoModel.id == detalle_dict.get("producto_id")).first():
                 raise ValueError(f"El producto con id {detalle_dict.get('producto_id')} no existe.")
         # Costo y dimensiones: FABRICADO/REVENTA toman el costo de la
         # cotización; INSUMO también propaga su costo real (compra + pasada,
         # que el frontend guarda en costo_total en COP), dividido por la
-        # cantidad para obtener el costo unitario. Las dimensiones solo
-        # aplican a FABRICADO/REVENTA.
+        # cantidad para obtener el costo unitario. REPARACION/SERVICIO toman el
+        # costo total de su renglón por posición (no tienen producto que
+        # identificar). Las dimensiones solo aplican a FABRICADO/REVENTA/REPARACION.
         if detalle_dict.get("costo_unitario") is None:
-            for dc in (db_cotizacion.detalles or []):
-                if (dc.producto_id == detalle_dict.get("producto_id")
-                        and dc.material_id == detalle_dict.get("material_id")
-                        and dc.costo_total):
-                    if tipo == "INSUMO" and dc.cantidad:
-                        detalle_dict["costo_unitario"] = float(dc.costo_total) / float(dc.cantidad)
-                    else:
-                        detalle_dict["costo_unitario"] = float(dc.costo_total)
-                    break
-        if tipo != "INSUMO":
-            if detalle_dict.get("ancho") is None or detalle_dict.get("largo") is None:
-                for dc in (db_cotizacion.detalles or []):
-                    if dc.producto_id == detalle_dict.get("producto_id"):
-                        if detalle_dict.get("ancho") is None:
-                            detalle_dict["ancho"] = float(dc.ancho) if dc.ancho else None
-                        if detalle_dict.get("largo") is None:
-                            detalle_dict["largo"] = float(dc.largo) if dc.largo else None
+            dc_matched = None
+            if tipo in ("REPARACION", "SERVICIO"):
+                if dc_cot and dc_cot.costo_total:
+                    dc_matched = dc_cot
+            else:
+                for dc in cotizacion_detalles:
+                    if (dc.producto_id == detalle_dict.get("producto_id")
+                            and dc.material_id == detalle_dict.get("material_id")
+                            and dc.costo_total):
+                        dc_matched = dc
                         break
+            if dc_matched:
+                if tipo == "INSUMO" and dc_matched.cantidad:
+                    detalle_dict["costo_unitario"] = float(dc_matched.costo_total) / float(dc_matched.cantidad)
+                else:
+                    detalle_dict["costo_unitario"] = float(dc_matched.costo_total)
+        if tipo not in ("INSUMO", "SERVICIO"):
+            if detalle_dict.get("ancho") is None or detalle_dict.get("largo") is None:
+                dc_dims = None
+                if tipo == "REPARACION":
+                    dc_dims = dc_cot
+                else:
+                    for dc in cotizacion_detalles:
+                        if dc.producto_id == detalle_dict.get("producto_id"):
+                            dc_dims = dc
+                            break
+                if dc_dims:
+                    if detalle_dict.get("ancho") is None:
+                        detalle_dict["ancho"] = float(dc_dims.ancho) if dc_dims.ancho else None
+                    if detalle_dict.get("largo") is None:
+                        detalle_dict["largo"] = float(dc_dims.largo) if dc_dims.largo else None
         if not detalle_dict.get("porcentaje_ganancia"):
             costo = detalle_dict.get("costo_unitario")
             precio = detalle_dict.get("precio", 0.0)
@@ -570,12 +636,13 @@ def convertir_cotizacion_a_pedido(
     ])
 
     # El pedido nació en PRODUCCION: generar las órdenes de producción de las
-    # líneas FABRICADO (REVENTA/INSUMO no se fabrican). Mismo criterio que
-    # actualizar_pedido al pasar a PRODUCCION, pero sin paso intermedio.
+    # líneas FABRICADO/REPARACION (REVENTA/INSUMO/SERVICIO no se fabrican).
+    # Mismo criterio que actualizar_pedido al pasar a PRODUCCION, pero sin paso
+    # intermedio. Las órdenes de REPARACION quedan SIN producto (pieza del cliente).
     if estado_pedido == "PRODUCCION":
         from app.modules.production.model import OrdenProduccion
         for detalle in db_pedido.detalles:
-            if (detalle.tipo_item or "FABRICADO") != "FABRICADO":
+            if not _es_producible(detalle.tipo_item):
                 continue
             existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
             if not existente:
@@ -638,3 +705,81 @@ def convertir_cotizacion_a_pedido(
     db.commit()
     db.refresh(db_pedido)
     return db_pedido
+
+
+def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
+    """Costo real vs estimado de un pedido para conocer el margen real.
+
+    - Costo estimado de producción: Σ DetallePedido.costo_unitario × cantidad
+      (lo que se cotizó, en moneda base).
+    - Costo real de producción: Σ CostoProduccion.costo_total de las órdenes
+      FABRICADO/REPARACION del pedido (materiales + MO + gastos de sección).
+    - Flete real: costo del envío en moneda base (opcional).
+    Todo lo que no está en moneda base se convierte con la TRM congelada del
+    pedido (costo_unitario del detalle ya vive en COP)."""
+    from app.modules.sales.model import Venta
+    from app.modules.production.model import OrdenProduccion, CostoProduccion
+    from app.modules.envios.model import Envio
+    from app.modules.catalogos.model import Moneda
+
+    pedido = db.query(model.Pedido).filter(model.Pedido.id == id_pedido).first()
+    if not pedido:
+        return None
+
+    venta = db.query(Venta).filter(Venta.pedido_id == id_pedido).first()
+    moneda_id = venta.moneda_id if venta else 1
+    trm = float(venta.tasa_cambio) if venta and venta.tasa_cambio else 1.0
+    moneda_codigo = None
+    if moneda_id != 1:
+        m = db.query(Moneda).filter(Moneda.id == moneda_id).first()
+        moneda_codigo = m.codigo if m else None
+
+    total_cobrado = 0.0
+    costo_estimado = 0.0
+    flete_cobrado_base = 0.0
+    for dp in pedido.detalles:
+        total_cobrado += float(dp.cantidad) * float(dp.precio)
+        if dp.costo_unitario is not None:
+            costo_estimado += float(dp.costo_unitario) * float(dp.cantidad)
+        if (dp.tipo_item or "FABRICADO") == "SERVICIO":
+            flete_cobrado_base += float(dp.cantidad) * float(dp.precio) * trm
+
+    # Costo real de producción: sumar los costos finalizados de las órdenes.
+    costo_real = 0.0
+    n_ordenes = 0
+    ordenes = (
+        db.query(OrdenProduccion)
+        .join(model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id)
+        .filter(model.DetallePedido.pedido_id == id_pedido)
+        .all()
+    )
+    for orden in ordenes:
+        n_ordenes += 1
+        costo = db.query(CostoProduccion).filter(
+            CostoProduccion.orden_produccion_id == orden.id
+        ).first()
+        if costo and costo.costo_total is not None:
+            costo_real += float(costo.costo_total)
+
+    envio = db.query(Envio).filter(Envio.pedido_id == id_pedido).first()
+    flete_real_base = float(envio.costo_flete_en_moneda_base) if envio and envio.costo_flete_en_moneda_base else 0.0
+
+    total_cobrado_base = total_cobrado * trm
+    margen_estimado = total_cobrado_base - costo_estimado
+    margen_real = total_cobrado_base - costo_real - flete_real_base
+
+    return schemas.RentabilidadPedidoResponse(
+        pedido_id=pedido.id,
+        moneda_id=moneda_id,
+        moneda_codigo=moneda_codigo,
+        total_cobrado=round(total_cobrado, 2),
+        total_cobrado_base=round(total_cobrado_base, 2),
+        costo_estimado_produccion=round(costo_estimado, 2),
+        costo_real_produccion=round(costo_real, 2),
+        diferencia_costo=round(costo_real - costo_estimado, 2),
+        flete_cobrado_base=round(flete_cobrado_base, 2),
+        flete_real_base=round(flete_real_base, 2),
+        margen_estimado=round(margen_estimado, 2),
+        margen_real=round(margen_real, 2),
+        tiene_produccion=n_ordenes > 0,
+    )

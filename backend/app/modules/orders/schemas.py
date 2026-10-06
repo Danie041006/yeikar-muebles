@@ -8,7 +8,7 @@ from app.modules.quotes.schemas import CotizacionResponse
 class DetallePedidoBase(BaseModel):
     producto_id: Optional[int] = None
     material_id: Optional[int] = None
-    tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO)$")
+    tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO|REPARACION|SERVICIO)$")
     cantidad: float = Field(gt=0)
     precio: float = Field(ge=0)
     costo_unitario: Optional[float] = Field(None, ge=0)
@@ -34,6 +34,13 @@ class DetallePedidoCreate(DetallePedidoBase):
                 raise ValueError("material_id es requerido para tipo_item INSUMO")
             if self.producto_id:
                 raise ValueError("producto_id no debe enviarse para tipo_item INSUMO")
+        elif self.tipo_item in ("REPARACION", "SERVICIO"):
+            if self.producto_id:
+                raise ValueError("producto_id no debe enviarse para tipo_item REPARACION/SERVICIO")
+            if self.material_id:
+                raise ValueError("material_id no debe enviarse para tipo_item REPARACION/SERVICIO")
+            if not (self.descripcion_especifica or self.observaciones):
+                raise ValueError("La descripción es obligatoria para tipo_item REPARACION/SERVICIO")
         else:
             if not self.producto_id:
                 raise ValueError("producto_id es requerido para tipo_item FABRICADO/REVENTA")
@@ -98,3 +105,23 @@ class ConvertirCotizacionBody(BaseModel):
     tasa_cambio_adelanto: Optional[float] = None
     # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE | BINANCE
     metodo_pago: Optional[str] = None
+
+
+class RentabilidadPedidoResponse(BaseModel):
+    """Compara el costo ESTIMADO (de la cotización) con el costo REAL (producción
+    + flete) de un pedido, para conocer el margen real. Todo expresado en moneda
+    base (COP) salvo `total_cobrado`, que va en la moneda del pedido."""
+
+    pedido_id: int
+    moneda_id: int
+    moneda_codigo: Optional[str] = None
+    total_cobrado: float = 0.0
+    total_cobrado_base: float = 0.0
+    costo_estimado_produccion: float = 0.0
+    costo_real_produccion: float = 0.0
+    diferencia_costo: float = 0.0
+    flete_cobrado_base: float = 0.0
+    flete_real_base: float = 0.0
+    margen_estimado: float = 0.0
+    margen_real: float = 0.0
+    tiene_produccion: bool = False

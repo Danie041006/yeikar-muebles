@@ -1,6 +1,7 @@
 import api from './api';
 import { Order } from './pedidoService';
 import { Empleado } from './produccionService';
+import type { Moneda } from './cotizacionService';
 export interface Envio {
   id: number;
   pedido_id: number;
@@ -11,6 +12,10 @@ export interface Envio {
   direccion_entrega?: string | null;
   guia_despacho?: string | null;
   observaciones?: string | null;
+  costo_flete?: number | null;
+  moneda_flete_id?: number | null;
+  tasa_cambio_flete?: number | null;
+  costo_flete_en_moneda_base?: number | null;
   created_at?: string;
   updated_at?: string;
   creado_por_id?: number | null;
@@ -20,6 +25,7 @@ export interface Envio {
   asignado_por_nombre?: string | null;
   pedido?: Order;
   empleado?: Empleado | null;
+  moneda_flete?: Moneda | null;
 }
 
 export interface EnvioUbicacion {
@@ -46,6 +52,9 @@ export interface EnvioUpdate {
   direccion_entrega?: string | null;
   guia_despacho?: string | null;
   observaciones?: string | null;
+  costo_flete?: number | null;
+  moneda_flete_id?: number | null;
+  tasa_cambio_flete?: number | null;
 }
 
 export interface ClienteReparto {
@@ -72,13 +81,14 @@ export interface DetallePedidoReparto {
   /** INSUMO vendido suelto: producto_id null, material_id presente. */
   producto_id?: number | null;
   material_id?: number | null;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   cantidad: number;
   alto?: number | null;
   ancho?: number | null;
   largo?: number | null;
   color?: string | null;
   acabado?: string | null;
+  descripcion_especifica?: string | null;
   observaciones?: string | null;
   producto?: ProductoReparto | null;
   material?: MaterialReparto | null;

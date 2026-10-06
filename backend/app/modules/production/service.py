@@ -248,6 +248,11 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuari
             f"El producto '{detalle.producto.nombre}' no entra a producción desde un pedido. "
             "Su venta descuenta stock del inventario al facturar."
         )
+    # SERVICIO (flete/instalación) no se fabrica: nunca genera orden de producción.
+    if (detalle.tipo_item or "FABRICADO") == "SERVICIO":
+        raise ValueError("Una línea SERVICIO no entra a producción.")
+    # REPARACION: la pieza ya existe (es del cliente), así que la orden va SIN
+    # producto. El taller registra materiales y mano de obra libres en las etapas.
 
     # Verificar si ya existe una orden de producción para este detalle
     existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle_pedido_id).first()
@@ -414,14 +419,15 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
             pedido = db.query(Pedido).filter(Pedido.id == detalle.pedido_id).with_for_update().first()
             if pedido:
                 # C3: TODAS las líneas FABRICABLES del pedido deben tener su orden
-                # FINALIZADA. Las de REVENTA/INSUMO/EXHIBICIÓN no entran a
-                # producción (se venden/despachan del inventario), así que no
+                # FINALIZADA. Las de REVENTA/INSUMO/SERVICIO/EXHIBICIÓN no entran
+                # a producción (se venden/despachan del inventario), así que no
                 # bloquean el cierre: igual que la ruta manual de actualizar_pedido.
                 # (Antes contaba TODAS las líneas: un pedido mixto nunca terminaba.)
                 n_detalles = db.query(DetallePedido).filter(
                     DetallePedido.pedido_id == pedido.id,
                     or_(
                         DetallePedido.tipo_item == "FABRICADO",
+                        DetallePedido.tipo_item == "REPARACION",
                         DetallePedido.tipo_item.is_(None),
                     ),
                 ).count()

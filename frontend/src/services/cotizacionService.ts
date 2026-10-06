@@ -38,12 +38,13 @@ export interface QuoteDetail {
   cotizacion_id?: number;
   producto_id?: number | null;
   material_id?: number | null;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   cantidad: number;
   precio: number;
   alto?: number | null;
   ancho?: number | null;
   largo?: number | null;
+  descripcion_especifica?: string | null;
   observaciones?: string | null;
   costo_materiales?: number | null;
   costo_mano_obra?: number | null;

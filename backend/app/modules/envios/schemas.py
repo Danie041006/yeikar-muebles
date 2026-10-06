@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import List, Optional
 from app.modules.orders.schemas import PedidoResponse
 from app.modules.empleados.schemas import EmpleadoResponse
+from app.modules.catalogos.schemas import MonedaResponse
 
 
 class EnvioBase(BaseModel):
@@ -14,6 +15,12 @@ class EnvioBase(BaseModel):
     direccion_entrega: Optional[str] = None
     guia_despacho: Optional[str] = None
     observaciones: Optional[str] = None
+    # Costo real del flete (opcional). moneda_flete_id es la moneda en la que se
+    # pagó; costo_flete_en_moneda_base se autocalcula en el servicio.
+    costo_flete: Optional[float] = Field(None, ge=0)
+    moneda_flete_id: Optional[int] = None
+    tasa_cambio_flete: Optional[float] = Field(None, gt=0)
+    costo_flete_en_moneda_base: Optional[float] = None
 class EnvioCreate(EnvioBase):
     pass
 class EnvioUpdate(BaseModel):
@@ -24,6 +31,10 @@ class EnvioUpdate(BaseModel):
     direccion_entrega: Optional[str] = None
     guia_despacho: Optional[str] = None
     observaciones: Optional[str] = None
+    costo_flete: Optional[float] = Field(None, ge=0)
+    moneda_flete_id: Optional[int] = None
+    tasa_cambio_flete: Optional[float] = Field(None, gt=0)
+    costo_flete_en_moneda_base: Optional[float] = None
 class EnvioResponse(EnvioBase):
     id: int
     created_at: Optional[datetime] = None
@@ -35,6 +46,7 @@ class EnvioResponse(EnvioBase):
     asignado_por_nombre: Optional[str] = None
     pedido: Optional[PedidoResponse] = None
     empleado: Optional[EmpleadoResponse] = None
+    moneda_flete: Optional[MonedaResponse] = None
     class Config:
         from_attributes = True
 

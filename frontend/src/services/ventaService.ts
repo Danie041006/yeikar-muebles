@@ -29,7 +29,7 @@ export interface DetalleVenta {
   venta_id: number;
   producto_id?: number | null;
   material_id?: number | null;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   cantidad: number;
   precio: number;
   costo_unitario?: number;

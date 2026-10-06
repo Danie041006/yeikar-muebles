@@ -44,7 +44,7 @@ export interface ProductoInfo {
 export interface DetalleFactura {
   id: number;
   factura_id: number;
-  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO';
+  tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   producto_id?: number | null;
   material_id?: number | null;
   descripcion?: string;

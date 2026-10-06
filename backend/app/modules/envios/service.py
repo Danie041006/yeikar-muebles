@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import false, or_
 from sqlalchemy.orm import Session, joinedload
@@ -37,7 +38,28 @@ def _snapshot(envio: Envio) -> dict:
         "observaciones": envio.observaciones,
         "fecha_salida": envio.fecha_salida,
         "fecha_entrega": envio.fecha_entrega,
+        "costo_flete": float(envio.costo_flete) if envio.costo_flete is not None else None,
+        "moneda_flete_id": envio.moneda_flete_id,
+        "tasa_cambio_flete": float(envio.tasa_cambio_flete) if envio.tasa_cambio_flete is not None else None,
+        "costo_flete_en_moneda_base": float(envio.costo_flete_en_moneda_base) if envio.costo_flete_en_moneda_base is not None else None,
     }
+
+
+def _procesar_flete(db: Session, envio: Envio) -> None:
+    """Calcula y guarda el costo del flete en moneda base (COP). Si la moneda
+    del flete es la base o no se indica, tasa = 1.0 y base = monto. En cualquier
+    otro caso usa la TRM recibida (o 1.0 como mejor esfuerzo) para dejar el
+    monto comparable con los costos de producción (todos en moneda base)."""
+    monto = envio.costo_flete
+    if monto is None:
+        return
+    moneda = envio.moneda_flete_id
+    if not moneda or moneda == 1:
+        envio.tasa_cambio_flete = Decimal("1.000000")
+        envio.costo_flete_en_moneda_base = Decimal(str(monto)).quantize(Decimal("0.01"))
+        return
+    tasa = envio.tasa_cambio_flete if envio.tasa_cambio_flete is not None else Decimal("1.000000")
+    envio.costo_flete_en_moneda_base = (Decimal(str(monto)) * Decimal(str(tasa))).quantize(Decimal("0.01"))
 
 
 def _registrar_asignacion(db: Session, envio: Envio, empleado_id: int | None, usuario: Usuario | None) -> None:
@@ -163,6 +185,7 @@ def crear_envio(db: Session, esquema: schemas.EnvioCreate, usuario: Usuario | No
         actualizado_por_id=usuario.id if usuario else pedido.creado_por_id,
         asignado_por_usuario_id=usuario.id if usuario and datos.get("empleado_id") else None,
     )
+    _procesar_flete(db, db_envio)
     db.add(db_envio)
     db.flush()
     if db_envio.empleado_id is not None:
@@ -275,6 +298,8 @@ def actualizar_envio(
 
     for campo, valor in datos.items():
         setattr(db_envio, campo, valor)
+
+    _procesar_flete(db, db_envio)
 
     if nuevo_estado and nuevo_estado != estado_anterior:
         if nuevo_estado == "EN_TRANSITO" and not db_envio.fecha_salida:

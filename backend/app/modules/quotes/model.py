@@ -39,12 +39,13 @@ class DetalleCotizacion(Base):
     cotizacion_id = Column(BigInteger, ForeignKey("cotizacion.id", ondelete="CASCADE"), nullable=False)
     producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=True)
     material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
-    tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO
+    tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO | REPARACION | SERVICIO
     cantidad = Column(Numeric(10, 2), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
     alto = Column(Numeric(10, 2), nullable=True)
     ancho = Column(Numeric(10, 2), nullable=True)
     largo = Column(Numeric(10, 2), nullable=True)
+    descripcion_especifica = Column(Text, nullable=True)
     observaciones = Column(Text, nullable=True)
     # Promo obsequio: línea del plástico de regalo (precio 0, 1 por colchón)
     es_obsequio = Column(Boolean, nullable=False, server_default="false")
