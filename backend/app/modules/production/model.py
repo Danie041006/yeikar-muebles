@@ -61,12 +61,58 @@ class OrdenProduccion(Base):
     producto = relationship("Producto", foreign_keys=[producto_id])
     etapas = relationship("EtapaProduccion", back_populates="orden", cascade="all, delete-orphan")
     costo = relationship("CostoProduccion", back_populates="orden", uselist=False, cascade="all, delete-orphan")
+    # Checklist de piezas del mueble (un juego = varias piezas): se
+    # auto-detecta de la descripción y el taller la marca dentro de la tarjeta.
+    # No altera el precio ni la receta: es una guía de armado/entrega.
+    piezas = relationship(
+        "PiezaOrden",
+        back_populates="orden",
+        cascade="all, delete-orphan",
+        order_by="PiezaOrden.posicion",
+    )
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
     actualizador = relationship("Usuario", foreign_keys=[actualizado_por_id])
 
     @property
     def creador_nombre(self):
         return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
+
+
+class PiezaOrden(Base):
+    """Pieza que compone un mueble de la orden (sofá, poltrona…).
+
+    Se crea sola a partir de la descripción del renglón (motor
+    `production/piezas.py`) y el taller la usa como checklist: marcar una
+    pieza no toca stock, costos ni etapas — es visibilidad de armado/entrega.
+    """
+
+    __tablename__ = "orden_pieza"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    orden_produccion_id = Column(
+        BigInteger,
+        ForeignKey("orden_produccion.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Orden de aparición dentro del mueble (SOFA 1, POLTRONA 2, POLTRONA 3…).
+    posicion = Column(BigInteger, nullable=False, default=0)
+    nombre = Column(String(150), nullable=False)
+    cantidad = Column(Numeric(10, 2), nullable=False, server_default="1", default=1)
+    # Área sugerida (informativa): dónde se fabrica principalmente la pieza.
+    area_id = Column(BigInteger, ForeignKey("area.id", ondelete="SET NULL"), nullable=True)
+    notas = Column(Text, nullable=True)
+    completada = Column(Boolean, nullable=False, server_default="false", default=False)
+    completada_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    fecha_completada = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    orden = relationship("OrdenProduccion", back_populates="piezas")
+    area = relationship("Area")
+    completada_por = relationship("Usuario", foreign_keys=[completada_por_id])
+
 
 class EtapaProduccion(Base):
     __tablename__ = "etapa_produccion"

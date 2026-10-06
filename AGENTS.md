@@ -103,6 +103,13 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 - **Costo final al finalizar**: `CostoProduccion.costo_total` = materiales + MO registrada + **gastos por sección** (ReglaGastoSeccion, default 10%, helper `_gastos_seccion_orden`); `POST /produccion/costo/calcular/{id}` sin `costo_gastos` también los autocalcula. Con MO con recargo explícito el total cuadra exacto con la tablita de costos en vivo.
 - **Nómina**: lee `mano_obra` directamente (no los consumos); el costo de producción suma esa misma fila `monto × (1+recargo/100)`.
 
+### Muebles a la medida y piezas del juego (checklist)
+
+- **Renglón a medida**: `DetalleCotizacion`/`DetallePedido` aceptan `tipo_item=FABRICADO` con `producto_id NULL` si hay `descripcion_especifica` (juegos, diseños nuevos). En Cotizaciones, el selector de productos muestra la fila contextual «Usar “…” como mueble a la medida» al escribir; el precio se digita a mano. Es la vía para teclear notas de papel completas.
+- **Conversión cotización→pedido**: los renglones CON producto/material se emparejan por clave y son reutilizables (un renglón cotizado puede dividirse en varias líneas del pedido: facturación independiente por `detalle_pedido`); los A MEDIDA (sin producto) se emparejan **por posición, consumiendo** (antes `(tipo, None, None)` colapsaba todos en uno).
+- **Checklist de piezas** (`orden_pieza`): al crear la orden se auto-detecta desde la descripción con `production/piezas.py` («SOFA DE 3 PUESTOS Y 2 POLTRONAS» → Sofá ×1 + Poltrona ×2); sin conjunto claro no genera nada (cero ruido). Endpoints: `POST /produccion/orden/{id}/piezas`, `PUT/DELETE /produccion/pieza/{id}` (marcar = `PUT {completada: true}`). Se muestra en el modal (tab La etapa), en la tarjeta y en la Hoja de Trabajo. NO toca precio, receta, stock ni costos; finalizar AVISA si faltan piezas (no bloquea). Backfill de órdenes viejas: `venv/bin/python scripts/sembrar_piezas_ordenes.py --aplicar`.
+- **Ficha/Hoja de Trabajo sin producto**: `GET /produccion/etapa/{id}/referencia-receta` devuelve `producto_id: null`, `materiales: []`, la descripción y `piezas_mueble` (antes 404).
+
 ### Piezas de exhibición (showroom)
 
 - `OrdenProduccion.tipo` (PEDIDO | EXHIBICION | STOCK) define el DESTINO de lo fabricado; `es_stock` queda como alias heredado de "sin pedido". El servicio deriva el tipo y rechaza un `tipo` explícito que contradiga el destino

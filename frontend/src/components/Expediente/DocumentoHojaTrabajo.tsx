@@ -252,6 +252,27 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
           </div>
         </div>
 
+        {/* ── 3b. PIEZAS DEL MUEBLE (juego): checklist de armado ── */}
+        {(hoja.piezas_mueble?.length ?? 0) > 0 && (
+          <div data-pdf-item="true" className="border border-stone-300 rounded-xl overflow-hidden">
+            <div className="bg-[#2D1B10] text-[#F9F7F2] text-[7.5px] font-mono font-bold uppercase tracking-[0.18em] px-2.5 py-1 flex items-center justify-between">
+              <span>Piezas que componen este mueble</span>
+              <span className="text-[#D4AF37]">Marcar al terminar cada una</span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 px-3 py-2 bg-stone-50/60">
+              {hoja.piezas_mueble!.map((p) => (
+                <div key={p.id} className="flex items-center gap-2 text-[10px] text-stone-900">
+                  <span className="w-3.5 h-3.5 border-2 border-stone-500 rounded-sm shrink-0 bg-white" />
+                  <span className="font-bold truncate" title={p.nombre}>
+                    {p.nombre}
+                    {Number(p.cantidad) > 1 ? ` × ${Number(p.cantidad)}` : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── 4. OBSERVACIONES Y ESPECIFICACIONES CRÍTICAS ── */}
         <div data-pdf-item="true">
           {observaciones.length > 0 ? (

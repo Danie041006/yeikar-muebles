@@ -10,14 +10,15 @@ from app.modules.production.model import (
     TIPO_PEDIDO, TIPO_EXHIBICION, TIPO_STOCK, TIPOS_ORDEN,
     OrdenProduccion, EtapaProduccion, ConsumoMaterial, ManoObra, CostoProduccion,
     ProductoCrudoInventario, ProduccionCrudo, ProduccionCrudoConsumo,
-    ProduccionCrudoManoObra, ProduccionCrudoUso, MovimientoCrudo,
+    ProduccionCrudoManoObra, ProduccionCrudoUso, MovimientoCrudo, PiezaOrden,
 )
 from app.modules.production.schemas import (
     OrdenProduccionCreate, OrdenProduccionUpdate,
     EtapaProduccionCreate, EtapaProduccionUpdate,
     ConsumoMaterialCreate, ConsumoConfirmarCreate, ManoObraCreate, CostoProduccionCreate,
     CrudoCreate, ProduccionCrudoCreate, ProduccionCrudoEstadoUpdate, CrudoConsumoCreate,
-    ProduccionCrudoManoObraCreate, ProduccionCrudoManoObraUpdate
+    ProduccionCrudoManoObraCreate, ProduccionCrudoManoObraUpdate,
+    PiezaOrdenCreate, PiezaOrdenUpdate,
 )
 from app.modules.orders.model import DetallePedido
 from app.modules.orders.model import DetallePedido, Pedido
@@ -190,6 +191,10 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
         )
         db.add(db_orden)
         db.flush()
+        # Checklist de piezas auto-detectado (p. ej. "JUEGO DE MUEBLES ... 2
+        # POLTRONAS"): es una guía de armado, no toca receta ni costos.
+        from app.modules.production.piezas import sembrar_piezas_orden
+        sembrar_piezas_orden(db, db_orden)
         record_event(db, actor=usuario, action="CREATE", entity_type="orden_produccion", entity_id=db_orden.id, after=_snapshot_orden(db_orden))
         db.commit()
         db.refresh(db_orden)
@@ -224,6 +229,8 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
     )
     db.add(db_orden)
     db.flush()
+    from app.modules.production.piezas import sembrar_piezas_orden
+    sembrar_piezas_orden(db, db_orden, detalle=_detalle)
     record_event(db, actor=usuario, action="CREATE", entity_type="orden_produccion", entity_id=db_orden.id, after=_snapshot_orden(db_orden))
     db.commit()
     db.refresh(db_orden)
@@ -269,6 +276,9 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuari
         actualizado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
     )
     db.add(db_orden)
+    db.flush()
+    from app.modules.production.piezas import sembrar_piezas_orden
+    sembrar_piezas_orden(db, db_orden, detalle=detalle)
     db.commit()
     db.refresh(db_orden)
     return db_orden
@@ -573,6 +583,133 @@ def cambiar_estado_etapa_produccion(db: Session, id_etapa: int, nuevo_estado: st
     db.commit()
     db.refresh(db_etapa)
     return db_etapa
+
+
+def _scope_piezas(query, usuario: Usuario | None):
+    if usuario is None or tiene_alcance_total(usuario):
+        return query
+    return (
+        query.join(OrdenProduccion, OrdenProduccion.id == PiezaOrden.orden_produccion_id)
+        .filter(OrdenProduccion.creado_por_id == usuario.id)
+    )
+
+
+def _snapshot_pieza(pieza: PiezaOrden) -> dict:
+    return {
+        "orden_produccion_id": pieza.orden_produccion_id,
+        "nombre": pieza.nombre,
+        "cantidad": pieza.cantidad,
+        "completada": pieza.completada,
+        "area_id": pieza.area_id,
+    }
+
+
+def obtener_pieza_orden(db: Session, id_pieza: int, usuario: Usuario | None = None):
+    return _scope_piezas(
+        db.query(PiezaOrden).filter(PiezaOrden.id == id_pieza), usuario
+    ).first()
+
+
+def crear_pieza_orden(db: Session, esquema: PiezaOrdenCreate, usuario: Usuario | None = None) -> PiezaOrden:
+    if not esquema.orden_produccion_id:
+        raise ValueError("Debe indicar la orden de producción de la pieza.")
+    orden = _scope_orders(
+        db.query(OrdenProduccion).filter(OrdenProduccion.id == esquema.orden_produccion_id),
+        usuario,
+    ).first()
+    if not orden:
+        raise ValueError("La orden de producción no existe o no está disponible para este usuario.")
+    if orden.estado == "CANCELADA":
+        raise ValueError("No se pueden agregar piezas a una orden cancelada.")
+    if esquema.area_id is not None and not db.query(Area).filter(Area.id == esquema.area_id).first():
+        raise ValueError("El área indicada no existe.")
+
+    # Posición al final del checklist actual.
+    ultima = (
+        db.query(PiezaOrden)
+        .filter(PiezaOrden.orden_produccion_id == orden.id)
+        .order_by(PiezaOrden.posicion.desc())
+        .first()
+    )
+    pieza = PiezaOrden(
+        orden_produccion_id=orden.id,
+        posicion=(ultima.posicion + 1) if ultima else 0,
+        nombre=esquema.nombre.strip(),
+        cantidad=esquema.cantidad,
+        area_id=esquema.area_id,
+        notas=esquema.notas,
+    )
+    if not pieza.nombre:
+        raise ValueError("El nombre de la pieza es obligatorio.")
+    db.add(pieza)
+    db.flush()
+    record_event(
+        db, actor=usuario, action="CREATE", entity_type="orden_pieza",
+        entity_id=pieza.id, after=_snapshot_pieza(pieza),
+    )
+    db.commit()
+    db.refresh(pieza)
+    return pieza
+
+
+def actualizar_pieza_orden(db: Session, id_pieza: int, esquema: PiezaOrdenUpdate, usuario: Usuario | None = None):
+    # FOR UPDATE: dos marcas simultáneas de la misma pieza se serializan.
+    pieza = _scope_piezas(
+        db.query(PiezaOrden).filter(PiezaOrden.id == id_pieza), usuario
+    ).with_for_update().first()
+    if not pieza:
+        return None
+    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == pieza.orden_produccion_id).first()
+    if orden and orden.estado == "CANCELADA":
+        raise ValueError("No se puede modificar una pieza de una orden cancelada.")
+
+    data = esquema.model_dump(exclude_unset=True)
+    antes = _snapshot_pieza(pieza)
+    if "nombre" in data:
+        if not (data["nombre"] or "").strip():
+            raise ValueError("El nombre de la pieza no puede quedar vacío.")
+        data["nombre"] = data["nombre"].strip()
+    if "area_id" in data and data["area_id"] is not None:
+        if not db.query(Area).filter(Area.id == data["area_id"]).first():
+            raise ValueError("El área indicada no existe.")
+    if "completada" in data and data["completada"] is not None:
+        completada = bool(data.pop("completada"))
+        if completada and not pieza.completada:
+            pieza.completada = True
+            pieza.completada_por_id = usuario.id if usuario is not None else None
+            pieza.fecha_completada = ahora_ve()
+        elif not completada and pieza.completada:
+            pieza.completada = False
+            pieza.completada_por_id = None
+            pieza.fecha_completada = None
+    for clave, valor in data.items():
+        setattr(pieza, clave, valor)
+
+    record_event(
+        db, actor=usuario, action="UPDATE", entity_type="orden_pieza",
+        entity_id=pieza.id, before=antes, after=_snapshot_pieza(pieza),
+    )
+    db.commit()
+    db.refresh(pieza)
+    return pieza
+
+
+def eliminar_pieza_orden(db: Session, id_pieza: int, usuario: Usuario | None = None) -> bool:
+    pieza = obtener_pieza_orden(db, id_pieza, usuario)
+    if not pieza:
+        return False
+    orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == pieza.orden_produccion_id).first()
+    if orden and orden.estado == "CANCELADA":
+        raise ValueError("No se puede modificar una pieza de una orden cancelada.")
+    record_event(
+        db, actor=usuario, action="DELETE", entity_type="orden_pieza",
+        entity_id=pieza.id, before=_snapshot_pieza(pieza),
+    )
+    db.delete(pieza)
+    db.commit()
+    return True
+
+
 def eliminar_etapa_produccion(db: Session, id_etapa: int, usuario: Usuario | None = None):
     db_etapa = obtener_etapa_produccion(db, id_etapa, usuario)
     if not db_etapa:
@@ -1343,21 +1480,27 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
     detalle = orden.detalle_pedido
     pedido = detalle.pedido if detalle else None
     producto = detalle.producto if detalle else orden.producto
-    if not producto:
-        return None
 
-    ancho_base = Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")
-    largo_base = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
-    if detalle:
-        nuevo_ancho = Decimal(str(detalle.ancho)) if detalle.ancho else ancho_base
-        nuevo_largo = Decimal(str(detalle.largo)) if detalle.largo else largo_base
+    # Mueble a la medida (sin producto de catálogo): no hay receta que escalar.
+    # Se usan las medidas del renglón (o de la orden) tal cual; la ficha y la
+    # Hoja de Trabajo se arman con la descripción y el checklist de piezas.
+    if producto:
+        ancho_base = Decimal(str(producto.ancho_base)) if producto.ancho_base else Decimal("1.60")
+        largo_base = Decimal(str(producto.largo_base)) if producto.largo_base else Decimal("1.90")
+        if detalle:
+            nuevo_ancho = Decimal(str(detalle.ancho)) if detalle.ancho else ancho_base
+            nuevo_largo = Decimal(str(detalle.largo)) if detalle.largo else largo_base
+        else:
+            # Orden sin pedido (EXHIBICION/STOCK): dimensiones copiadas a la orden
+            # o, en su defecto, las base del producto.
+            nuevo_ancho = Decimal(str(orden.ancho)) if orden.ancho else ancho_base
+            nuevo_largo = Decimal(str(orden.largo)) if orden.largo else largo_base
+        area_base = ancho_base * largo_base
+        area_nueva = nuevo_ancho * nuevo_largo
     else:
-        # Orden sin pedido (EXHIBICION/STOCK): dimensiones copiadas a la orden
-        # o, en su defecto, las base del producto.
-        nuevo_ancho = Decimal(str(orden.ancho)) if orden.ancho else ancho_base
-        nuevo_largo = Decimal(str(orden.largo)) if orden.largo else largo_base
-    area_base = ancho_base * largo_base
-    area_nueva = nuevo_ancho * nuevo_largo
+        ancho_base = largo_base = area_base = area_nueva = Decimal("0")
+        nuevo_ancho = Decimal(str(detalle.ancho)) if (detalle and detalle.ancho) else None
+        nuevo_largo = Decimal(str(detalle.largo)) if (detalle and detalle.largo) else None
 
     # N.º de piezas de la línea (2 poltronas, 3 sillas...). La receta se define
     # por UNIDAD; aquí se calcula además el TOTAL del lote (`cantidad_total`)
@@ -1370,7 +1513,7 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         .options(joinedload(ProductoMaterial.material).joinedload(MatModel.unidad_medida))
         .filter(ProductoMaterial.producto_id == producto.id)
         .all()
-    )
+    ) if producto else []
 
     materiales = []
     from app.modules.inventory import laminas as laminas_motor
@@ -1413,16 +1556,41 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
     def _campo(f, clave):
         return f.get(clave) if isinstance(f, dict) else getattr(f, clave, None)
 
-    fotos = [{"url": _campo(f, "url"), "nombre": _campo(f, "nombre")} for f in (producto.fotos or [])]
+    fotos = [{"url": _campo(f, "url"), "nombre": _campo(f, "nombre")} for f in ((producto.fotos if producto else []) or [])]
     fotos = [f for f in fotos if f["url"]]
     cliente = pedido.cliente if pedido else None
 
+    # Checklist del mueble: guía de armado/entrega (sofá, poltronas…).
+    piezas_mueble = [
+        {
+            "id": p.id,
+            "orden_produccion_id": p.orden_produccion_id,
+            "posicion": p.posicion,
+            "nombre": p.nombre,
+            "cantidad": float(p.cantidad),
+            "area_id": p.area_id,
+            "area": {"id": p.area.id, "nombre": p.area.nombre} if p.area else None,
+            "notas": p.notas,
+            "completada": p.completada,
+            "completada_por_id": p.completada_por_id,
+            "fecha_completada": p.fecha_completada,
+        }
+        for p in (orden.piezas or [])
+    ]
+
+    nombre_mueble = (
+        producto.nombre
+        if producto
+        else (detalle.descripcion_especifica if detalle and detalle.descripcion_especifica else None)
+        or f"Orden de producción #{orden.id}"
+    )
+
     return {
-        "producto_id": producto.id,
-        "producto_nombre": producto.nombre,
+        "producto_id": producto.id if producto else None,
+        "producto_nombre": nombre_mueble,
         "dimensiones": {
-            "ancho": float(nuevo_ancho),
-            "largo": float(nuevo_largo),
+            "ancho": float(nuevo_ancho) if nuevo_ancho is not None else None,
+            "largo": float(nuevo_largo) if nuevo_largo is not None else None,
         },
         "seccion_actual": _normalizar_seccion(etapa.area.nombre) if etapa.area else None,
         "materiales": materiales,
@@ -1443,6 +1611,7 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         "cantidad": float(detalle.cantidad) if detalle else 1.0,
         # N.º de piezas idénticas de la línea (1 en órdenes sin pedido).
         "piezas": float(piezas),
+        "piezas_mueble": piezas_mueble,
         "producto_fotos": fotos,
     }
 

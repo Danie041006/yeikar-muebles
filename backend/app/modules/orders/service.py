@@ -454,22 +454,44 @@ def convertir_cotizacion_a_pedido(
         raise ValueError("El pedido requiere al menos un detalle de producto")
 
     # Validar que los precios/cantidades coincidan con los de la cotización.
-    # Indexar por (tipo_item, producto_id, material_id) para mezclar fabricados, reventa e insumos.
-    detalles_cotizacion = {}
+    # Hay dos formas de emparejar, a propósito:
+    #  - Renglones CON producto/material: por clave (tipo, producto, material),
+    #    reutilizable. La dueña puede dividir UN renglón cotizado en varias
+    #    líneas del pedido (facturación independiente por detalle_pedido, p. ej.
+    #    el mismo producto facturado en dos montos USD distintos).
+    #  - Muebles A LA MEDIDA (sin producto ni material): por POSICIÓN entre los
+    #    renglones a medida, consumiendo. No tienen clave que los distinga, así
+    #    que un indexado por (tipo, None, None) colapsaba todos en el último y
+    #    la conversión fallaba o validaba contra el renglón equivocado.
+    detalles_cotizacion: dict = {}
+    a_medida_cotizados: list = []
     for dc in (db_cotizacion.detalles or []):
-        key = (dc.tipo_item or "FABRICADO", dc.producto_id, dc.material_id)
-        detalles_cotizacion[key] = dc
+        tipo_dc = dc.tipo_item or "FABRICADO"
+        if dc.producto_id is None and dc.material_id is None and tipo_dc == "FABRICADO":
+            a_medida_cotizados.append(dc)
+        else:
+            detalles_cotizacion[(tipo_dc, dc.producto_id, dc.material_id)] = dc
+
+    a_medida_idx = 0
+    dcs_match: list = []
     for detalle in detalles:
         detalle_dict = detalle if isinstance(detalle, dict) else detalle.model_dump()
         tipo = detalle_dict.get("tipo_item", "FABRICADO")
-        key = (tipo, detalle_dict.get("producto_id"), detalle_dict.get("material_id"))
-        dc = detalles_cotizacion.get(key)
+        pid = detalle_dict.get("producto_id")
+        mid = detalle_dict.get("material_id")
+        es_a_medida = pid is None and mid is None and tipo == "FABRICADO"
+        if es_a_medida:
+            dc = a_medida_cotizados[a_medida_idx] if a_medida_idx < len(a_medida_cotizados) else None
+            a_medida_idx += 1
+        else:
+            dc = detalles_cotizacion.get((tipo, pid, mid))
         if dc is None:
-            ref = detalle_dict.get("material_id") or detalle_dict.get("producto_id")
+            ref = mid or pid
             raise ValueError(
                 f"El ítem (tipo={tipo}, id={ref}) no forma parte de la cotización. "
                 "El pedido debe copiar exactamente los renglones cotizados."
             )
+        dcs_match.append(dc)
         precio_enviado = float(detalle_dict.get("precio", 0) or 0)
         precio_cotizado = float(dc.precio)
         cantidad_enviada = float(detalle_dict.get("cantidad", 0) or 0)
@@ -554,40 +576,40 @@ def convertir_cotizacion_a_pedido(
     db.add(db_pedido)
     db.flush()
 
-    cotizacion_detalles = db_cotizacion.detalles or []
     for idx, detalle in enumerate(detalles):
         detalle_dict = dict(detalle) if isinstance(detalle, dict) else detalle.model_dump()
         tipo = detalle_dict.get("tipo_item", "FABRICADO")
-        dc_cot = cotizacion_detalles[idx] if idx < len(cotizacion_detalles) else None
+        # Renglón cotizado exacto que le corresponde (emparejado en orden en la
+        # validación de arriba: soporta duplicados y muebles a la medida).
+        dc_cot = dcs_match[idx]
         # Validar que el producto o material exista (REPARACION/SERVICIO no
         # referencian producto ni material: la pieza es del cliente o es un
-        # cobro de flete/instalación).
+        # cobro de flete/instalación; FABRICADO sin producto es un mueble a
+        # medida descrito en el renglón).
         if tipo == "INSUMO":
             from app.modules.productos.model import Material as MaterialModel
             if not db.query(MaterialModel.id).filter(MaterialModel.id == detalle_dict.get("material_id")).first():
                 raise ValueError(f"El material con id {detalle_dict.get('material_id')} no existe.")
         elif tipo not in ("REPARACION", "SERVICIO"):
             from app.modules.productos.model import Producto as ProductoModel
-            if not db.query(ProductoModel.id).filter(ProductoModel.id == detalle_dict.get("producto_id")).first():
-                raise ValueError(f"El producto con id {detalle_dict.get('producto_id')} no existe.")
+            pid = detalle_dict.get("producto_id")
+            if pid is not None:
+                if not db.query(ProductoModel.id).filter(ProductoModel.id == pid).first():
+                    raise ValueError(f"El producto con id {pid} no existe.")
+            elif tipo == "FABRICADO" and (detalle_dict.get("descripcion_especifica") or detalle_dict.get("observaciones")):
+                pass  # mueble a la medida: sin producto de catálogo
+            elif not pid:
+                raise ValueError(
+                    "El renglón requiere producto_id (o descripción si es un mueble a la medida)."
+                )
         # Costo y dimensiones: FABRICADO/REVENTA toman el costo de la
         # cotización; INSUMO también propaga su costo real (compra + pasada,
         # que el frontend guarda en costo_total en COP), dividido por la
         # cantidad para obtener el costo unitario. REPARACION/SERVICIO toman el
-        # costo total de su renglón por posición (no tienen producto que
-        # identificar). Las dimensiones solo aplican a FABRICADO/REVENTA/REPARACION.
+        # costo total de su renglón. Las dimensiones solo aplican a
+        # FABRICADO/REVENTA/REPARACION.
         if detalle_dict.get("costo_unitario") is None:
-            dc_matched = None
-            if tipo in ("REPARACION", "SERVICIO"):
-                if dc_cot and dc_cot.costo_total:
-                    dc_matched = dc_cot
-            else:
-                for dc in cotizacion_detalles:
-                    if (dc.producto_id == detalle_dict.get("producto_id")
-                            and dc.material_id == detalle_dict.get("material_id")
-                            and dc.costo_total):
-                        dc_matched = dc
-                        break
+            dc_matched = dc_cot if (dc_cot and dc_cot.costo_total) else None
             if dc_matched:
                 if tipo == "INSUMO" and dc_matched.cantidad:
                     detalle_dict["costo_unitario"] = float(dc_matched.costo_total) / float(dc_matched.cantidad)
@@ -595,14 +617,7 @@ def convertir_cotizacion_a_pedido(
                     detalle_dict["costo_unitario"] = float(dc_matched.costo_total)
         if tipo not in ("INSUMO", "SERVICIO"):
             if detalle_dict.get("ancho") is None or detalle_dict.get("largo") is None:
-                dc_dims = None
-                if tipo == "REPARACION":
-                    dc_dims = dc_cot
-                else:
-                    for dc in cotizacion_detalles:
-                        if dc.producto_id == detalle_dict.get("producto_id"):
-                            dc_dims = dc
-                            break
+                dc_dims = dc_cot
                 if dc_dims:
                     if detalle_dict.get("ancho") is None:
                         detalle_dict["ancho"] = float(dc_dims.ancho) if dc_dims.ancho else None
@@ -646,14 +661,20 @@ def convertir_cotizacion_a_pedido(
                 continue
             existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
             if not existente:
-                db.add(OrdenProduccion(
+                nueva_orden = OrdenProduccion(
                     detalle_pedido_id=detalle.id,
                     estado="PENDIENTE",
                     fecha_inicio=None,
                     fecha_fin=None,
                     creado_por_id=usuario.id if usuario is not None else None,
                     actualizado_por_id=usuario.id if usuario is not None else None,
-                ))
+                )
+                db.add(nueva_orden)
+                db.flush()
+                # Checklist de piezas auto-detectado de la descripción
+                # (p. ej. "SOFA DE 3 PUESTOS ... Y 2 POLTRONAS").
+                from app.modules.production.piezas import sembrar_piezas_orden
+                sembrar_piezas_orden(db, nueva_orden, detalle=detalle)
 
     # ── Factura automática en la moneda de la cotización ──────────────────
     db_venta = venta_service.crear_venta_desde_pedido(

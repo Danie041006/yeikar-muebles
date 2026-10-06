@@ -192,6 +192,14 @@ function KanbanCard({ stage, pedidoInfo, onClick, onStatusChange, onPassToArea, 
           </p>
         ) : null}
 
+        {(stage.orden?.piezas?.length ?? 0) > 0 && (
+          <p className={`text-[10px] font-mono font-bold ${
+            stage.orden!.piezas!.every((p) => p.completada) ? 'text-emerald-600' : 'text-sky-700'
+          }`}>
+            Piezas {stage.orden!.piezas!.filter((p) => p.completada).length}/{stage.orden!.piezas!.length} listas
+          </p>
+        )}
+
         {stage.observaciones && (
           <p className="text-xs text-yeikar-neutral/60 line-clamp-2 italic">
             {stage.observaciones}
@@ -446,12 +454,13 @@ export default function ProduccionKanban() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Receta de referencia del producto de la etapa (escalada a las dimensiones)
-  // Funciona para órdenes con pedido Y para EXHIBICION/STOCK (producto de la orden)
+  // Ficha de referencia de la etapa (receta escalada para productos de
+  // catálogo; descripción + piezas para muebles a la medida sin producto).
   useEffect(() => {
-    if (selectedStage?.orden?.detalle_pedido?.producto?.id || selectedStage?.orden?.producto_id) {
+    if (selectedStage) {
       setLoadingReceta(true);
-      produccionService.getReferenciaReceta(selectedStage.id)        .then(setReferenciaReceta)
+      produccionService.getReferenciaReceta(selectedStage.id)
+        .then(setReferenciaReceta)
         .catch(() => setReferenciaReceta(null))
         .finally(() => setLoadingReceta(false));
     } else {
@@ -1105,11 +1114,20 @@ export default function ProduccionKanban() {
       <ConfirmDialog
         open={confirmFinalizarId !== null}
         title="Finalizar orden de producción"
-        message={
-          ordenes.some((o) => o.id === confirmFinalizarId && esOrdenExhibicion(o))
+        message={(() => {
+          const orden = ordenes.find((o) => o.id === confirmFinalizarId);
+          const base = orden && esOrdenExhibicion(orden)
             ? `¿Finalizar la orden #${confirmFinalizarId ?? ''}? Se calcularán los costos y la pieza de EXHIBICIÓN entrará al stock del showroom (no se genera envío a cliente).`
-            : `¿Estás seguro de finalizar la orden #${confirmFinalizarId ?? ''}? Esto calculará sus costos definitivos y la cerrará.`
-        }
+            : `¿Estás seguro de finalizar la orden #${confirmFinalizarId ?? ''}? Esto calculará sus costos definitivos y la cerrará.`;
+          // Checklist de piezas: AVISA antes de cerrar, no bloquea (el taller
+          // puede finalizar aunque falte marcar alguna).
+          const pendientes = (orden?.piezas ?? []).filter((p) => !p.completada);
+          if (pendientes.length === 0) return base;
+          const detalle = pendientes
+            .map((p) => `${p.nombre}${Number(p.cantidad) > 1 ? ` × ${Number(p.cantidad)}` : ''}`)
+            .join(', ');
+          return `${base} Ojo: faltan ${pendientes.length} pieza(s) por marcar (${detalle}). Puedes finalizar igual.`;
+        })()}
         confirmLabel="Sí, finalizar"
         danger={false}
         onConfirm={ejecutarFinalizarOrden}

@@ -223,6 +223,44 @@ class EtapaProduccionUpdate(BaseModel):
     fecha_inicio: Optional[datetime] = None
     fecha_fin: Optional[datetime] = None
 
+class PiezaOrdenCreate(BaseModel):
+    """Pieza que compone un mueble (agregado manual al checklist).
+
+    `orden_produccion_id` va en el path del endpoint; se acepta también en el
+    body por compatibilidad, pero el path manda.
+    """
+    orden_produccion_id: Optional[int] = None
+    nombre: str = Field(min_length=1, max_length=150)
+    cantidad: float = Field(1, gt=0)
+    area_id: Optional[int] = None
+    notas: Optional[str] = None
+
+
+class PiezaOrdenUpdate(BaseModel):
+    nombre: Optional[str] = Field(None, min_length=1, max_length=150)
+    cantidad: Optional[float] = Field(None, gt=0)
+    area_id: Optional[int] = None
+    notas: Optional[str] = None
+    completada: Optional[bool] = None
+
+
+class PiezaOrdenResponse(BaseModel):
+    id: int
+    orden_produccion_id: int
+    posicion: int = 0
+    nombre: str
+    cantidad: float
+    area_id: Optional[int] = None
+    area: Optional[AreaResponse] = None
+    notas: Optional[str] = None
+    completada: bool = False
+    completada_por_id: Optional[int] = None
+    fecha_completada: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
 class EtapaProduccionResponse(EtapaProduccionBase):
     id: int
     orden_produccion_id: int
@@ -353,6 +391,9 @@ class OrdenProduccionMinima(BaseModel):
     alto: Optional[float] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
+    # Checklist de piezas del mueble (juego = varias piezas). El tablero la
+    # muestra para marcar avance; no altera precio, receta ni costos.
+    piezas: List[PiezaOrdenResponse] = []
 
     class Config:
         from_attributes = True
@@ -373,6 +414,7 @@ class OrdenProduccionResponse(OrdenProduccionBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     etapas: List[EtapaProduccionResponse] = []
+    piezas: List[PiezaOrdenResponse] = []
     costo: Optional[CostoProduccionResponse] = None
 
     class Config:
@@ -411,7 +453,9 @@ class FotoReferencia(BaseModel):
     nombre: Optional[str] = None
 
 class ReferenciaRecetaResponse(BaseModel):
-    producto_id: int
+    # None en muebles a la medida (sin producto de catálogo): la ficha y la
+    # Hoja de Trabajo se arman con la descripción del renglón y las piezas.
+    producto_id: Optional[int] = None
     producto_nombre: str
     dimensiones: dict
     seccion_actual: Optional[str] = None
@@ -435,6 +479,9 @@ class ReferenciaRecetaResponse(BaseModel):
     cantidad: Optional[float] = None
     # N.º de piezas idénticas de la línea (1 si la orden no tiene pedido).
     piezas: Optional[float] = None
+    # Checklist de piezas del mueble (sofá, poltronas…): la Hoja de Trabajo las
+    # imprime con casillas. Distinto de `piezas` (unidades idénticas de línea).
+    piezas_mueble: List[PiezaOrdenResponse] = []
     producto_fotos: List[FotoReferencia] = []
 
 

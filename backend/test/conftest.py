@@ -130,6 +130,7 @@ ORDEN_LIMPIEZA = [
     "consumo_material",
     "etapa_asignado_adicional",
     "etapa_produccion",
+    "orden_pieza",
     "costo_produccion",
     "produccion_crudo_uso",
     "produccion_crudo_consumo",

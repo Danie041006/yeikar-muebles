@@ -20,6 +20,10 @@ interface ProductSelectorModalProps {
   // ('reventa' incluye piezas de exhibición por compatibilidad: ambas son
   // stock; 'exhibicion' muestra SOLO piezas del showroom.)
   modo?: 'todos' | 'fabricados' | 'reventa' | 'exhibicion';
+  // Mueble a la medida: usa lo que el usuario escribió como renglón sin
+  // catálogo (descripción libre + precio manual). Sin botones nuevos: es una
+  // fila contextual que aparece al escribir una búsqueda.
+  onSelectPersonalizado?: (nombre: string) => void;
 }
 
 // "De stock": se vende tal cual, sin fabricarse. Una pieza de exhibición se
@@ -37,6 +41,7 @@ export default function ProductSelectorModal({
   selectedMonedaId = 1,
   title = 'Catálogo de Modelos y Muebles',
   modo = 'todos',
+  onSelectPersonalizado,
 }: ProductSelectorModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('TODOS');
@@ -285,6 +290,29 @@ export default function ProductSelectorModal({
 
         {/* Content Area: Products Grid or Index List */}
         <div className="flex-1 overflow-y-auto p-5 bg-stone-50/50">
+          {/* Fila contextual "a la medida": misma mecánica de escribir y
+              elegir, sin botones nuevos en la barra del cotizador. */}
+          {onSelectPersonalizado && searchTerm.trim() && (
+            <button
+              type="button"
+              onClick={() => onSelectPersonalizado(searchTerm.trim())}
+              className="w-full mb-4 flex items-center gap-3 text-left bg-amber-50 border border-amber-300 hover:bg-amber-100 rounded-2xl px-4 py-3 transition-colors shadow-sm group"
+              title="Crea el renglón con esta descripción y precio manual, sin producto de catálogo"
+            >
+              <span className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0">
+                <Sparkles className="w-4 h-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black font-headline text-amber-900">
+                  Usar «{searchTerm.trim()}» como mueble a la medida
+                </span>
+                <span className="block text-[11px] text-amber-800/80">
+                  No está en el catálogo: se cotiza con descripción libre y precio manual (juego, diseño nuevo…).
+                </span>
+              </span>
+              <ArrowRight className="w-4 h-4 text-amber-700 ml-auto shrink-0 group-hover:translate-x-0.5 transition-transform" />
+            </button>
+          )}
           {filteredProducts.length === 0 ? (
             <div className="py-16 text-center">
               <div className="w-14 h-14 rounded-2xl bg-stone-100 text-stone-400 mx-auto flex items-center justify-center mb-3">

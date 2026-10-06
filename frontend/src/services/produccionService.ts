@@ -121,6 +121,21 @@ export interface CostoProduccion {
   costo_estimado?: number | null;
 }
 
+/** Pieza que compone un mueble (sofá, poltrona…): checklist de armado. */
+export interface PiezaOrden {
+  id: number;
+  orden_produccion_id: number;
+  posicion: number;
+  nombre: string;
+  cantidad: number;
+  area_id?: number | null;
+  area?: { id: number; nombre: string } | null;
+  notas?: string | null;
+  completada: boolean;
+  completada_por_id?: number | null;
+  fecha_completada?: string | null;
+}
+
 export interface OrdenProduccion {
   id: number;
   detalle_pedido_id: number | null;
@@ -139,6 +154,8 @@ export interface OrdenProduccion {
   largo?: number;
   alto?: number;
   etapas: EtapaProduccion[];
+  /** Checklist de piezas del mueble (auto-detectado de la descripción). */
+  piezas?: PiezaOrden[];
   costo?: CostoProduccion;
   // True si al finalizar se generó la estructura de costes del producto.
   estructura_generada?: boolean | null;
@@ -210,7 +227,8 @@ export interface FotoReferencia {
 }
 
 export interface ReferenciaReceta {
-  producto_id: number;
+  /** None en muebles a la medida (sin producto de catálogo). */
+  producto_id: number | null;
   producto_nombre: string;
   dimensiones: { ancho: number | null; largo: number | null };
   seccion_actual?: string | null;
@@ -232,6 +250,8 @@ export interface ReferenciaReceta {
   cantidad?: number | null;
   /** N.º de piezas idénticas de la línea (1 si la orden no tiene pedido). */
   piezas?: number | null;
+  /** Checklist de piezas del mueble (sofá, poltronas…): se imprime en la hoja. */
+  piezas_mueble?: PiezaOrden[];
   producto_fotos?: FotoReferencia[];
 }
 
@@ -303,6 +323,15 @@ export const produccionService = {
 
   quitarAsignadoAdicional: async (etapaId: number, empleadoId: number): Promise<void> => {
     await api.delete(`/produccion/etapa/${etapaId}/asignados/${empleadoId}`);
+  },
+
+  /** Marca/desmarca una pieza del mueble (checklist de armado). */
+  actualizarPieza: async (
+    piezaId: number,
+    cambios: { completada?: boolean; nombre?: string; cantidad?: number; area_id?: number | null; notas?: string | null },
+  ): Promise<PiezaOrden> => {
+    const response = await api.put<PiezaOrden>(`/produccion/pieza/${piezaId}`, cambios);
+    return response.data;
   },
 
   registrarConsumo: async (consumo: {

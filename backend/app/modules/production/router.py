@@ -182,6 +182,54 @@ def eliminar_etapa(
     return None
 
 
+# ------------------------------------------------------------
+# Piezas del mueble (checklist de armado/entrega)
+# ------------------------------------------------------------
+@router.post("/orden/{id}/piezas", response_model=schemas.PiezaOrdenResponse, status_code=status.HTTP_201_CREATED)
+def crear_pieza_orden(
+    id: int,
+    esquema: schemas.PiezaOrdenCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        esquema.orden_produccion_id = id  # el path manda
+        return service.crear_pieza_orden(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/pieza/{id}", response_model=schemas.PiezaOrdenResponse)
+def actualizar_pieza_orden(
+    id: int,
+    esquema: schemas.PiezaOrdenUpdate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        db_obj = service.actualizar_pieza_orden(db, id, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not db_obj:
+        raise HTTPException(status_code=404, detail="Pieza no encontrada")
+    return db_obj
+
+
+@router.delete("/pieza/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_pieza_orden(
+    id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    try:
+        exito = service.eliminar_pieza_orden(db, id, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not exito:
+        raise HTTPException(status_code=404, detail="Pieza no encontrada")
+    return None
+
+
 @router.post("/etapa/{id}/pasar-a-area", response_model=schemas.EtapaProduccionResponse, status_code=status.HTTP_201_CREATED)
 def pasar_a_area(
     id: int,

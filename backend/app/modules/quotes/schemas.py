@@ -69,9 +69,18 @@ class DetalleCotizacionCreate(DetalleCotizacionBase):
                 raise ValueError("material_id no debe enviarse para tipo_item REPARACION/SERVICIO")
             if not (self.descripcion_especifica or self.observaciones):
                 raise ValueError("La descripción es obligatoria para tipo_item REPARACION/SERVICIO")
+        elif self.tipo_item == "FABRICADO":
+            # Mueble a la medida: sin producto de catálogo, descrito en
+            # descripcion_especifica (p. ej. "JUEGO DE SALA: sofá 3 puestos +
+            # 2 poltronas"). El precio es manual (no hay receta que costear).
+            if not self.producto_id and not (self.descripcion_especifica or self.observaciones):
+                raise ValueError(
+                    "producto_id es requerido para tipo_item FABRICADO "
+                    "(o describe el mueble a medida en descripcion_especifica)"
+                )
         else:
             if not self.producto_id:
-                raise ValueError("producto_id es requerido para tipo_item FABRICADO/REVENTA")
+                raise ValueError("producto_id es requerido para tipo_item REVENTA")
         return self
 
 class DetalleCotizacionResponse(DetalleCotizacionBase):

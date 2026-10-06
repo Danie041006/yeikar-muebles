@@ -8,6 +8,7 @@ import {
   type ReferenciaReceta,
   type CostosEnVivoOrden,
   type ConsumoMaterial,
+  type PiezaOrden,
 } from '../../services/produccionService';
 import { productosService } from '../../services/productosService';
 import { getEmpleados } from '../../services/empleadosService';
@@ -683,7 +684,34 @@ export default function EtapaModal({
   // ── Ficha del mueble (tab "La etapa") ──
   const fotoProducto = referenciaReceta?.producto_fotos?.find((f) => f.url)?.url ?? null;
   const accionPrimaria = acciones.find((a) => a.primario) ?? null;
-  const puedeHojaTrabajo = !!(stage.orden?.detalle_pedido?.producto || stage.orden?.producto_id);
+  // La Hoja de Trabajo aplica a cualquier orden: los muebles a la medida no
+  // tienen producto de catálogo, pero sí descripción y checklist de piezas.
+  const puedeHojaTrabajo = !!stage.orden;
+
+  // Checklist de piezas auto-detectado (juego = varias piezas). El estado
+  // local refleja el toggle al instante sin recargar toda la etapa.
+  const piezas = useMemo(() => {
+    const lista = stage.orden?.piezas ?? orden?.piezas ?? [];
+    return [...lista].sort((a, b) => (a.posicion ?? 0) - (b.posicion ?? 0));
+  }, [stage.orden?.piezas, orden?.piezas]);
+  const [piezasLocal, setPiezasLocal] = useState<Record<number, boolean>>({});
+  const [piezaToggling, setPiezaToggling] = useState<number | null>(null);
+  const piezaEstaCompletada = (p: PiezaOrden) => piezasLocal[p.id] ?? p.completada;
+  const piezasHechas = piezas.filter(piezaEstaCompletada).length;
+  const togglePieza = async (p: PiezaOrden) => {
+    if (piezaToggling !== null) return;
+    setPiezaToggling(p.id);
+    try {
+      const actualizada = await produccionService.actualizarPieza(p.id, {
+        completada: !piezaEstaCompletada(p),
+      });
+      setPiezasLocal((prev) => ({ ...prev, [p.id]: actualizada.completada }));
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || 'No se pudo actualizar la pieza.');
+    } finally {
+      setPiezaToggling(null);
+    }
+  };
   const descripcionAccion = (a: { destino: string; label: string }) =>
     stage.estado === 'PAUSADA' && a.destino === 'EN_PROCESO'
       ? 'Reactiva el trabajo en esta área donde quedó.'
@@ -720,6 +748,18 @@ export default function EtapaModal({
               <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border ${ESTADO_COLORS[stage.estado]}`}>
                 {stage.estado.replace('_', ' ')}
               </span>
+              {piezas.length > 0 && (
+                <span
+                  className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg border ${
+                    piezasHechas === piezas.length
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-sky-50 text-sky-800 border-sky-200'
+                  }`}
+                  title="Piezas del mueble marcadas como listas"
+                >
+                  Piezas {piezasHechas}/{piezas.length}
+                </span>
+              )}
             </div>
             <h2 className="text-xl sm:text-2xl font-black font-headline text-yeikar-secondary tracking-tight truncate">
               {productoNombre}
@@ -911,6 +951,63 @@ export default function EtapaModal({
                   </div>
                 </div>
               </section>
+
+              {/* Piezas del mueble: checklist de armado (solo si el mueble es
+                  un juego o trae varias piezas detectadas). */}
+              {piezas.length > 0 && (
+                <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
+                  <header className="flex items-center justify-between gap-2 px-4 py-3 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
+                    <div>
+                      <h3 className="text-sm font-bold font-headline text-yeikar-secondary leading-tight">Piezas del mueble</h3>
+                      <p className="text-[10px] text-yeikar-neutral/50">Detectadas de la descripción: toca una pieza para marcarla como lista</p>
+                    </div>
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                      piezasHechas === piezas.length
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-yeikar-primary/15 text-yeikar-secondary'
+                    }`}>
+                      {piezasHechas}/{piezas.length}
+                    </span>
+                  </header>
+                  <div className="divide-y divide-yeikar-secondary-light/5">
+                    {piezas.map((p) => {
+                      const hecha = piezaEstaCompletada(p);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => togglePieza(p)}
+                          disabled={piezaToggling !== null}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-yeikar-tertiary/20 transition-colors disabled:opacity-60"
+                          title={hecha ? 'Desmarcar pieza' : 'Marcar pieza como lista'}
+                        >
+                          <span className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 ${
+                            hecha ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-yeikar-secondary-light/40 bg-white'
+                          }`}>
+                            {hecha && (
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className={`block text-sm font-bold ${hecha ? 'text-yeikar-neutral/40 line-through' : 'text-yeikar-secondary'}`}>
+                              {p.nombre}{Number(p.cantidad) > 1 ? ` × ${fmtNum(Number(p.cantidad))}` : ''}
+                            </span>
+                            <span className="block text-[10px] font-mono text-yeikar-neutral/40">
+                              {p.area?.nombre ? `Área sugerida: ${p.area.nombre}` : 'Sin área sugerida'}
+                              {hecha && p.fecha_completada ? ` · Lista ${fmtFechaVE(p.fecha_completada)}` : ''}
+                            </span>
+                          </span>
+                          {piezaToggling === p.id && (
+                            <Loader2 className="w-4 h-4 animate-spin text-yeikar-neutral/40 shrink-0" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
               {/* Acciones de la etapa, explicadas una por una */}
               <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
