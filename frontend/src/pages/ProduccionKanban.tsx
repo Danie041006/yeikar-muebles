@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { produccionService, OrdenProduccion, EtapaProduccion, Area, ReferenciaReceta, CostosEnVivoOrden } from '../services/produccionService';
 import { inventarioService, SobranteLamina } from '../services/inventarioService';
@@ -17,6 +17,10 @@ import { useToast } from '../context/ToastContext';
 // real del taller, no el orden de creación de las áreas en la base de datos.
 const ORDEN_PIPELINE = ['Ebanistería', 'Preparación', 'Pintura', 'Tapicería', 'Vidriería', 'Terminación'];
 
+/** Posición de una orden dentro de su pedido (pieza i de N). Evita confundir
+ *  el número de orden de producción con el número de pedido. */
+type PedidoInfo = { pedidoId: number; indice: number; total: number };
+
 // Kanban column component
 interface ColumnProps {
   area: Area;
@@ -25,9 +29,10 @@ interface ColumnProps {
   onStatusChange: (stageId: number, newStatus: string) => void;
   onPassToArea: (stage: EtapaProduccion) => void;
   updatingStageId: number | null;
+  pedidoInfoPorOrden: Map<number, PedidoInfo>;
 }
 
-function KanbanColumn({ area, stages, onCardClick, onStatusChange, onPassToArea, updatingStageId }: ColumnProps) {
+function KanbanColumn({ area, stages, onCardClick, onStatusChange, onPassToArea, updatingStageId, pedidoInfoPorOrden }: ColumnProps) {
   return (
     <div
       className="flex flex-col min-h-[500px] w-[85vw] max-w-xs sm:max-w-none sm:w-72 snap-start bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 rounded-2xl p-3 sm:p-4 shadow-sm"
@@ -53,6 +58,7 @@ function KanbanColumn({ area, stages, onCardClick, onStatusChange, onPassToArea,
             <KanbanCard
               key={stage.id}
               stage={stage}
+              pedidoInfo={pedidoInfoPorOrden.get(stage.orden_produccion_id)}
               onClick={() => onCardClick(stage)}
               onStatusChange={onStatusChange}
               onPassToArea={onPassToArea}
@@ -68,13 +74,14 @@ function KanbanColumn({ area, stages, onCardClick, onStatusChange, onPassToArea,
 // Kanban card component
 interface CardProps {
   stage: EtapaProduccion;
+  pedidoInfo?: PedidoInfo;
   onClick: () => void;
   onStatusChange: (stageId: number, newStatus: string) => void;
   onPassToArea: (stage: EtapaProduccion) => void;
   statusUpdating?: boolean;
 }
 
-function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdating = false }: CardProps) {
+function KanbanCard({ stage, pedidoInfo, onClick, onStatusChange, onPassToArea, statusUpdating = false }: CardProps) {
   const statusColors = {
     ASIGNADA: 'bg-blue-50 text-blue-700 border-blue-200',
     EN_PROCESO: 'bg-amber-50 text-amber-700 border-amber-200 animate-pulse',
@@ -100,9 +107,24 @@ function KanbanCard({ stage, onClick, onStatusChange, onPassToArea, statusUpdati
       />
 
       <div className="flex items-start justify-between gap-2 mb-2">
-        <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">
-          ORDEN #{stage.orden_produccion_id}
-        </span>
+        <div className="min-w-0">
+          {pedidoInfo ? (
+            <span
+              className="text-[10px] font-mono font-bold text-yeikar-secondary flex items-center gap-1 flex-wrap"
+              title={`El pedido #${pedidoInfo.pedidoId} tiene ${pedidoInfo.total} pieza(s) en producción; esta es la ${pedidoInfo.indice}.`}
+            >
+              PEDIDO #{pedidoInfo.pedidoId}
+              <span className="text-yeikar-neutral/40 font-normal">· pieza {pedidoInfo.indice} de {pedidoInfo.total}</span>
+            </span>
+          ) : (
+            <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">
+              {esOrdenExhibicion(stage.orden) ? 'EXHIBICIÓN' : 'SIN PEDIDO'}
+            </span>
+          )}
+          <span className="block text-[9px] font-mono text-yeikar-neutral/35">
+            Orden de producción #{stage.orden_produccion_id}
+          </span>
+        </div>
         
         {/* Status selector: solo transiciones legales (la máquina de estados
             del backend rechaza el resto; antes se ofrecían las 4 siempre y el
@@ -613,6 +635,28 @@ export default function ProduccionKanban() {
     }
   };
 
+  // Posición de cada orden dentro de su pedido: pieza i de N. Es la clave para
+  // que el taller no confunda "Orden de producción #16" con un pedido distinto:
+  // ambas piezas comparten el mismo pedido aunque tengan órdenes separadas.
+  const pedidoInfoPorOrden = useMemo(() => {
+    const mapa = new Map<number, PedidoInfo>();
+    const porPedido = new Map<number, OrdenProduccion[]>();
+    ordenes.forEach((o) => {
+      const pedidoId = o.detalle_pedido?.pedido?.id;
+      if (!pedidoId) return;
+      const lista = porPedido.get(pedidoId) ?? [];
+      lista.push(o);
+      porPedido.set(pedidoId, lista);
+    });
+    porPedido.forEach((lista, pedidoId) => {
+      const ordenadas = [...lista].sort((a, b) => a.id - b.id);
+      ordenadas.forEach((o, i) => {
+        mapa.set(o.id, { pedidoId, indice: i + 1, total: ordenadas.length });
+      });
+    });
+    return mapa;
+  }, [ordenes]);
+
   // Filtrar etapas por búsqueda y toggle de completadas
   const filteredStages = stages.filter((stage) => {
     // Filtrar por completadas según toggle
@@ -621,6 +665,7 @@ export default function ProduccionKanban() {
     const term = search.toLowerCase();
     if (!term) return true;
     const idMatch = stage.orden_produccion_id.toString().includes(term);
+    const pedidoMatch = String(stage.orden?.detalle_pedido?.pedido?.id ?? '').includes(term);
     const obsMatch = stage.observaciones?.toLowerCase().includes(term) || false;
     const empMatch =
       stage.empleado_responsable
@@ -635,7 +680,7 @@ export default function ProduccionKanban() {
     // de la línea del pedido, así que es lo único que hay contra el que buscar.
     const descMatch =
       stage.orden?.detalle_pedido?.descripcion_especifica?.toLowerCase().includes(term) || false;
-    return idMatch || obsMatch || empMatch || clientMatch || prodMatch || descMatch;
+    return idMatch || pedidoMatch || obsMatch || empMatch || clientMatch || prodMatch || descMatch;
   });
 
   return (
@@ -817,6 +862,7 @@ export default function ProduccionKanban() {
                   onStatusChange={handleStatusChange}
                   onPassToArea={openPasarModal}
                   updatingStageId={statusUpdatingId}
+                  pedidoInfoPorOrden={pedidoInfoPorOrden}
                 />
               );
             })}
@@ -843,6 +889,7 @@ export default function ProduccionKanban() {
           key={selectedStage.id}
           stage={selectedStage}
           orden={ordenes.find((o) => o.id === selectedStage.orden_produccion_id) ?? null}
+          pedidoInfo={pedidoInfoPorOrden.get(selectedStage.orden_produccion_id) ?? null}
           areas={areas}
           empleados={empleados}
           materiales={materiales}
@@ -878,11 +925,19 @@ export default function ProduccionKanban() {
                   Mover a Nueva Área
                 </h2>
                 <p className="text-sm text-yeikar-neutral/60 mt-1">
-                  {pasarStage.orden?.detalle_pedido?.producto?.nombre || `Orden #${pasarStage.orden_produccion_id}`}
+                  {pasarStage.orden?.detalle_pedido?.producto?.nombre || `Orden de producción #${pasarStage.orden_produccion_id}`}
                   {pasarStage.orden?.detalle_pedido?.pedido?.cliente?.nombre
                     ? ` / ${pasarStage.orden.detalle_pedido.pedido.cliente.nombre}`
                     : ''}
                 </p>
+                {(() => {
+                  const info = pedidoInfoPorOrden.get(pasarStage.orden_produccion_id);
+                  return info ? (
+                    <p className="text-[11px] font-mono font-bold text-yeikar-secondary mt-1">
+                      Pedido #{info.pedidoId} · pieza {info.indice} de {info.total}
+                    </p>
+                  ) : null;
+                })()}
               </div>
               <button
                 type="button"
