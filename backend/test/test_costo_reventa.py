@@ -107,3 +107,45 @@ def test_entrada_inventario_actualiza_precio_costo_base(db, cleaner):
     db.refresh(prod)
 
     assert prod.precio_costo_base == Decimal("85.00")
+
+
+def test_reventa_con_precio_lista_manda_precio_de_venta(db, cleaner):
+    """Reventa con costo Y precio de lista definidos: el precio al cliente es
+    el de VENTA (352), no el costo de compra (325) — antes con ganancia 0%
+    el motor devolvía el costo como precio."""
+    from decimal import Decimal
+    prod = Producto(
+        nombre="COLCHON EURO PILLON PRECIO LISTA",
+        tipo_producto_id=2,
+        es_reventa=True,
+        moneda_id=2,  # USD
+        precio_costo_base=Decimal("325.00"),
+        precio_venta_base=Decimal("352.00"),
+        activo=True,
+    )
+    db.add(prod)
+    db.commit()
+    db.refresh(prod)
+    cleaner.registrar("producto", prod.id)
+
+    res = calcular_costo_producto(
+        db=db,
+        producto_id=prod.id,
+        nuevo_ancho=Decimal("1.0"),
+        nuevo_largo=Decimal("1.0"),
+        ganancia_porcentaje=Decimal("0"),   # campo vacío del cotizador
+        impuesto_porcentaje=Decimal("0"),
+    )
+    assert res["costo_total"] == 325.0       # el costo queda para el margen
+    assert res["precio_venta"] == 352.0      # el precio manda es el de lista
+
+    # Con ganancia explícita distinta de 0 se re-margina desde el costo
+    res2 = calcular_costo_producto(
+        db=db,
+        producto_id=prod.id,
+        nuevo_ancho=Decimal("1.0"),
+        nuevo_largo=Decimal("1.0"),
+        ganancia_porcentaje=Decimal("10"),
+        impuesto_porcentaje=Decimal("0"),
+    )
+    assert res2["precio_venta"] == 357.50    # 325 × 1.10

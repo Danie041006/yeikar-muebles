@@ -654,9 +654,26 @@ def calcular_costo_producto(
 
             if producto.precio_costo_base is not None:
                 costo_produccion = Decimal(str(producto.precio_costo_base))
-                monto_impuestos, base_con_impuestos, precio_sin_iva, precio_con_iva = _aplicar_impuestos_y_ganancia(
-                    costo_produccion, ganancia_porcentaje, iva_porcentaje, impuesto_porcentaje, es_moneda_base=es_moneda_base
+                # Reventa/exhibición con PRECIO DE LISTA definido: el precio al
+                # cliente es precio_venta_base (ya lleva su margen implícito),
+                # NO costo × (1+ganancia) con ganancia 0% (eso devolvía el costo
+                # de compra como precio). El % ganancia del formulario solo
+                # re-margina desde el costo si viene distinto de 0.
+                usa_precio_lista = (
+                    (producto.es_reventa or producto.es_exhibicion)
+                    and producto.precio_venta_base is not None
+                    and ganancia_porcentaje == 0
                 )
+                if usa_precio_lista:
+                    estimado = Decimal(str(producto.precio_venta_base)).quantize(Decimal("0.01"))
+                    monto_impuestos = Decimal("0")
+                    base_con_impuestos = estimado
+                    precio_sin_iva = estimado
+                    precio_con_iva = estimado
+                else:
+                    monto_impuestos, base_con_impuestos, precio_sin_iva, precio_con_iva = _aplicar_impuestos_y_ganancia(
+                        costo_produccion, ganancia_porcentaje, iva_porcentaje, impuesto_porcentaje, es_moneda_base=es_moneda_base
+                    )
             elif producto.precio_venta_base is not None:
                 # El estimado ES el PRECIO FINAL que se le da al cliente: sale
                 # TAL CUAL (ya lleva implícitos su margen y sus impuestos). El
