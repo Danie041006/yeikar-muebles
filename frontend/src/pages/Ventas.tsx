@@ -22,7 +22,7 @@ import {
   type DescuentoCreate,
   type MetodoPagoOption,
 } from '../services/ventaService';
-import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, redondearCobroEntero, extractErrorMessage } from '../utils/format';
+import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, redondearCobroEntero, extractErrorMessage, fmtConversionTasa } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { fmtFechaVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
@@ -1074,6 +1074,9 @@ function ModalDetalle({
                       const esMultimoneda = p.tasa_cambio && p.tasa_cambio !== 1;
                       const pagoCodigo = p.moneda?.codigo ?? '?';
                       const ventaCodigo = detalle.moneda?.codigo ?? '?';
+                      const conversion = esMultimoneda
+                        ? fmtConversionTasa(Number(p.monto), Number(p.monto_en_moneda_base), p.tasa_cambio, pagoCodigo, ventaCodigo)
+                        : null;
                       return (
                         <div
                           key={p.id}
@@ -1106,10 +1109,7 @@ function ModalDetalle({
                             )}
                             {esMultimoneda && (
                               <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
-                                ≈ {fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}
-                                <span className="opacity-70">
-                                  {' '}(1 {pagoCodigo} = {Number(p.tasa_cambio).toLocaleString('es-ES')} {nombreMoneda(ventaCodigo)})
-                                </span>
+                                {conversion ?? `≈ ${fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}`}
                               </span>
                             )}
                           </span>
@@ -1140,6 +1140,9 @@ function ModalDetalle({
                       const esMulti = d.tasa_cambio && d.tasa_cambio !== 1;
                       const descCodigo = d.moneda?.codigo ?? '?';
                       const ventaCodigo = detalle.moneda?.codigo ?? '?';
+                      const conversion = esMulti
+                        ? fmtConversionTasa(Number(d.monto), Number(d.monto_en_moneda_base), d.tasa_cambio, descCodigo, ventaCodigo)
+                        : null;
                       return (
                         <div
                           key={d.id}
@@ -1158,10 +1161,7 @@ function ModalDetalle({
                             </span>
                             {esMulti && (
                               <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
-                                ≈ {fmtMoneda(Number(d.monto_en_moneda_base), ventaCodigo)}
-                                <span className="opacity-70">
-                                  {' '}(1 {descCodigo} = {Number(d.tasa_cambio).toLocaleString('es-ES')} {nombreMoneda(ventaCodigo)})
-                                </span>
+                                {conversion ?? `≈ ${fmtMoneda(Number(d.monto_en_moneda_base), ventaCodigo)}`}
                               </span>
                             )}
                           </span>
@@ -1326,7 +1326,7 @@ function ModalDetalle({
                             ≈ {montoEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {nombreMoneda(monedaVenta?.codigo)}
                           </p>
                           <p className="text-[10px] text-amber-600/70 font-mono mt-0.5">
-                            equivale a 1 {nombreMoneda(monedaPago?.codigo)} = {tasaAlmacenada.toLocaleString('es-ES', { maximumFractionDigits: 6 })} {nombreMoneda(monedaVenta?.codigo)}
+                            {montoNum.toLocaleString('es-ES')} {monedaPago?.codigo} {monedaPago?.codigo === parPago.quoteCod ? '÷' : '×'} {tasaHumana.toLocaleString('es-ES')} = {montoEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {monedaVenta?.codigo}
                           </p>
                           {monedaVenta?.codigo === 'COP' && (
                             <p className="text-[10px] text-emerald-700 font-mono mt-0.5 bg-emerald-50 rounded px-1.5 py-0.5">
@@ -1529,6 +1529,9 @@ function ModalDetalle({
                         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                           <p className="text-sm font-bold text-amber-800 font-mono">
                             ≈ {descEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {nombreMoneda(monedaVenta?.codigo)}
+                          </p>
+                          <p className="text-[10px] text-amber-600/70 font-mono mt-0.5">
+                            {descMontoNum.toLocaleString('es-ES')} {monedaDesc?.codigo} {monedaDesc?.codigo === parDesc.quoteCod ? '÷' : '×'} {tasaHumanaDesc.toLocaleString('es-ES')} = {descEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {monedaVenta?.codigo}
                           </p>
                           {descEquivalente > saldoRestante + (monedaVenta?.codigo === 'COP' ? 1000 : 0.01) && (
                             <p className="text-xs text-red-600 font-bold mt-1">

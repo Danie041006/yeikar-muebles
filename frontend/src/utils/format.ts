@@ -213,6 +213,43 @@ export function calcularTasaAlmacenadaPago(
 }
 
 /**
+ * Arma la conversión de un pago/descuento multimoneda como la escribe el
+ * taller en el comprobante: "1.075.680 COP ÷ 3320 = 324 USD" (pago en la
+ * moneda débil, p. ej. COP → USD) o "350 USD × 3320 = 1.162.000 COP" (pago
+ * en la moneda fuerte, p. ej. USD → COP). La tasa SIEMPRE se muestra en su
+ * forma natural (3320, nunca 0.000301). Devuelve null si la conversión es
+ * 1:1 o faltan datos.
+ */
+export function fmtConversionTasa(
+  monto: number,
+  equivalente: number,
+  tasaAlmacenada?: number | null,
+  codPago?: string | null,
+  codVenta?: string | null
+): string | null {
+  const m = Number(monto) || 0;
+  let eq = Number(equivalente) || 0;
+  const tasa = Number(tasaAlmacenada) || 0;
+  if (m <= 0) return null;
+  if (eq <= 0 && tasa > 0) eq = m * tasa;
+  if (eq <= 0) return null;
+
+  // Unidades de pago por unidad de venta en la operación REALMENTE registrada
+  // (compensa el redondeo entero del equivalente: 1.075.680 / 324 = 3.320).
+  const ratio = m / eq;
+  if (Math.abs(ratio - 1) < 1e-9) return null;
+
+  const esDivision = ratio > 1;
+  const tasaNatural = esDivision ? ratio : 1 / ratio;
+  const fmtMonto = (n: number) => n.toLocaleString('es-ES', { maximumFractionDigits: 2 });
+  const fmtTasa = (n: number) =>
+    n.toLocaleString('es-ES', { maximumFractionDigits: n < 100 ? 4 : 2 });
+  const sufPago = codPago ? ` ${codPago}` : '';
+  const sufVenta = codVenta ? ` ${codVenta}` : '';
+  return `${fmtMonto(m)}${sufPago} ${esDivision ? '÷' : '×'} ${fmtTasa(tasaNatural)} = ${fmtMonto(eq)}${sufVenta}`;
+}
+
+/**
  * Extrae un string seguro de un error (incluyendo errores 422 de Pydantic v2
  * donde error.response.data.detail es una lista de objetos {type, loc, msg, input, ctx}).
  * Evita colapsar React con Minified React error #31.

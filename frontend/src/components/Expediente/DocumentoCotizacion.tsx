@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatCurrency } from '../../utils/format';
+import { formatCurrency, fmtConversionTasa } from '../../utils/format';
 import { fmtFechaVE } from '../../utils/fechas';
 import { METODOS_PAGO } from '../../services/ventaService';
 
@@ -238,13 +238,20 @@ export default function DocumentoCotizacion({
                       <th className="px-2 py-1 text-left">Método</th>
                       <th className="px-2 py-1 text-left">Ref.</th>
                       <th className="px-2 py-1 text-right">Monto Recibido</th>
-                      <th className="px-2 py-1 text-right">Equivalente en COP</th>
+                      <th className="px-2 py-1 text-right">Equivalente en {moneda}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-stone-200 font-mono">
                     {venta.pagos.map((p, idx) => {
                       const metodoLabel = METODOS_PAGO.find((m) => m.value === p.metodo_pago)?.label ?? p.metodo_pago;
                       const simbolo = p.moneda?.simbolo ?? '';
+                      const conversion = fmtConversionTasa(
+                        Number(p.monto),
+                        Number(p.monto_en_moneda_base ?? 0),
+                        p.tasa_cambio,
+                        p.moneda?.codigo,
+                        moneda,
+                      );
                       return (
                         <tr key={p.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/50'}>
                           <td className="px-2 py-1 text-stone-700">{fmtFechaVE(p.fecha)}</td>
@@ -254,9 +261,9 @@ export default function DocumentoCotizacion({
                             {simbolo}{Number(p.monto).toLocaleString('es-ES')}
                           </td>
                           <td className="px-2 py-1 text-right font-bold text-emerald-800">
-                            {formatCurrency(Number(p.monto_en_moneda_base || p.monto), 'COP')}
-                            {p.tasa_cambio && p.tasa_cambio !== 1 && (
-                              <span className="block text-[7px] text-stone-500 font-normal">Tasa: {p.tasa_cambio}</span>
+                            {formatCurrency(Number(p.monto_en_moneda_base || p.monto), moneda)}
+                            {conversion && (
+                              <span className="block text-[7px] text-stone-500 font-normal">{conversion}</span>
                             )}
                           </td>
                         </tr>
@@ -299,7 +306,7 @@ export default function DocumentoCotizacion({
               {venta && Number(venta.total_pagado) > 0 && (
                 <div className="flex justify-between items-baseline text-[8.5px] text-emerald-800 font-mono font-extrabold border-t border-amber-200/60 pt-1">
                   <span>TOTAL ABONADO:</span>
-                  <span>-{formatCurrency(Number(venta.total_pagado), 'COP')}</span>
+                  <span>-{formatCurrency(Number(venta.total_pagado), moneda)}</span>
                 </div>
               )}
 
@@ -307,7 +314,7 @@ export default function DocumentoCotizacion({
                 {venta && (
                   <div className="flex justify-between text-amber-900 font-mono font-black text-[9.5px]">
                     <span>SALDO PENDIENTE:</span>
-                    <span>{formatCurrency(Number(venta.saldo_pendiente), 'COP')}</span>
+                    <span>{formatCurrency(Number(venta.saldo_pendiente), moneda)}</span>
                   </div>
                 )}
               </div>
