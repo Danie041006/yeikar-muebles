@@ -283,6 +283,8 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         cliente_id=cliente_id,
         proveedor_nombre=proveedor_nombre,
         cliente_nombre=cliente_nombre,
+        departamento=getattr(movimiento, "departamento", None),
+        recibido_por=getattr(movimiento, "recibido_por", None),
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Text, BigInteger, Numeric, ForeignKey, Integer, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, Text, BigInteger, Numeric, ForeignKey, Integer, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -91,10 +91,46 @@ class Material(Base):
 
     unidad_medida   = relationship("UnidadMedida")
     categoria_inventario = relationship("CategoriaInventario")
+    unidades_uso    = relationship(
+        "MaterialUnidadUso",
+        back_populates="material",
+        cascade="all, delete-orphan",
+        order_by="MaterialUnidadUso.id",
+    )
 
     @property
     def es_laminar(self) -> bool:
         return self.largo_cm is not None and self.ancho_cm is not None
+
+
+class MaterialUnidadUso(Base):
+    """Unidad de USO de un material líquido/denso: cómo lo consume el taller.
+
+    El inventario y TODOS los costos viven en la unidad BASE del material
+    (la de compra: CUÑETE, GALÓN, LITRO...). El trabajador a veces usa otra
+    medida y esta tabla guarda la equivalencia PRÁCTICA del taller:
+
+        1 [nombre] = factor_base [unidad base]
+
+    Ej.: COLBÓN (base CUÑETE) → GALÓN factor 0,2 · PISTOLADA factor 0,0625 ·
+    LITRO factor 0,0528 (los factores son los que dicta la práctica, no la
+    matemática teórica: el sistema no los corrige).
+    """
+    __tablename__ = "material_unidad_uso"
+    __table_args__ = (
+        UniqueConstraint("material_id", "nombre", name="uq_material_unidad_uso_nombre"),
+    )
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    material_id = Column(BigInteger, ForeignKey("material.id", ondelete="CASCADE"), nullable=False, index=True)
+    nombre = Column(String(50), nullable=False)
+    factor_base = Column(Numeric(18, 10), nullable=False)
+    activo = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    material = relationship("Material", back_populates="unidades_uso")
+
 
 
 class ProductoMaterial(Base):

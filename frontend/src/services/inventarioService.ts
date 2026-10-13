@@ -96,6 +96,10 @@ export interface MovimientoCreate {
   cliente_id?: number;
   /** Nombre libre del cliente (misma mecánica que el proveedor). */
   cliente_nombre?: string;
+  /** Zona del taller a la que va la compra — opcional, solo entradas (no cambia el departamento del insumo). */
+  departamento?: string;
+  /** Quién trajo/entregó la compra (texto libre) — opcional, solo entradas. */
+  recibido_por?: string;
   /** "Fiar": ENTRADA sin pagar → se registra automáticamente la deuda (cuenta por pagar). */
   fiar?: boolean;
 }
@@ -115,7 +119,9 @@ export interface MovimientoResponse {
   proveedor_nombre?: string;
   cliente_id?: number;
   cliente_nombre?: string;
-  fecha: string;
+  departamento?: string | null;
+  recibido_por?: string | null;
+  fecha?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -186,7 +192,7 @@ export interface MovimientoProductoResponse {
   proveedor_nombre?: string;
   cliente_id?: number;
   cliente_nombre?: string;
-  fecha: string;
+  fecha?: string | null;
   created_at: string;
   updated_at: string;
 }

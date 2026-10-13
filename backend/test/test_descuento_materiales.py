@@ -9,7 +9,8 @@ descuenta bien cuando los materiales se toman POR MEDIDAS:
 
   Madera:
     volumétrica (m³) por pieza con medidas → descuenta la fórmula de la casa
-      (L×A×E) × piezas ÷ 1000 = m³.
+      (L×A×E) × piezas ÷ 10000 = m³ (largo en m, ancho/espesor en cm); con
+      unidad_captura='CM' las TRES medidas van en cm y divide entre 1.000.000.
     lineal (metros) capturado en cm → descuenta la conversión (1520 cm → 15.2 m).
 
 Ejecutar:  pytest test/test_descuento_materiales.py -v
@@ -167,18 +168,18 @@ def test_madera_volumetrica_pieza_descuenta_m3(client, cleaner, db):
                             costo_base=2000000, unidad_medida_id=UNIDAD_M3)
     dar_stock(client, cleaner, madera["id"], 20)   # 20 m³
 
-    # 2 piezas de 20×4×2 → (20×4×2)×2 ÷ 1000 = 0.32 m³
+    # 2 piezas 20 m × 4 cm × 2 cm → (20×4×2)×2 ÷ 10000 = 0.032 m³
     consumo = _consumir(client, cleaner, db, etapa, madera["id"], {
         "cantidad": 2,
         "extra": {
             "pieza_largo": 20, "pieza_ancho": 4, "pieza_espesor": 2,
         },
     })
-    # La cantidad almacenada en el consumo es la CANÓNICA (0.32 m³)
-    assert float(consumo["cantidad"]) == 0.32, consumo["cantidad"]
-    assert stock_actual(db, madera["id"]) == Decimal("19.68"), "20 − 0.32 m³ = 19.68"
+    # La cantidad almacenada en el consumo es la CANÓNICA (0.032 m³)
+    assert float(consumo["cantidad"]) == 0.032, consumo["cantidad"]
+    assert stock_actual(db, madera["id"]) == Decimal("19.968"), "20 − 0.032 m³ = 19.968"
     mov = _movimiento_material(db, madera["id"])
-    assert float(mov[0]) == 0.32, "El kardex descuenta los m³ convertidos"
+    assert float(mov[0]) == 0.032, "El kardex descuenta los m³ convertidos"
 
 
 def test_madera_volumetrica_una_pieza_016(client, cleaner, db):
@@ -186,12 +187,46 @@ def test_madera_volumetrica_una_pieza_016(client, cleaner, db):
     madera = crear_material(client, cleaner, nombre="MADERA TEST PIEZA 016",
                             costo_base=2000000, unidad_medida_id=UNIDAD_M3)
     dar_stock(client, cleaner, madera["id"], 1)
-    # 1 pieza 20×4×2 → 0.16 m³
+    # 1 pieza 20 m × 4 cm × 2 cm → 0.016 m³
     _consumir(client, cleaner, db, etapa, madera["id"], {
         "cantidad": 1,
         "extra": {"pieza_largo": 20, "pieza_ancho": 4, "pieza_espesor": 2},
     })
-    assert stock_actual(db, madera["id"]) == Decimal("0.84")
+    assert stock_actual(db, madera["id"]) == Decimal("0.984")
+
+
+def test_madera_volumetrica_todo_en_cm_descuenta_y_etiqueta(client, cleaner, db):
+    """El taller recibió las medidas en cm (200×20×4 cm): con el modo "todo en
+    cm" la fórmula divide entre 1.000.000 → 16.000 cm³ = 0.016 m³, y la
+    etiqueta de la tablita aclara que se digitó en cm."""
+    _, _, etapa = _pedido_con_etapa_en_proceso(client, cleaner)
+    madera = crear_material(client, cleaner, nombre="MADERA TEST TODO CM",
+                            costo_base=2000000, unidad_medida_id=UNIDAD_M3)
+    dar_stock(client, cleaner, madera["id"], 1)
+
+    consumo = _consumir(client, cleaner, db, etapa, madera["id"], {
+        "cantidad": 1,
+        "extra": {
+            "unidad_captura": "CM",
+            "pieza_largo": 200, "pieza_ancho": 20, "pieza_espesor": 4,
+        },
+    })
+    assert float(consumo["cantidad"]) == 0.016, consumo["cantidad"]
+    assert consumo["unidad_captura"] == "CM"
+    assert consumo["detalle_uso"] == "Pieza 200×20×4 (cm) × 1", consumo["detalle_uso"]
+    assert stock_actual(db, madera["id"]) == Decimal("0.984")
+    mov = _movimiento_material(db, madera["id"])
+    assert float(mov[0]) == 0.016
+
+    # El mismo volumen por la fórmula de la casa (largo 2 m): resultado idéntico.
+    madera2 = crear_material(client, cleaner, nombre="MADERA TEST CASA",
+                             costo_base=2000000, unidad_medida_id=UNIDAD_M3)
+    dar_stock(client, cleaner, madera2["id"], 1)
+    consumo2 = _consumir(client, cleaner, db, etapa, madera2["id"], {
+        "cantidad": 1,
+        "extra": {"pieza_largo": 2, "pieza_ancho": 20, "pieza_espesor": 4},
+    })
+    assert float(consumo2["cantidad"]) == float(consumo["cantidad"])
 
 
 def test_madera_lineal_en_cm_descuenta_metros(client, cleaner, db):
@@ -244,9 +279,9 @@ def test_reversa_madera_por_pieza_repone_el_m3_exacto(client, cleaner, db):
     from conftest import registrar_inventario_de_material
     registrar_inventario_de_material(db, cleaner, madera["id"])
 
-    assert stock_actual(db, madera["id"]) == Decimal("19.68")
+    assert stock_actual(db, madera["id"]) == Decimal("19.968")
 
-    # Eliminar el consumo → la reversa repone los 0.32 m³ EXACTOS (usa la
+    # Eliminar el consumo → la reversa repone los 0.032 m³ EXACTOS (usa la
     # cantidad canónica almacenada, no los datos de captura originales).
     r = client.delete(f"/api/v1/produccion/consumo/{consumo['id']}", headers=ADMIN_HEADERS)
     assert r.status_code in (200, 204), r.text
@@ -255,3 +290,40 @@ def test_reversa_madera_por_pieza_repone_el_m3_exacto(client, cleaner, db):
         "SELECT COUNT(*) FROM movimiento_inventario WHERE material_id = :m"
     ), {"m": madera["id"]}).scalar()
     assert n >= 2, "Debe quedar el movimiento de reversa (ENTRADA) en el kardex"
+
+
+# ============================================================================
+# Unitario: motor de conversión con las medidas de la pieza en cm
+# ============================================================================
+
+class _UnidadFake:
+    abreviatura = "m³"
+
+
+class _MaterialFake:
+    unidad_medida = _UnidadFake()
+
+
+def test_unidades_pieza_todo_cm_unitario():
+    """Punto único de conversión: con unidad_captura='CM' + medidas de pieza,
+    las TRES medidas van en cm (÷1.000.000); sin ella, fórmula de la casa
+    (largo en m, ÷10.000). La cuenta del taller de un solo campo no cambia."""
+    from app.modules.production.unidades import (
+        resolver_cantidad_consumo,
+        etiqueta_uso,
+        nota_captura,
+    )
+
+    material = _MaterialFake()
+    # 2 piezas de 210×20×5 cm → 42.000 cm³ = 0.042 m³
+    assert resolver_cantidad_consumo(material, 2, "CM", 210, 20, 5) == Decimal("0.042")
+    # Fórmula de la casa con el largo en metros: 2,10 m × 20 cm × 5 cm × 2 = 0.042 m³
+    assert resolver_cantidad_consumo(material, 2, None, 2.1, 20, 5) == Decimal("0.042")
+    assert resolver_cantidad_consumo(material, 2, "M", 2.1, 20, 5) == Decimal("0.042")
+    # La cuenta del taller (un solo campo, "832") sigue dividiendo entre 10.000.
+    assert resolver_cantidad_consumo(material, 832, "CM", None, None, None) == Decimal("0.0832")
+    # Etiquetas: '(cm)' SOLO cuando las medidas de la pieza van en cm.
+    assert etiqueta_uso(2, "CM", 210, 20, 5) == "Pieza 210×20×5 (cm) × 2"
+    assert etiqueta_uso(2, None, 2.1, 20, 5) == "Pieza 2.1×20×5 × 2"
+    assert nota_captura(2, "CM", 210, 20, 5) == "pieza 210×20×5 (cm) × 2"
+    assert nota_captura(2, None, 2.1, 20, 5) == "pieza 2.1×20×5 × 2"

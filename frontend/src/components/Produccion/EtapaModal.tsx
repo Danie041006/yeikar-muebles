@@ -9,6 +9,7 @@ import {
   type CostosEnVivoOrden,
   type ConsumoMaterial,
   type PiezaOrden,
+  type MaterialUnidadUso,
 } from '../../services/produccionService';
 import { productosService } from '../../services/productosService';
 import { getEmpleados } from '../../services/empleadosService';
@@ -25,11 +26,13 @@ import {
   dimensionalidad,
   volumenPieza,
   convertirCapturaLineal,
+  convertirUnidadUso,
   etiquetaCaptura,
   fmtNum,
   fmtNum4,
   type UnidadCaptura,
 } from '../../utils/unidades';
+import { parseCantidadHumana, fmtCantidadHumana } from '../../utils/cantidades';
 
 // ── EtapaModal: estación de trabajo de una etapa del Kanban de producción.
 //    Flujo de lectura = la pregunta del trabajador:
@@ -67,12 +70,15 @@ interface EtapaModalProps {
 const esMaterialLaminar = (m?: Material | null) => !!m && m.largo_cm != null && m.ancho_cm != null;
 
 /**
- * Normaliza un valor digitado a número con PUNTO decimal: el navegador puede
- * estar en locale inglés y `type="number"` rechaza la coma (0,5 → vacío →
- * "Please fill out this field"). Se usa type="text" + inputMode="decimal" y
- * esta función convierte "0,5" → 0.5. Devuelve NaN si no es numérico.
+ * Normaliza un valor digitado a número: acepta coma ("0,5"), fracciones
+ * ("3/4") y cantidades en palabras ("tres cuartos", "medio") — el taller
+ * dicta así. Se usa type="text" + inputMode="decimal" porque `type="number"`
+ * rechaza la coma en algunos locales. Devuelve NaN si no es comprensible.
  */
-const parseDecimalEs = (v: string): number => parseFloat(v.trim().replace(',', '.'));
+const parseDecimalEs = (v: string): number => {
+  const n = parseCantidadHumana(v);
+  return n === null ? NaN : n;
+};
 
 // ── Confirmación multi-uso: una línea = una cosa que se hizo con la madera.
 //    BASE = unidad base del material (m³/m); PIEZA = fórmula de la casa
@@ -86,24 +92,35 @@ interface UsoLinea {
   pieza_largo: string;
   pieza_ancho: string;
   pieza_espesor: string;
+  /** Medidas de la pieza TODAS en cm (divisor 1.000.000) en vez de la
+   *  fórmula de la casa con el largo en metros (divisor 10.000). */
+  pieza_cm: boolean;
+  /** Unidad de uso elegida ('' = unidad base): galón, pistolada, litro… */
+  unidad_uso_id: string;
 }
 
 const lineaUsoVacia = (): UsoLinea => ({
   modo: 'BASE', cantidad: '', pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
+  pieza_cm: false, unidad_uso_id: '',
 });
 
 /** Convierte una línea de uso a la unidad base (vista previa; la conversión
  *  real la hace el backend con el mismo motor). null = línea incompleta. */
-const convertirUso = (u: UsoLinea, dim: string): number | null => {
+const convertirUso = (u: UsoLinea, dim: string, unidadesUso: MaterialUnidadUso[] = []): number | null => {
   const v = parseDecimalEs(u.cantidad);
   if (!(v > 0)) return null;
+  if (u.unidad_uso_id) {
+    const un = unidadesUso.find((x) => String(x.id) === u.unidad_uso_id);
+    if (!un) return null;
+    return convertirUnidadUso(v, un.factor_base);
+  }
   if (u.modo === 'CM') return dim === 'VOLUMEN' ? v / 10000 : v / 100;
   if (u.modo === 'PIEZA') {
     const l = parseDecimalEs(u.pieza_largo);
     const a = parseDecimalEs(u.pieza_ancho);
     const e = parseDecimalEs(u.pieza_espesor);
     if (!(l > 0 && a > 0 && e > 0)) return null;
-    return volumenPieza({ largo: l, ancho: a, espesor: e }, v);
+    return volumenPieza({ largo: l, ancho: a, espesor: e }, v, u.pieza_cm ? 'CM' : 'M');
   }
   return v;
 };
@@ -184,12 +201,15 @@ export default function EtapaModal({
     // Captura flexible de madera: el modo depende de la unidad del material.
     unidad_captura: '' as '' | UnidadCaptura,
     modo_pieza: false,
-    // Modo "Medidas en cm" (volumétricos): lo mismo que Por pieza pero con
-    // TODAS las medidas en cm → (L×A×E) × piezas ÷ 1000000 = m³.
+    // Modo "Medidas en cm" (volumétricos): cuenta del ebanista en un solo
+    // campo (ej. 832) ÷ 10000 = m³.
     modo_cm: false,
     pieza_largo: '',
     pieza_ancho: '',
     pieza_espesor: '',
+    // Pieza con TODAS las medidas en cm (el taller las recibe así):
+    // (L×A×E) × piezas ÷ 1.000.000 = m³. Apagado = fórmula de la casa (largo m).
+    pieza_cm: false,
     componente: '',
     es_excedente: false,
     motivo_exceso: '',
@@ -199,6 +219,8 @@ export default function EtapaModal({
     es_lamina_completa: false,
     // Pedido general (madera y demás): entrega hoy, uso se confirma después.
     es_pedido: false,
+    // Unidad de uso (líquidos/densos): '' = unidad base del material.
+    unidad_uso_id: '',
   });
   const [materialSearch, setMaterialSearch] = useState('');
   const [showMaterialDropdown, setShowMaterialDropdown] = useState(false);
@@ -238,6 +260,17 @@ export default function EtapaModal({
   // Dimensionalidad del material que se está CONFIRMANDO (mismo motor que el
   // registro: captura flexible al confirmar el uso).
   const dimConfirmar = dimensionalidad(consumoAConfirmar?.material?.unidad_medida?.abreviatura);
+  // Unidades de USO (líquidos/densos: cuñete/galón/pistolada/litro…). Los chips
+  // solo aparecen cuando el material las tiene configuradas y su captura no es
+  // de madera (m/m³), que ya tiene sus propios modos.
+  const unidadesUsoConsumo = (materialConsumo?.unidades_uso ?? []).filter((u) => u.activo !== false);
+  const esUnidadUsoConsumo = unidadesUsoConsumo.length > 0 && dimConsumo === 'OTRA';
+  const unidadUsoSelConsumo =
+    unidadesUsoConsumo.find((u) => String(u.id) === newConsumo.unidad_uso_id) ?? null;
+  const unidadesUsoConfirmar = (consumoAConfirmar?.material?.unidades_uso ?? []).filter(
+    (u) => u.activo !== false,
+  );
+  const esUnidadUsoConfirmar = unidadesUsoConfirmar.length > 0 && dimConfirmar === 'OTRA';
 
   // Sobrantes del material actual que le caben al corte digitado (ambas orientaciones)
   const sobrantesQueCaben = (() => {
@@ -369,7 +402,7 @@ export default function EtapaModal({
       ...prev,
       material_id: String(materialId),
       cantidad: cantidadFaltante > 0 ? String(Math.round(cantidadFaltante * 100) / 100) : '',
-      unidad_captura: '', modo_pieza: false, modo_cm: false,
+      unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_cm: false,
       pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
       ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
       es_lamina_completa: false, es_pedido: false,
@@ -441,6 +474,18 @@ export default function EtapaModal({
     try {
       const materialId = parseInt(newConsumo.material_id);
       const cantidad = esPedidoAbierto ? null : parseDecimalEs(newConsumo.cantidad);
+      if (!esPedidoAbierto && !(cantidad! > 0)) {
+        toast.error('Cantidad no válida: usa un número (0,75 · 3/4 · medio · tres cuartos).');
+        setConsumoSubmitting(false);
+        return;
+      }
+      // Unidad de uso elegida (líquidos/densos): solo aplica a captura simple.
+      // El pedido abierto (sin cantidad) no lleva unidad: se decide al confirmar.
+      const unidadUsoId =
+        newConsumo.unidad_uso_id && !esPedidoAbierto && !esPieza && !esCm && !esCorte && !esLaminaCompleta
+          ? parseInt(newConsumo.unidad_uso_id)
+          : undefined;
+      const unidadUsoSel = unidadesUsoConsumo.find((u) => u.id === unidadUsoId) ?? null;
       const cantidadConvertida = esPedidoAbierto
         ? 0
         : esCorte
@@ -449,12 +494,15 @@ export default function EtapaModal({
             ? volumenPieza(
                 { largo: parseDecimalEs(newConsumo.pieza_largo), ancho: parseDecimalEs(newConsumo.pieza_ancho), espesor: parseDecimalEs(newConsumo.pieza_espesor) },
                 cantidad!,
+                newConsumo.pieza_cm ? 'CM' : 'M',
               )
             : esCm
               ? cantidad! / 10000
-              : newConsumo.unidad_captura === 'CM'
-                ? convertirCapturaLineal(cantidad!, 'CM')
-                : cantidad!;
+              : unidadUsoSel
+                ? convertirUnidadUso(cantidad!, unidadUsoSel.factor_base)
+                : newConsumo.unidad_captura === 'CM'
+                  ? convertirCapturaLineal(cantidad!, 'CM')
+                  : cantidad!;
       const stockAntes = inventario[materialId];
       await produccionService.registrarConsumo({
         etapa_produccion_id: stage.id,
@@ -477,12 +525,16 @@ export default function EtapaModal({
                   pieza_largo: parseDecimalEs(newConsumo.pieza_largo),
                   pieza_ancho: parseDecimalEs(newConsumo.pieza_ancho),
                   pieza_espesor: parseDecimalEs(newConsumo.pieza_espesor),
+                  // 'CM' = las tres medidas vienen en cm (divide entre 1.000.000).
+                  ...(newConsumo.pieza_cm ? { unidad_captura: 'CM' as const } : {}),
                 }
               : esCm
                 ? { unidad_captura: 'CM' as const }
-                : newConsumo.unidad_captura
-                  ? { unidad_captura: newConsumo.unidad_captura }
-                  : {}),
+                : unidadUsoId
+                  ? { unidad_uso_id: unidadUsoId }
+                  : newConsumo.unidad_captura
+                    ? { unidad_captura: newConsumo.unidad_captura }
+                    : {}),
         ...(newConsumo.componente.trim() ? { componente: newConsumo.componente.trim() } : {}),
         // Pedido general: la cantidad digitada es lo ENTREGADO; el uso real
         // se confirma después (el backend deja el consumo PENDIENTE).
@@ -495,10 +547,10 @@ export default function EtapaModal({
       setNewConsumo((prev) => ({
         ...prev,
         material_id: '', cantidad: '', observaciones: '',
-        unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
+        unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_cm: false, pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
         componente: '', es_excedente: false, motivo_exceso: '',
         ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
-        es_lamina_completa: false, es_pedido: false,
+        es_lamina_completa: false, es_pedido: false, unidad_uso_id: '',
       }));
       setMaterialSearch('');
       await onRecargarSobrantes();
@@ -550,10 +602,13 @@ export default function EtapaModal({
       for (const [i, u] of usos.entries()) {
         const v = parseDecimalEs(u.cantidad);
         if (!(v > 0)) {
-          toast.error(`Uso ${i + 1}: indica la cantidad (mayor a 0).`);
+          toast.error(`Uso ${i + 1}: indica la cantidad (0,75 · 3/4 · medio · tres cuartos).`);
           return;
         }
-        if (u.modo === 'PIEZA') {
+        if (u.unidad_uso_id) {
+          // Unidad de uso (galón, pistolada, litro…): el backend multiplica por su factor.
+          payloadUsos.push({ cantidad: v, unidad_uso_id: parseInt(u.unidad_uso_id) });
+        } else if (u.modo === 'PIEZA') {
           const l = parseDecimalEs(u.pieza_largo);
           const a = parseDecimalEs(u.pieza_ancho);
           const e = parseDecimalEs(u.pieza_espesor);
@@ -561,7 +616,14 @@ export default function EtapaModal({
             toast.error(`Uso ${i + 1}: completa las medidas de la pieza (largo × ancho × espesor).`);
             return;
           }
-          payloadUsos.push({ cantidad: v, pieza_largo: l, pieza_ancho: a, pieza_espesor: e });
+          payloadUsos.push({
+            cantidad: v,
+            pieza_largo: l,
+            pieza_ancho: a,
+            pieza_espesor: e,
+            // 'CM' = las tres medidas vienen en cm (divide entre 1.000.000).
+            ...(u.pieza_cm ? { unidad_captura: 'CM' as const } : {}),
+          });
         } else if (u.modo === 'CM') {
           payloadUsos.push({ cantidad: v, unidad_captura: 'CM' });
         } else {
@@ -1295,10 +1357,11 @@ export default function EtapaModal({
                                     ...prev,
                                     material_id: String(m.id),
                                     // El material define el modo de captura: reset.
-      unidad_captura: '', modo_pieza: false, modo_cm: false,
+                                    unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_cm: false,
                                     pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
                                     ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
                                     es_pedido: false,
+                                    unidad_uso_id: '',
                                   }));
                                   setMaterialSeleccionado(m);
                                   setMaterialSearch(m.nombre);
@@ -1341,13 +1404,15 @@ export default function EtapaModal({
                           ? 'Cantidad entregada (opcional)'
                           : esMaterialLaminar(materialConsumo) && newConsumo.es_lamina_completa
                           ? 'N.º de láminas'
-                          : dimConsumo === 'VOLUMEN' && newConsumo.modo_cm
-                            ? 'Cantidad (cm)'
-                            : dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza
-                              ? 'N.º de piezas'
-                              : dimConsumo === 'VOLUMEN'
-                                ? 'Cantidad (m³)'
-                                : 'Cantidad'}
+                          : unidadUsoSelConsumo
+                            ? `Cantidad (${unidadUsoSelConsumo.nombre})`
+                            : dimConsumo === 'VOLUMEN' && newConsumo.modo_cm
+                              ? 'Cantidad (cm)'
+                              : dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza
+                                ? 'N.º de piezas'
+                                : dimConsumo === 'VOLUMEN'
+                                  ? 'Cantidad (m³)'
+                                  : 'Cantidad'}
                       </label>
                       <input
                         type="text"
@@ -1363,6 +1428,62 @@ export default function EtapaModal({
                           Piden sin cantidad: se descuenta al confirmar cuánto se usó.
                         </p>
                       )}
+                      {/* Unidad de uso (líquidos/densos): chips + equivalencia en vivo */}
+                      {esUnidadUsoConsumo && (
+                        <div className="flex items-center gap-1 flex-wrap mt-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setNewConsumo(prev => ({ ...prev, unidad_uso_id: '' }))}
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border transition-colors ${
+                              !newConsumo.unidad_uso_id
+                                ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                                : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+                            }`}
+                          >
+                            {materialConsumo?.unidad_medida?.abreviatura || 'base'}
+                          </button>
+                          {unidadesUsoConsumo.map((u) => (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => setNewConsumo(prev => ({ ...prev, unidad_uso_id: String(u.id) }))}
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-md border transition-colors ${
+                                newConsumo.unidad_uso_id === String(u.id)
+                                  ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                                  : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+                              }`}
+                            >
+                              {u.nombre}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      {(() => {
+                        const parsed = parseCantidadHumana(newConsumo.cantidad);
+                        if (parsed === null) return null;
+                        const esTexto = !/^\d+(?:[.,]\d+)?$/.test(newConsumo.cantidad.trim());
+                        const abrev = materialConsumo?.unidad_medida?.abreviatura || 'base';
+                        if (unidadUsoSelConsumo) {
+                          const base = convertirUnidadUso(parsed, unidadUsoSelConsumo.factor_base);
+                          return (
+                            <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 mt-1">
+                              {esTexto && <>{newConsumo.cantidad.trim()} = </>}
+                              {fmtCantidadHumana(parsed)} {unidadUsoSelConsumo.nombre} = {fmtNum4(base)} {abrev}
+                              {materialConsumo && materialConsumo.costo_base > 0 && base > 0
+                                ? ` ≈ ${fmt(base * materialConsumo.costo_base)}`
+                                : ''}
+                            </p>
+                          );
+                        }
+                        if (esTexto) {
+                          return (
+                            <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 mt-1">
+                              “{newConsumo.cantidad.trim()}” = {fmtCantidadHumana(parsed)}
+                            </p>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                     {/* Solicitante (prellenado con el responsable) */}
                     <div className="sm:col-span-3">
@@ -1490,8 +1611,39 @@ export default function EtapaModal({
                   )}
                   {materialConsumo && dimConsumo === 'VOLUMEN' && newConsumo.modo_pieza && (
                     <div className="space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-semibold text-yeikar-neutral/50 uppercase">Medidas:</span>
+                        <button
+                          type="button"
+                          onClick={() => setNewConsumo(prev => ({ ...prev, pieza_cm: false }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+                            !newConsumo.pieza_cm
+                              ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                              : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+                          }`}
+                          title="Fórmula de la casa: largo en metros, ancho y espesor en cm"
+                        >
+                          Largo (m) + cm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewConsumo(prev => ({ ...prev, pieza_cm: true }))}
+                          className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
+                            newConsumo.pieza_cm
+                              ? 'bg-yeikar-primary text-yeikar-neutral border-yeikar-primary'
+                              : 'bg-white text-yeikar-neutral/60 border-yeikar-secondary-light/15 hover:border-yeikar-primary/40'
+                          }`}
+                          title="Las tres medidas en centímetros (como las recibe del taller)"
+                        >
+                          Todo en cm
+                        </button>
+                      </div>
                       <div className="grid grid-cols-3 gap-2">
-                        {([['pieza_largo', 'Largo (m)'], ['pieza_ancho', 'Ancho (cm)'], ['pieza_espesor', 'Espesor (cm)']] as const).map(([campo, etiqueta]) => (
+                        {([
+                          ['pieza_largo', newConsumo.pieza_cm ? 'Largo (cm)' : 'Largo (m)'],
+                          ['pieza_ancho', 'Ancho (cm)'],
+                          ['pieza_espesor', 'Espesor (cm)'],
+                        ] as const).map(([campo, etiqueta]) => (
                           <input
                             key={campo}
                             type="text"
@@ -1506,11 +1658,14 @@ export default function EtapaModal({
                       </div>
                       {newConsumo.pieza_largo && newConsumo.pieza_ancho && newConsumo.pieza_espesor && parseDecimalEs(newConsumo.cantidad || '0') > 0 && (
                         <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
-                          Fórmula de la casa: ({newConsumo.pieza_largo}×{newConsumo.pieza_ancho}×{newConsumo.pieza_espesor}) × {newConsumo.cantidad} ÷ 10000 ={' '}
+                          {newConsumo.pieza_cm
+                            ? `Todas en cm: (${newConsumo.pieza_largo}×${newConsumo.pieza_ancho}×${newConsumo.pieza_espesor}) × ${newConsumo.cantidad} ÷ 1.000.000 =`
+                            : `Fórmula de la casa: (${newConsumo.pieza_largo}×${newConsumo.pieza_ancho}×${newConsumo.pieza_espesor}) × ${newConsumo.cantidad} ÷ 10.000 =`}{' '}
                           <span className="font-bold">
                             {fmtNum4(volumenPieza(
                               { largo: parseDecimalEs(newConsumo.pieza_largo), ancho: parseDecimalEs(newConsumo.pieza_ancho), espesor: parseDecimalEs(newConsumo.pieza_espesor) },
                               parseDecimalEs(newConsumo.cantidad) || 0,
+                              newConsumo.pieza_cm ? 'CM' : 'M',
                             ))} m³
                           </span>{' '}a descontar
                         </p>
@@ -1698,7 +1853,7 @@ export default function EtapaModal({
                                     ? `PENDIENTE · ${c.cantidad} lámina(s)`
                                     : c.cantidad_pedida == null
                                       ? 'PEDIDO ABIERTO · por confirmar'
-                                      : `PEDIDO · ${c.cantidad} ${c.material?.unidad_medida?.abreviatura ?? ''} por confirmar`}
+                                      : `PEDIDO · ${c.cantidad_uso != null && c.unidad_uso ? `${c.cantidad_uso} ${c.unidad_uso.nombre}` : `${c.cantidad} ${c.material?.unidad_medida?.abreviatura ?? ''}`} por confirmar`}
                                 </span>
                               )}
                               {c.es_excedente && (
@@ -2091,14 +2246,22 @@ export default function EtapaModal({
             : dimConfirmar === 'LONGITUD'
               ? [['BASE', 'mts'], ['CM', 'cm']]
               : [];
-          const etiquetaCantidad = (u: UsoLinea) =>
-            u.modo === 'PIEZA'
+          const etiquetaCantidad = (u: UsoLinea) => {
+            if (u.unidad_uso_id) {
+              const un = unidadesUsoConfirmar.find((x) => String(x.id) === u.unidad_uso_id);
+              return `Cantidad (${un?.nombre || 'unidad'})`;
+            }
+            return u.modo === 'PIEZA'
               ? 'N.º de piezas'
               : u.modo === 'CM'
                 ? 'Cantidad (cm)'
                 : `Cantidad (${unidad || 'unidad base'})`;
+          };
           // Total de la confirmación (vista previa; el backend convierte igual).
-          const totalBase = usos.reduce((acc, u) => acc + (convertirUso(u, dimConfirmar) ?? 0), 0);
+          const totalBase = usos.reduce(
+            (acc, u) => acc + (convertirUso(u, dimConfirmar, unidadesUsoConfirmar) ?? 0),
+            0,
+          );
           const dif = totalBase > 0 ? Number(pedidas) - totalBase : null;
           const toggleBtn = (activo: boolean) =>
             `text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
@@ -2151,7 +2314,8 @@ export default function EtapaModal({
                   className="space-y-3"
                 >
                   {usos.map((u, i) => {
-                    const baseLinea = convertirUso(u, dimConfirmar);
+                    const baseLinea = convertirUso(u, dimConfirmar, unidadesUsoConfirmar);
+                    const unidadSelLinea = unidadesUsoConfirmar.find((x) => String(x.id) === u.unidad_uso_id) ?? null;
                     return (
                       <div key={i} className="rounded-2xl border border-yeikar-secondary-light/15 bg-yeikar-tertiary/20 p-2.5 space-y-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -2162,12 +2326,33 @@ export default function EtapaModal({
                             <button
                               key={valor}
                               type="button"
-                              onClick={() => setUso(i, 'modo', valor)}
-                              className={toggleBtn(u.modo === valor)}
+                              onClick={() => setUsos(prev => prev.map((x, j) => (j === i ? { ...x, modo: valor, unidad_uso_id: '' } : x)))}
+                              className={toggleBtn(u.modo === valor && !u.unidad_uso_id)}
                             >
                               {etiqueta}
                             </button>
                           ))}
+                          {esUnidadUsoConfirmar && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => setUsos(prev => prev.map((x, j) => (j === i ? { ...x, unidad_uso_id: '' } : x)))}
+                                className={toggleBtn(!u.unidad_uso_id)}
+                              >
+                                {mat?.unidad_medida?.abreviatura || 'base'}
+                              </button>
+                              {unidadesUsoConfirmar.map((un) => (
+                                <button
+                                  key={un.id}
+                                  type="button"
+                                  onClick={() => setUsos(prev => prev.map((x, j) => (j === i ? { ...x, modo: 'BASE', unidad_uso_id: String(un.id) } : x)))}
+                                  className={toggleBtn(u.unidad_uso_id === String(un.id))}
+                                >
+                                  {un.nombre}
+                                </button>
+                              ))}
+                            </>
+                          )}
                           {usos.length > 1 && (
                             <button
                               type="button"
@@ -2185,7 +2370,7 @@ export default function EtapaModal({
                           <input
                             type="text"
                             inputMode="decimal"
-                            placeholder={u.modo === 'PIEZA' ? 'Ej. 4' : u.modo === 'CM' ? 'Ej. 832' : 'Ej. 2,5'}
+                            placeholder={unidadSelLinea ? 'Ej. ¾ · 0,75 · tres cuartos' : u.modo === 'PIEZA' ? 'Ej. 4' : u.modo === 'CM' ? 'Ej. 832' : 'Ej. 2,5'}
                             value={u.cantidad}
                             onChange={(e) => setUso(i, 'cantidad', e.target.value)}
                             required
@@ -2193,25 +2378,61 @@ export default function EtapaModal({
                             className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
                           />
                         </div>
+                        {unidadSelLinea && baseLinea !== null && (
+                          <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
+                            {parseCantidadHumana(u.cantidad) !== null && !/^\d+(?:[.,]\d+)?$/.test(u.cantidad.trim()) && (
+                              <>{u.cantidad.trim()} = </>
+                            )}
+                            {fmtCantidadHumana(parseCantidadHumana(u.cantidad) ?? 0)} {unidadSelLinea.nombre} = {fmtNum4(baseLinea)} {unidad || 'base'}
+                            {mat && mat.costo_base > 0 && baseLinea > 0 ? ` ≈ ${fmt(baseLinea * mat.costo_base)}` : ''}
+                          </p>
+                        )}
                         {u.modo === 'PIEZA' && (
-                          <div className="grid grid-cols-3 gap-2">
-                            {([['pieza_largo', 'Largo (m)'], ['pieza_ancho', 'Ancho (cm)'], ['pieza_espesor', 'Espesor (cm)']] as const).map(([campo, etiqueta]) => (
-                              <input
-                                key={campo}
-                                type="text"
-                                inputMode="decimal"
-                                placeholder={etiqueta}
-                                value={u[campo]}
-                                onChange={(e) => setUso(i, campo, e.target.value)}
-                                required
-                                className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
-                              />
-                            ))}
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[9px] font-semibold text-yeikar-neutral/50 uppercase">Medidas:</span>
+                              <button
+                                type="button"
+                                onClick={() => setUsos(prev => prev.map((x, j) => (j === i ? { ...x, pieza_cm: false } : x)))}
+                                className={toggleBtn(!u.pieza_cm)}
+                                title="Fórmula de la casa: largo en metros, ancho y espesor en cm"
+                              >
+                                Largo (m) + cm
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setUsos(prev => prev.map((x, j) => (j === i ? { ...x, pieza_cm: true } : x)))}
+                                className={toggleBtn(u.pieza_cm)}
+                                title="Las tres medidas en centímetros (como las recibe del taller)"
+                              >
+                                Todo en cm
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {([
+                                ['pieza_largo', u.pieza_cm ? 'Largo (cm)' : 'Largo (m)'],
+                                ['pieza_ancho', 'Ancho (cm)'],
+                                ['pieza_espesor', 'Espesor (cm)'],
+                              ] as const).map(([campo, etiqueta]) => (
+                                <input
+                                  key={campo}
+                                  type="text"
+                                  inputMode="decimal"
+                                  placeholder={etiqueta}
+                                  value={u[campo]}
+                                  onChange={(e) => setUso(i, campo, e.target.value)}
+                                  required
+                                  className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
+                                />
+                              ))}
+                            </div>
                           </div>
                         )}
                         {u.modo === 'PIEZA' && baseLinea !== null && (
                           <p className="text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
-                            Fórmula de la casa: ({u.pieza_largo}×{u.pieza_ancho}×{u.pieza_espesor}) × {u.cantidad} ÷ 10000 ={' '}
+                            {u.pieza_cm
+                              ? `Todas en cm: (${u.pieza_largo}×${u.pieza_ancho}×${u.pieza_espesor}) × ${u.cantidad} ÷ 1.000.000 =`
+                              : `Fórmula de la casa: (${u.pieza_largo}×${u.pieza_ancho}×${u.pieza_espesor}) × ${u.cantidad} ÷ 10.000 =`}{' '}
                             <span className="font-bold">{fmtNum4(baseLinea)} {unidad}</span>
                           </p>
                         )}

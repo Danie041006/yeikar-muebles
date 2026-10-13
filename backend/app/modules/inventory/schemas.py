@@ -1,8 +1,18 @@
 # backend/app/modules/inventory/schemas.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional
 from decimal import Decimal
+
+# Zonas del taller para las entradas de insumos (mismas que material.departamento)
+DEPARTAMENTOS_VALIDOS = {
+    "EBANISTERIA",
+    "PREPARACION",
+    "PINTURA",
+    "TAPICERIA",
+    "VIDRIERIA",
+    "TERMINACION",
+}
 
 # Stock actual (Inventario)
 class InventarioResponse(BaseModel):
@@ -55,17 +65,57 @@ class MovimientoCreate(BaseModel):
     cliente_id: Optional[int] = None
     proveedor_nombre: Optional[str] = None
     cliente_nombre: Optional[str] = None
+    # Zona del taller a la que va la compra (solo entradas): EBANISTERIA,
+    # PREPARACION, PINTURA, TAPICERIA, VIDRIERIA, TERMINACION. Solo se registra
+    # en el movimiento; no cambia material.departamento (NULL = general).
+    departamento: Optional[str] = None
+    # Quién trajo/entregó la compra (texto libre, solo entradas).
+    recibido_por: Optional[str] = Field(None, max_length=150)
     # "Fiar": ENTRADA sin pagar de una cuenta → se registra automáticamente una
     # cuenta por pagar (compra + pasada) con el proveedor indicado.
     fiar: Optional[bool] = False
 
-class MovimientoResponse(MovimientoCreate):
+    @field_validator("departamento")
+    @classmethod
+    def _validar_departamento(cls, v: Optional[str]) -> Optional[str]:
+        if v in (None, ""):
+            return None
+        v = v.upper().strip()
+        if v not in DEPARTAMENTOS_VALIDOS:
+            raise ValueError(f"Departamento inválido: {v}")
+        return v
+
+class MovimientoResponse(BaseModel):
+    """Salida del kardex: SIN las validaciones de entrada (gt/pattern).
+
+    Los movimientos históricos pueden tener valores que el POST no admite:
+    p. ej. la carga inicial de Excel guarda `costo_unitario = 0` y un AJUSTE
+    puede quedar en cantidad 0. Validar la respuesta con las reglas de entrada
+    tumbaba el kardex completo (500) de esos materiales.
+    """
     id: int
-    fecha: datetime
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    material_id: int
+    ubicacion_id: int
+    tipo: str
+    cantidad: Decimal
+    costo_unitario: Optional[Decimal] = None
+    referencia_tipo: Optional[str] = None
+    referencia_id: Optional[int] = None
+    observaciones: Optional[str] = None
+    llevada: Optional[Decimal] = None
+    pagado_desde_metodo_caja_id: Optional[int] = None
+    moneda_pago_id: Optional[int] = None
+    tasa_pago: Optional[Decimal] = None
+    proveedor_id: Optional[int] = None
+    cliente_id: Optional[int] = None
     proveedor_nombre: Optional[str] = None
     cliente_nombre: Optional[str] = None
+    departamento: Optional[str] = None
+    recibido_por: Optional[str] = None
+    fiar: Optional[bool] = False
+    fecha: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -135,13 +185,30 @@ class MovimientoProductoCreate(BaseModel):
     fiar: Optional[bool] = False
 
 
-class MovimientoProductoResponse(MovimientoProductoCreate):
+class MovimientoProductoResponse(BaseModel):
+    """Salida del kardex de productos: sin validaciones de entrada (mismo caso
+    que MovimientoResponse: cargas iniciales con costo 0)."""
     id: int
-    fecha: datetime
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    producto_id: int
+    ubicacion_id: int
+    tipo: str
+    cantidad: Decimal
+    costo_unitario: Optional[Decimal] = None
+    referencia_tipo: Optional[str] = None
+    referencia_id: Optional[int] = None
+    observaciones: Optional[str] = None
+    llevada: Optional[Decimal] = None
+    pagado_desde_metodo_caja_id: Optional[int] = None
+    moneda_pago_id: Optional[int] = None
+    tasa_pago: Optional[Decimal] = None
+    proveedor_id: Optional[int] = None
+    cliente_id: Optional[int] = None
     proveedor_nombre: Optional[str] = None
     cliente_nombre: Optional[str] = None
+    fiar: Optional[bool] = False
+    fecha: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

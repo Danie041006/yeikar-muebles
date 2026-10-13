@@ -31,6 +31,8 @@ interface Material {
   ancho_cm?: number | null;
   categoria_inventario_id?: number | null;
   departamento?: string | null;
+  // Unidades de uso (líquidos/densos): 1 [nombre] = factor_base unidades base.
+  unidades_uso?: { id?: number; nombre: string; factor_base: number; activo?: boolean }[];
 }
 
   interface Product {
@@ -160,6 +162,8 @@ export default function Inventario() {
     llevada: '',    // "la llevada": flete/aduana (opcional)
     proveedor_nombre: '', // dónde se compró (texto libre, opcional, solo entradas)
     cliente_nombre: '',  // comprado para un cliente específico (texto libre, opcional)
+    departamento: '',    // zona del taller a la que va ('' = general), solo entradas
+    recibido_por: '',    // quién trajo la compra (texto libre, solo entradas)
   });
   const [savingMov, setSavingMov] = useState(false);
 
@@ -177,7 +181,13 @@ export default function Inventario() {
     nombre: '', costo_base: '', stock_minimo: '8',
     largo_cm: '', ancho_cm: '', categoria_inventario_id: '',
     departamento: null as string | null,
+    unidad_medida_id: '',
   });
+  // Unidades de USO del insumo (líquidos/densos): cómo lo consume el taller.
+  // `valor` se interpreta según `invertida`:
+  //   false → "1 [BASE] = valor [NOMBRE]" · true → "1 [NOMBRE] = valor [BASE]"
+  interface FilaUnidadUso { nombre: string; valor: string; invertida: boolean }
+  const [unidadesUsoEdit, setUnidadesUsoEdit] = useState<FilaUnidadUso[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // ---- Productos (terminados / reventa) ----
@@ -827,8 +837,19 @@ export default function Inventario() {
       ancho_cm: mat.ancho_cm != null ? String(mat.ancho_cm) : '',
       categoria_inventario_id: mat.categoria_inventario_id != null ? String(mat.categoria_inventario_id) : '',
       departamento: mat.departamento ?? null,
+      unidad_medida_id: mat.unidad_medida_id != null ? String(mat.unidad_medida_id) : '',
     });
-    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+    // Unidades de uso: factor_base < 1 se muestra como "1 BASE = N unidad"
+    // (más natural); factor >= 1 como "1 unidad = N BASE".
+    setUnidadesUsoEdit(
+      (mat.unidades_uso ?? []).map((u) => {
+        const f = Number(u.factor_base);
+        return f > 0 && f < 1
+          ? { nombre: u.nombre, valor: String(Number((1 / f).toFixed(6))), invertida: false }
+          : { nombre: u.nombre, valor: String(f), invertida: true };
+      }),
+    );
+    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
     try {
       setLoadingKardex(true);
       const data = await inventarioService.getKardex(mat.id);
@@ -844,6 +865,22 @@ export default function Inventario() {
   const handleSaveMaterial = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedMaterialId) return;
+    // Validar unidades de uso antes de tocar la BD.
+    const filasUnidades: { nombre: string; factor_base: number }[] = [];
+    for (const [i, f] of unidadesUsoEdit.entries()) {
+      const nombre = f.nombre.trim().toUpperCase();
+      const n = parseFloat((f.valor || '').replace(',', '.'));
+      if (!nombre && !f.valor) continue;
+      if (!nombre) {
+        toast.error(`Unidad de uso ${i + 1}: escribe el nombre (GALÓN, PISTOLADA, LITRO…).`);
+        return;
+      }
+      if (!(n > 0)) {
+        toast.error(`Unidad de uso ${i + 1}: la equivalencia debe ser mayor a 0.`);
+        return;
+      }
+      filasUnidades.push({ nombre, factor_base: f.invertida ? n : 1 / n });
+    }
     try {
       setSavingEdit(true);
       await api.put(`/material/${selectedMaterialId}`, {
@@ -854,7 +891,13 @@ export default function Inventario() {
         ancho_cm: editMaterial.ancho_cm ? parseFloat(editMaterial.ancho_cm) : null,
         categoria_inventario_id: editMaterial.categoria_inventario_id ? parseInt(editMaterial.categoria_inventario_id) : null,
         departamento: editMaterial.departamento || null,
+        // Unidad BASE (la de compra): se puede corregir (ej. COLBÓN = Cuñete).
+        ...(editMaterial.unidad_medida_id ? { unidad_medida_id: parseInt(editMaterial.unidad_medida_id) } : {}),
       });
+      await productosService.reemplazarUnidadesUso(
+        selectedMaterialId,
+        filasUnidades.map((u) => ({ nombre: u.nombre, factor_base: u.factor_base })),
+      );
       toast.success('Insumo actualizado.');
       fetchInsumos();
     } catch (error: any) {
@@ -903,6 +946,13 @@ export default function Inventario() {
     const notaDesc = costoBruto !== undefined && pctDesc > 0
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: $${costoBruto.toLocaleString('es-CO')} → Neto: $${costoNeto?.toLocaleString('es-CO')})`
       : '';
+    // "La llevada" se captura POR UNIDAD (flete unitario); el backend la guarda
+    // como TOTAL del movimiento (gasto, deuda y costo real dependen de eso).
+    const cantMov = parseFloat(movMaterial.cantidad || '0') || 0;
+    const llevadaUnidad = esEntrada && movMaterial.llevada ? parseFloat(movMaterial.llevada) || 0 : 0;
+    const llevadaTotal = llevadaUnidad > 0 && cantMov > 0
+      ? parseFloat((llevadaUnidad * cantMov).toFixed(2))
+      : undefined;
 
     try {
       setSavingMov(true);
@@ -915,15 +965,18 @@ export default function Inventario() {
         pagado_desde_metodo_caja_id: esEntrada && pago.cuentaId ? pago.cuentaId : undefined,
         moneda_pago_id: esEntrada && pago.cuentaId ? pago.monedaId ?? undefined : undefined,
         tasa_pago: esEntrada && pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID ? tasaNum : undefined,
-        // "La llevada": flete/aduana (solo tiene sentido en compras de contado)
-        llevada: esEntrada && movMaterial.llevada ? parseFloat(movMaterial.llevada) : undefined,
+        // "La llevada": flete/aduana por unidad → se envía el total × cantidad
+        llevada: llevadaTotal,
         proveedor_nombre: esEntrada && movMaterial.proveedor_nombre ? movMaterial.proveedor_nombre.trim() : undefined,
         cliente_nombre: esEntrada && movMaterial.cliente_nombre ? movMaterial.cliente_nombre.trim() : undefined,
+        // Zona del taller a la que va la compra y quién la trajo (solo ENTRADA)
+        departamento: movMaterial.tipo === 'ENTRADA' && movMaterial.departamento ? movMaterial.departamento : undefined,
+        recibido_por: movMaterial.tipo === 'ENTRADA' && movMaterial.recibido_por ? movMaterial.recibido_por.trim() : undefined,
         fiar: fiando || undefined,
         observaciones: [movMaterial.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -1246,9 +1299,13 @@ export default function Inventario() {
   };
 
   // ---- Vistas derivadas ----
-  const stockMap = new Map<number, InventarioItem>();
+  // Un material puede tener stock en VARIAS ubicaciones (depósito, exhibición…):
+  // se agrupan todas las filas para mostrar el stock TOTAL y el desglose.
+  const stockPorMaterial = new Map<number, InventarioItem[]>();
   inventario.forEach(item => {
-    if (!stockMap.has(item.material_id)) stockMap.set(item.material_id, item);
+    const arr = stockPorMaterial.get(item.material_id) ?? [];
+    arr.push(item);
+    stockPorMaterial.set(item.material_id, arr);
   });
 
   // Mapa material → categoría (desde el stock o desde el catálogo de materiales)
@@ -1267,9 +1324,11 @@ export default function Inventario() {
           : mat.departamento === filtroDepto,
     );
 
-  const stockMapProducto = new Map<number, ProductoInventarioItem>();
+  const stockPorProducto = new Map<number, ProductoInventarioItem[]>();
   invProductos.forEach(item => {
-    if (!stockMapProducto.has(item.producto_id)) stockMapProducto.set(item.producto_id, item);
+    const arr = stockPorProducto.get(item.producto_id) ?? [];
+    arr.push(item);
+    stockPorProducto.set(item.producto_id, arr);
   });
 
   // Productos comprados para revender. PLÁSTICOS vive en su pestaña propia:
@@ -1376,9 +1435,9 @@ export default function Inventario() {
   );
 
   const insumoStock = (m: Material) => {
-    const s = stockMap.get(m.id);
-    const c = s ? parseFloat(s.cantidad.toString()) : 0;
-    return { s, c, low: c <= (m.stock_minimo ?? 8) };
+    const filas = stockPorMaterial.get(m.id) ?? [];
+    const c = filas.reduce((a, f) => a + (parseFloat(String(f.cantidad)) || 0), 0);
+    return { filas, s: filas[0], c, low: c <= (m.stock_minimo ?? 8) };
   };
 
   const crudoColumns: DataColumn<Crudo>[] = [
@@ -1480,18 +1539,31 @@ export default function Inventario() {
     {
       key: 'ubicacion',
       header: 'Ubicación',
-      render: (m) =>
-        insumoStock(m).s?.ubicacion_nombre || (
-          <span className="text-xs italic text-yeikar-neutral/30">Sin stock</span>
-        ),
+      render: (m) => {
+        const { filas } = insumoStock(m);
+        if (filas.length === 0) return <span className="text-xs italic text-yeikar-neutral/30">Sin stock</span>;
+        if (filas.length === 1) return filas[0].ubicacion_nombre;
+        return (
+          <div className="space-y-0.5">
+            {filas.map((f) => (
+              <div key={f.id} className="text-[11px] text-yeikar-neutral/70 whitespace-nowrap">
+                {f.ubicacion_nombre}:{' '}
+                <span className="font-mono font-semibold text-yeikar-secondary">
+                  {(parseFloat(String(f.cantidad)) || 0).toLocaleString('es-ES')}
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      },
       mobileLabel: 'Ubicación',
     },
     {
       key: 'stock',
       header: 'Stock Actual',
       render: (m) => {
-        const { s, c, low } = insumoStock(m);
-        return stockPill(!!s, c, low);
+        const { c, low } = insumoStock(m);
+        return stockPill(c > 0, c, low);
       },
       mobileHidden: true,
     },
@@ -1522,9 +1594,9 @@ export default function Inventario() {
   ];
 
   const productoStock = (p: Product) => {
-    const s = stockMapProducto.get(p.id);
-    const c = s ? parseFloat(s.cantidad.toString()) : 0;
-    return { s, c, low: c <= (p.stock_minimo ?? 8) };
+    const filas = stockPorProducto.get(p.id) ?? [];
+    const c = filas.reduce((a, f) => a + (parseFloat(String(f.cantidad)) || 0), 0);
+    return { filas, s: filas[0], c, low: c <= (p.stock_minimo ?? 8) };
   };
 
   /** Prefijo del precio según la moneda declarada del producto ($ para COP). */
@@ -1547,18 +1619,31 @@ export default function Inventario() {
     {
       key: 'ubicacion',
       header: 'Ubicación',
-      render: (p) =>
-        productoStock(p).s?.ubicacion_nombre || (
-          <span className="text-xs italic text-yeikar-neutral/30">Sin stock</span>
-        ),
+      render: (p) => {
+        const { filas } = productoStock(p);
+        if (filas.length === 0) return <span className="text-xs italic text-yeikar-neutral/30">Sin stock</span>;
+        if (filas.length === 1) return filas[0].ubicacion_nombre;
+        return (
+          <div className="space-y-0.5">
+            {filas.map((f) => (
+              <div key={f.id} className="text-[11px] text-yeikar-neutral/70 whitespace-nowrap">
+                {f.ubicacion_nombre}:{' '}
+                <span className="font-mono font-semibold text-yeikar-secondary">
+                  {(parseFloat(String(f.cantidad)) || 0).toLocaleString('es-ES')}
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      },
       mobileLabel: 'Ubicación',
     },
     {
       key: 'stock',
       header: 'Stock Actual',
       render: (p) => {
-        const { s, c, low } = productoStock(p);
-        return stockPill(!!s, c, low);
+        const { c, low } = productoStock(p);
+        return stockPill(c > 0, c, low);
       },
       mobileHidden: true,
     },
@@ -1957,8 +2042,8 @@ export default function Inventario() {
               rows={filteredInv}
               rowKey={(m) => m.id}
               cardBadge={(m) => {
-                const { s, c, low } = insumoStock(m);
-                return stockPill(!!s, c, low);
+                const { c, low } = insumoStock(m);
+                return stockPill(c > 0, c, low);
               }}
               onRowClick={(m) => handleOpenMaterial(m)}
               empty={
@@ -2061,8 +2146,8 @@ export default function Inventario() {
               rows={filteredProductosPlasticos}
               rowKey={(p) => p.id}
               cardBadge={(p) => {
-                const { s, c, low } = productoStock(p);
-                return stockPill(!!s, c, low);
+                const { c, low } = productoStock(p);
+                return stockPill(c > 0, c, low);
               }}
               onRowClick={(p) => handleOpenProducto(p)}
               empty={
@@ -2077,8 +2162,8 @@ export default function Inventario() {
               rows={filteredProductos}
               rowKey={(p) => p.id}
               cardBadge={(p) => {
-                const { s, c, low } = productoStock(p);
-                return stockPill(!!s, c, low);
+                const { c, low } = productoStock(p);
+                return stockPill(c > 0, c, low);
               }}
               onRowClick={(p) => handleOpenProducto(p)}
               empty={
@@ -2134,6 +2219,14 @@ export default function Inventario() {
                         {stockInfo.c.toLocaleString('es-ES')}
                         <span className="text-xs font-normal text-white/70"> {materialSeleccionado.unidad_medida?.abreviatura || ''}</span>
                       </p>
+                      {stockInfo.filas.length > 1 && (
+                        <p
+                          className="text-[9px] font-mono text-white/60 leading-tight truncate"
+                          title={stockInfo.filas.map((f) => `${f.ubicacion_nombre}: ${(parseFloat(String(f.cantidad)) || 0).toLocaleString('es-ES')}`).join(' · ')}
+                        >
+                          {stockInfo.filas.map((f) => `${f.ubicacion_nombre}: ${(parseFloat(String(f.cantidad)) || 0).toLocaleString('es-ES')}`).join(' · ')}
+                        </p>
+                      )}
                     </div>
                     <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
                       <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Costo</p>
@@ -2231,7 +2324,7 @@ export default function Inventario() {
                             </div>
                             <div className="space-y-1">
                               <label className="text-xs font-bold text-yeikar-secondary">
-                                La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete — genera gasto)</span>
+                                La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete por unidad — genera gasto)</span>
                               </label>
                               <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(e) => setMovMaterial((p) => ({ ...p, llevada: e.target.value }))} className={inputCls} />
                             </div>
@@ -2262,6 +2355,37 @@ export default function Inventario() {
                               />
                             </div>
                           </div>
+
+                          {movMaterial.tipo === 'ENTRADA' && (
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-xs font-bold text-yeikar-secondary">
+                                  Zona / Departamento <span className="text-yeikar-neutral/40 font-normal">(a dónde va)</span>
+                                </label>
+                                <SearchSelect
+                                  value={movMaterial.departamento}
+                                  onChange={(v) => setMovMaterial((p) => ({ ...p, departamento: v === '' ? '' : String(v) }))}
+                                  options={[
+                                    { value: '', label: 'General (sin zona)' },
+                                    ...DEPARTAMENTOS.map((d) => ({ value: d.valor, label: d.label })),
+                                  ]}
+                                  placeholder="General..."
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs font-bold text-yeikar-secondary">
+                                  Quién trajo la compra <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
+                                </label>
+                                <input
+                                  type="text"
+                                  value={movMaterial.recibido_por}
+                                  onChange={(e) => setMovMaterial((p) => ({ ...p, recibido_por: e.target.value }))}
+                                  placeholder="Ej. Juan / mensajería"
+                                  className={inputCls.replace('font-mono', '')}
+                                />
+                              </div>
+                            </div>
+                          )}
 
                           {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && (
                             <div className="space-y-2 pt-1 border-t border-yeikar-secondary-light/10">
@@ -2312,19 +2436,77 @@ export default function Inventario() {
                         </div>
                       )}
 
+                      {/* Resumen visible de la compra: flete por unidad, costo real y TOTAL */}
+                      {movMaterial.tipo === 'ENTRADA' && (() => {
+                        const bruto = parseFloat(movMaterial.costo_unitario || '0') || 0;
+                        const cant = parseFloat(movMaterial.cantidad || '0') || 0;
+                        if (bruto <= 0 || cant <= 0) return null;
+                        const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
+                        const netoUnit = descPct > 0 ? Math.max(0, bruto * (1 - descPct / 100)) : bruto;
+                        // "La llevada" es el flete POR UNIDAD: el total se multiplica por la cantidad.
+                        const fleteUnidad = parseFloat(movMaterial.llevada || '0') || 0;
+                        const llevadaTotal = fleteUnidad * cant;
+                        const costoRealUnidad = netoUnit + fleteUnidad;
+                        const subtotal = netoUnit * cant;
+                        const total = subtotal + llevadaTotal;
+                        const fmt = (n: number, d = 2) => `$${n.toLocaleString('es-CO', { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+                        const unidad = materialSeleccionado.unidad_medida?.abreviatura || materialSeleccionado.unidad_medida?.nombre || 'u';
+                        return (
+                          <div className="bg-white/70 border border-yeikar-secondary-light/15 rounded-2xl p-4 space-y-2 shadow-sm">
+                            <p className="text-[10px] font-mono font-bold uppercase tracking-[0.15em] text-yeikar-neutral/45">Resumen de la compra</p>
+                            <div className="space-y-1.5 text-[12px]">
+                              <div className="flex justify-between text-yeikar-neutral/70">
+                                <span>Precio unitario neto</span>
+                                <span className="font-mono">{fmt(netoUnit)} <span className="text-yeikar-neutral/40">/ {unidad}</span></span>
+                              </div>
+                              {fleteUnidad > 0 && (
+                                <div className="flex justify-between text-yeikar-neutral/70">
+                                  <span>Flete por unidad</span>
+                                  <span className="font-mono">{fmt(fleteUnidad)} / {unidad}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between font-semibold text-yeikar-secondary">
+                                <span>Costo unitario real</span>
+                                <span className="font-mono">{fmt(costoRealUnidad)}</span>
+                              </div>
+                              <div className="border-t border-yeikar-secondary-light/10 pt-1.5 space-y-1">
+                                <div className="flex justify-between text-yeikar-neutral/70">
+                                  <span>{cant.toLocaleString('es-CO')} × {fmt(netoUnit)}</span>
+                                  <span className="font-mono">{fmt(subtotal)}</span>
+                                </div>
+                                {fleteUnidad > 0 && (
+                                  <div className="flex justify-between text-amber-700">
+                                    <span>+ La llevada (flete) <span className="text-amber-700/60">{cant.toLocaleString('es-CO')} × {fmt(fleteUnidad)}</span></span>
+                                    <span className="font-mono">{fmt(llevadaTotal)}</span>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center justify-between bg-yeikar-secondary text-white rounded-xl px-3.5 py-2.5 mt-1 shadow-sm">
+                                <span className="text-[10px] font-headline font-black uppercase tracking-[0.18em] text-yeikar-primary">Total compra</span>
+                                <span className="font-mono font-black text-lg">{fmt(total)}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Pago: cuenta / fiado / tasa */}
                       {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && cuentasPago.length > 0 && (() => {
                         const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
                         const brutoRef = parseFloat(movMaterial.costo_unitario || '0') || 0;
                         const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
                         const netoUnit = descPct > 0 ? Math.max(0, brutoRef * (1 - descPct / 100)) : brutoRef;
-                        const totalRef = netoUnit * (parseFloat(movMaterial.cantidad || '0') || 0);
+                        const cantRef = parseFloat(movMaterial.cantidad || '0') || 0;
+                        const totalRef = netoUnit * cantRef;
+                        // "La llevada" es flete POR UNIDAD → el gasto/deuda usa el total
+                        const llevadaRef = (parseFloat(movMaterial.llevada || '0') || 0) * cantRef;
+                        const granTotalRef = totalRef + llevadaRef;
                         const pagoCod = codMonedaDe(monedaId);
                         const necesitaTasa = !!cuentaId && monedaId !== MONEDA_BASE_ID;
                         const par = resolverParMonedas('COP', pagoCod);
                         const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
                         const tasaValida = necesitaTasa && tasaNum > 0;
-                        const deduc = cuentaId ? (tasaValida ? convertirMonedaHumana(totalRef, 'COP', pagoCod, tasaNum) : totalRef) : 0;
+                        const deduc = cuentaId ? (tasaValida ? convertirMonedaHumana(granTotalRef, 'COP', pagoCod, tasaNum) : granTotalRef) : 0;
                         return (
                           <div className="space-y-3">
                             <div className="space-y-1">
@@ -2344,7 +2526,7 @@ export default function Inventario() {
                             {!cuentaId && parseFloat(movMaterial.cantidad || '0') > 0 && (
                               <div className="space-y-1.5">
                                 <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
-                                  Se registrará una deuda de ≈ <b>${(totalRef + (parseFloat(movMaterial.llevada || '0') || 0)).toLocaleString('es-CO')} COP</b>
+                                  Se registrará una deuda de ≈ <b>${granTotalRef.toLocaleString('es-CO')} COP</b>
                                   {' '}(compra + llevada) en <b>Egresos y Gastos → Por Pagar</b>.
                                 </p>
                                 {!movMaterial.proveedor_nombre && (
@@ -2369,12 +2551,14 @@ export default function Inventario() {
                                     Se descontarán ≈ <b>${deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
                                   </p>
                                   <p className="text-[10px] text-emerald-700/80">
-                                    Compra total: <span className="font-mono">${totalRef.toLocaleString('es-CO')} COP</span> · tasa {tasaNum.toLocaleString('es-CO')}
+                                    Compra: <span className="font-mono">${totalRef.toLocaleString('es-CO')} COP</span>
+                                    {llevadaRef > 0 && <> · Llevada: <span className="font-mono">${llevadaRef.toLocaleString('es-CO')} COP</span></>}
+                                    {' '}· tasa {tasaNum.toLocaleString('es-CO')}
                                   </p>
                                 </div>
                               ) : necesitaTasa ? (
                                 <p className="text-[11px] text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg px-3 py-2">
-                                  La compra suma ≈ <b>${totalRef.toLocaleString('es-CO')} COP</b> · escribe la tasa <b>({par.label})</b> para calcular cuánto se descuenta en {pagoCod}.
+                                  La compra {llevadaRef > 0 ? '+ llevada ' : ''}suma ≈ <b>${granTotalRef.toLocaleString('es-CO')} COP</b> · escribe la tasa <b>({par.label})</b> para calcular cuánto se descuenta en {pagoCod}.
                                 </p>
                               ) : (
                                 <p className="text-[11px] text-emerald-900 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
@@ -2440,6 +2624,102 @@ export default function Inventario() {
                           placeholder="General..."
                         />
                       </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          Unidad base <span className="text-yeikar-neutral/40 font-normal">(la de compra)</span>
+                        </label>
+                        <SearchSelect
+                          value={editMaterial.unidad_medida_id}
+                          onChange={(v) => setEditMaterial((p) => ({ ...p, unidad_medida_id: String(v) }))}
+                          options={unidades.map((u) => ({ value: u.id, label: `${u.nombre} (${u.abreviatura})` }))}
+                          placeholder="Seleccione..."
+                        />
+                      </div>
+
+                      {/* Unidades de uso: equivalencias PRÁCTICAS del taller para
+                          insumos líquidos/densos (colbón, laca, tiner…). El stock
+                          y los costos siguen en la unidad base. */}
+                      <div className="space-y-2 bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-2xl p-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-yeikar-secondary">
+                            Unidades de uso <span className="text-yeikar-neutral/40 font-normal">(líquidos/densos)</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setUnidadesUsoEdit((p) => [...p, { nombre: '', valor: '', invertida: false }])}
+                            className="text-[10px] font-bold text-yeikar-primary hover:text-yeikar-primary-dark transition-colors"
+                          >
+                            + Agregar
+                          </button>
+                        </div>
+                        {unidadesUsoEdit.length === 0 ? (
+                          <p className="text-[10px] text-yeikar-neutral/40">
+                            Sin equivalencias: el taller digita en la unidad base. Agrega GALÓN, PISTOLADA,
+                            LITRO… cuando el insumo se consuma así.
+                          </p>
+                        ) : (
+                          <div className="space-y-2.5">
+                            {unidadesUsoEdit.map((fila, i) => {
+                              const abrevBase =
+                                unidades.find((u) => String(u.id) === editMaterial.unidad_medida_id)?.abreviatura || 'BASE';
+                              const n = parseFloat((fila.valor || '').replace(',', '.'));
+                              const nombreU = fila.nombre.trim().toUpperCase() || 'UNIDAD';
+                              const factor = n > 0 ? (fila.invertida ? n : 1 / n) : null;
+                              const inputMini = 'bg-white border border-yeikar-secondary-light/10 rounded-lg px-2 py-1.5 text-xs font-mono text-yeikar-neutral focus:outline-none focus:border-yeikar-primary';
+                              return (
+                                <div key={i} className="space-y-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      placeholder="GALÓN"
+                                      value={fila.nombre}
+                                      onChange={(e) => setUnidadesUsoEdit((p) => p.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))}
+                                      className={`flex-1 min-w-0 ${inputMini}`}
+                                    />
+                                    <button
+                                      type="button"
+                                      title={fila.invertida
+                                        ? `Cambiar a: 1 ${abrevBase} = N ${nombreU}`
+                                        : `Cambiar a: 1 ${nombreU} = N ${abrevBase}`}
+                                      onClick={() => setUnidadesUsoEdit((p) => p.map((x, j) => (j === i ? { ...x, invertida: !x.invertida } : x)))}
+                                      className="shrink-0 text-[10px] font-bold px-1.5 py-1 rounded-lg border border-yeikar-secondary-light/15 text-yeikar-neutral/60 hover:border-yeikar-primary/40 transition-colors"
+                                    >
+                                      ⇄
+                                    </button>
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      placeholder="Ej. 5"
+                                      value={fila.valor}
+                                      onChange={(e) => setUnidadesUsoEdit((p) => p.map((x, j) => (j === i ? { ...x, valor: e.target.value } : x)))}
+                                      className={`w-20 shrink-0 ${inputMini}`}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => setUnidadesUsoEdit((p) => p.filter((_, j) => j !== i))}
+                                      className="shrink-0 text-red-400 hover:text-red-600 text-xs font-bold px-1 transition-colors"
+                                      aria-label="Quitar unidad"
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                  <p className="text-[10px] font-mono text-yeikar-neutral/50">
+                                    {fila.invertida
+                                      ? `1 ${nombreU} = ${n > 0 ? n.toLocaleString('es-CO', { maximumFractionDigits: 6 }) : '¿?'} ${abrevBase}`
+                                      : `1 ${abrevBase} = ${n > 0 ? n.toLocaleString('es-CO', { maximumFractionDigits: 6 }) : '¿?'} ${nombreU}`}
+                                    {factor != null && (
+                                      <span className="text-emerald-700">
+                                        {' '}→ el taller verá: 1 {nombreU} = {factor.toLocaleString('es-CO', { maximumFractionDigits: 6 })} {abrevBase}
+                                      </span>
+                                    )}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-yeikar-secondary">Largo Lámina (cm)</label>
@@ -2494,7 +2774,7 @@ export default function Inventario() {
                                       {mov.tipo}
                                     </span>
                                     <span className="font-mono text-[10px] text-yeikar-neutral/40">
-                                      {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                      {mov.fecha ? new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
                                     </span>
                                   </div>
                                   <div className="flex items-baseline justify-between mt-1.5">
@@ -2513,6 +2793,28 @@ export default function Inventario() {
                                       Llevada (flete): <span className="font-mono font-semibold text-amber-700">${Number(mov.llevada).toLocaleString('es-ES')}</span>
                                     </p>
                                   )}
+                                  {(mov.departamento || mov.recibido_por) && (
+                                    <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
+                                      {mov.departamento && <>Zona: <span className="font-semibold text-yeikar-secondary">{labelDepartamento(mov.departamento)}</span></>}
+                                      {mov.departamento && mov.recibido_por && ' · '}
+                                      {mov.recibido_por && <>Trajo: <span className="font-semibold text-yeikar-secondary">{mov.recibido_por}</span></>}
+                                    </p>
+                                  )}
+                                  {mov.tipo === 'ENTRADA' && mov.costo_unitario != null && (() => {
+                                    const cant = Number(mov.cantidad) || 0;
+                                    const costo = Number(mov.costo_unitario) || 0;
+                                    const llev = Number(mov.llevada) || 0;
+                                    const total = cant * costo + llev;
+                                    const realUnidad = cant > 0 ? costo + llev / cant : costo;
+                                    return (
+                                      <div className="flex items-center justify-between bg-white/50 border border-yeikar-secondary-light/10 rounded-lg px-2.5 py-1.5 mt-1">
+                                        <span className="text-[10px] font-bold uppercase tracking-wide text-yeikar-neutral/40">
+                                          Total compra{llev > 0 && <> · real/u <span className="font-mono">${realUnidad.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</span></>}
+                                        </span>
+                                        <span className="font-mono font-bold text-sm text-yeikar-secondary">${total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    );
+                                  })()}
                                   {(mov.proveedor_nombre || mov.cliente_nombre) && (
                                     <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
                                       {mov.proveedor_nombre && <>Proveedor: <span className="font-semibold text-yeikar-secondary">{mov.proveedor_nombre}</span></>}
@@ -2541,7 +2843,7 @@ export default function Inventario() {
 
         {/* ================= MODAL DETALLE DE PRODUCTO (misma UI que insumos) ================= */}
         {(tab === 'productos' || tab === 'plasticos' || tab === 'exhibicion') && selectedProductoId && productoSeleccionado && (() => {
-          const { c: stockProd, low: stockLow } = productoStock(productoSeleccionado);
+          const { filas: filasStockProd, c: stockProd, low: stockLow } = productoStock(productoSeleccionado);
           const esExh = tab === 'exhibicion';
           const monCod = productoSeleccionado?.moneda?.codigo ?? 'COP';
           const tabsProd = (
@@ -2584,6 +2886,14 @@ export default function Inventario() {
                     <p className={`font-mono font-bold text-lg leading-tight ${stockLow ? 'text-amber-300' : 'text-white'}`}>
                       {stockProd.toLocaleString('es-ES')}
                     </p>
+                    {filasStockProd.length > 1 && (
+                      <p
+                        className="text-[9px] font-mono text-white/60 leading-tight truncate"
+                        title={filasStockProd.map((f) => `${f.ubicacion_nombre}: ${(parseFloat(String(f.cantidad)) || 0).toLocaleString('es-ES')}`).join(' · ')}
+                      >
+                        {filasStockProd.map((f) => `${f.ubicacion_nombre}: ${(parseFloat(String(f.cantidad)) || 0).toLocaleString('es-ES')}`).join(' · ')}
+                      </p>
+                    )}
                   </div>
                   <div className="bg-white/10 border border-white/10 rounded-xl px-3 py-2">
                     <p className="text-[9px] font-mono uppercase tracking-wider text-white/60">Precio</p>
@@ -2995,7 +3305,7 @@ export default function Inventario() {
                                 {mov.tipo}
                               </span>
                               <span className="font-mono text-[10px] text-yeikar-neutral/40">
-                                {new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                                {mov.fecha ? new Date(mov.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
                               </span>
                             </div>
                             <div className="flex items-baseline justify-between mt-1.5">

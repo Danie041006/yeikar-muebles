@@ -41,6 +41,14 @@ export interface Product {
   fotos?: AdjuntoInfo[];
 }
 
+export interface MaterialUnidadUso {
+  id?: number;
+  nombre: string;
+  /** 1 [nombre] = factor_base unidades base del material (factor PRÁCTICO). */
+  factor_base: number;
+  activo?: boolean;
+}
+
 export interface Material {
   id: number;
   nombre: string;
@@ -54,6 +62,7 @@ export interface Material {
   // Departamento del taller (EBANISTERIA | PREPARACION | PINTURA | TAPICERIA |
   // VIDRIERIA | TERMINACION). NULL = transversal/general. Tendido → EBANISTERIA.
   departamento?: string | null;
+  unidades_uso?: MaterialUnidadUso[];
   unidad_medida?: {
     id: number;
     nombre: string;
@@ -245,6 +254,19 @@ export const productosService = {
 
   crearMaterial: async (material: Omit<Material, 'id' | 'unidad_medida'>): Promise<Material> => {
     const response = await api.post<Material>('/material/', material);
+    return response.data;
+  },
+
+  getUnidadesUso: async (materialId: number): Promise<MaterialUnidadUso[]> => {
+    const response = await api.get<MaterialUnidadUso[]>(`/material/${materialId}/unidades-uso`);
+    return response.data;
+  },
+
+  /** Contrato de reemplazo completo: envía TODAS las unidades de uso. */
+  reemplazarUnidadesUso: async (materialId: number, unidades: MaterialUnidadUso[]): Promise<MaterialUnidadUso[]> => {
+    const response = await api.put<MaterialUnidadUso[]>(`/material/${materialId}/unidades-uso`, {
+      unidades: unidades.map((u) => ({ nombre: u.nombre, factor_base: u.factor_base })),
+    });
     return response.data;
   },
 

@@ -129,6 +129,32 @@ def listar_materiales(
     return items
 
 
+@material_router.get("/{id_material}/unidades-uso", response_model=List[schemas.MaterialUnidadUsoResponse])
+def listar_unidades_uso(
+    id_material: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Unidades de uso (galón, pistolada, litro…) del material: cómo lo
+    consume el taller, con su factor a la unidad base."""
+    return service.obtener_unidades_uso(db, id_material)
+
+
+@material_router.put("/{id_material}/unidades-uso", response_model=List[schemas.MaterialUnidadUsoResponse])
+def reemplazar_unidades_uso(
+    id_material: int,
+    esquema: schemas.MaterialUnidadUsoReplace,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Reemplaza TODAS las unidades de uso del material (contrato de lista
+    completa, igual que los detalles de una cotización)."""
+    try:
+        return service.reemplazar_unidades_uso(db, id_material, esquema)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ------------------------------------------------------------
 # Duplicados del catálogo y fusión de materiales
 # (ANTES de GET /{id_material}: si no, "/duplicados" matchea como id)

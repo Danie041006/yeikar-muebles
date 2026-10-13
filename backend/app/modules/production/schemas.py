@@ -3,7 +3,7 @@ from datetime import date, datetime
 from typing import List, Optional
 from app.modules.catalogos.schemas import AreaResponse
 from app.modules.empleados.schemas import EmpleadoResponse
-from app.modules.productos.schemas import MaterialResponse, ProductoResponse
+from app.modules.productos.schemas import MaterialResponse, ProductoResponse, MaterialUnidadUsoResponse
 
 # ------------------------------------------------------------
 # Consumo de Material
@@ -54,6 +54,11 @@ class ConsumoMaterialCreate(ConsumoMaterialBase):
     pieza_largo: Optional[float] = Field(None, gt=0)
     pieza_ancho: Optional[float] = Field(None, gt=0)
     pieza_espesor: Optional[float] = Field(None, gt=0)
+    # --- Unidad de USO (líquidos/densos: galón, pistolada, litro…) ---
+    # Si viene, `cantidad` es lo DIGITADO en esa unidad y el backend lo lleva a
+    # la unidad base con el factor PRÁCTICO del material (material_unidad_uso).
+    # Excluyente con unidad_captura/pieza_*.
+    unidad_uso_id: Optional[int] = None
     # --- Componente y consumo extra (estructura de costes desde producción) ---
     # componente: pieza del mueble (CAMA, NOCHERO, CABECERA...) → secciones
     # "SECCIÓN (COMPONENTE)" en la estructura generada.
@@ -83,6 +88,9 @@ class UsoConfirmarItem(BaseModel):
     pieza_largo: Optional[float] = Field(None, gt=0)
     pieza_ancho: Optional[float] = Field(None, gt=0)
     pieza_espesor: Optional[float] = Field(None, gt=0)
+    # Unidad de uso (galón, pistolada, litro…): `cantidad` va digitada en ella.
+    unidad_uso_id: Optional[int] = None
+
 
 class ConsumoConfirmarCreate(BaseModel):
     """Confirmación de uso de un material pedido (PENDIENTE → CONFIRMADO).
@@ -112,6 +120,9 @@ class ConsumoConfirmarCreate(BaseModel):
     pieza_largo: Optional[float] = Field(None, gt=0)
     pieza_ancho: Optional[float] = Field(None, gt=0)
     pieza_espesor: Optional[float] = Field(None, gt=0)
+    # Unidad de uso (galón, pistolada, litro…): `cantidad_usada` va digitada
+    # en ella y el backend la lleva a la base con el factor del material.
+    unidad_uso_id: Optional[int] = None
     # --- Confirmación MULTI-LÍNEA: varios usos de un mismo pedido ---
     # Excluyente con `cantidad_usada`: cada línea se convierte y suma; la
     # suma es lo que se descuenta. Cada uso queda como un consumo propio.
@@ -142,6 +153,11 @@ class ConsumoMaterialResponse(ConsumoMaterialBase):
     pieza_largo: Optional[float] = None
     pieza_ancho: Optional[float] = None
     pieza_espesor: Optional[float] = None
+    # Unidad de USO con la que se digitó (si aplica) y el número tal cual,
+    # para mostrar "2 GALÓN" sin recalcular desde la base.
+    unidad_uso_id: Optional[int] = None
+    cantidad_uso: Optional[float] = None
+    unidad_uso: Optional[MaterialUnidadUsoResponse] = None
     # Etiqueta legible del uso ("Pieza 2×10×5") para la tablita de costos.
     detalle_uso: Optional[str] = None
     componente: Optional[str] = None
@@ -590,6 +606,8 @@ class CrudoConsumoCreate(BaseModel):
     pieza_largo: Optional[float] = Field(None, gt=0)
     pieza_ancho: Optional[float] = Field(None, gt=0)
     pieza_espesor: Optional[float] = Field(None, gt=0)
+    # Unidad de uso (líquidos/densos), igual que ConsumoMaterialCreate.
+    unidad_uso_id: Optional[int] = None
     # --- Componente y consumo extra ---
     componente: Optional[str] = Field(None, max_length=50)
     es_excedente: Optional[bool] = False
@@ -618,6 +636,9 @@ class CrudoConsumoResponse(BaseModel):
     pieza_largo: Optional[float] = None
     pieza_ancho: Optional[float] = None
     pieza_espesor: Optional[float] = None
+    unidad_uso_id: Optional[int] = None
+    cantidad_uso: Optional[float] = None
+    unidad_uso: Optional[MaterialUnidadUsoResponse] = None
     componente: Optional[str] = None
     es_excedente: Optional[bool] = False
     motivo_exceso: Optional[str] = None

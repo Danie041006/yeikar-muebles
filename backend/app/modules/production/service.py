@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, object_session
 from sqlalchemy import or_, exists
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date
@@ -22,14 +22,18 @@ from app.modules.production.schemas import (
 )
 from app.modules.orders.model import DetallePedido
 from app.modules.orders.model import DetallePedido, Pedido
-from app.modules.productos.model import Material, Producto, ProductoMaterial, ReglaGastoSeccion
+from app.modules.productos.model import Material, Producto, ProductoMaterial, ReglaGastoSeccion, MaterialUnidadUso
 from app.modules.empleados.model import Empleado
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Ubicacion, TipoGasto, Area
 from app.modules.inventory.service import registrar_movimiento
 from app.modules.inventory.schemas import MovimientoCreate
 from app.modules.auditoria.service import record_event
-from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
+from app.modules.users.deps import (
+    filtrar_registros_propios,
+    obtener_accesos_usuario,
+    tiene_alcance_total,
+)
 from app.modules.users.model import Usuario
 from app.core.state_machine import (
     TRANSICIONES_ORDEN_PRODUCCION,
@@ -51,20 +55,36 @@ def _redondear4(v: Decimal) -> Decimal:
     return v.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
 
-def _scope_orders(query, usuario: Usuario | None):
+def _ver_toda_la_produccion(usuario: Usuario | None) -> bool:
+    """Alcance del módulo Producción: el tablero del taller es COMPARTIDO.
+
+    Dueño/Administrador ven todo; y cualquier usuario con acceso al módulo
+    Producción (aunque sea de solo lectura) ve TODAS las órdenes del taller,
+    no solo las que él creó. Los usuarios sin el módulo (p. ej. Ventas) siguen
+    con el alcance por creador: únicamente sus propios registros.
+    """
     if usuario is None or tiene_alcance_total(usuario):
+        return True
+    db = object_session(usuario)
+    if db is None:
+        return False
+    return "produccion" in obtener_accesos_usuario(db, usuario)
+
+
+def _scope_orders(query, usuario: Usuario | None):
+    if _ver_toda_la_produccion(usuario):
         return query
     return filtrar_registros_propios(query, OrdenProduccion.creado_por_id, usuario)
 
 
 def _scope_stages(query, usuario: Usuario | None):
-    if usuario is None or tiene_alcance_total(usuario):
+    if _ver_toda_la_produccion(usuario):
         return query
     return query.join(EtapaProduccion.orden).filter(OrdenProduccion.creado_por_id == usuario.id)
 
 
 def _scope_consumos(query, usuario: Usuario | None):
-    if usuario is None or tiene_alcance_total(usuario):
+    if _ver_toda_la_produccion(usuario):
         return query
     return (
         query.join(ConsumoMaterial.etapa)
@@ -74,7 +94,7 @@ def _scope_consumos(query, usuario: Usuario | None):
 
 
 def _scope_mano_obras(query, usuario: Usuario | None):
-    if usuario is None or tiene_alcance_total(usuario):
+    if _ver_toda_la_produccion(usuario):
         return query
     return (
         query.join(ManoObra.etapa)
@@ -205,7 +225,7 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
     detalle_query = db.query(DetallePedido).join(Pedido, Pedido.id == DetallePedido.pedido_id).filter(
         DetallePedido.id == esquema.detalle_pedido_id
     )
-    if usuario is not None and not tiene_alcance_total(usuario):
+    if not _ver_toda_la_produccion(usuario):
         detalle_query = detalle_query.filter(Pedido.creado_por_id == usuario.id)
     # Los productos de REVENTA no se fabrican: se venden del inventario.
     _detalle = detalle_query.first()
@@ -240,7 +260,7 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuari
     # FOR UPDATE sobre el detalle: dos requests simultáneos para el mismo detalle
     # se serializan y solo el primero crea la orden (evita IntegrityError 500).
     detalle_query = db.query(DetallePedido).join(Pedido, Pedido.id == DetallePedido.pedido_id).filter(DetallePedido.id == detalle_pedido_id)
-    if usuario is not None and not tiene_alcance_total(usuario):
+    if not _ver_toda_la_produccion(usuario):
         detalle_query = detalle_query.filter(Pedido.creado_por_id == usuario.id)
     detalle = detalle_query.with_for_update().first()
     if not detalle:
@@ -586,7 +606,7 @@ def cambiar_estado_etapa_produccion(db: Session, id_etapa: int, nuevo_estado: st
 
 
 def _scope_piezas(query, usuario: Usuario | None):
-    if usuario is None or tiene_alcance_total(usuario):
+    if _ver_toda_la_produccion(usuario):
         return query
     return (
         query.join(OrdenProduccion, OrdenProduccion.id == PiezaOrden.orden_produccion_id)
@@ -737,6 +757,18 @@ def obtener_consumo_material(db: Session, id_consumo: int, usuario: Usuario | No
     return _scope_consumos(query, usuario).first()
 
 
+def _resolver_unidad_uso(db: Session, material: Material, unidad_uso_id: int | None) -> MaterialUnidadUso | None:
+    """Valida que la unidad de uso exista, esté activa y sea DEL material."""
+    if not unidad_uso_id:
+        return None
+    unidad = db.query(MaterialUnidadUso).filter(MaterialUnidadUso.id == unidad_uso_id).first()
+    if not unidad or not unidad.activo:
+        raise ValueError("La unidad de uso indicada no existe o está inactiva.")
+    if unidad.material_id != material.id:
+        raise ValueError(f"La unidad de uso «{unidad.nombre}» no pertenece al material seleccionado.")
+    return unidad
+
+
 def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario: Usuario | None = None):
     # 0. Validar que la cantidad sea positiva. Pedido ABIERTO (es_pedido y sin
     #    cantidad): se permite None — se confirma el uso después.
@@ -773,6 +805,8 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
     material = db.query(Material).filter(Material.id == esquema.material_id).first()
     if not material:
         raise ValueError("El material especificado no existe.")
+    # 3.2 Unidad de USO (líquidos/densos): debe pertenecer al material.
+    unidad_uso = _resolver_unidad_uso(db, material, getattr(esquema, "unidad_uso_id", None))
     # 3.5 Validar el SOLICITANTE (quién pide el material). Es obligatorio:
     # queda registrado el empleado que solicita, no solo el usuario que digita.
     solicitante = db.query(Empleado).filter(Empleado.id == esquema.solicitante_empleado_id).first()
@@ -797,13 +831,17 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
     if esquema.cantidad is None:
         if not pedido_abierto:
             raise ValueError("Indica la cantidad consumida.")
-        if esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho or esquema.pieza_espesor:
+        if (
+            esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho
+            or esquema.pieza_espesor or unidad_uso
+        ):
             raise ValueError("El pedido abierto no admite captura en cm ni por pieza: la cantidad se confirma después.")
     pendiente = lamina_completa or pedido_general
     # 4.0 El consumo por corte de láminas NO admite captura flexible: ahí la
     #     cantidad es N.º de cortes y el motor de láminas hace su propia math.
     if corte_activo and (
-        esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho or esquema.pieza_espesor
+        esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho
+        or esquema.pieza_espesor or unidad_uso
     ):
         raise ValueError("El consumo por corte de láminas no admite captura en cm ni por pieza.")
     # 4.0.0 Pedido de LÁMINA COMPLETA: sale la lámina entera hoy (stock apartado,
@@ -813,7 +851,8 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         if corte_activo:
             raise ValueError("El modo lámina completa no admite medidas de corte: se confirman después.")
         if (
-            esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho or esquema.pieza_espesor
+            esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho
+            or esquema.pieza_espesor or unidad_uso
         ):
             raise ValueError("El pedido de láminas completas no admite captura en cm ni por pieza.")
         if not material.largo_cm or not material.ancho_cm:
@@ -830,7 +869,8 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
     else:
         # 4.0.1 Captura flexible: convertir a la unidad base del material ANTES de
         #     descontar inventario o costear (cm→m; pieza L×A×E → m³ con la
-        #     fórmula de la casa). Punto único de conversión: production/unidades.py
+        #     fórmula de la casa; galón/pistolada/litro → factor de la unidad de
+        #     uso). Punto único de conversión: production/unidades.py
         cantidad_base = resolver_cantidad_consumo(
             material,
             esquema.cantidad,
@@ -838,6 +878,7 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
             esquema.pieza_largo,
             esquema.pieza_ancho,
             esquema.pieza_espesor,
+            unidad_uso=unidad_uso,
         )
     db_consumo = ConsumoMaterial(
         etapa_produccion_id=esquema.etapa_produccion_id,
@@ -857,14 +898,22 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         pieza_largo=Decimal(str(esquema.pieza_largo)) if esquema.pieza_largo else None,
         pieza_ancho=Decimal(str(esquema.pieza_ancho)) if esquema.pieza_ancho else None,
         pieza_espesor=Decimal(str(esquema.pieza_espesor)) if esquema.pieza_espesor else None,
+        # Unidad de uso: se conserva lo digitado ("2 GALÓN") además de la base.
+        unidad_uso_id=unidad_uso.id if unidad_uso else None,
+        cantidad_uso=Decimal(str(esquema.cantidad)) if unidad_uso else None,
         # Etiqueta legible para la tablita de costos (solo capturas flexibles).
         detalle_uso=(
             etiqueta_uso(
                 esquema.cantidad, esquema.unidad_captura,
                 esquema.pieza_largo, esquema.pieza_ancho, esquema.pieza_espesor,
+                unidad_uso=unidad_uso,
+                base_abrev=(material.unidad_medida.abreviatura if material.unidad_medida else None),
             )
             if (esquema.cantidad is not None and not corte_activo and not lamina_completa
-                and (esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho or esquema.pieza_espesor))
+                and (
+                    esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho
+                    or esquema.pieza_espesor or unidad_uso
+                ))
             else None
         ),
         componente=(esquema.componente or "").strip().upper() or None,
@@ -1009,6 +1058,7 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
             "captura": nota_captura(
                 esquema.cantidad, esquema.unidad_captura,
                 esquema.pieza_largo, esquema.pieza_ancho, esquema.pieza_espesor,
+                unidad_uso=unidad_uso,
             ),
             "etapa_produccion_id": db_consumo.etapa_produccion_id,
             "solicitante_empleado_id": db_consumo.solicitante_empleado_id,
@@ -1077,7 +1127,7 @@ def confirmar_consumo_material(
         # un consumo por uso → renglones aislados en la tablita de costos.
         if esquema.usos:
             entradas = [
-                (u.cantidad, u.unidad_captura, u.pieza_largo, u.pieza_ancho, u.pieza_espesor)
+                (u.cantidad, u.unidad_captura, u.pieza_largo, u.pieza_ancho, u.pieza_espesor, u.unidad_uso_id)
                 for u in esquema.usos
             ]
         else:
@@ -1085,12 +1135,18 @@ def confirmar_consumo_material(
             entradas = [(
                 esquema.cantidad_usada, esquema.unidad_captura,
                 esquema.pieza_largo, esquema.pieza_ancho, esquema.pieza_espesor,
+                getattr(esquema, "unidad_uso_id", None),
             )]
+        base_abrev = material.unidad_medida.abreviatura if material.unidad_medida else None
         usos = []
-        for cant_digitada, u_captura, p_largo, p_ancho, p_espesor in entradas:
-            es_flexible = bool(u_captura or p_largo or p_ancho or p_espesor)
+        for cant_digitada, u_captura, p_largo, p_ancho, p_espesor, u_uso_id in entradas:
+            unidad_uso = _resolver_unidad_uso(db, material, u_uso_id)
+            es_flexible = bool(u_captura or p_largo or p_ancho or p_espesor or unidad_uso)
             base = (
-                resolver_cantidad_consumo(material, cant_digitada, u_captura, p_largo, p_ancho, p_espesor)
+                resolver_cantidad_consumo(
+                    material, cant_digitada, u_captura, p_largo, p_ancho, p_espesor,
+                    unidad_uso=unidad_uso,
+                )
                 if es_flexible
                 else Decimal(str(cant_digitada))
             )
@@ -1100,7 +1156,12 @@ def confirmar_consumo_material(
                 "pieza_largo": Decimal(str(p_largo)) if p_largo else None,
                 "pieza_ancho": Decimal(str(p_ancho)) if p_ancho else None,
                 "pieza_espesor": Decimal(str(p_espesor)) if p_espesor else None,
-                "etiqueta": etiqueta_uso(cant_digitada, u_captura, p_largo, p_ancho, p_espesor),
+                "unidad_uso_id": unidad_uso.id if unidad_uso else None,
+                "cantidad_uso": Decimal(str(cant_digitada)) if unidad_uso else None,
+                "etiqueta": etiqueta_uso(
+                    cant_digitada, u_captura, p_largo, p_ancho, p_espesor,
+                    unidad_uso=unidad_uso, base_abrev=base_abrev,
+                ),
             })
         return _confirmar_usos(db, db_consumo, material, usos, usuario)
     if not material.largo_cm or not material.ancho_cm:
@@ -1243,6 +1304,13 @@ def _gasto_consumo(db: Session, consumo_id: int):
 def _captura_desde_columnas(c: ConsumoMaterial) -> str | None:
     """Etiqueta de uso derivada de las columnas cuando no hay detalle_uso
     (registros viejos): 'Pieza 2×10×5' o 'Uso en cm (cuenta del taller)'."""
+    if c.unidad_uso_id and c.unidad_uso and c.cantidad_uso is not None:
+        base_abrev = (
+            c.material.unidad_medida.abreviatura
+            if (c.material and c.material.unidad_medida)
+            else None
+        )
+        return etiqueta_uso(c.cantidad_uso, unidad_uso=c.unidad_uso, base_abrev=base_abrev)
     if c.pieza_largo or c.pieza_ancho or c.pieza_espesor:
         return etiqueta_uso(None, None, c.pieza_largo, c.pieza_ancho, c.pieza_espesor)
     if (c.unidad_captura or "").upper() == "CM":
@@ -1371,6 +1439,8 @@ def _confirmar_usos(
     db_consumo.pieza_largo = first["pieza_largo"]
     db_consumo.pieza_ancho = first["pieza_ancho"]
     db_consumo.pieza_espesor = first["pieza_espesor"]
+    db_consumo.unidad_uso_id = first.get("unidad_uso_id")
+    db_consumo.cantidad_uso = first.get("cantidad_uso")
     db_consumo.detalle_uso = first["etiqueta"]
     db_consumo.estado = "CONFIRMADO"
     _upsert_gasto_consumo(
@@ -1393,6 +1463,8 @@ def _confirmar_usos(
             pieza_largo=uso["pieza_largo"],
             pieza_ancho=uso["pieza_ancho"],
             pieza_espesor=uso["pieza_espesor"],
+            unidad_uso_id=uso.get("unidad_uso_id"),
+            cantidad_uso=uso.get("cantidad_uso"),
             detalle_uso=uso["etiqueta"],
             componente=db_consumo.componente,
             es_excedente=db_consumo.es_excedente,
@@ -1860,7 +1932,7 @@ def eliminar_mano_obra(db: Session, id_mano_obra: int, usuario: Usuario | None =
 # ------------------------------------------------------------
 def obtener_costo_por_orden(db: Session, orden_id: int, usuario: Usuario | None = None):
     query = db.query(CostoProduccion).filter(CostoProduccion.orden_produccion_id == orden_id)
-    if usuario is not None and not tiene_alcance_total(usuario):
+    if not _ver_toda_la_produccion(usuario):
         query = query.join(CostoProduccion.orden).filter(OrdenProduccion.creado_por_id == usuario.id)
     return query.first()
 
@@ -2188,6 +2260,10 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
                 # del taller)"): la tablita la muestra bajo el material para
                 # que cada renglón se entienda sin adivinar.
                 "captura": c.detalle_uso or _captura_desde_columnas(c),
+                # Unidad de uso (galón, pistolada, litro…): lo digitado tal cual,
+                # para badges/etiquetas sin recalcular desde la base.
+                "cantidad_uso": float(c.cantidad_uso) if c.cantidad_uso is not None else None,
+                "unidad_uso": c.unidad_uso.nombre if c.unidad_uso else None,
                 "es_excedente": bool(c.es_excedente),
                 "es_retrabajo": bool(etapa and etapa.es_retrabajo),
                 "motivo": c.motivo_exceso or None,
@@ -2637,11 +2713,13 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
     solicitante = db.query(Empleado).filter(Empleado.id == esquema.solicitante_empleado_id).first()
     if not solicitante:
         raise ValueError("Debe indicar quién solicita el material (solicitante inválido).")
+    unidad_uso = _resolver_unidad_uso(db, material, getattr(esquema, "unidad_uso_id", None))
     now = ahora_ve()
     corte_activo = bool(getattr(esquema, "ancho_corte_cm", None) and getattr(esquema, "largo_corte_cm", None))
     # El motor de cortes no admite captura flexible (igual que producción por pedidos).
     if corte_activo and (
-        esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho or esquema.pieza_espesor
+        esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho
+        or esquema.pieza_espesor or unidad_uso
     ):
         raise ValueError("El consumo por corte de láminas no admite captura en cm ni por pieza.")
     # Captura flexible → unidad base del material ANTES de descontar/costear.
@@ -2652,6 +2730,7 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
         esquema.pieza_largo,
         esquema.pieza_ancho,
         esquema.pieza_espesor,
+        unidad_uso=unidad_uso,
     )
     consumo = ProduccionCrudoConsumo(
         produccion_crudo_id=pc.id,
@@ -2666,6 +2745,8 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
         pieza_largo=Decimal(str(esquema.pieza_largo)) if esquema.pieza_largo else None,
         pieza_ancho=Decimal(str(esquema.pieza_ancho)) if esquema.pieza_ancho else None,
         pieza_espesor=Decimal(str(esquema.pieza_espesor)) if esquema.pieza_espesor else None,
+        unidad_uso_id=unidad_uso.id if unidad_uso else None,
+        cantidad_uso=Decimal(str(esquema.cantidad)) if unidad_uso else None,
         componente=(esquema.componente or "").strip().upper() or None,
         es_excedente=bool(getattr(esquema, "es_excedente", False)),
         motivo_exceso=(esquema.motivo_exceso or "").strip().upper() or None,
@@ -2726,6 +2807,7 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
         nota = nota_captura(
             esquema.cantidad, esquema.unidad_captura,
             esquema.pieza_largo, esquema.pieza_ancho, esquema.pieza_espesor,
+            unidad_uso=unidad_uso,
         )
         if nota:
             descripcion_gasto += f" — {nota}"
@@ -2750,6 +2832,7 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
             "captura": nota_captura(
                 esquema.cantidad, esquema.unidad_captura,
                 esquema.pieza_largo, esquema.pieza_ancho, esquema.pieza_espesor,
+                unidad_uso=unidad_uso,
             ),
             "produccion_crudo_id": pc.id,
             "solicitante": solicitante.nombre,
@@ -3129,7 +3212,7 @@ def desasignar_crudo_de_detalle(db: Session, uso_id: int, usuario: Usuario | Non
     Corrige una asignación equivocada (antes solo se podía compensar stock con
     un movimiento manual, y el uso congelado seguía contando en el costo)."""
     query = db.query(ProduccionCrudoUso).filter(ProduccionCrudoUso.id == uso_id)
-    if usuario is not None:
+    if not _ver_toda_la_produccion(usuario):
         query = filtrar_registros_propios(
             query.join(DetallePedido, DetallePedido.id == ProduccionCrudoUso.detalle_pedido_id)
             .join(Pedido, Pedido.id == DetallePedido.pedido_id),

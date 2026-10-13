@@ -36,6 +36,11 @@ CM_POR_METRO = Decimal("100")
 # a la cuenta del ebanista digitada en cm (un solo campo: "832" → 0.0832 m³).
 DIVISOR_PIEZA = Decimal("10000")
 
+# Variante "TODAS las medidas en cm" (el taller a veces recibe las medidas en
+# cm): (L_cm × A_cm × E_cm) × piezas ÷ 1.000.000 = m³ (1 m³ = 1.000.000 cm³).
+# Se activa enviando unidad_captura='CM' junto con las medidas de la pieza.
+DIVISOR_PIEZA_CM = Decimal("1000000")
+
 # Las columnas de cantidad son Numeric(12,4) (4 decimales: la fórmula de la
 # casa ÷10000 da volúmenes pequeños como 0.016 m³ y con 2 decimales se
 # perdía stock al redondear). Se redondea UNA sola vez aquí para que consumo,
@@ -88,6 +93,7 @@ def resolver_cantidad_consumo(
     pieza_largo=None,
     pieza_ancho=None,
     pieza_espesor=None,
+    unidad_uso=None,
 ) -> Decimal:
     """Convierte la captura del operario a la unidad base del material.
 
@@ -99,6 +105,9 @@ def resolver_cantidad_consumo(
         pieza_largo / pieza_ancho / pieza_espesor: medidas de UNA pieza tal
             cual las escribe el taller. Si ALGUNO viene, se activa el modo
             pieza (fórmula de la casa) y se exige material volumétrico (m³).
+        unidad_uso: MaterialUnidadUso (galón, pistolada, litro…) en la que el
+            taller digitó `cantidad`. Se multiplica por su factor PRÁCTICO a la
+            unidad base. Mutuamente excluyente con `unidad_captura`/pieza.
 
     Returns:
         Decimal redondeado a 2 decimales: cantidad canónica en la unidad base
@@ -113,6 +122,17 @@ def resolver_cantidad_consumo(
     cant = Decimal(str(cantidad))
 
     es_pieza = any(v is not None for v in (pieza_largo, pieza_ancho, pieza_espesor))
+    if unidad_uso is not None:
+        if es_pieza or unidad_captura:
+            raise ValueError(
+                "Elige la unidad de uso (galón, pistolada, litro…) o la captura "
+                "de medidas (cm/mts/pieza), no ambas."
+            )
+        factor = Decimal(str(unidad_uso.factor_base))
+        if factor <= 0:
+            raise ValueError(f"El factor de la unidad «{unidad_uso.nombre}» debe ser positivo.")
+        return (cant * factor).quantize(DECIMALES_CANTIDAD, rounding=ROUND_HALF_UP)
+
     if es_pieza:
         if dim != VOLUMEN:
             raise ValueError(
@@ -131,13 +151,16 @@ def resolver_cantidad_consumo(
             raise ValueError(f"Faltan medidas de la pieza: {', '.join(faltan)}.")
         # FÓRMULA DE LA CASA (21 años de práctica): producto de las 3 medidas
         # por número de piezas, con el largo en METROS y ancho/espesor en cm;
-        # la regla de los 10000 lo lleva a m³.
+        # la regla de los 10000 lo lleva a m³. Si el taller las recibe TODAS en
+        # cm, manda unidad_captura='CM' y aplica la regla de los 1.000.000.
+        captura = (unidad_captura or "").upper()
+        divisor = DIVISOR_PIEZA_CM if captura == "CM" else DIVISOR_PIEZA
         volumen = (
             Decimal(str(pieza_largo))
             * Decimal(str(pieza_ancho))
             * Decimal(str(pieza_espesor))
             * cant
-        ) / DIVISOR_PIEZA
+        ) / divisor
         return volumen.quantize(DECIMALES_CANTIDAD, rounding=ROUND_HALF_UP)
 
     if unidad_captura:
@@ -166,20 +189,29 @@ def resolver_cantidad_consumo(
     return cant.quantize(DECIMALES_CANTIDAD, rounding=ROUND_HALF_UP)
 
 
+def _sufijo_cm_pieza(unidad_captura: str | None) -> str:
+    """' (cm)' cuando las medidas de la pieza van todas en centímetros."""
+    return " (cm)" if (unidad_captura or "").upper() == "CM" else ""
+
+
 def nota_captura(
     cantidad,
     unidad_captura: str | None = None,
     pieza_largo=None,
     pieza_ancho=None,
     pieza_espesor=None,
+    unidad_uso=None,
 ) -> str | None:
     """Texto corto de trazabilidad sobre CÓMO se digitó la cantidad.
 
-    Ej.: 'pieza 20×4×2 × 2' · 'digitado en cm'. None = captura directa."""
+    Ej.: 'pieza 20×4×2 × 2' · 'pieza 200×20×4 (cm) × 2' · 'digitado en cm' ·
+    'en GALÓN'. None = captura directa."""
+    if unidad_uso is not None:
+        return f"en {unidad_uso.nombre}"
     if pieza_largo or pieza_ancho or pieza_espesor:
         return (
             f"pieza {_fmt(pieza_largo)}×{_fmt(pieza_ancho)}×{_fmt(pieza_espesor)}"
-            f" × {_fmt(cantidad)}"
+            f"{_sufijo_cm_pieza(unidad_captura)} × {_fmt(cantidad)}"
         )
     if unidad_captura:
         return f"digitado en {unidad_captura.upper()}"
@@ -192,16 +224,33 @@ def etiqueta_uso(
     pieza_largo=None,
     pieza_ancho=None,
     pieza_espesor=None,
+    unidad_uso=None,
+    base_abrev: str | None = None,
 ) -> str:
     """Etiqueta HUMANA de un uso de material, para la tablita de costos:
 
     - 'Pieza 2×10×5 × 3' (fórmula de la casa, con n.º de piezas si aplica)
     - '1.500 cm (cuenta del taller)' (un solo campo en cm)
+    - '0,75 GALÓN (= 0,15 CUÑETE)' (unidad de uso con su equivalencia base)
     - '2,5 (unidad base)' (digitado directo)
     """
+    if unidad_uso is not None:
+        etiqueta = f"{_fmt(cantidad)} {unidad_uso.nombre}"
+        if base_abrev:
+            # La base mostrada es la MISMA que se descuenta (redondeo 4
+            # decimales del motor): no mostrar más precisión que el inventario.
+            base = (Decimal(str(cantidad)) * Decimal(str(unidad_uso.factor_base))).quantize(
+                DECIMALES_CANTIDAD, rounding=ROUND_HALF_UP
+            )
+            etiqueta += f" (= {_fmt(base)} {base_abrev})"
+        # La columna en BD es String(120): mejor perder el paréntesis que romper.
+        return etiqueta[:120]
     if pieza_largo or pieza_ancho or pieza_espesor:
         sufijo = f" × {_fmt(cantidad)}" if cantidad is not None else ""
-        return f"Pieza {_fmt(pieza_largo)}×{_fmt(pieza_ancho)}×{_fmt(pieza_espesor)}{sufijo}"
+        return (
+            f"Pieza {_fmt(pieza_largo)}×{_fmt(pieza_ancho)}×{_fmt(pieza_espesor)}"
+            f"{_sufijo_cm_pieza(unidad_captura)}{sufijo}"
+        )
     if (unidad_captura or "").upper() == "CM":
         return f"{_fmt(cantidad)} cm (cuenta del taller)"
     return f"{_fmt(cantidad)} (unidad base)"

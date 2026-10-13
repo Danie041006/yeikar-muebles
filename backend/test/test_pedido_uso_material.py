@@ -584,6 +584,38 @@ def test_confirmar_multi_uso_abierto_pieza_y_cm(client, cleaner, db):
     assert abs(total_costos - 970.0) < 0.01, total_costos
 
 
+def test_confirmar_multi_uso_pieza_todo_cm(client, cleaner, db):
+    """Uso confirmado con las medidas de la pieza TODAS en cm: 2 piezas de
+    210×20×5 cm → 42.000 cm³ = 0.042 m³. Convive con un uso clásico de la casa
+    en el mismo confirmar: stock, gasto y etiquetas exactos."""
+    _, etapa, mat = _setup_vol(client, cleaner, db, stock=5)
+    consumo = pedir(client, etapa, mat["id"], None).json()
+    _cerrar(client, cleaner, db, mat, consumo["id"])
+
+    r = confirmar_usos(client, consumo["id"], [
+        {"cantidad": 2, "unidad_captura": "CM",
+         "pieza_largo": 210, "pieza_ancho": 20, "pieza_espesor": 5},   # 42.000 cm³ = 0.042
+        {"cantidad": 1, "pieza_largo": 2, "pieza_ancho": 10, "pieza_espesor": 5},  # 0.01
+    ])
+    assert r.status_code == 200, r.text
+    _cerrar_etapa(db, cleaner, etapa)
+    registrar_inventario_de_material(db, cleaner, mat["id"])
+    db.expire_all()
+
+    filas = _consumos_de_etapa(db, etapa)
+    assert len(filas) == 2, filas
+    cabeza = [f for f in filas if f[0] == consumo["id"]][0]
+    assert abs(float(cabeza[1]) - 0.042) < 0.0001, cabeza
+    assert cabeza[3] == "Pieza 210×20×5 (cm) × 2", cabeza[3]
+    etiquetas = {f[3] for f in filas}
+    assert "Pieza 2×10×5 × 1" in etiquetas, etiquetas
+
+    # Stock: 5 − (0.042 + 0.01) = 4.948; gasto total 0.052 × 5000 = 260.
+    assert stock_actual(db, mat["id"]) == Decimal("4.948")
+    total_gastos = sum((gasto_monto(db, f[0]) or Decimal("0")) for f in filas)
+    assert total_gastos == Decimal("260.00"), total_gastos
+
+
 def test_confirmar_multi_uso_con_entrega_devuelve_sobrante(client, cleaner, db):
     """Pedido con entrega (2 m) confirmado con 2 usos (0.058 m³): la cabeza
     ajusta la entrega y el stock queda en 5 − 0.058."""

@@ -17,6 +17,14 @@ export interface Empleado {
   };
 }
 
+export interface MaterialUnidadUso {
+  id?: number;
+  nombre: string;
+  /** 1 [nombre] = factor_base unidades base del material (factor PRÁCTICO). */
+  factor_base: number;
+  activo?: boolean;
+}
+
 export interface Material {
   id: number;
   nombre: string;
@@ -24,6 +32,8 @@ export interface Material {
   // Dimensiones de la lámina completa (cm) si el material es laminar
   largo_cm?: number | null;
   ancho_cm?: number | null;
+  // Unidades de uso (líquidos/densos: galón, pistolada, litro…)
+  unidades_uso?: MaterialUnidadUso[];
   unidad_medida?: {
     id: number;
     nombre: string;
@@ -47,6 +57,11 @@ export interface ConsumoMaterial {
   pieza_largo?: number | null;
   pieza_ancho?: number | null;
   pieza_espesor?: number | null;
+  // --- Unidad de uso (galón, pistolada, litro…): lo digitado tal cual ---
+  unidad_uso_id?: number | null;
+  cantidad_uso?: number | null;
+  unidad_uso?: MaterialUnidadUso | null;
+  detalle_uso?: string | null;
   // --- Componente y consumo extra (estructura de costes desde producción) ---
   componente?: string | null;
   es_excedente?: boolean;
@@ -350,6 +365,8 @@ export const produccionService = {
     pieza_largo?: number;
     pieza_ancho?: number;
     pieza_espesor?: number;
+    /** Unidad de uso (galón, pistolada, litro…): `cantidad` va digitada en ella. */
+    unidad_uso_id?: number;
     // --- Componente y consumo extra ---
     componente?: string;
     es_excedente?: boolean;
@@ -395,6 +412,8 @@ export const produccionService = {
       pieza_largo?: number;
       pieza_ancho?: number;
       pieza_espesor?: number;
+      /** Unidad de uso del modo legacy (galón, pistolada, litro…). */
+      unidad_uso_id?: number;
       /** Varios usos en una sola confirmación (uno por renglón de costo). */
       usos?: {
         cantidad: number;
@@ -402,6 +421,8 @@ export const produccionService = {
         pieza_largo?: number;
         pieza_ancho?: number;
         pieza_espesor?: number;
+        /** Unidad de uso (galón, pistolada, litro…): `cantidad` va en ella. */
+        unidad_uso_id?: number;
       }[];
     },
   ): Promise<ConsumoMaterial> => {

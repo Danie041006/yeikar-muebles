@@ -149,6 +149,7 @@ def obtener_material(db: Session, id_material: int):
     return db.query(model.Material).options(
         joinedload(model.Material.unidad_medida),
         joinedload(model.Material.categoria_inventario),
+        selectinload(model.Material.unidades_uso),
     ).filter(model.Material.id == id_material).first()
 
 def obtener_materiales(db: Session, salto: int = 0, limite: int = 100, buscar: str = None):
@@ -158,6 +159,7 @@ def obtener_materiales(db: Session, salto: int = 0, limite: int = 100, buscar: s
     query = db.query(model.Material).options(
         joinedload(model.Material.unidad_medida),
         joinedload(model.Material.categoria_inventario),
+        selectinload(model.Material.unidades_uso),
     )
     if buscar:
         term = f"%{buscar}%"
@@ -206,6 +208,39 @@ def actualizar_material(db: Session, id_material: int, esquema: schemas.Material
                 # El recálculo jamás debe romper la actualización del material.
                 db.rollback()
     return db_obj
+
+
+# ------------------------------------------------------------
+# Unidades de USO del material (líquidos/densos)
+# ------------------------------------------------------------
+def obtener_unidades_uso(db: Session, id_material: int):
+    return db.query(model.MaterialUnidadUso).filter(
+        model.MaterialUnidadUso.material_id == id_material
+    ).order_by(model.MaterialUnidadUso.id.asc()).all()
+
+
+def reemplazar_unidades_uso(db: Session, id_material: int, esquema: schemas.MaterialUnidadUsoReplace):
+    """Contrato de reemplazo completo (como los detalles de cotización).
+
+    Valida duplicados por nombre normalizado antes de tocar la BD y devuelve
+    la lista resultante. Un material sin filas sigue funcionando igual que hoy.
+    """
+    material = db.query(model.Material).filter(model.Material.id == id_material).first()
+    if not material:
+        raise ValueError(f"El material #{id_material} no existe.")
+
+    nombres = [u.nombre for u in esquema.unidades]
+    if len(nombres) != len(set(nombres)):
+        raise ValueError("Hay unidades de uso repetidas: usa un nombre distinto para cada una.")
+
+    material.unidades_uso.clear()
+    db.flush()
+    for item in esquema.unidades:
+        material.unidades_uso.append(
+            model.MaterialUnidadUso(nombre=item.nombre, factor_base=Decimal(str(item.factor_base)))
+        )
+    db.commit()
+    return obtener_unidades_uso(db, id_material)
 
 def eliminar_material(db: Session, id_material: int):
     db_obj = obtener_material(db, id_material)

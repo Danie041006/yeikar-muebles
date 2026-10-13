@@ -1,4 +1,4 @@
-import type { OrdenProduccion } from '../../services/produccionService';
+import type { OrdenProduccion, MaterialUnidadUso } from '../../services/produccionService';
 
 // ── Tipos y constantes compartidos entre el Kanban de producción y el
 //    modal de etapa (única fuente de verdad, sin imports circulares). ──
@@ -14,6 +14,8 @@ export interface Material {
   costo_base: number;
   largo_cm?: number | null;
   ancho_cm?: number | null;
+  // Unidades de uso (líquidos/densos: galón, pistolada, litro…)
+  unidades_uso?: MaterialUnidadUso[];
   unidad_medida?: {
     id: number;
     nombre: string;

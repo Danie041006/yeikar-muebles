@@ -186,6 +186,12 @@ class ConsumoMaterial(Base):
     # 2×10×5", "1.500 cm (cuenta del taller)", etc. NULL = derivarla de las
     # columnas de captura.
     detalle_uso = Column(String(120), nullable=True)
+    # --- Unidad de USO (líquidos/densos: cuñete/galón/pistolada/litro) ---
+    # Cuando el taller captura en una unidad distinta a la base, aquí queda la
+    # unidad usada (cuyo factor_base la lleva a la base) y `cantidad_uso` = el
+    # número tal cual lo digitó (ej. 0,75 L). `cantidad` sigue en unidad base.
+    unidad_uso_id = Column(BigInteger, ForeignKey("material_unidad_uso.id", ondelete="SET NULL"), nullable=True)
+    cantidad_uso = Column(Numeric(12, 4), nullable=True)
     # --- Componente y consumo extra (alimentan la estructura de costes) ---
     # componente: pieza del mueble a la que se destinó el material (CAMA,
     # NOCHERO, CABECERA...) → genera secciones "SECCIÓN (COMPONENTE)" en la
@@ -207,6 +213,7 @@ class ConsumoMaterial(Base):
 
     etapa = relationship("EtapaProduccion", back_populates="consumos")
     material = relationship("Material")
+    unidad_uso = relationship("MaterialUnidadUso")
     sobrante_origen = relationship("SobranteLamina", foreign_keys=[origen_sobrante_id])
     solicitante = relationship("Empleado", foreign_keys=[solicitante_empleado_id])
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
@@ -455,6 +462,9 @@ class ProduccionCrudoConsumo(Base):
     pieza_largo = Column(Numeric(10, 2), nullable=True)
     pieza_ancho = Column(Numeric(10, 2), nullable=True)
     pieza_espesor = Column(Numeric(10, 2), nullable=True)
+    # Unidad de USO (líquidos/densos), igual que ConsumoMaterial.
+    unidad_uso_id = Column(BigInteger, ForeignKey("material_unidad_uso.id", ondelete="SET NULL"), nullable=True)
+    cantidad_uso = Column(Numeric(12, 4), nullable=True)
     # --- Componente y consumo extra, igual que ConsumoMaterial ---
     componente = Column(String(50), nullable=True)
     es_excedente = Column(Boolean, default=False, nullable=False, server_default="false")
@@ -470,6 +480,7 @@ class ProduccionCrudoConsumo(Base):
 
     produccion = relationship("ProduccionCrudo", back_populates="consumos")
     material = relationship("Material")
+    unidad_uso = relationship("MaterialUnidadUso")
     sobrante_origen = relationship("SobranteLamina", foreign_keys=[origen_sobrante_id])
     solicitante = relationship("Empleado", foreign_keys=[solicitante_empleado_id])
     creador = relationship("Usuario", foreign_keys=[creado_por_id])

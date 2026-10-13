@@ -74,6 +74,11 @@ class MovimientoInventario(Base):
     # opcionales y solo se llenan si el nombre coincide con un registro).
     proveedor_nombre = Column(String(150), nullable=True)
     cliente_nombre = Column(String(150), nullable=True)
+    # Zona del taller a la que va la compra (solo entradas). Informativo: no
+    # cambia material.departamento. NULL = general/sin zona.
+    departamento = Column(String(30), nullable=True)
+    # Quién trajo/entregó la compra (texto libre, solo entradas).
+    recibido_por = Column(String(150), nullable=True)
     fecha = Column(DateTime, server_default=func.now())
     referencia_tipo = Column(String(100), nullable=True)
     referencia_id = Column(BigInteger, nullable=True)

@@ -133,6 +133,7 @@ class MaterialResponse(MaterialBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     unidad_medida: Optional[UnidadMedidaResponse] = None
+    unidades_uso: List["MaterialUnidadUsoResponse"] = []
 
     class Config:
         from_attributes = True
@@ -140,6 +141,40 @@ class MaterialResponse(MaterialBase):
     @property
     def es_laminar(self) -> bool:
         return self.largo_cm is not None and self.ancho_cm is not None
+
+
+class MaterialUnidadUsoItem(BaseModel):
+    """Una unidad de USO del material: 1 [nombre] = factor_base [unidad base].
+
+    El factor es el PRÁCTICO del taller (cuñete rendidor real), no la
+    matemática teórica; el sistema no lo corrige ni lo cruza con otras filas.
+    """
+    nombre: str = Field(min_length=1, max_length=50)
+    factor_base: float = Field(gt=0)
+
+    @field_validator("nombre")
+    @classmethod
+    def _normalizar_nombre(cls, v: str) -> str:
+        v = v.strip().upper()
+        if not v:
+            raise ValueError("El nombre de la unidad de uso no puede estar vacío.")
+        return v
+
+
+class MaterialUnidadUsoResponse(MaterialUnidadUsoItem):
+    id: int
+    activo: bool = True
+
+    class Config:
+        from_attributes = True
+
+
+class MaterialUnidadUsoReplace(BaseModel):
+    """Contrato de reemplazo completo: PUT /material/{id}/unidades-uso."""
+    unidades: List[MaterialUnidadUsoItem]
+
+
+MaterialResponse.model_rebuild()
 
 
 class MaterialFusionIn(BaseModel):
