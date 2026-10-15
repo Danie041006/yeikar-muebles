@@ -60,6 +60,7 @@ backend/backup_pre_limpieza_*.sql
 
 # Herramientas de agente / entorno local (no parte del ERP)
 .agents/
+.opencode/
 skills-lock.json
 videos/
 # Logs del túnel de acceso móvil / utilidades locales

@@ -73,7 +73,8 @@ export interface AlertaStock {
 
 export interface MovimientoCreate {
   material_id: number;
-  ubicacion_id: number;
+  /** Opcional: sin ubicación, el backend registra el movimiento en el depósito principal. */
+  ubicacion_id?: number;
   tipo: 'ENTRADA' | 'SALIDA' | 'AJUSTE' | 'DAÑO' | 'DEVOLUCION';
   cantidad: number;
   costo_unitario?: number;
@@ -102,6 +103,8 @@ export interface MovimientoCreate {
   recibido_por?: string;
   /** "Fiar": ENTRADA sin pagar → se registra automáticamente la deuda (cuenta por pagar). */
   fiar?: boolean;
+  /** % de descuento aplicado (el neto ya viaja en costo_unitario); queda en el libro. */
+  descuento_porcentaje?: number;
 }
 
 export interface MovimientoResponse {
@@ -175,6 +178,8 @@ export interface MovimientoProductoCreate {
   cliente_nombre?: string;
   /** "Fiar": ENTRADA sin pagar → cuenta por pagar (igual que en insumos). */
   fiar?: boolean;
+  /** % de descuento aplicado (el neto ya viaja en costo_unitario); queda en el libro. */
+  descuento_porcentaje?: number;
 }
 
 export interface MovimientoProductoResponse {
@@ -202,6 +207,59 @@ export interface CostoUnitarioRealMaterial {
   costo_compra: number;
   pasada_unitaria: number;
   costo_real: number;
+}
+
+// ---- Libro de Entradas y Salidas (consulta por rango de fechas) ----
+export interface LibroFila {
+  id: number;
+  item_tipo: 'MATERIAL' | 'PRODUCTO' | 'CRUDO';
+  item_id: number;
+  item_nombre: string;
+  unidad?: string | null;
+  categoria?: string | null;
+  fecha: string;
+  tipo: 'ENTRADA' | 'SALIDA' | 'DEVOLUCION' | 'DANO';
+  cantidad: number;
+  costo_unitario?: number | null;
+  costo_total?: number | null;
+  llevada?: number | null;
+  zona: string;
+  ubicacion?: string | null;
+  origen: string;
+  proveedor?: string | null;
+  cliente?: string | null;
+  recibido_por?: string | null;
+  observaciones?: string | null;
+  /** Registro de la compra (solo insumos): cuenta de pago, descuento y fiar. */
+  descuento?: number | null;
+  pagado_desde?: string | null;
+  fiado?: boolean;
+  fiado_a?: string | null;
+  fiado_estado?: string | null;
+}
+
+export interface LibroZona {
+  zona: string;
+  label: string;
+  movimientos: number;
+  costo: number;
+  sin_costo: number;
+}
+
+export interface LibroResumen {
+  lado: string;
+  desde: string;
+  hasta: string;
+  movimientos: number;
+  costo_total: number;
+  movimientos_sin_costo: number;
+  por_zona: LibroZona[];
+}
+
+export interface LibroEntradasSalidas {
+  resumen: LibroResumen;
+  filas: LibroFila[];
+  truncado: boolean;
 }
 
 export const inventarioService = {
@@ -290,6 +348,21 @@ export const inventarioService = {
 
   crearCategoria: async (nombre: string, tipo: 'MATERIAL' | 'PRODUCTO', orden = 0): Promise<CategoriaInventario> => {
     const response = await api.post<CategoriaInventario>('/inventario/categorias', { nombre, tipo, orden });
+    return response.data;
+  },
+
+  // ---- Libro de Entradas y Salidas ----
+  getLibro: async (params: {
+    desde: string;
+    hasta: string;
+    lado: 'ENTRADAS' | 'SALIDAS';
+    tipo_item?: 'TODOS' | 'MATERIAL' | 'PRODUCTO' | 'CRUDO';
+    zona?: string;
+    buscar?: string;
+    categoria_id?: number;
+    tipo_producto_id?: number;
+  }): Promise<LibroEntradasSalidas> => {
+    const response = await api.get<LibroEntradasSalidas>('/inventario/libro', { params });
     return response.data;
   },
 };

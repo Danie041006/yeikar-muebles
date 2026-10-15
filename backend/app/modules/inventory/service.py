@@ -1,14 +1,17 @@
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
-from sqlalchemy.exc import IntegrityError
+import unicodedata
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Optional, List
 
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 
 
 from app.modules.inventory import model, schemas
 from app.modules.productos.model import Material, Producto
-from app.modules.catalogos.model import Ubicacion
+from app.modules.catalogos.model import Area, CategoriaInventario, Ubicacion, UnidadMedida
 from app.modules.proveedores.model import Proveedor
 from app.modules.clients.model import Client
 from app.core.hora_ve import ahora_ve, hoy_ve
@@ -197,6 +200,24 @@ def obtener_stock_material(db: Session, material_id: int, ubicacion_id: int) -> 
 
 
 
+def _ubicacion_deposito_predeterminada(db: Session) -> int:
+    """Depósito destino por defecto de los movimientos manuales de insumos.
+
+    El formulario ya no pide almacén (los insumos se organizan por
+    departamentos): se busca el depósito principal activo, sin hardcodear ids.
+    """
+    deposito = db.query(Ubicacion).filter(
+        Ubicacion.activo == True,
+        Ubicacion.tipo == "DEPOSITO",
+    ).order_by(Ubicacion.nombre).first()
+    if deposito:
+        return deposito.id
+    cualquiera = db.query(Ubicacion).filter(Ubicacion.activo == True).order_by(Ubicacion.id).first()
+    if cualquiera:
+        return cualquiera.id
+    raise ValueError("No hay ubicaciones activas para registrar el movimiento.")
+
+
 def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usuario=None) -> model.MovimientoInventario:
     """
     Registra un movimiento de inventario (entrada, salida, ajuste, etc.)
@@ -210,6 +231,11 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     # de "conflicto simultáneo".
     if movimiento.tipo == "DAÑO":
         movimiento.tipo = "DANO"
+
+    # El formulario de insumos ya no pide almacén (la organización es por
+    # departamentos): sin ubicación, el movimiento va al depósito principal.
+    if movimiento.ubicacion_id is None:
+        movimiento.ubicacion_id = _ubicacion_deposito_predeterminada(db)
 
     # Obtener o crear el registro de inventario para ese material y ubicación.
     # FOR UPDATE bloquea la fila para que dos SALIDAS concurrentes no lean el
@@ -285,6 +311,9 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         cliente_nombre=cliente_nombre,
         departamento=getattr(movimiento, "departamento", None),
         recibido_por=getattr(movimiento, "recibido_por", None),
+        pagado_desde_metodo_caja_id=getattr(movimiento, "pagado_desde_metodo_caja_id", None),
+        descuento_porcentaje=getattr(movimiento, "descuento_porcentaje", None),
+        fiar=bool(getattr(movimiento, "fiar", False)),
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
@@ -636,6 +665,9 @@ def registrar_movimiento_producto(
         cliente_id=cliente_id,
         proveedor_nombre=proveedor_nombre,
         cliente_nombre=cliente_nombre,
+        pagado_desde_metodo_caja_id=getattr(movimiento, "pagado_desde_metodo_caja_id", None),
+        descuento_porcentaje=getattr(movimiento, "descuento_porcentaje", None),
+        fiar=bool(getattr(movimiento, "fiar", False)),
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
@@ -872,3 +904,565 @@ def eliminar_sobrante(db: Session, sobrante_id: int) -> bool:
     db.delete(s)
     db.commit()
     return True
+
+
+# =========================================================================
+# Libro de Entradas y Salidas (control operativo por rango de fechas)
+#
+# Une los tres kardex (materiales, productos y crudo) en un solo listado:
+# qué entró y qué salió en el período, con su zona del taller (departamento)
+# y su origen (compra, venta, producción…). SOLO LECTURA: no toca stock,
+# costos ni contabilidad.
+# =========================================================================
+
+TIPOS_POR_LADO = {
+    "ENTRADAS": ("ENTRADA", "DEVOLUCION"),
+    "SALIDAS": ("SALIDA", "DANO", "DAÑO"),
+}
+
+# Clave de zona (departamento del taller) → etiqueta visible.
+# GENERAL = insumo transversal o movimiento sin zona.
+ZONAS_LIBRO = {
+    "EBANISTERIA": "Ebanistería",
+    "PREPARACION": "Preparación",
+    "PINTURA": "Pintura",
+    "TAPICERIA": "Tapicería",
+    "VIDRIERIA": "Vidriería",
+    "TERMINACION": "Terminación",
+    "GENERAL": "General",
+}
+
+_ORDEN_ZONAS = [
+    "EBANISTERIA", "PREPARACION", "PINTURA", "TAPICERIA", "VIDRIERIA", "TERMINACION", "GENERAL",
+]
+
+_ORIGEN_LABELS = {
+    "COMPRA": "Compra",
+    "VENTA": "Venta",
+    "PRODUCCION": "Producción",
+    "PRODUCCION_EXHIBICION": "Producción (exhibición)",
+    "produccion": "Producción",
+    "produccion_crudo": "Producción de crudo",
+    "ASIGNACION": "Asignación a pedido",
+    "STOCK_INICIAL": "Carga inicial",
+    "CARGA_INICIAL": "Carga inicial",
+    "inventario_inicial": "Inventario inicial",
+    "INVENTARIO_INICIAL": "Inventario inicial",
+    "IMPORTACION MANAPLAS": "Importación Manaplas",
+    "AJUSTE": "Ajuste",
+}
+
+
+def _clave_departamento(valor) -> Optional[str]:
+    """Normaliza una zona a su clave canónica ('Ebanistería' → 'EBANISTERIA').
+
+    Devuelve None si no es una zona válida del taller (p. ej. 'Depósito')."""
+    if not valor:
+        return None
+    s = unicodedata.normalize("NFD", str(valor).upper())
+    s = "".join(c for c in s if unicodedata.category(c) != "Mn").strip()
+    s = s.split("(")[0].strip().replace(" ", "_")
+    return s if s in ZONAS_LIBRO else None
+
+
+def _etiqueta_origen(referencia_tipo, referencia_id) -> str:
+    if not referencia_tipo:
+        return "Manual"
+    label = _ORIGEN_LABELS.get(referencia_tipo) or referencia_tipo.replace("_", " ").capitalize()
+    if referencia_id and referencia_tipo.upper() in ("COMPRA", "VENTA"):
+        return f"{label} #{referencia_id}"
+    return label
+
+
+def _datos_consumos(db: Session, ids_consumo: List[int], ids_consumo_crudo: List[int]) -> dict:
+    """Costo unitario y zona de los consumos referenciados por las SALIDAS.
+
+    La zona de una salida de producción es el área de su etapa (producción por
+    pedido) o el área del ítem en crudo (producción de crudo). El costo real
+    también vive en el consumo, no en el movimiento."""
+    datos: dict = {}
+    if ids_consumo:
+        from app.modules.production.model import ConsumoMaterial, EtapaProduccion
+        filas = (
+            db.query(ConsumoMaterial.id, ConsumoMaterial.costo_unitario, Area.nombre)
+            .join(EtapaProduccion, ConsumoMaterial.etapa_produccion_id == EtapaProduccion.id)
+            .outerjoin(Area, EtapaProduccion.area_id == Area.id)
+            .filter(ConsumoMaterial.id.in_(ids_consumo))
+            .all()
+        )
+        for consumo_id, costo, area_nombre in filas:
+            datos[("produccion", consumo_id)] = {
+                "costo": costo, "zona": _clave_departamento(area_nombre),
+            }
+    if ids_consumo_crudo:
+        from app.modules.production.model import (
+            ProductoCrudoInventario,
+            ProduccionCrudo,
+            ProduccionCrudoConsumo,
+        )
+        filas = (
+            db.query(ProduccionCrudoConsumo.id, ProduccionCrudoConsumo.costo_unitario, Area.nombre)
+            .join(ProduccionCrudo, ProduccionCrudoConsumo.produccion_crudo_id == ProduccionCrudo.id)
+            .join(ProductoCrudoInventario, ProduccionCrudo.crudo_id == ProductoCrudoInventario.id)
+            .outerjoin(Area, ProductoCrudoInventario.area_id == Area.id)
+            .filter(ProduccionCrudoConsumo.id.in_(ids_consumo_crudo))
+            .all()
+        )
+        for consumo_id, costo, area_nombre in filas:
+            datos[("produccion_crudo", consumo_id)] = {
+                "costo": costo, "zona": _clave_departamento(area_nombre),
+            }
+    return datos
+
+
+def _costos_compras(db: Session, compra_ids: List[int]) -> dict:
+    """{(compra_id, material_id): costo_unitario} de las compras referenciadas.
+
+    Las entradas por compra no guardan el costo en el movimiento (el costo vive
+    en el detalle de la compra); si un material se repite, se usa el primer
+    renglón."""
+    if not compra_ids:
+        return {}
+    from app.modules.purchases.model import DetalleCompra
+    filas = (
+        db.query(DetalleCompra.compra_id, DetalleCompra.material_id, DetalleCompra.costo_unitario)
+        .filter(DetalleCompra.compra_id.in_(compra_ids))
+        .all()
+    )
+    costos: dict = {}
+    for compra_id, material_id, costo in filas:
+        costos.setdefault((compra_id, material_id), costo)
+    return costos
+
+
+def _cuentas_de_pago(db: Session, cuenta_ids: List[int]) -> dict:
+    """{metodo_caja_id: nombre} de las cuentas con las que se pagaron entradas."""
+    ids = sorted({cuenta_id for cuenta_id in cuenta_ids if cuenta_id})
+    if not ids:
+        return {}
+    from app.modules.reports.model import MetodoCaja
+    return {
+        cuenta_id: nombre
+        for cuenta_id, nombre in db.query(MetodoCaja.id, MetodoCaja.nombre).filter(MetodoCaja.id.in_(ids)).all()
+    }
+
+
+def _deudas_de_movimientos(db: Session, movimiento_ids: List[int]) -> dict:
+    """{movimiento_id: {proveedor, estado, material_id}} de las entradas fiadas:
+    la cuenta por pagar nace con origen ENTRADA_INVENTARIO + id del movimiento.
+    Insumos y productos viven en tablas distintas (los ids pueden repetirse):
+    el renglón de la deuda desambigua (material_id lleno = insumo; vacío =
+    producto) y quien consume filtra por el tipo que le corresponde."""
+    if not movimiento_ids:
+        return {}
+    from app.modules.cuentas_por_pagar.model import CuentaPorPagar, DetalleCuentaPorPagar
+    filas = (
+        db.query(
+            CuentaPorPagar.origen_id,
+            CuentaPorPagar.estado,
+            Proveedor.nombre,
+            DetalleCuentaPorPagar.material_id,
+        )
+        .join(Proveedor, CuentaPorPagar.proveedor_id == Proveedor.id)
+        .join(DetalleCuentaPorPagar, DetalleCuentaPorPagar.cuenta_por_pagar_id == CuentaPorPagar.id)
+        .filter(
+            CuentaPorPagar.origen_tipo == "ENTRADA_INVENTARIO",
+            CuentaPorPagar.origen_id.in_(movimiento_ids),
+            DetalleCuentaPorPagar.orden == 0,
+        )
+        .all()
+    )
+    return {
+        origen_id: {
+            "proveedor": proveedor_nombre,
+            "estado": estado,
+            "material_id": material_id,
+        }
+        for origen_id, estado, proveedor_nombre, material_id in filas
+    }
+
+
+@dataclass
+class _FilaLibro:
+    """Fila normalizada del libro: misma forma para los tres kardex.
+
+    `como_dict` concentra las normalizaciones comunes (tipo DAÑO → DANO,
+    cantidad numérica, costo total = cantidad × costo unitario y llevada)."""
+    id: int
+    item_tipo: str
+    item_id: int
+    item_nombre: str
+    unidad: Optional[str]
+    categoria: Optional[str]
+    fecha: Optional[datetime]
+    tipo: str
+    cantidad: float | Decimal
+    costo_unitario: Optional[float | Decimal]
+    llevada: Optional[float | Decimal]
+    zona: str
+    ubicacion: Optional[str]
+    origen: str
+    proveedor: Optional[str]
+    cliente: Optional[str]
+    recibido_por: Optional[str]
+    observaciones: Optional[str]
+    # Registro de la compra (solo insumos; None/False en productos y crudo)
+    descuento: Optional[float | Decimal] = None
+    pagado_desde: Optional[str] = None
+    fiado: bool = False
+    fiado_a: Optional[str] = None
+    fiado_estado: Optional[str] = None
+
+    def como_dict(self) -> dict:
+        cantidad = float(self.cantidad or 0)
+        costo_unitario = float(self.costo_unitario) if self.costo_unitario is not None else None
+        llevada = float(self.llevada) if self.llevada is not None else None
+        descuento = float(self.descuento) if self.descuento is not None else None
+        return {
+            "id": self.id,
+            "item_tipo": self.item_tipo,
+            "item_id": self.item_id,
+            "item_nombre": self.item_nombre or "",
+            "unidad": self.unidad,
+            "categoria": self.categoria,
+            "fecha": self.fecha,
+            "tipo": "DANO" if self.tipo == "DAÑO" else self.tipo,
+            "cantidad": cantidad,
+            "costo_unitario": costo_unitario,
+            "costo_total": round(cantidad * costo_unitario, 2) if costo_unitario is not None else None,
+            "llevada": llevada,
+            "zona": self.zona,
+            "ubicacion": self.ubicacion,
+            "origen": self.origen,
+            "proveedor": self.proveedor,
+            "cliente": self.cliente,
+            "recibido_por": self.recibido_por,
+            "observaciones": self.observaciones,
+            "descuento": descuento,
+            "pagado_desde": self.pagado_desde,
+            "fiado": self.fiado,
+            "fiado_a": self.fiado_a,
+            "fiado_estado": self.fiado_estado,
+        }
+
+
+def _costo_y_zona_material(mov, departamento_material, datos_consumos: dict, costos_compras: dict) -> tuple:
+    """Costo unitario y zona resueltos de un movimiento de material.
+
+    Costo: lo que trae el movimiento → detalle de la compra → consumo de
+    producción. Zona: departamento del movimiento → área de la etapa
+    (producción) → departamento del material → 'GENERAL'."""
+    datos_consumo = datos_consumos.get((mov.referencia_tipo, mov.referencia_id)) if mov.referencia_id else None
+    costo_unitario = mov.costo_unitario
+    if costo_unitario is None and mov.referencia_tipo == "COMPRA" and mov.referencia_id:
+        costo_unitario = costos_compras.get((mov.referencia_id, mov.material_id))
+    if costo_unitario is None and datos_consumo:
+        costo_unitario = datos_consumo["costo"]
+    zona_fila = _clave_departamento(mov.departamento)
+    if zona_fila is None and datos_consumo and datos_consumo["zona"]:
+        zona_fila = datos_consumo["zona"]
+    if zona_fila is None:
+        zona_fila = _clave_departamento(departamento_material)
+    return costo_unitario, zona_fila or "GENERAL"
+
+
+@dataclass
+class _ConsultaResuelta:
+    """Consulta ya resuelta: lado, rango de fechas y filtros del período."""
+    tipos: tuple
+    desde_dt: datetime
+    hasta_dt: datetime
+    categoria_id: Optional[int] = None
+    tipo_producto_id: Optional[int] = None
+
+
+def _filas_materiales(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
+    """Entradas/salidas de MATERIALES del período, con zona y costo resueltos.
+
+    La zona sale del departamento del movimiento, del área de la etapa (cuando
+    la referencia es una producción) o del departamento del material; el costo
+    del detalle de la compra o del consumo cuando el movimiento no lo trae."""
+    consulta = (
+        db.query(
+            model.MovimientoInventario,
+            Material.nombre,
+            Material.departamento,
+            UnidadMedida.abreviatura,
+            Ubicacion.nombre,
+            CategoriaInventario.nombre,
+        )
+        .join(Material, model.MovimientoInventario.material_id == Material.id)
+        .outerjoin(UnidadMedida, Material.unidad_medida_id == UnidadMedida.id)
+        .outerjoin(Ubicacion, model.MovimientoInventario.ubicacion_id == Ubicacion.id)
+        .outerjoin(CategoriaInventario, Material.categoria_inventario_id == CategoriaInventario.id)
+        .options(
+            joinedload(model.MovimientoInventario.proveedor),
+            joinedload(model.MovimientoInventario.cliente),
+        )
+        .filter(
+            model.MovimientoInventario.fecha >= ctx.desde_dt,
+            model.MovimientoInventario.fecha < ctx.hasta_dt,
+            model.MovimientoInventario.tipo.in_(ctx.tipos),
+        )
+    )
+    if ctx.categoria_id:
+        consulta = consulta.filter(Material.categoria_inventario_id == ctx.categoria_id)
+    movimientos = consulta.all()
+
+    ids_consumo = [
+        m.referencia_id for m, *_ in movimientos
+        if m.referencia_tipo == "produccion" and m.referencia_id
+    ]
+    ids_consumo_crudo = [
+        m.referencia_id for m, *_ in movimientos
+        if m.referencia_tipo == "produccion_crudo" and m.referencia_id
+    ]
+    ids_compra = [
+        m.referencia_id for m, *_ in movimientos
+        if m.referencia_tipo == "COMPRA" and m.referencia_id
+    ]
+    datos_consumos = _datos_consumos(db, ids_consumo, ids_consumo_crudo)
+    costos_compras = _costos_compras(db, ids_compra)
+    cuenta_pago = _cuentas_de_pago(
+        db, [m.pagado_desde_metodo_caja_id for m, *_ in movimientos if m.pagado_desde_metodo_caja_id],
+    )
+    deudas = _deudas_de_movimientos(db, [m.id for m, *_ in movimientos])
+
+    filas: List[dict] = []
+    for mov, nombre, departamento, unidad, ubicacion_nombre, categoria in movimientos:
+        costo_unitario, zona = _costo_y_zona_material(mov, departamento, datos_consumos, costos_compras)
+        deuda = deudas.get(mov.id)
+        if deuda and deuda["material_id"] != mov.material_id:
+            deuda = None  # la deuda con ese id es de un producto, no de este insumo
+        filas.append(_FilaLibro(
+            id=mov.id,
+            item_tipo="MATERIAL",
+            item_id=mov.material_id,
+            item_nombre=nombre,
+            unidad=unidad,
+            categoria=categoria,
+            fecha=mov.fecha,
+            tipo=mov.tipo,
+            cantidad=mov.cantidad,
+            costo_unitario=costo_unitario,
+            llevada=mov.llevada,
+            zona=zona,
+            ubicacion=ubicacion_nombre,
+            origen=_etiqueta_origen(mov.referencia_tipo, mov.referencia_id),
+            proveedor=mov.proveedor_nombre or (mov.proveedor.nombre if mov.proveedor else None),
+            cliente=mov.cliente_nombre or (mov.cliente.nombre if mov.cliente else None),
+            recibido_por=mov.recibido_por,
+            observaciones=mov.observaciones,
+            descuento=mov.descuento_porcentaje,
+            pagado_desde=cuenta_pago.get(mov.pagado_desde_metodo_caja_id),
+            fiado=bool(mov.fiar),
+            fiado_a=deuda["proveedor"] if deuda else (mov.proveedor_nombre if mov.fiar else None),
+            fiado_estado=deuda["estado"] if deuda else None,
+        ).como_dict())
+    return filas
+
+
+def _filas_productos(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
+    """Entradas/salidas de PRODUCTOS del período (con categoría y tipo)."""
+    consulta = (
+        db.query(
+            model.MovimientoProductoInventario,
+            Producto.nombre,
+            Ubicacion.nombre,
+            CategoriaInventario.nombre,
+        )
+        .join(Producto, model.MovimientoProductoInventario.producto_id == Producto.id)
+        .outerjoin(Ubicacion, model.MovimientoProductoInventario.ubicacion_id == Ubicacion.id)
+        .outerjoin(CategoriaInventario, Producto.categoria_inventario_id == CategoriaInventario.id)
+        .options(
+            joinedload(model.MovimientoProductoInventario.proveedor),
+            joinedload(model.MovimientoProductoInventario.cliente),
+        )
+        .filter(
+            model.MovimientoProductoInventario.fecha >= ctx.desde_dt,
+            model.MovimientoProductoInventario.fecha < ctx.hasta_dt,
+            model.MovimientoProductoInventario.tipo.in_(ctx.tipos),
+        )
+    )
+    if ctx.categoria_id:
+        consulta = consulta.filter(Producto.categoria_inventario_id == ctx.categoria_id)
+    if ctx.tipo_producto_id:
+        consulta = consulta.filter(Producto.tipo_producto_id == ctx.tipo_producto_id)
+    movimientos = consulta.all()
+
+    cuenta_pago = _cuentas_de_pago(
+        db, [m.pagado_desde_metodo_caja_id for m, *_ in movimientos if m.pagado_desde_metodo_caja_id],
+    )
+    deudas = _deudas_de_movimientos(db, [m.id for m, *_ in movimientos])
+
+    filas: List[dict] = []
+    for mov, nombre, ubicacion_nombre, categoria in movimientos:
+        deuda = deudas.get(mov.id)
+        if deuda and deuda["material_id"] is not None:
+            deuda = None  # la deuda con ese id es de un insumo, no de este producto
+        filas.append(_FilaLibro(
+            id=mov.id,
+            item_tipo="PRODUCTO",
+            item_id=mov.producto_id,
+            item_nombre=nombre,
+            unidad=None,
+            categoria=categoria,
+            fecha=mov.fecha,
+            tipo=mov.tipo,
+            cantidad=mov.cantidad,
+            costo_unitario=mov.costo_unitario,
+            llevada=mov.llevada,
+            zona="GENERAL",
+            ubicacion=ubicacion_nombre,
+            origen=_etiqueta_origen(mov.referencia_tipo, mov.referencia_id),
+            proveedor=mov.proveedor_nombre or (mov.proveedor.nombre if mov.proveedor else None),
+            cliente=mov.cliente_nombre or (mov.cliente.nombre if mov.cliente else None),
+            recibido_por=None,
+            observaciones=mov.observaciones,
+            descuento=mov.descuento_porcentaje,
+            pagado_desde=cuenta_pago.get(mov.pagado_desde_metodo_caja_id),
+            fiado=bool(mov.fiar),
+            fiado_a=deuda["proveedor"] if deuda else (mov.proveedor_nombre if mov.fiar else None),
+            fiado_estado=deuda["estado"] if deuda else None,
+        ).como_dict())
+    return filas
+
+
+def _filas_crudo(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
+    """Entradas/salidas del inventario en CRUDO (zona = área del ítem)."""
+    from app.modules.production.model import MovimientoCrudo, ProductoCrudoInventario
+
+    movimientos = (
+        db.query(MovimientoCrudo, ProductoCrudoInventario.nombre, Area.nombre)
+        .join(ProductoCrudoInventario, MovimientoCrudo.crudo_id == ProductoCrudoInventario.id)
+        .outerjoin(Area, ProductoCrudoInventario.area_id == Area.id)
+        .filter(
+            MovimientoCrudo.fecha >= ctx.desde_dt,
+            MovimientoCrudo.fecha < ctx.hasta_dt,
+            MovimientoCrudo.tipo.in_(ctx.tipos),
+        )
+        .all()
+    )
+    return [
+        _FilaLibro(
+            id=mov.id,
+            item_tipo="CRUDO",
+            item_id=mov.crudo_id,
+            item_nombre=nombre,
+            unidad=None,
+            categoria=None,
+            fecha=mov.fecha,
+            tipo=mov.tipo,
+            cantidad=mov.cantidad,
+            costo_unitario=None,   # el crudo no costea por movimiento
+            llevada=None,
+            zona=_clave_departamento(area_nombre) or "GENERAL",
+            ubicacion=None,
+            origen=_etiqueta_origen(mov.referencia_tipo, mov.referencia_id),
+            proveedor=None,
+            cliente=None,
+            recibido_por=None,
+            observaciones=mov.observaciones,
+        ).como_dict()
+        for mov, nombre, area_nombre in movimientos
+    ]
+
+
+def _acumular_por_zona(filas: List[dict]) -> List[dict]:
+    """Totales por zona (movimientos, costo y cuántos sin costo), en el orden
+    canónico del taller."""
+    por_zona: dict = {}
+    for fila in filas:
+        acumulado = por_zona.setdefault(fila["zona"], {
+            "zona": fila["zona"],
+            "label": ZONAS_LIBRO.get(fila["zona"], fila["zona"]),
+            "movimientos": 0,
+            "costo": 0.0,
+            "sin_costo": 0,
+        })
+        acumulado["movimientos"] += 1
+        if fila["costo_total"] is None:
+            acumulado["sin_costo"] += 1
+        else:
+            acumulado["costo"] = round(acumulado["costo"] + fila["costo_total"], 2)
+    return sorted(
+        por_zona.values(),
+        key=lambda zona: (
+            _ORDEN_ZONAS.index(zona["zona"]) if zona["zona"] in _ORDEN_ZONAS else len(_ORDEN_ZONAS)
+        ),
+    )
+
+
+def _construir_resumen(lado: str, desde: date, hasta: date, filas: List[dict]) -> dict:
+    """Resumen del libro: movimientos, costo acumulado y desglose por zona."""
+    return {
+        "lado": lado,
+        "desde": desde,
+        "hasta": hasta,
+        "movimientos": len(filas),
+        "costo_total": round(sum(fila["costo_total"] for fila in filas if fila["costo_total"] is not None), 2),
+        "movimientos_sin_costo": sum(1 for fila in filas if fila["costo_total"] is None),
+        "por_zona": _acumular_por_zona(filas),
+    }
+
+
+@dataclass
+class ConsultaLibro:
+    """Parámetros de una consulta al libro de entradas y salidas."""
+    desde: date
+    hasta: date
+    lado: str
+    tipo_item: str = "TODOS"
+    zona: Optional[str] = None
+    buscar: Optional[str] = None
+    limite: int = 5000
+    categoria_id: Optional[int] = None
+    tipo_producto_id: Optional[int] = None
+
+
+def obtener_libro_entradas_salidas(db: Session, consulta: ConsultaLibro) -> dict:
+    """Entradas o salidas de inventario en un rango de fechas.
+
+    Devuelve las filas (materiales + productos + crudo) con zona y origen, más
+    un resumen con totales por zona. El lado 'ENTRADAS' agrupa ENTRADA y
+    DEVOLUCION; 'SALIDAS' agrupa SALIDA y DAÑO (los AJUSTE no son flujos del
+    libro: se ven en el kardex de cada ítem)."""
+    lado = (consulta.lado or "").upper()
+    if lado not in TIPOS_POR_LADO:
+        raise ValueError("El lado debe ser ENTRADAS o SALIDAS.")
+    tipo_item = (consulta.tipo_item or "TODOS").upper()
+    if tipo_item not in ("TODOS", "MATERIAL", "PRODUCTO", "CRUDO"):
+        raise ValueError("tipo_item debe ser TODOS, MATERIAL, PRODUCTO o CRUDO.")
+    if consulta.desde > consulta.hasta:
+        raise ValueError("La fecha inicial no puede ser mayor que la final.")
+
+    ctx = _ConsultaResuelta(
+        tipos=TIPOS_POR_LADO[lado],
+        desde_dt=datetime.combine(consulta.desde, time.min),
+        hasta_dt=datetime.combine(consulta.hasta + timedelta(days=1), time.min),
+        categoria_id=consulta.categoria_id,
+        tipo_producto_id=consulta.tipo_producto_id,
+    )
+
+    filas: List[dict] = []
+    if tipo_item in ("TODOS", "MATERIAL"):
+        filas += _filas_materiales(db, ctx)
+    if tipo_item in ("TODOS", "PRODUCTO"):
+        filas += _filas_productos(db, ctx)
+    if tipo_item in ("TODOS", "CRUDO"):
+        filas += _filas_crudo(db, ctx)
+
+    # ── Filtros, orden y resumen ──────────────────────────────────────────
+    if consulta.zona:
+        objetivo = _clave_departamento(consulta.zona) or consulta.zona.strip().upper()
+        filas = [fila for fila in filas if fila["zona"] == objetivo]
+    if consulta.buscar:
+        texto = consulta.buscar.strip().lower()
+        filas = [fila for fila in filas if texto in (fila["item_nombre"] or "").lower()]
+
+    filas.sort(key=lambda fila: (fila["fecha"] or datetime.min, fila["id"]))
+    return {
+        "resumen": _construir_resumen(lado, consulta.desde, consulta.hasta, filas),
+        "filas": filas[:consulta.limite],
+        "truncado": len(filas) > consulta.limite,
+    }

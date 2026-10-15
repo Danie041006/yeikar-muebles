@@ -1332,7 +1332,7 @@ def _tasa_transferencia_salida(db: Session, moneda_salida_id: int, tasa_indicada
     if registrada and abs(tasa - registrada) / registrada > Decimal("0.5"):
         raise ValueError(
             f"La tasa indicada ({tasa}) difiere más de 50% de la tasa registrada "
-            f"({registrada}). Usa la TRM real del día."
+            f"({registrada}). Usa la tasa real del día."
         )
     return tasa
 

@@ -346,7 +346,7 @@ def _convertir_a_moneda_venta(
     if not tasa_cambio or float(tasa_cambio) <= 0:
         raise ValueError(
             "La moneda difiere de la moneda de la factura. "
-            "Debes proporcionar la tasa de cambio (TRM) para realizar la conversión."
+            "Debes proporcionar la tasa de cambio para realizar la conversión."
         )
     tasa = float(tasa_cambio)
     monto_base = round(float(monto) * tasa, 2)
@@ -378,12 +378,12 @@ def _convertir_a_moneda_venta(
     if tasa < 0.0001:
         raise ValueError(
             f"La tasa de cambio ({tasa}) no es válida para un monto en moneda extranjera. "
-            "Indica la TRM real del día (COP por unidad de la moneda del pago)."
+            "Indica la tasa real del día (COP por unidad de la moneda del pago)."
         )
     if round(monto_base, 2) <= 0:
         raise ValueError(
             "El monto en moneda base queda en 0 con la tasa indicada. "
-            "Revisa la TRM."
+            "Revisa la tasa."
         )
     # Si el sistema tiene una tasa registrada para esa moneda, la tasa no
     # puede desviarse más de 50% (anti "cobrar en cero" con TRM inventadas
@@ -397,7 +397,7 @@ def _convertir_a_moneda_venta(
         if abs(tasa - vigente) / vigente > 0.5:
             raise ValueError(
                 f"La tasa ({tasa}) difiere más de 50% de la tasa registrada "
-                f"del día ({vigente}). Usa la TRM real."
+                f"del día ({vigente}). Usa la tasa real."
             )
     return tasa, monto_base, margen_saldo
 

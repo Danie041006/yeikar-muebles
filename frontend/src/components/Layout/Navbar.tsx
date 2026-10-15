@@ -7,22 +7,22 @@ interface NavbarProps {
 
 const pageMeta: Record<string, { title: string; category: string }> = {
   '/dashboard': { title: 'Panel principal', category: 'Resumen' },
-  '/clientes': { title: 'Clientes', category: 'Operación' },
-  '/cotizaciones': { title: 'Cotizaciones', category: 'Operación' },
-  '/pedidos': { title: 'Pedidos', category: 'Operación' },
-  '/historial': { title: 'Expediente', category: 'Operación' },
-  '/produccion': { title: 'Producción', category: 'Operación' },
-  '/produccion-crudo': { title: 'Producción de Productos en Crudo', category: 'Operación' },
-  '/empleados': { title: 'Empleados', category: 'Operación' },
-  '/inventario': { title: 'Inventario', category: 'Operación' },
-  '/productos': { title: 'Productos', category: 'Operación' },
-  '/envios': { title: 'Despachos', category: 'Operación' },
-  '/mis-despachos': { title: 'Mis Despachos', category: 'Operación' },
+  '/clientes': { title: 'Clientes', category: 'Comercial' },
+  '/cotizaciones': { title: 'Cotizaciones', category: 'Comercial' },
+  '/pedidos': { title: 'Pedidos', category: 'Comercial' },
+  '/historial': { title: 'Libros', category: 'Comercial' },
+  '/produccion': { title: 'Producción', category: 'Producción' },
+  '/produccion-crudo': { title: 'Producción de Productos en Crudo', category: 'Producción' },
+  '/empleados': { title: 'Empleados', category: 'Administración' },
+  '/inventario': { title: 'Inventario', category: 'Almacén' },
+  '/productos': { title: 'Productos', category: 'Almacén' },
+  '/envios': { title: 'Despachos', category: 'Comercial' },
+  '/mis-despachos': { title: 'Mis Despachos', category: 'Comercial' },
   '/ventas': { title: 'Ventas y cobros', category: 'Finanzas' },
   '/facturacion': { title: 'Facturación', category: 'Finanzas' },
   '/gastos': { title: 'Egresos y gastos', category: 'Finanzas' },
-  '/costos-produccion': { title: 'Costos de Producción', category: 'Finanzas' },
-  '/nomina': { title: 'Nómina', category: 'Finanzas' },
+  '/costos-produccion': { title: 'Costos de Producción', category: 'Producción' },
+  '/nomina': { title: 'Nómina', category: 'Producción' },
   '/cuentas': { title: 'Cuentas', category: 'Finanzas' },
   '/reportes': { title: 'Reportes financieros', category: 'Finanzas' },
   '/reporte-diario': { title: 'Estado del día', category: 'Finanzas' },
@@ -52,8 +52,12 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
         </button>
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="hidden font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-yeikar-primary-dark sm:inline">{meta.category}</span>
-            <span className="hidden text-yeikar-secondary-light/30 sm:inline">/</span>
+            {meta.category !== meta.title && (
+              <>
+                <span className="hidden font-mono text-[10px] font-bold uppercase tracking-[0.16em] text-yeikar-primary-dark sm:inline">{meta.category}</span>
+                <span className="hidden text-yeikar-secondary-light/30 sm:inline">/</span>
+              </>
+            )}
             <h1 className="truncate font-headline text-base font-bold tracking-tight text-yeikar-neutral sm:text-lg">{meta.title}</h1>
           </div>
           <p className="mt-0.5 hidden text-xs text-yeikar-neutral/45 sm:block">Control operativo con intención.</p>

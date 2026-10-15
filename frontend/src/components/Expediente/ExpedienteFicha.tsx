@@ -561,7 +561,7 @@ export default function ExpedienteFicha({
   modoLibro = 'todos',
 }: {
   ficha: Expediente;
-  modoLibro?: 'cotizaciones' | 'pedidos' | 'facturas' | 'envios' | 'clientes' | 'todos';
+  modoLibro?: 'cotizaciones' | 'pedidos' | 'facturas' | 'envios' | 'todos';
 }) {
   const cliente = ficha.cliente;
 
@@ -582,13 +582,13 @@ export default function ExpedienteFicha({
             ? 'Libro de Facturas'
             : modoLibro === 'envios'
             ? 'Libro de Guías de Despacho'
-            : 'Ficha de Expediente'}
+            : 'Ficha completa'}
         </p>
         <h2 className="font-headline font-black text-xl mt-0.5">{cliente?.nombre || 'Cliente sin nombre'}</h2>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-white/70 font-mono">
           {cliente?.cedula && <span>C.I.: {cliente.cedula}</span>}
-          {cliente?.telefono && <span>📞 {cliente.telefono}</span>}
-          {cliente?.ciudad && <span>📍 {cliente.ciudad}</span>}
+          {cliente?.telefono && <span>Tel: {cliente.telefono}</span>}
+          {cliente?.ciudad && <span>Ciudad: {cliente.ciudad}</span>}
           {ficha.cotizacion && modoLibro === 'cotizaciones' && <span>Cotización #{ficha.cotizacion.id}</span>}
           {ficha.pedido && modoLibro === 'pedidos' && <span>Pedido #{ficha.pedido.id}</span>}
           {ficha.envio && modoLibro === 'envios' && <span>Envío #{ficha.envio.id}</span>}

@@ -1,6 +1,15 @@
 import api from './api';
 import { Client } from './clienteService';
 import type { AdjuntoInfo } from './adjuntosService';
+import {
+  actualizarOperacionLocal,
+  borrarCache,
+  cancelarOperacionLocal,
+  conCache,
+  esIdLocal,
+  mutarOEncolar,
+  parchearCache,
+} from '../offline/cache';
 
 export interface Moneda {
   id: number;
@@ -139,27 +148,97 @@ export const cotizacionService = {
     if (mes !== undefined) params.mes = mes;
     if (anio !== undefined) params.anio = anio;
 
-    const response = await api.get<Quote[]>('/cotizacion/', { params });
-    return response.data;
+    return conCache(`cotizaciones:${search ?? ''}:${soloMesActual}:${mes ?? ''}:${anio ?? ''}`, async () => {
+      const response = await api.get<Quote[]>('/cotizacion/', { params });
+      return response.data;
+    });
   },
 
   getById: async (id: number): Promise<Quote> => {
-    const response = await api.get<Quote>(`/cotizacion/${id}`);
-    return response.data;
+    return conCache(`cotizacion:${id}`, async () => {
+      const response = await api.get<Quote>(`/cotizacion/${id}`);
+      return response.data;
+    });
   },
 
   create: async (quote: QuoteCreate): Promise<Quote> => {
-    const response = await api.post<Quote>('/cotizacion/', quote);
-    return response.data;
+    return mutarOEncolar<Quote>('cotizacion.crear', { ...quote }, {
+      enLinea: async () => {
+        const response = await api.post<Quote>('/cotizacion/', quote);
+        return response.data;
+      },
+      fabricarLocal: (idLocal) => ({
+        id: idLocal,
+        cliente_id: quote.cliente_id,
+        fecha: quote.fecha,
+        estado: quote.estado,
+        total_estimado: quote.total_estimado,
+        moneda_id: quote.moneda_id ?? 1,
+        tasa_cambio: quote.tasa_cambio ?? 1,
+        observaciones: quote.observaciones,
+        detalles: quote.detalles,
+      }) as unknown as Quote,
+      optimista: async (idLocal) => {
+        const local = {
+          id: idLocal,
+          cliente_id: quote.cliente_id,
+          fecha: quote.fecha,
+          estado: quote.estado,
+          total_estimado: quote.total_estimado,
+          moneda_id: quote.moneda_id ?? 1,
+          tasa_cambio: quote.tasa_cambio ?? 1,
+          observaciones: quote.observaciones,
+          detalles: quote.detalles,
+        };
+        await parchearCache('cotizaciones:', (lista) => (Array.isArray(lista) ? [local, ...lista] : undefined));
+      },
+    });
   },
 
   update: async (id: number, quote: Partial<QuoteCreate>): Promise<Quote> => {
-    const response = await api.put<Quote>(`/cotizacion/${id}`, quote);
-    return response.data;
+    if (esIdLocal(id)) {
+      await actualizarOperacionLocal('cotizacion.crear', id, { ...quote });
+      await parchearCache('cotizacion:', (c) => (c?.id === id ? { ...c, ...quote } : undefined));
+      await parchearCache('cotizaciones:', (lista) =>
+        Array.isArray(lista) ? lista.map((c: any) => (c.id === id ? { ...c, ...quote } : c)) : undefined,
+      );
+      const actual = await cotizacionService.getById(id).catch(() => null);
+      return { ...(actual ?? {}), id, ...quote } as unknown as Quote;
+    }
+    return mutarOEncolar<Quote>('cotizacion.actualizar', { cotizacion_id: id, ...quote }, {
+      enLinea: async () => {
+        const response = await api.put<Quote>(`/cotizacion/${id}`, quote);
+        return response.data;
+      },
+      optimista: async () => {
+        await parchearCache('cotizacion:', (c) => (c?.id === id ? { ...c, ...quote } : undefined));
+        await parchearCache('cotizaciones:', (lista) =>
+          Array.isArray(lista) ? lista.map((c: any) => (c.id === id ? { ...c, ...quote } : c)) : undefined,
+        );
+      },
+    });
   },
 
   delete: async (id: number): Promise<void> => {
-    await api.delete(`/cotizacion/${id}`);
+    if (esIdLocal(id)) {
+      await cancelarOperacionLocal('cotizacion.crear', id);
+      await parchearCache('cotizaciones:', (lista) =>
+        Array.isArray(lista) ? lista.filter((c: any) => c.id !== id) : undefined,
+      );
+      await borrarCache(`cotizacion:${id}`);
+      return;
+    }
+    await mutarOEncolar<void>('cotizacion.eliminar', { cotizacion_id: id }, {
+      enLinea: async () => {
+        await api.delete(`/cotizacion/${id}`);
+      },
+      optimista: async () => {
+        await parchearCache('cotizaciones:', (lista) =>
+          Array.isArray(lista) ? lista.filter((c: any) => c.id !== id) : undefined,
+        );
+        await borrarCache(`cotizacion:${id}`);
+      },
+    });
   },
 
   /** Alta de cliente desde el formulario de cotización (no exige el módulo

@@ -536,7 +536,7 @@ def convertir_cotizacion_a_pedido(
                 tasa_venta = float(db_cotizacion.tasa_cambio or 1.0)
                 if tasa_venta <= 0:
                     raise ValueError(
-                        "La cotización no tiene una tasa de cambio válida para convertir la TRM del abono."
+                        "La cotización no tiene una tasa de cambio válida para convertir la tasa del abono."
                     )
                 tasa_pago = tasa_explicita / tasa_venta
             else:
@@ -545,7 +545,7 @@ def convertir_cotizacion_a_pedido(
                 if not derivada or tasa_pago is None:
                     raise ValueError(
                         "La moneda del abono difiere de la moneda de la cotización. "
-                        "Indica la tasa de cambio (TRM) del abono."
+                        "Indica la tasa de cambio del abono."
                     )
 
     # Cambiar estado de la cotización a APROBADA

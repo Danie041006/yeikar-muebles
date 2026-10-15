@@ -424,6 +424,7 @@ export interface MovimientoCaja {
   observaciones?: string | null;
   metodo_caja?: MetodoCaja | null;
   moneda?: { codigo: string } | null;
+  usuario?: { nombre?: string | null; nombre_usuario?: string } | null;
 }
 
 export interface DevolucionVenta {

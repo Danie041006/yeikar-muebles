@@ -5,32 +5,42 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { PageHeader, SearchInput, Spinner, EmptyState } from '../components/ui';
 import BadgeEstado from '../components/BadgeEstado';
 import ExpedienteFicha from '../components/Expediente/ExpedienteFicha';
-import { historialService, ClienteResumen } from '../services/historialService';
+import LibroEntradasSalidas from '../components/Expediente/LibroEntradasSalidas';
+import { historialService } from '../services/historialService';
 import type { Expediente } from '../services/historialService';
 import { cotizacionService } from '../services/cotizacionService';
 import type { Quote } from '../services/cotizacionService';
 import { pedidoService, Order } from '../services/pedidoService';
 import { facturacionService, Factura } from '../services/facturacionService';
-import { clienteService, Client } from '../services/clienteService';
 import { envioService, Envio } from '../services/envioService';
 import { formatCurrency } from '../utils/format';
 import { fmtFechaVE } from '../utils/fechas';
 
-type Tab = 'cotizaciones' | 'pedidos' | 'facturas' | 'clientes' | 'envios';
+type Tab = 'cotizaciones' | 'pedidos' | 'facturas' | 'envios' | 'entradas-salidas';
+
+// Los enlaces desde otras secciones llegan con el tipo en singular
+// (?tipo=pedido&id=5): se normaliza aquí para que abran la pestaña y la ficha.
+const TIPO_ALIAS: Record<string, Tab> = {
+  cotizacion: 'cotizaciones', cotizaciones: 'cotizaciones',
+  pedido: 'pedidos', pedidos: 'pedidos',
+  factura: 'facturas', facturas: 'facturas',
+  envio: 'envios', envios: 'envios',
+  'entradas-salidas': 'entradas-salidas',
+};
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'cotizaciones', label: 'Libro de Cotizaciones' },
   { id: 'pedidos', label: 'Libro de Pedidos' },
   { id: 'facturas', label: 'Libro de Facturas' },
-  { id: 'clientes', label: 'Libro de Clientes' },
   { id: 'envios', label: 'Libro de Guías de Despacho' },
+  { id: 'entradas-salidas', label: 'Libro de Entradas y Salidas' },
 ];
 
 const fmtD = (v?: string | null) => fmtFechaVE(v);
 
 export default function Expediente() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState<Tab>((searchParams.get('tipo') as Tab) || 'cotizaciones');
+  const [tab, setTab] = useState<Tab>(TIPO_ALIAS[searchParams.get('tipo') ?? ''] ?? 'cotizaciones');
   const [buscar, setBuscar] = useState('');
   const [loading, setLoading] = useState(true);
   const [loadingFicha, setLoadingFicha] = useState(false);
@@ -39,23 +49,19 @@ export default function Expediente() {
   const [cotizaciones, setCotizaciones] = useState<Quote[]>([]);
   const [pedidos, setPedidos] = useState<Order[]>([]);
   const [facturas, setFacturas] = useState<Factura[]>([]);
-  const [clientes, setClientes] = useState<Client[]>([]);
   const [envios, setEnvios] = useState<Envio[]>([]);
 
   // Ficha abierta
   const [ficha, setFicha] = useState<Expediente | null>(null);
-  const [resumenCliente, setResumenCliente] = useState<ClienteResumen | null>(null);
-  const [tituloFicha, setTituloFicha] = useState<string>('');
 
   const cargarTab = useCallback(async (q: string) => {
     setLoading(true);
     try {
       // Búsqueda server-side por pestaña: el catálogo no se baja completo al
-      // cliente (clientes 1.204+ → antes solo llegaban los primeros 100).
+      // cliente (con miles de registros antes solo llegaban los primeros 100).
       if (tab === 'cotizaciones') setCotizaciones(await cotizacionService.getAll(q || undefined, false));
       else if (tab === 'pedidos') setPedidos(await pedidoService.getAll(q || undefined, false));
       else if (tab === 'facturas') setFacturas((await facturacionService.getAll()).items);
-      else if (tab === 'clientes') setClientes(await clienteService.getAll(q || undefined));
       else if (tab === 'envios') setEnvios((await envioService.getAll({ buscar: q || undefined })).items);
     } catch (e) {
       console.error('Error cargando expedientes:', e);
@@ -73,7 +79,7 @@ export default function Expediente() {
 
   // Apertura directa desde otras secciones: /historial?tipo=pedido&id=5
   useEffect(() => {
-    const tipo = searchParams.get('tipo') as Tab | null;
+    const tipo = TIPO_ALIAS[searchParams.get('tipo') ?? ''];
     const id = searchParams.get('id');
     if (tipo && id) {
       setTab(tipo);
@@ -85,29 +91,19 @@ export default function Expediente() {
 
   const abrirFicha = async (t: Tab, id: number) => {
     setLoadingFicha(true);
-    setResumenCliente(null);
     try {
       if (t === 'cotizaciones') {
         const f = await historialService.fichaCotizacion(id);
         setFicha(f);
-        setTituloFicha(`Cotización #${id}`);
       } else if (t === 'pedidos') {
         const f = await historialService.fichaPedido(id);
         setFicha(f);
-        setTituloFicha(`Pedido #${id}`);
       } else if (t === 'facturas') {
         const f = await historialService.fichaFactura(id);
         setFicha(f);
-        setTituloFicha(`Factura #${id}`);
       } else if (t === 'envios') {
         const f = await historialService.fichaEnvio(id);
         setFicha(f);
-        setTituloFicha(`Despacho #${id}`);
-      } else if (t === 'clientes') {
-        const r = await historialService.fichaCliente(id);
-        setResumenCliente(r);
-        setFicha(null);
-        setTituloFicha(`Cliente: ${r.cliente.nombre}`);
       }
     } catch (e) {
       console.error('Error abriendo ficha:', e);
@@ -117,17 +113,16 @@ export default function Expediente() {
     }
   };
 
-  const listaFiltrada: (Quote | Order | Factura | Client | Envio)[] = (() => {
+  const listaFiltrada: (Quote | Order | Factura | Envio)[] = (() => {
     // Facturas: el endpoint no soporta búsqueda, se filtra por id en el cliente.
     if (tab === 'facturas') {
       const q = buscar.toLowerCase();
       return facturas.filter((f) => !q || String(f.id).includes(q));
     }
-    // Cotizaciones, pedidos, clientes y envíos ya vienen filtrados por el
-    // servidor (búsqueda con debounce en cargarTab).
+    // Cotizaciones, pedidos y envíos ya vienen filtrados por el servidor
+    // (búsqueda con debounce en cargarTab).
     if (tab === 'cotizaciones') return cotizaciones;
     if (tab === 'pedidos') return pedidos;
-    if (tab === 'clientes') return clientes;
     return envios;
   })();
 
@@ -135,7 +130,7 @@ export default function Expediente() {
     <div className="space-y-6">
       <PageHeader
         title="Libros de Control y Registro"
-        subtitle="Consulta independiente por libro: Cotizaciones, Pedidos, Clientes, Facturas  y Guías de Despacho."
+        subtitle="Consulta independiente por libro: Cotizaciones, Pedidos, Facturas, Guías de Despacho y Entradas y Salidas."
         icon={<FolderOpen className="h-6 w-6 text-yeikar-primary" />}
       />
 
@@ -146,25 +141,30 @@ export default function Expediente() {
             t.id === 'cotizaciones' ? cotizaciones.length
             : t.id === 'pedidos' ? pedidos.length
             : t.id === 'facturas' ? facturas.length
-            : t.id === 'clientes' ? clientes.length
+            : t.id === 'entradas-salidas' ? null
             : envios.length;
           return (
             <button
               key={t.id}
-              onClick={() => { setTab(t.id); setFicha(null); setResumenCliente(null); }}
+              onClick={() => { setTab(t.id); setFicha(null); }}
               className={`px-4 py-2 rounded-lg text-sm font-bold font-headline transition-all ${
                 tab === t.id ? 'bg-yeikar-primary text-yeikar-neutral shadow-gold' : 'text-yeikar-secondary/70 hover:bg-yeikar-tertiary/40'
               }`}
             >
               {t.label}
-              <span className={`ml-1.5 font-mono text-[10px] ${tab === t.id ? 'text-yeikar-neutral/70' : 'text-yeikar-neutral/40'}`}>
-                {loading ? '…' : count}
-              </span>
+              {typeof count === 'number' && (
+                <span className={`ml-1.5 font-mono text-[10px] ${tab === t.id ? 'text-yeikar-neutral/70' : 'text-yeikar-neutral/40'}`}>
+                  {loading ? '…' : count}
+                </span>
+              )}
             </button>
           );
         })}
       </div>
 
+      {tab === 'entradas-salidas' && <LibroEntradasSalidas />}
+
+      {tab !== 'entradas-salidas' && (
       <div className="flex flex-col xl:flex-row gap-6">
         {/* ── Listado ── */}
         <div className="w-full xl:w-[360px] shrink-0 space-y-3">
@@ -214,19 +214,6 @@ export default function Expediente() {
                     </button>
                   </li>
                 ))}
-                {tab === 'clientes' && (listaFiltrada as Client[]).map((c) => (
-                  <li key={c.id}>
-                    <button onClick={() => abrirFicha('clientes', c.id)} className="w-full text-left px-4 py-3 hover:bg-yeikar-tertiary/30 transition-colors">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-headline font-bold text-sm text-yeikar-secondary">{c.nombre}</span>
-                        <span className="font-mono text-[10px] text-yeikar-neutral/45">#{c.id}</span>
-                      </div>
-                      <p className="text-[11px] font-mono text-yeikar-neutral/55 mt-1">
-                        {[c.cedula && `C.I. ${c.cedula}`, c.telefono && `Tel: ${c.telefono}`, c.ciudad].filter(Boolean).join(' · ') || '—'}
-                      </p>
-                    </button>
-                  </li>
-                ))}
                 {tab === 'envios' && (listaFiltrada as Envio[]).map((e) => (
                   <li key={e.id}>
                     <button onClick={() => abrirFicha('envios', e.id)} className="w-full text-left px-4 py-3 hover:bg-yeikar-tertiary/30 transition-colors">
@@ -256,8 +243,6 @@ export default function Expediente() {
             </div>
           ) : ficha ? (
             <ExpedienteFicha ficha={ficha} modoLibro={tab} />
-          ) : resumenCliente ? (
-            <ResumenCliente resumen={resumenCliente} onAbrirPedido={(id) => abrirFicha('pedidos', id)} />
           ) : (
             <div className="bg-white border border-dashed border-yeikar-secondary-light/15 rounded-3xl p-14 text-center text-yeikar-neutral/40">
               <FolderOpen className="w-12 h-12 mx-auto text-yeikar-neutral/20 mb-3" />
@@ -267,66 +252,6 @@ export default function Expediente() {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Resumen por cliente: todas sus operaciones
-// ─────────────────────────────────────────────────────────────────────────
-function ResumenCliente({ resumen, onAbrirPedido }: { resumen: ClienteResumen; onAbrirPedido: (id: number) => void }) {
-  const c = resumen.cliente;
-  const r = resumen.resumen;
-  return (
-    <div className="space-y-4">
-      <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light rounded-2xl p-5 text-white shadow-sm">
-        <p className="font-mono text-[10px] uppercase tracking-widest text-white/50">Historial del cliente</p>
-        <h2 className="font-headline font-black text-xl mt-0.5">{c.nombre}</h2>
-        <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-white/70 font-mono">
-          {c.cedula && <span>C.I.: {c.cedula}</span>}
-          {c.telefono && <span>Tel: {c.telefono}</span>}
-          {c.ciudad && <span>Ciudad: {c.ciudad}</span>}
-          {c.fecha_registro && <span>Cliente desde {fmtD(c.fecha_registro)}</span>}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        {([
-          ['Cotizaciones', r.cotizaciones.length],
-          ['Pedidos', r.pedidos.length],
-          ['Ventas', r.ventas.length],
-          ['Facturas', r.facturas.length],
-          ['Despachos', r.envios.length],
-        ] as const).map(([label, n]) => (
-          <div key={label} className="bg-white border border-yeikar-secondary-light/10 rounded-xl p-3 text-center">
-            <p className="font-headline font-black text-2xl text-yeikar-primary">{n}</p>
-            <p className="text-[10px] font-bold uppercase tracking-wider text-yeikar-neutral/50">{label}</p>
-          </div>
-        ))}
-      </div>
-
-      {r.pedidos.length > 0 && (
-        <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-sm overflow-hidden">
-          <div className="px-5 py-3 bg-yeikar-secondary/5 border-b border-yeikar-secondary-light/10">
-            <h3 className="font-headline font-black text-sm text-yeikar-secondary">Pedidos del cliente</h3>
-          </div>
-          <ul className="divide-y divide-yeikar-secondary-light/5">
-            {r.pedidos.map((p) => (
-              <li key={p.id}>
-                <button onClick={() => onAbrirPedido(p.id)} className="w-full flex items-center justify-between gap-2 px-5 py-3 hover:bg-yeikar-tertiary/30 transition-colors text-left">
-                  <span className="font-headline font-bold text-sm text-yeikar-secondary">Pedido #{p.id}</span>
-                  <span className="flex items-center gap-2">
-                    <span className="font-mono text-[11px] text-yeikar-neutral/55">{fmtD(p.fecha)}</span>
-                    <BadgeEstado dominio="pedido" estado={p.estado} />
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {r.pedidos.length === 0 && (
-        <p className="text-xs text-yeikar-neutral/50 italic">Este cliente aún no tiene pedidos.</p>
       )}
     </div>
   );

@@ -32,6 +32,7 @@ from app.modules.costos_produccion.router import router as costos_produccion_rou
 from app.modules.nomina.router import router as nomina_router
 from app.modules.adjuntos.router import router as adjuntos_router
 from app.modules.historial.router import router as historial_router
+from app.modules.sync.router import router as sync_router
 app = FastAPI(
     title="YEIKAR API",
     version="0.0.1",
@@ -129,3 +130,4 @@ app.include_router(costos_produccion_router, prefix="/api/v1", tags=["costos de 
 app.include_router(adjuntos_router, tags=["adjuntos"])
 app.include_router(nomina_router, prefix="/api/v1", tags=["nómina"])
 app.include_router(historial_router, prefix="/api/v1", tags=["historial"])
+app.include_router(sync_router, prefix="/api/v1/sync", tags=["sync offline"])

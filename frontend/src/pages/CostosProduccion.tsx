@@ -247,7 +247,7 @@ export default function CostosProduccion() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Finanzas"
+        eyebrow="Producción"
         title="Costos de Producción"
         subtitle="Listado de precios por área para la nómina (mano de obra / por producción)"
         actions={

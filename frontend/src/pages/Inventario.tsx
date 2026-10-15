@@ -151,7 +151,6 @@ export default function Inventario() {
 
   // Formulario de movimiento de MATERIAL (dentro del panel)
   const [movMaterial, setMovMaterial] = useState({
-    ubicacion_id: '',
     tipo: 'ENTRADA',
     cantidad: '',
     costo_unitario: '',
@@ -849,7 +848,7 @@ export default function Inventario() {
           : { nombre: u.nombre, valor: String(f), invertida: true };
       }),
     );
-    setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
+    setMovMaterial({ tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
     try {
       setLoadingKardex(true);
       const data = await inventarioService.getKardex(mat.id);
@@ -920,7 +919,7 @@ export default function Inventario() {
   // ---- Registrar movimiento de material (desde el panel) ----
   const handleRegisterMovement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedMaterialId || !movMaterial.ubicacion_id || !movMaterial.cantidad) return;
+    if (!selectedMaterialId || !movMaterial.cantidad) return;
 
     const esEntrada = movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION';
     const pago = esEntrada ? parsePagoKey(movMaterial.pago_key) : { cuentaId: null, monedaId: null };
@@ -958,7 +957,8 @@ export default function Inventario() {
       setSavingMov(true);
       await inventarioService.crearMovimiento({
         material_id: selectedMaterialId,
-        ubicacion_id: parseInt(movMaterial.ubicacion_id),
+        // Sin ubicación: el backend usa el depósito principal (el formulario
+        // ya no pide almacén — la organización es por departamentos).
         tipo: movMaterial.tipo as any,
         cantidad: parseFloat(movMaterial.cantidad),
         costo_unitario: costoNeto,
@@ -967,6 +967,7 @@ export default function Inventario() {
         tasa_pago: esEntrada && pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID ? tasaNum : undefined,
         // "La llevada": flete/aduana por unidad → se envía el total × cantidad
         llevada: llevadaTotal,
+        descuento_porcentaje: pctDesc > 0 ? pctDesc : undefined,
         proveedor_nombre: esEntrada && movMaterial.proveedor_nombre ? movMaterial.proveedor_nombre.trim() : undefined,
         cliente_nombre: esEntrada && movMaterial.cliente_nombre ? movMaterial.cliente_nombre.trim() : undefined,
         // Zona del taller a la que va la compra y quién la trajo (solo ENTRADA)
@@ -976,7 +977,7 @@ export default function Inventario() {
         observaciones: [movMaterial.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovMaterial({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
+      setMovMaterial({ tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -1105,6 +1106,7 @@ export default function Inventario() {
           movProducto.tipo === 'ENTRADA' && pago.cuentaId && tasaNum > 0 ? tasaNum : undefined,
         // "La llevada": flete/aduana (solo en compras de contado)
         llevada: movProducto.tipo === 'ENTRADA' && movProducto.llevada ? parseFloat(movProducto.llevada) : undefined,
+        descuento_porcentaje: pctDesc > 0 ? pctDesc : undefined,
         proveedor_nombre: movProducto.tipo === 'ENTRADA' && movProducto.proveedor_nombre ? movProducto.proveedor_nombre.trim() : undefined,
         cliente_nombre: movProducto.tipo === 'ENTRADA' && movProducto.cliente_nombre ? movProducto.cliente_nombre.trim() : undefined,
         fiar: fiandoProd || undefined,
@@ -2292,23 +2294,12 @@ export default function Inventario() {
                         <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movMaterial.tipo]}</p>
                       </div>
 
-                      {/* Ubicación + Cantidad */}
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
-                          <SearchSelect
-                            value={movMaterial.ubicacion_id}
-                            onChange={(v) => setMovMaterial((p) => ({ ...p, ubicacion_id: String(v) }))}
-                            options={ubicaciones.map((u) => ({ value: u.id, label: u.nombre }))}
-                            placeholder="Seleccione..."
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-yeikar-secondary">
-                            Cantidad <span className="text-yeikar-neutral/40 font-normal">({materialSeleccionado.unidad_medida?.abreviatura || materialSeleccionado.unidad_medida?.nombre || ''})</span>
-                          </label>
-                          <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial((p) => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
-                        </div>
+                      {/* Cantidad */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          Cantidad <span className="text-yeikar-neutral/40 font-normal">({materialSeleccionado.unidad_medida?.abreviatura || materialSeleccionado.unidad_medida?.nombre || ''})</span>
+                        </label>
+                        <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial((p) => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
                       </div>
 
                       {/* Datos de la compra (entradas y devoluciones) */}

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Text, DateTime, ForeignKey, UniqueConstraint, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -79,7 +79,12 @@ class MovimientoInventario(Base):
     departamento = Column(String(30), nullable=True)
     # Quién trajo/entregó la compra (texto libre, solo entradas).
     recibido_por = Column(String(150), nullable=True)
-    fecha = Column(DateTime, server_default=func.now())
+    # Registro de la compra para el libro de entradas: cuenta desde la que se
+    # pagó (contado), % de descuento aplicado y si quedó fiada al proveedor.
+    pagado_desde_metodo_caja_id = Column(BigInteger, ForeignKey("metodo_caja.id", ondelete="SET NULL"), nullable=True)
+    descuento_porcentaje = Column(Numeric(5, 2), nullable=True)
+    fiar = Column(Boolean, nullable=False, server_default="false")
+    fecha = Column(DateTime, server_default=func.now(), index=True)
     referencia_tipo = Column(String(100), nullable=True)
     referencia_id = Column(BigInteger, nullable=True)
     observaciones = Column(Text, nullable=True)
@@ -133,7 +138,12 @@ class MovimientoProductoInventario(Base):
     # Texto libre, igual que en movimiento_inventario.
     proveedor_nombre = Column(String(150), nullable=True)
     cliente_nombre = Column(String(150), nullable=True)
-    fecha = Column(DateTime, server_default=func.now())
+    # Registro de la compra para el libro de entradas: cuenta desde la que se
+    # pagó (contado), % de descuento aplicado y si quedó fiada al proveedor.
+    pagado_desde_metodo_caja_id = Column(BigInteger, ForeignKey("metodo_caja.id", ondelete="SET NULL"), nullable=True)
+    descuento_porcentaje = Column(Numeric(5, 2), nullable=True)
+    fiar = Column(Boolean, nullable=False, server_default="false")
+    fecha = Column(DateTime, server_default=func.now(), index=True)
     referencia_tipo = Column(String(100), nullable=True)   # VENTA, COMPRA, PRODUCCION, AJUSTE...
     referencia_id = Column(BigInteger, nullable=True)
     observaciones = Column(Text, nullable=True)

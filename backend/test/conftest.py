@@ -159,6 +159,7 @@ ORDEN_LIMPIEZA = [
     "precio_produccion",
     "producto",
     "material",
+    "cuenta_por_pagar",
     "gasto",
     "tasa_cambio",
     "cliente",

@@ -514,9 +514,9 @@ export default function ProduccionKanban() {
       await produccionService.updateEstadoEtapa(stageId, newStatus);
       fetchKanbanData();
       if (selectedStage && selectedStage.id === stageId) {
-        // Actualizar modal si está abierto
-        const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${stageId}`);
-        setSelectedStage(updated.data);
+        // Actualizar modal si está abierto (cache-through: sirve sin red).
+        const updated = await produccionService.getEtapa(stageId);
+        setSelectedStage(updated);
       }
     } catch (error: any) {
       console.error('Error changing stage status:', error);
@@ -578,8 +578,8 @@ export default function ProduccionKanban() {
   const refrescarEtapa = async () => {
     if (!selectedStage) return;
     try {
-      const updated = await api.get<EtapaProduccion>(`/produccion/etapa/${selectedStage.id}`);
-      setSelectedStage(updated.data);
+      const updated = await produccionService.getEtapa(selectedStage.id);
+      setSelectedStage(updated);
     } catch {
       // si falla la recarga puntual, el tablero sigue refrescando abajo
     }

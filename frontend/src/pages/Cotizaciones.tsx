@@ -1465,7 +1465,7 @@ export default function Cotizaciones() {
         }
         if (!monedasIguales && !tasaAbonoValida) {
           setConvertError(
-            `Indica la tasa de cambio (TRM) del abono: ${parAdelanto.label}.`
+            `Indica la tasa de cambio del abono: ${parAdelanto.label}.`
           );
           return;
         }
@@ -1836,9 +1836,9 @@ export default function Cotizaciones() {
         Ver Cotización
       </button>
       <button
-        onClick={() => navigate(`/historial?tipo=cotizacion&id=${quote.id}`)}
+        onClick={() => navigate(`/historial?tipo=cotizaciones&id=${quote.id}`)}
         className="p-2 text-yeikar-primary hover:text-yeikar-primary-dark transition-colors"
-        title="Ver expediente completo"
+        title="Ver ficha completa"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -3083,7 +3083,7 @@ export default function Cotizaciones() {
                 {!monedasIguales && (
                   <div className="mt-2">
                     <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
-                      TRM: {parAdelanto.label}
+                      Tasa: {parAdelanto.label}
                     </label>
                     <input
                       type="number"

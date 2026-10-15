@@ -1,7 +1,7 @@
 # backend/app/modules/inventory/schemas.py
 from pydantic import BaseModel, Field, field_validator
-from datetime import datetime
-from typing import Optional
+from datetime import date, datetime
+from typing import List, Optional
 from decimal import Decimal
 
 # Zonas del taller para las entradas de insumos (mismas que material.departamento)
@@ -38,7 +38,10 @@ class InventarioResponse(BaseModel):
 
 class MovimientoCreate(BaseModel):
     material_id: int
-    ubicacion_id: int
+    # Opcional: sin ubicación, el movimiento se registra contra el depósito
+    # principal (el formulario de insumos ya no pide almacén; la organización
+    # del taller es por departamentos).
+    ubicacion_id: Optional[int] = None
     tipo: str = Field(..., pattern="^(ENTRADA|SALIDA|AJUSTE|DAÑO|DANO|DEVOLUCION)$")
     cantidad: Decimal = Field(..., gt=0)
     costo_unitario: Optional[Decimal] = Field(None, gt=0)
@@ -74,6 +77,9 @@ class MovimientoCreate(BaseModel):
     # "Fiar": ENTRADA sin pagar de una cuenta → se registra automáticamente una
     # cuenta por pagar (compra + pasada) con el proveedor indicado.
     fiar: Optional[bool] = False
+    # % de descuento aplicado (el NETO ya viaja en costo_unitario); queda
+    # guardado para mostrarlo en el libro de entradas.
+    descuento_porcentaje: Optional[Decimal] = Field(None, ge=0, le=100)
 
     @field_validator("departamento")
     @classmethod
@@ -183,6 +189,9 @@ class MovimientoProductoCreate(BaseModel):
     cliente_nombre: Optional[str] = None
     # "Fiar": ENTRADA sin pagar → cuenta por pagar (igual que en insumos).
     fiar: Optional[bool] = False
+    # % de descuento aplicado (el NETO ya viaja en costo_unitario); queda
+    # guardado para mostrarlo en el libro de entradas.
+    descuento_porcentaje: Optional[Decimal] = Field(None, ge=0, le=100)
 
 
 class MovimientoProductoResponse(BaseModel):
@@ -263,3 +272,61 @@ class SobranteLaminaResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# =========================================================================
+# Libro de Entradas y Salidas (consulta consolidada por rango de fechas)
+# =========================================================================
+
+class LibroFilaResponse(BaseModel):
+    """Una entrada/salida ya resuelta para el libro: con nombre del ítem,
+    zona del taller y etiqueta de origen legibles."""
+    id: int
+    item_tipo: str          # MATERIAL | PRODUCTO | CRUDO
+    item_id: int
+    item_nombre: str
+    unidad: Optional[str] = None
+    categoria: Optional[str] = None
+    fecha: datetime
+    tipo: str               # ENTRADA | SALIDA | DEVOLUCION | DANO
+    cantidad: float
+    costo_unitario: Optional[float] = None
+    costo_total: Optional[float] = None
+    llevada: Optional[float] = None
+    zona: str               # EBANISTERIA | PREPARACION | PINTURA | … | GENERAL
+    ubicacion: Optional[str] = None
+    origen: str             # "Compra #12", "Venta #30", "Producción", "Manual"…
+    proveedor: Optional[str] = None
+    cliente: Optional[str] = None
+    recibido_por: Optional[str] = None
+    observaciones: Optional[str] = None
+    # Registro de la compra (solo insumos)
+    descuento: Optional[float] = None
+    pagado_desde: Optional[str] = None
+    fiado: bool = False
+    fiado_a: Optional[str] = None
+    fiado_estado: Optional[str] = None
+
+
+class LibroZonaResponse(BaseModel):
+    zona: str
+    label: str
+    movimientos: int
+    costo: float
+    sin_costo: int
+
+
+class LibroResumenResponse(BaseModel):
+    lado: str
+    desde: date
+    hasta: date
+    movimientos: int
+    costo_total: float
+    movimientos_sin_costo: int
+    por_zona: List[LibroZonaResponse]
+
+
+class LibroEntradasSalidasResponse(BaseModel):
+    resumen: LibroResumenResponse
+    filas: List[LibroFilaResponse]
+    truncado: bool = False

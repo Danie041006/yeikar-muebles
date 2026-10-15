@@ -364,7 +364,7 @@ class MovimientoCrudo(Base):
     observaciones = Column(Text, nullable=True)
     creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
 
-    fecha = Column(DateTime, server_default=func.now())
+    fecha = Column(DateTime, server_default=func.now(), index=True)
     created_at = Column(DateTime, server_default=func.now())
 
     crudo = relationship("ProductoCrudoInventario")

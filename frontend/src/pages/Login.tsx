@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { ArrowRight, Check, Eye, EyeOff, Fingerprint, LockKeyhole, ShieldCheck, Smartphone, Sparkles, TriangleAlert } from 'lucide-react';
+import { ArrowRight, Check, Eye, EyeOff, Fingerprint, LockKeyhole, ShieldCheck, Smartphone, Sparkles, TriangleAlert, WifiOff } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { startAuthentication } from '@simplewebauthn/browser';
 
 import { useAuth } from '../context/AuthContext';
 import { API_URL } from '../services/api';
+import { useOnline } from '../hooks/useOnline';
+import { resumenSesion, tienePin } from '../offline/sesion';
+import { OFFLINE_HABILITADO } from '../offline/interruptor';
 
 // Clave del sitio Turnstile (las dummy de Cloudflare en pruebas). Sin clave
 // configurada no se renderiza widget nunca.
@@ -29,8 +32,16 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { refresh } = useAuth();
+  const { refresh, desbloquear } = useAuth();
+  const online = useOnline();
   const destination = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/dashboard';
+
+  // Salida de emergencia sin internet: sesión cacheada + PIN local.
+  const [redCaida, setRedCaida] = useState(false);
+  const [pidiendoPin, setPidiendoPin] = useState(false);
+  const [pinOffline, setPinOffline] = useState('');
+  const [errorPin, setErrorPin] = useState('');
+  const [verificandoPin, setVerificandoPin] = useState(false);
 
   // Captcha invisible: se activa cuando el backend lo exige tras fallos.
   const [captchaRequerido, setCaptchaRequerido] = useState(false);
@@ -146,6 +157,7 @@ export default function Login() {
         } else if (err.response?.status === 429) {
           setError(detalle ?? 'Demasiados intentos fallidos. Espera unos minutos.');
         } else if (err.code === 'ERR_NETWORK') {
+          setRedCaida(true);
           setError('No pudimos conectar con YEIKAR. Revisa tu conexión.');
         } else {
           setError('El servicio no está disponible en este momento. Inténtalo nuevamente.');
@@ -156,6 +168,44 @@ export default function Login() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Salida sin internet: verifica el PIN local contra la sesión cacheada del
+  // equipo (el PIN se configura al entrar con conexión, ver PromptPinOffline).
+  const entrarSinConexion = async () => {
+    setError('');
+    const resumen = await resumenSesion();
+    if (!resumen) {
+      setError('Este equipo no tiene una sesión guardada. Conéctate una vez y activa tu PIN para habilitar el modo sin internet.');
+      return;
+    }
+    if (!(await tienePin())) {
+      setError(`Hay una sesión guardada de ${resumen.nombre || resumen.nombre_usuario}, pero sin PIN. Conéctate una vez y actívalo.`);
+      return;
+    }
+    setPinOffline('');
+    setErrorPin('');
+    setPidiendoPin(true);
+  };
+
+  const confirmarPinOffline = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (pinOffline.length < 4) return;
+    setErrorPin('');
+    setVerificandoPin(true);
+    const ok = await desbloquear(pinOffline);
+    if (ok) {
+      navigate(destination, { replace: true });
+    } else {
+      setPinOffline('');
+      const resumen = await resumenSesion();
+      setErrorPin(
+        resumen
+          ? 'PIN incorrecto. Inténtalo de nuevo.'
+          : 'Demasiados intentos: la copia local se borró. Necesitas conexión para entrar.',
+      );
+    }
+    setVerificandoPin(false);
   };
 
   // Login biométrico: la huella del equipo sustituye contraseña y 2FA.
@@ -328,7 +378,65 @@ export default function Login() {
             className="w-full max-w-[430px]"
           >
             <div className="rounded-3xl border border-yeikar-secondary-light/10 bg-white p-6 shadow-modal sm:p-8 lg:rounded-none lg:border-0 lg:bg-transparent lg:p-0 lg:shadow-none">
-              {ticket2FA ? (
+              {pidiendoPin ? (
+                <>
+                  <div className="mb-7">
+                    <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl border border-amber-300/60 bg-amber-50 text-amber-800">
+                      <LockKeyhole className="h-5 w-5" strokeWidth={1.8} />
+                    </div>
+                    <p className="eyebrow mb-2">Modo sin conexión</p>
+                    <h2 className="font-headline text-[28px] font-semibold leading-tight tracking-[-0.045em] text-yeikar-neutral sm:text-4xl">Entra con tu PIN.</h2>
+                    <p className="mt-3 max-w-sm text-sm leading-relaxed text-yeikar-neutral/55">
+                      Sin internet entras con el PIN que configuraste en este equipo. Tus datos locales están cifrados con él.
+                    </p>
+                  </div>
+
+                  {errorPin && (
+                    <div className="mb-6 flex items-start gap-3 rounded-2xl border border-rose-200/80 bg-rose-50/80 px-4 py-3.5 text-sm text-rose-800" role="alert" aria-live="polite">
+                      <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{errorPin}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={confirmarPinOffline} className="space-y-5" noValidate>
+                    <div>
+                      <label htmlFor="pin-offline" className="label">PIN local</label>
+                      <input
+                        id="pin-offline"
+                        type="password"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        value={pinOffline}
+                        onChange={(event) => setPinOffline(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                        disabled={verificandoPin}
+                        className="input h-14 bg-white/80 text-center font-mono text-2xl tracking-[0.4em] lg:bg-white"
+                        placeholder="••••"
+                        autoFocus
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={verificandoPin || pinOffline.length < 4}
+                      className="group flex h-[52px] w-full items-center justify-center gap-3 rounded-xl bg-yeikar-primary px-5 font-headline text-sm font-bold text-yeikar-neutral shadow-gold transition-all duration-200 hover:bg-yeikar-primary-light hover:shadow-lift disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {verificandoPin ? (
+                        <span className="flex items-center gap-2"><span className="h-4 w-4 animate-spin rounded-full border-2 border-yeikar-neutral/25 border-t-yeikar-neutral" /> Verificando...</span>
+                      ) : (
+                        <>Entrar sin conexión <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => { setPidiendoPin(false); setPinOffline(''); setErrorPin(''); }}
+                      className="w-full text-center text-xs font-bold text-yeikar-neutral/45 hover:text-yeikar-neutral transition-colors"
+                    >
+                      ← Volver a iniciar sesión
+                    </button>
+                  </form>
+                </>
+              ) : ticket2FA ? (
                 <>
                   <div className="mb-7">
                     <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl border border-yeikar-primary/20 bg-yeikar-primary/10 text-yeikar-primary-dark">
@@ -498,6 +606,17 @@ export default function Login() {
                 <p className="text-center text-[11px] leading-relaxed text-yeikar-neutral/45">
                   Toca y entra: sin escribir nada eliges tu cuenta aquí mismo. Si escribes tu usuario primero, entra directo.
                 </p>
+
+                {OFFLINE_HABILITADO && (!online || redCaida) && (
+                  <button
+                    type="button"
+                    onClick={() => void entrarSinConexion()}
+                    disabled={loading || cargandoHuella}
+                    className="flex h-12 w-full items-center justify-center gap-2.5 rounded-xl border border-amber-300/60 bg-amber-50/80 font-headline text-sm font-bold text-amber-900 transition-all hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <WifiOff className="h-[18px] w-[18px]" strokeWidth={1.8} /> Entrar sin conexión (PIN)
+                  </button>
+                )}
               </form>
 
               <div className="mt-8 flex items-center gap-3 border-t border-yeikar-secondary-light/10 pt-5 text-[11px] text-yeikar-neutral/45">

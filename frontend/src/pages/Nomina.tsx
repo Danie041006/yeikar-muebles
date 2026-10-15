@@ -531,7 +531,7 @@ export default function Nomina() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Finanzas"
+        eyebrow="Producción"
         title="Nómina Semanal"
         subtitle="Genera, revisa y paga la nómina de cada semana"
         actions={

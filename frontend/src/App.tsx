@@ -27,6 +27,7 @@ import EstadoDia from './pages/EstadoDia';
 import Expediente from './pages/Expediente';
 import NotFound from './pages/NotFound';
 import DashboardLayout from './components/Layout/DashboardLayout';
+import PantallaBloqueo from './components/PantallaBloqueo';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 
@@ -58,7 +59,7 @@ const ROUTE_MODULES: Record<string, string> = {
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user, loading, hasModulo, esAdmin } = useAuth();
+  const { user, loading, hasModulo, esAdmin, bloqueado } = useAuth();
 
   const token = localStorage.getItem('token');
   if (!token) return <Navigate to="/login" state={{ from: location }} />;
@@ -77,6 +78,8 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
+
+  if (bloqueado) return <PantallaBloqueo />;
 
   if (!user) return <Navigate to="/login" state={{ from: location }} />;
 
@@ -124,8 +127,8 @@ const pageMeta: Record<string, { title: string; description: string }> = {
     description: 'Administración de pedidos y órdenes de compra.',
   },
   '/historial': {
-    title: 'Expediente',
-    description: 'Historial completo de cada negocio: cotización, pedido, producción, cobros, factura y despacho.',
+    title: 'Libros',
+    description: 'Libros de control y registro: cotizaciones, pedidos, facturas y guías de despacho de cada negocio.',
   },
   '/produccion': {
     title: 'Producción',
@@ -259,6 +262,10 @@ function App() {
                 </DashboardLayout>
               </PrivateRoute>
             }
+          />
+          <Route
+            path="/entradas-salidas"
+            element={<Navigate to="/historial?tipo=entradas-salidas" replace />}
           />
           <Route
             path="/produccion"

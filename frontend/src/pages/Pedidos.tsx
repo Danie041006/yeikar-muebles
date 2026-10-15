@@ -424,7 +424,7 @@ export default function Pedidos() {
         footer={
           <>
             {selectedOrder && (
-              <Button variant="outline" onClick={() => navigate(`/historial?tipo=pedido&id=${selectedOrder.id}`)}>
+              <Button variant="outline" onClick={() => navigate(`/historial?tipo=pedidos&id=${selectedOrder.id}`)}>
                 Ver información del Pedido
               </Button>
             )}

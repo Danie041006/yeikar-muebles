@@ -1,15 +1,18 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  Activity,
   BarChart3,
+  BookOpen,
   Box,
+  Briefcase,
+  Calculator,
+  CalendarDays,
   ChevronRight,
+  CircleDollarSign,
   CreditCard,
   FileCheck2,
   FileText,
-  FolderOpen,
   Hammer,
   LayoutDashboard,
   LogOut,
@@ -19,7 +22,9 @@ import {
   ShieldCheck,
   ShoppingBag,
   Truck,
+  UserCog,
   Users,
+  Wallet,
   X,
 } from 'lucide-react';
 
@@ -45,39 +50,49 @@ const groups: { label: string; items: MenuItem[] }[] = [
     ],
   },
   {
-    label: 'Operación',
+    label: 'Comercial',
     items: [
       { name: 'Clientes', path: '/clientes', module: 'clientes', icon: Users },
       { name: 'Cotizaciones', path: '/cotizaciones', module: 'cotizaciones', icon: FileText },
-      { name: 'Expediente', path: '/historial', module: 'pedidos', icon: FolderOpen },
       { name: 'Pedidos', path: '/pedidos', module: 'pedidos', icon: ShoppingBag },
+      { name: 'Despachos', path: '/envios', module: 'envios', icon: Truck },
+      { name: 'Libros', path: '/historial', module: 'pedidos', icon: BookOpen },
+    ],
+  },
+  {
+    label: 'Producción',
+    items: [
       { name: 'Producción', path: '/produccion', module: 'produccion', icon: Hammer, children: [
         { name: 'Producción por Pedido', path: '/produccion' },
         { name: 'Producción de Productos en Crudo', path: '/produccion-crudo' },
       ] },
-      { name: 'Empleados', path: '/empleados', module: 'empleados', icon: Users },
+      { name: 'Costos de Producción', path: '/costos-produccion', module: 'costos_produccion', icon: Calculator },
+      { name: 'Nómina', path: '/nomina', module: 'nomina', icon: Wallet },
+    ],
+  },
+  {
+    label: 'Almacén',
+    items: [
       { name: 'Inventario', path: '/inventario', module: 'inventario', icon: Package },
       { name: 'Productos', path: '/productos', module: 'productos', icon: Box },
-      { name: 'Despachos', path: '/envios', module: 'envios', icon: Truck },
     ],
   },
   {
     label: 'Finanzas',
     items: [
-      { name: 'Ventas y cobros', path: '/ventas', module: 'ventas', icon: Activity },
+      { name: 'Ventas y cobros', path: '/ventas', module: 'ventas', icon: CircleDollarSign },
       { name: 'Facturación', path: '/facturacion', module: 'facturacion', icon: FileCheck2 },
       { name: 'Egresos y gastos', path: '/gastos', module: 'gastos', icon: Receipt },
-      { name: 'Costos de Producción', path: '/costos-produccion', module: 'costos_produccion', icon: Hammer },
-      { name: 'Nómina', path: '/nomina', module: 'nomina', icon: Receipt },
       { name: 'Cuentas', path: '/cuentas', module: 'cuentas', icon: CreditCard },
+      { name: 'Estado del día', path: '/reporte-diario', module: 'reportes', icon: CalendarDays },
       { name: 'Reportes financieros', path: '/reportes', module: 'reportes', icon: BarChart3 },
-      { name: 'Estado del día', path: '/reporte-diario', module: 'reportes', icon: CreditCard },
     ],
   },
   {
     label: 'Administración',
     items: [
-      { name: 'Gestión de usuarios', path: '/usuarios', module: 'usuarios', icon: Users },
+      { name: 'Empleados', path: '/empleados', module: 'empleados', icon: Briefcase },
+      { name: 'Gestión de usuarios', path: '/usuarios', module: 'usuarios', icon: UserCog },
       { name: 'Actividad y auditoría', path: '/auditoria', module: 'usuarios', icon: ScrollText },
     ],
   },
@@ -97,6 +112,31 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const despachoItem: MenuItem = esChofer
     ? { name: 'Mis Despachos', path: '/mis-despachos', module: 'envios', icon: Truck }
     : { name: 'Despachos', path: '/envios', module: 'envios', icon: Truck };
+
+  const gruposVisibles = groups
+    .map((group) => ({
+      label: group.label,
+      items: group.items
+        .map((item) => (item.path === '/envios' ? despachoItem : item))
+        .filter((item) => {
+          if (item.path === '/dashboard') return true;
+          if (item.path === '/reportes' && !esAdmin) return false;
+          return hasModulo(item.module);
+        }),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  // Submenú desplegable (Producción): se abre al hacer clic — también en
+  // pantallas táctiles, donde no existe hover — y se abre solo cuando la
+  // página activa pertenece a ese grupo. Solo un menú abierto a la vez.
+  const [submenuAbierto, setSubmenuAbierto] = useState<string | null>(null);
+
+  useEffect(() => {
+    const menuActivo = groups
+      .flatMap((group) => group.items)
+      .find((item) => item.children?.some((child) => child.path === location.pathname));
+    if (menuActivo) setSubmenuAbierto(menuActivo.path);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     await logout();
@@ -124,7 +164,7 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[278px] -translate-x-full flex-col border-r border-white/10 bg-yeikar-neutral text-yeikar-tertiary shadow-shell transition-transform duration-300 ease-out lg:sticky lg:top-0 lg:z-30 lg:h-screen lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[278px] -translate-x-full flex-col border-r border-white/10 bg-yeikar-neutral text-yeikar-tertiary shadow-shell transition-transform duration-300 ease-out lg:sticky lg:top-0 lg:z-30 lg:h-full lg:translate-x-0 ${
           mobileOpen ? 'translate-x-0' : ''
         }`}
       >
@@ -150,48 +190,41 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         </div>
 
         <nav className="flex-1 overflow-y-auto px-4 py-5" aria-label="Navegación principal">
-          {groups.map((group) => {
-            const items = group.items
-              .map((item) => (item.path === '/envios' ? despachoItem : item))
-              .filter((item) => {
-                if (item.path === '/dashboard') return true;
-                if (item.path === '/reportes' && !esAdmin) return false;
-                return hasModulo(item.module);
-              });
-            if (items.length === 0) return null;
+          {gruposVisibles.map((group, indice) => (
+            <div key={group.label} className={indice > 0 ? 'mt-4 border-t border-white/[0.06] pt-4' : ''}>
+              <p className="mb-2 px-3 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-white/40">{group.label}</p>
+              <div className="space-y-1">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = location.pathname === item.path;
+                  const hasChildren = !!item.children?.length;
+                  const childActive = hasChildren
+                    ? item.children!.some((c) => location.pathname === c.path)
+                    : false;
 
-            return (
-              <div key={group.label} className="mb-6 last:mb-0">
-                <p className="mb-2 px-3 font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-white/35">{group.label}</p>
-                <div className="space-y-1">
-                  {items.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = location.pathname === item.path;
-                    const hasChildren = !!item.children?.length;
-                    const childActive = hasChildren
-                      ? item.children!.some((c) => location.pathname === c.path)
-                      : false;
+                  if (hasChildren) {
+                    const abierto = submenuAbierto === item.path;
+                    return (
+                      <div key={item.path}>
+                        <button
+                          type="button"
+                          aria-expanded={abierto}
+                          onClick={() => setSubmenuAbierto(abierto ? null : item.path)}
+                          className={`group flex w-full min-h-10 items-center justify-between rounded-xl px-3.5 text-[13px] font-medium transition-all duration-200 ${
+                            childActive
+                              ? 'bg-yeikar-primary font-bold text-yeikar-neutral shadow-gold'
+                              : 'text-white/60 hover:bg-white/[0.06] hover:text-white'
+                          }`}
+                        >
+                          <span className="flex items-center gap-3">
+                            <Icon className={`h-[17px] w-[17px] transition-colors ${childActive ? 'text-yeikar-neutral' : 'text-white/40 group-hover:text-yeikar-primary'}`} strokeWidth={1.8} />
+                            <span>{item.name}</span>
+                          </span>
+                          <ChevronRight className={`h-3.5 w-3.5 transition-transform duration-200 ${abierto ? 'rotate-90' : ''} ${childActive ? 'text-yeikar-neutral' : 'text-white/40'}`} />
+                        </button>
 
-                    if (hasChildren) {
-                      return (
-                        <div key={item.path} className="group">
-                          <div
-                            aria-current={childActive ? 'page' : undefined}
-                            className={`flex min-h-10 cursor-default items-center justify-between rounded-xl px-3.5 text-[13px] font-medium transition-all duration-200 ${
-                              childActive
-                                ? 'bg-yeikar-primary font-bold text-yeikar-neutral shadow-gold'
-                                : 'text-white/60 hover:bg-white/[0.06] hover:text-white'
-                            }`}
-                          >
-                            <span className="flex items-center gap-3">
-                              <Icon className={`h-[17px] w-[17px] transition-colors ${childActive ? 'text-yeikar-neutral' : 'text-white/40 group-hover:text-yeikar-primary'}`} strokeWidth={1.8} />
-                              <span>{item.name}</span>
-                            </span>
-                            <ChevronRight className={`h-3.5 w-3.5 transition-transform duration-200 ${childActive ? 'text-yeikar-neutral' : 'text-white/40'} group-hover:rotate-90`} />
-                          </div>
-
-                          {/* Submenú desplegable al hacer hover */}
-                          <div className="mt-1 hidden space-y-1 pl-4 group-hover:block">
+                        {abierto && (
+                          <div className="mt-1 space-y-1 pl-4">
                             {item.children!.map((child) => {
                               const childSelected = location.pathname === child.path;
                               return (
@@ -212,40 +245,40 @@ export default function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                               );
                             })}
                           </div>
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <Link
-                        key={item.path}
-                        to={item.path}
-                        onClick={onClose}
-                        aria-current={isActive ? 'page' : undefined}
-                        className={`group relative flex min-h-10 items-center justify-between rounded-xl px-3.5 text-[13px] font-medium transition-all duration-200 ${
-                          isActive
-                            ? 'bg-yeikar-primary font-bold text-yeikar-neutral shadow-gold'
-                            : 'text-white/60 hover:bg-white/[0.06] hover:text-white'
-                        }`}
-                      >
-                        <span className="flex items-center gap-3">
-                          <Icon className={`h-[17px] w-[17px] transition-colors ${isActive ? 'text-yeikar-neutral' : 'text-white/40 group-hover:text-yeikar-primary'}`} strokeWidth={1.8} />
-                          <span>{item.name}</span>
-                        </span>
-                        {item.badge ? (
-                          <span className={`rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold ${isActive ? 'bg-yeikar-neutral text-yeikar-primary' : 'border border-yeikar-primary/25 bg-yeikar-primary/10 text-yeikar-primary'}`}>
-                            {item.badge}
-                          </span>
-                        ) : isActive ? (
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        ) : null}
-                      </Link>
+                        )}
+                      </div>
                     );
-                  })}
-                </div>
+                  }
+
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      onClick={onClose}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`group relative flex min-h-10 items-center justify-between rounded-xl px-3.5 text-[13px] font-medium transition-all duration-200 ${
+                        isActive
+                          ? 'bg-yeikar-primary font-bold text-yeikar-neutral shadow-gold'
+                          : 'text-white/60 hover:bg-white/[0.06] hover:text-white'
+                      }`}
+                    >
+                      <span className="flex items-center gap-3">
+                        <Icon className={`h-[17px] w-[17px] transition-colors ${isActive ? 'text-yeikar-neutral' : 'text-white/40 group-hover:text-yeikar-primary'}`} strokeWidth={1.8} />
+                        <span>{item.name}</span>
+                      </span>
+                      {item.badge ? (
+                        <span className={`rounded-md px-1.5 py-0.5 font-mono text-[9px] font-bold ${isActive ? 'bg-yeikar-neutral text-yeikar-primary' : 'border border-yeikar-primary/25 bg-yeikar-primary/10 text-yeikar-primary'}`}>
+                          {item.badge}
+                        </span>
+                      ) : isActive ? (
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      ) : null}
+                    </Link>
+                  );
+                })}
               </div>
-            );
-          })}
+            </div>
+          ))}
         </nav>
 
         <div className="border-t border-white/10 bg-black/10 p-4 pb-safe">

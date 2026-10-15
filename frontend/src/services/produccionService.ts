@@ -1,4 +1,24 @@
 import api from './api';
+import {
+  cancelarOperacionLocal,
+  conCache,
+  eliminarConsumoDeCaches,
+  eliminarManoObraDeCaches,
+  esIdLocal,
+  etapaDeConsumo,
+  etapaDeManoObra,
+  insertarAsignadoEnCaches,
+  insertarConsumoEnCaches,
+  insertarEtapaEnCaches,
+  insertarManoObraEnCaches,
+  leerCache,
+  leerPiezaDeCaches,
+  mutarOEncolar,
+  parchearConsumoEnCaches,
+  parchearEtapa,
+  parchearPiezaEnCaches,
+  quitarAsignadoDeCaches,
+} from '../offline/produccionOffline';
 export interface Area {
   id: number;
   nombre: string;
@@ -272,15 +292,26 @@ export interface ReferenciaReceta {
 
 export const produccionService = {
   getOrdenes: async (buscar?: string, salto = 0, limite = 100): Promise<OrdenProduccion[]> => {
-    const response = await api.get<OrdenProduccion[]>('/produccion/orden/', {
-      params: { buscar, salto, limite },
+    return conCache(`ordenes:${buscar ?? ''}:${salto}:${limite}`, async () => {
+      const response = await api.get<OrdenProduccion[]>('/produccion/orden/', {
+        params: { buscar, salto, limite },
+      });
+      return response.data;
     });
-    return response.data;
   },
 
   getOrdenById: async (id: number): Promise<OrdenProduccion> => {
-    const response = await api.get<OrdenProduccion>(`/produccion/orden/${id}`);
-    return response.data;
+    return conCache(`orden:${id}`, async () => {
+      const response = await api.get<OrdenProduccion>(`/produccion/orden/${id}`);
+      return response.data;
+    });
+  },
+
+  getEtapa: async (id: number): Promise<EtapaProduccion> => {
+    return conCache(`etapa:${id}`, async () => {
+      const response = await api.get<EtapaProduccion>(`/produccion/etapa/${id}`);
+      return response.data;
+    });
   },
 
   /** Crea una orden de producción. Con es_stock=true y producto_id fabrica
@@ -297,20 +328,36 @@ export const produccionService = {
   },
 
   getAreas: async (): Promise<Area[]> => {
-    const response = await api.get<Area[]>('/catalogos/area/');
-    return response.data;
+    return conCache('areas', async () => {
+      const response = await api.get<Area[]>('/catalogos/area/');
+      return response.data;
+    });
   },
 
   getReferenciaReceta: async (etapaId: number): Promise<ReferenciaReceta> => {
-    const response = await api.get<ReferenciaReceta>(`/produccion/etapa/${etapaId}/referencia-receta`);
-    return response.data;
+    return conCache(`receta:${etapaId}`, async () => {
+      const response = await api.get<ReferenciaReceta>(`/produccion/etapa/${etapaId}/referencia-receta`);
+      return response.data;
+    });
   },
 
   updateEstadoEtapa: async (id: number, estado: string): Promise<EtapaProduccion> => {
-    const response = await api.put<EtapaProduccion>(`/produccion/etapa/${id}/estado`, null, {
-      params: { estado },
+    return mutarOEncolar<EtapaProduccion>('produccion.etapa.estado', { etapa_id: id, estado }, {
+      enLinea: async () => {
+        const response = await api.put<EtapaProduccion>(`/produccion/etapa/${id}/estado`, null, {
+          params: { estado },
+        });
+        return response.data;
+      },
+      fabricarLocal: () => ({ id, estado } as EtapaProduccion),
+      optimista: async () => {
+        await parchearEtapa(id, {
+          estado,
+          ...(estado === 'EN_PROCESO' ? { fecha_inicio: new Date().toISOString() } : {}),
+          ...(estado === 'COMPLETADA' ? { fecha_fin: new Date().toISOString() } : {}),
+        });
+      },
     });
-    return response.data;
   },
 
   pasarAArea: async (
@@ -322,22 +369,71 @@ export const produccionService = {
       observaciones?: string;
     },
   ): Promise<EtapaProduccion> => {
-    const response = await api.post<EtapaProduccion>(
-      `/produccion/etapa/${etapaId}/pasar-a-area`,
-      payload,
-    );
-    return response.data;
+    return mutarOEncolar<EtapaProduccion>('produccion.etapa.pasar-area', { etapa_id: etapaId, ...payload }, {
+      enLinea: async () => {
+        const response = await api.post<EtapaProduccion>(
+          `/produccion/etapa/${etapaId}/pasar-a-area`,
+          payload,
+        );
+        return response.data;
+      },
+      fabricarLocal: (idLocal) => ({
+        id: idLocal,
+        area_id: payload.area_id,
+        empleado_responsable_id: payload.empleado_responsable_id,
+        estado: 'ASIGNADA',
+        consumos: [],
+        mano_obras: [],
+        asignados_adicionales: [],
+        observaciones: payload.observaciones,
+      }) as unknown as EtapaProduccion,
+      optimista: async (idLocal) => {
+        const actual = await leerCache<EtapaProduccion>(`etapa:${etapaId}`);
+        await parchearEtapa(etapaId, { estado: 'COMPLETADA', fecha_fin: new Date().toISOString() });
+        await insertarEtapaEnCaches(etapaId, {
+          id: idLocal,
+          orden_produccion_id: actual?.orden_produccion_id ?? 0,
+          area_id: payload.area_id,
+          empleado_responsable_id: payload.empleado_responsable_id,
+          estado: 'ASIGNADA',
+          fecha_inicio: new Date().toISOString(),
+          observaciones: payload.observaciones,
+          consumos: [],
+          mano_obras: [],
+          asignados_adicionales: [],
+        });
+      },
+    });
   },
 
   agregarAsignadoAdicional: async (etapaId: number, empleadoId: number): Promise<AsignadoAdicional> => {
-    const response = await api.post<AsignadoAdicional>(`/produccion/etapa/${etapaId}/asignados`, {
-      empleado_id: empleadoId,
+    return mutarOEncolar<AsignadoAdicional>('produccion.etapa.asignado.agregar', { etapa_id: etapaId, empleado_id: empleadoId }, {
+      enLinea: async () => {
+        const response = await api.post<AsignadoAdicional>(`/produccion/etapa/${etapaId}/asignados`, {
+          empleado_id: empleadoId,
+        });
+        return response.data;
+      },
+      fabricarLocal: (idLocal) => ({
+        id: idLocal,
+        etapa_produccion_id: etapaId,
+        empleado_id: empleadoId,
+      }) as AsignadoAdicional,
+      optimista: async (idLocal) => {
+        await insertarAsignadoEnCaches(etapaId, { id: idLocal, etapa_produccion_id: etapaId, empleado_id: empleadoId });
+      },
     });
-    return response.data;
   },
 
   quitarAsignadoAdicional: async (etapaId: number, empleadoId: number): Promise<void> => {
-    await api.delete(`/produccion/etapa/${etapaId}/asignados/${empleadoId}`);
+    await mutarOEncolar<void>('produccion.etapa.asignado.quitar', { etapa_id: etapaId, empleado_id: empleadoId }, {
+      enLinea: async () => {
+        await api.delete(`/produccion/etapa/${etapaId}/asignados/${empleadoId}`);
+      },
+      optimista: async () => {
+        await quitarAsignadoDeCaches(etapaId, empleadoId);
+      },
+    });
   },
 
   /** Marca/desmarca una pieza del mueble (checklist de armado). */
@@ -345,8 +441,19 @@ export const produccionService = {
     piezaId: number,
     cambios: { completada?: boolean; nombre?: string; cantidad?: number; area_id?: number | null; notas?: string | null },
   ): Promise<PiezaOrden> => {
-    const response = await api.put<PiezaOrden>(`/produccion/pieza/${piezaId}`, cambios);
-    return response.data;
+    return mutarOEncolar<PiezaOrden>('produccion.pieza.actualizar', { pieza_id: piezaId, ...cambios }, {
+      enLinea: async () => {
+        const response = await api.put<PiezaOrden>(`/produccion/pieza/${piezaId}`, cambios);
+        return response.data;
+      },
+      fabricarLocal: async () => {
+        const actual = await leerPiezaDeCaches(piezaId);
+        return { ...(actual ?? {}), id: piezaId, ...cambios } as PiezaOrden;
+      },
+      optimista: async () => {
+        await parchearPiezaEnCaches(piezaId, cambios as Record<string, unknown>);
+      },
+    });
   },
 
   registrarConsumo: async (consumo: {
@@ -388,8 +495,32 @@ export const produccionService = {
     sobrante_largo_cm?: number;
     sobrante_ancho_cm?: number;
   }): Promise<ConsumoMaterial> => {
-    const response = await api.post<ConsumoMaterial>('/produccion/consumo/', consumo);
-    return response.data;
+    const estadoLocal = consumo.es_pedido || consumo.es_lamina_completa ? 'PENDIENTE' as const : 'CONFIRMADO' as const;
+    const fabricar = (idLocal: number): ConsumoMaterial => ({
+      id: idLocal,
+      etapa_produccion_id: consumo.etapa_produccion_id,
+      material_id: consumo.material_id,
+      cantidad: consumo.cantidad ?? 0,
+      fecha: consumo.fecha,
+      estado: estadoLocal,
+      observaciones: consumo.observaciones,
+      solicitante_empleado_id: consumo.solicitante_empleado_id,
+      unidad_captura: consumo.unidad_captura ?? null,
+      pieza_largo: consumo.pieza_largo ?? null,
+      pieza_ancho: consumo.pieza_ancho ?? null,
+      pieza_espesor: consumo.pieza_espesor ?? null,
+    }) as unknown as ConsumoMaterial;
+
+    return mutarOEncolar<ConsumoMaterial>('produccion.consumo.registrar', { ...consumo }, {
+      enLinea: async () => {
+        const response = await api.post<ConsumoMaterial>('/produccion/consumo/', consumo);
+        return response.data;
+      },
+      fabricarLocal: fabricar,
+      optimista: async (idLocal) => {
+        await insertarConsumoEnCaches(consumo.etapa_produccion_id, fabricar(idLocal));
+      },
+    });
   },
 
   /** Confirma el uso real de un pedido (PENDIENTE → CONFIRMADO).
@@ -426,12 +557,43 @@ export const produccionService = {
       }[];
     },
   ): Promise<ConsumoMaterial> => {
-    const response = await api.put<ConsumoMaterial>(`/produccion/consumo/${id}/confirmar`, payload);
-    return response.data;
+    if (esIdLocal(id)) {
+      throw Object.assign(new Error('Consumo pendiente de sincronizar'), {
+        response: {
+          data: {
+            detail: 'Sin conexión: este consumo aún no existe en el servidor. Confírmalo cuando vuelva la red.',
+          },
+        },
+      });
+    }
+    return mutarOEncolar<ConsumoMaterial>('produccion.consumo.confirmar', { consumo_id: id, ...payload }, {
+      enLinea: async () => {
+        const response = await api.put<ConsumoMaterial>(`/produccion/consumo/${id}/confirmar`, payload);
+        return response.data;
+      },
+      optimista: async () => {
+        const etapaId = await etapaDeConsumo(id);
+        if (etapaId !== null) await parchearConsumoEnCaches(etapaId, id, { estado: 'CONFIRMADO' });
+      },
+    });
   },
 
   eliminarConsumo: async (id: number): Promise<void> => {
-    await api.delete(`/produccion/consumo/${id}`);
+    if (esIdLocal(id)) {
+      await cancelarOperacionLocal('produccion.consumo.registrar', id);
+      const etapaId = await etapaDeConsumo(id);
+      if (etapaId !== null) await eliminarConsumoDeCaches(etapaId, id);
+      return;
+    }
+    await mutarOEncolar<void>('produccion.consumo.eliminar', { consumo_id: id }, {
+      enLinea: async () => {
+        await api.delete(`/produccion/consumo/${id}`);
+      },
+      optimista: async () => {
+        const etapaId = await etapaDeConsumo(id);
+        if (etapaId !== null) await eliminarConsumoDeCaches(etapaId, id);
+      },
+    });
   },
 
   registrarManoObra: async (manoObra: {
@@ -442,12 +604,44 @@ export const produccionService = {
     observaciones?: string;
     precio_produccion_id?: number;
   }): Promise<ManoObra> => {
-    const response = await api.post<ManoObra>('/produccion/mano-obra/', manoObra);
-    return response.data;
+    const fabricar = (idLocal: number): ManoObra => ({
+      id: idLocal,
+      etapa_produccion_id: manoObra.etapa_produccion_id,
+      empleado_id: manoObra.empleado_id,
+      monto: manoObra.monto,
+      porcentaje_recargo: manoObra.porcentaje_recargo ?? 0,
+      observaciones: manoObra.observaciones,
+      precio_produccion_id: manoObra.precio_produccion_id ?? null,
+    }) as unknown as ManoObra;
+
+    return mutarOEncolar<ManoObra>('produccion.mano-obra.registrar', { ...manoObra }, {
+      enLinea: async () => {
+        const response = await api.post<ManoObra>('/produccion/mano-obra/', manoObra);
+        return response.data;
+      },
+      fabricarLocal: fabricar,
+      optimista: async (idLocal) => {
+        await insertarManoObraEnCaches(manoObra.etapa_produccion_id, fabricar(idLocal));
+      },
+    });
   },
 
   eliminarManoObra: async (id: number): Promise<void> => {
-    await api.delete(`/produccion/mano-obra/${id}`);
+    if (esIdLocal(id)) {
+      await cancelarOperacionLocal('produccion.mano-obra.registrar', id);
+      const etapaId = await etapaDeManoObra(id);
+      if (etapaId !== null) await eliminarManoObraDeCaches(etapaId, id);
+      return;
+    }
+    await mutarOEncolar<void>('produccion.mano-obra.eliminar', { mano_obra_id: id }, {
+      enLinea: async () => {
+        await api.delete(`/produccion/mano-obra/${id}`);
+      },
+      optimista: async () => {
+        const etapaId = await etapaDeManoObra(id);
+        if (etapaId !== null) await eliminarManoObraDeCaches(etapaId, id);
+      },
+    });
   },
 
   marcarManoObraPagada: async (id: number, pagado: boolean): Promise<ManoObra> => {
@@ -464,8 +658,10 @@ export const produccionService = {
     return response.data;
   },
   getCostosEnVivo: async (ordenId: number): Promise<CostosEnVivoOrden> => {
-    const response = await api.get<CostosEnVivoOrden>(`/produccion/orden/${ordenId}/costos-en-vivo`);
-    return response.data;
+    return conCache(`costos:${ordenId}`, async () => {
+      const response = await api.get<CostosEnVivoOrden>(`/produccion/orden/${ordenId}/costos-en-vivo`);
+      return response.data;
+    });
   },
 };
 

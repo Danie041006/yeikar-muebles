@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from decimal import Decimal
+from datetime import date
 
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
@@ -248,3 +249,42 @@ def crear_categoria(
     db.commit()
     db.refresh(cat)
     return {"id": cat.id, "nombre": cat.nombre, "tipo": cat.tipo, "orden": cat.orden}
+
+
+# =========================================================================
+# Libro de Entradas y Salidas (control operativo por rango de fechas)
+# =========================================================================
+
+@router.get("/libro", response_model=schemas.LibroEntradasSalidasResponse)
+def libro_entradas_salidas(
+    desde: date = Query(..., description="Fecha inicial (YYYY-MM-DD)"),
+    hasta: date = Query(..., description="Fecha final, inclusive (YYYY-MM-DD)"),
+    lado: str = Query(..., description="ENTRADAS | SALIDAS"),
+    tipo_item: str = Query("TODOS", description="TODOS | MATERIAL | PRODUCTO | CRUDO"),
+    zona: Optional[str] = Query(None, description="Zona/departamento del taller (EBANISTERIA, PINTURA, GENERAL, …)"),
+    buscar: Optional[str] = Query(None, description="Filtra por nombre del ítem"),
+    categoria_id: Optional[int] = Query(None, description="Filtra por categoría de inventario (ej. PLÁSTICOS)"),
+    tipo_producto_id: Optional[int] = Query(None, description="Filtra productos por tipo (ej. Revendido)"),
+    limite: int = Query(5000, ge=1, le=5000, description="Máximo de filas devueltas"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Entradas o salidas de inventario (materiales, productos y crudo) en un
+    rango de fechas, con zona del taller y origen de cada movimiento."""
+    try:
+        return service.obtener_libro_entradas_salidas(
+            db,
+            service.ConsultaLibro(
+                desde=desde,
+                hasta=hasta,
+                lado=lado,
+                tipo_item=tipo_item,
+                zona=zona,
+                buscar=buscar,
+                limite=limite,
+                categoria_id=categoria_id,
+                tipo_producto_id=tipo_producto_id,
+            ),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

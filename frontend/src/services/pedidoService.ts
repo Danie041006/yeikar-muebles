@@ -1,6 +1,7 @@
 import api from './api';
 import { Client } from './clienteService';
 import { Product } from './cotizacionService';
+import { borrarCache, conCache, mutarOEncolar, parchearCache } from '../offline/cache';
 
 export type TipoItem = 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
 
@@ -97,13 +98,17 @@ export const pedidoService = {
     if (mes !== undefined) params.mes = mes;
     if (anio !== undefined) params.anio = anio;
 
-    const response = await api.get<Order[]>('/pedido/', { params });
-    return response.data;
+    return conCache(`pedidos:${search ?? ''}:${soloMesActual}:${mes ?? ''}:${anio ?? ''}`, async () => {
+      const response = await api.get<Order[]>('/pedido/', { params });
+      return response.data;
+    });
   },
 
   getById: async (id: number): Promise<Order> => {
-    const response = await api.get<Order>(`/pedido/${id}`);
-    return response.data;
+    return conCache(`pedido:${id}`, async () => {
+      const response = await api.get<Order>(`/pedido/${id}`);
+      return response.data;
+    });
   },
 
   getRentabilidad: async (id: number): Promise<RentabilidadPedido> => {
@@ -112,12 +117,32 @@ export const pedidoService = {
   },
 
   update: async (id: number, order: OrderUpdate): Promise<Order> => {
-    const response = await api.put<Order>(`/pedido/${id}`, order);
-    return response.data;
+    return mutarOEncolar<Order>('pedido.actualizar', { pedido_id: id, ...order }, {
+      enLinea: async () => {
+        const response = await api.put<Order>(`/pedido/${id}`, order);
+        return response.data;
+      },
+      optimista: async () => {
+        await parchearCache('pedido:', (p) => (p?.id === id ? { ...p, ...order } : undefined));
+        await parchearCache('pedidos:', (lista) =>
+          Array.isArray(lista) ? lista.map((p: any) => (p.id === id ? { ...p, ...order } : p)) : undefined,
+        );
+      },
+    });
   },
 
   delete: async (id: number): Promise<void> => {
-    await api.delete(`/pedido/${id}`);
+    await mutarOEncolar<void>('pedido.eliminar', { pedido_id: id }, {
+      enLinea: async () => {
+        await api.delete(`/pedido/${id}`);
+      },
+      optimista: async () => {
+        await parchearCache('pedidos:', (lista) =>
+          Array.isArray(lista) ? lista.filter((p: any) => p.id !== id) : undefined,
+        );
+        await borrarCache(`pedido:${id}`);
+      },
+    });
   },
 
   convertQuote: async (quoteId: number, body: ConvertQuoteBody): Promise<Order> => {

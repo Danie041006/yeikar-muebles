@@ -740,7 +740,7 @@ export default function Cuentas() {
                   min="0"
                   value={transferForm.tasa_cambio}
                   onChange={(e) => setTransferForm({ ...transferForm, tasa_cambio: e.target.value })}
-                  placeholder="TRM del día (auto)"
+                  placeholder="Tasa del día (auto)"
                 />
               </Field>
             ) : <div />}
@@ -758,7 +758,7 @@ export default function Cuentas() {
           )}
           {transferMultimoneda && transferForm.cuenta_destino_id > 0 && (
             <p className="text-sm text-yeikar-neutral/50">
-              Cuentas en monedas distintas: la cuenta destino recibe el equivalente convertido con la TRM registrada de su moneda.
+              Cuentas en monedas distintas: la cuenta destino recibe el equivalente convertido con la tasa registrada de su moneda.
             </p>
           )}
           <Field label="Referencia">

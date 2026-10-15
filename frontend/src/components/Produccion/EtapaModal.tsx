@@ -999,14 +999,14 @@ export default function EtapaModal({
                       )}
                       {detalle?.pedido?.id && (
                         <button
-                          onClick={() => { window.location.href = `/historial?tipo=pedido&id=${detalle.pedido!.id}`; }}
+                          onClick={() => { window.location.href = `/historial?tipo=pedidos&id=${detalle.pedido!.id}`; }}
                           className="px-4 py-2 bg-white border border-yeikar-secondary-light/25 text-yeikar-secondary hover:bg-yeikar-tertiary/50 rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-2 shadow-sm"
-                          title="Ver expediente completo del pedido"
+                          title="Ver la ficha completa del pedido"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                           </svg>
-                          Expediente del pedido
+                          Ficha completa del pedido
                         </button>
                       )}
                     </div>

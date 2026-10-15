@@ -957,7 +957,7 @@ export default function Gastos() {
                   onChange={(e) => setForm({ ...form, monto: Number(e.target.value) })}
                 />
               </Field>
-              <Field label={`TRM (${monedaSeleccionada?.codigo} → COP)`}>
+              <Field label={`Tasa (${monedaSeleccionada?.codigo} → COP)`}>
                 <Input
                   type="number"
                   step="0.01"
@@ -977,7 +977,7 @@ export default function Gastos() {
               </p>
               {!esCOP && (
                 <p className="mt-0.5 text-xs text-yeikar-secondary">
-                  {fmtMoneda(Number(form.monto), monedaSeleccionada?.codigo)} × TRM {Number(form.tasa_cambio).toLocaleString()}
+                  {fmtMoneda(Number(form.monto), monedaSeleccionada?.codigo)} × tasa {Number(form.tasa_cambio).toLocaleString()}
                 </p>
               )}
             </div>

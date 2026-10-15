@@ -801,14 +801,14 @@ function ModalDetalle({
             <div className="flex shrink-0 items-center gap-2">
               {detalle?.pedido_id && (
                 <button
-                  onClick={() => { window.location.href = `/historial?tipo=pedido&id=${detalle.pedido_id}`; }}
+                  onClick={() => { window.location.href = `/historial?tipo=pedidos&id=${detalle.pedido_id}`; }}
                   className="px-3 py-1.5 bg-yeikar-secondary text-yeikar-primary hover:bg-yeikar-secondary-light rounded-xl text-xs font-bold font-headline transition-all flex items-center gap-1.5 shadow-sm"
-                  title="Ver expediente completo del pedido"
+                  title="Ver la ficha completa del pedido"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
                   </svg>
-                  Expediente
+                  Ficha completa
                 </button>
               )}
               <button

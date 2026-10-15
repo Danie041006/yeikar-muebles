@@ -28,6 +28,26 @@
   /* dvh evita el “salto” de la barra de Safari en iPhone; vh queda de fallback */
   #root { min-height: 100vh; min-height: 100dvh; }
 
+  /* Shell de la app: alto FIJO al viewport para que el contenido de <main>
+     siempre scrollee dentro. Antes el alto dependía del contenido y había
+     páginas altas donde un botón inferior quedaba inalcanzable. */
+  .app-shell {
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* Red de seguridad para modales construidos dentro de las páginas: si el
+     contenido supera la pantalla, el propio overlay scrollea (bug: botón de
+     guardar sin acceso). Excluye drawers de pantalla completa
+     (items-stretch) y overlays que ocultan a propósito (overflow-hidden).
+     `safe center` centra igual que items-center, pero si el contenido
+     desborda lo alinea arriba para que el scroll alcance todo. */
+  .fixed.inset-0.flex:not(.items-stretch):not(.overflow-hidden) {
+    overflow-y: auto;
+    align-items: safe center;
+    overscroll-behavior: contain;
+  }
+
   /* Los medios nunca deben forzar scroll horizontal en móvil */
   img, video { max-width: 100%; }
 

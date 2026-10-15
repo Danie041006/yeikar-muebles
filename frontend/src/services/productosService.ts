@@ -189,6 +189,14 @@ export const productosService = {
     return response.data;
   },
 
+  /** Tipos de producto del catálogo (Fabricado, Revendido, …). */
+  getTiposProducto: async (buscar?: string): Promise<TipoProducto[]> => {
+    const response = await api.get<TipoProducto[]>('/catalogos/tipo-producto/', {
+      params: { buscar, limite: 100 },
+    });
+    return response.data;
+  },
+
   /** Promos activas colchón → plástico de regalo (para el cotizador). */
   getPromocionesObsequio: async (soloActivas = true): Promise<PromocionObsequio[]> => {
     const response = await api.get<PromocionObsequio[]>('/promocion-obsequio', {

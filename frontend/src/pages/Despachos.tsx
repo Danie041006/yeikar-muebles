@@ -383,10 +383,10 @@ export default function Despachos() {
               {/* Action Buttons */}
               <div className="mt-5 pt-3 border-t border-yeikar-secondary-light/5 flex flex-col gap-2">
                 <button
-                  onClick={() => navigate(`/historial?tipo=envio&id=${envio.id}`)}
+                  onClick={() => navigate(`/historial?tipo=envios&id=${envio.id}`)}
                   className="w-full bg-yeikar-tertiary/60 hover:bg-yeikar-tertiary text-yeikar-secondary text-xs font-headline font-bold py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5"
                 >
-                  📂 Expediente completo
+                  Ficha completa
                 </button>
                 <div className="flex gap-2">
                   {envio.estado === 'PREPARADO' && (
