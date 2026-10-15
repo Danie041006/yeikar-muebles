@@ -138,12 +138,11 @@ def put_valores_mensuales(
 # ------------------------------------------------------------
 # Métodos de caja
 # ------------------------------------------------------------
-@router.get("/metodos-caja", response_model=List[schemas.MetodoCajaResponse])
-def get_metodos_caja(
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
-):
-    return service.listar_metodos_caja(db)
+# El LISTADO (GET) vive en `router_metodos_cobro` (final del archivo): los
+# combos de cobro (Ventas y la conversión de cotizaciones) lo necesitan para
+# CUALQUIER usuario autenticado — un vendedor no-admin recibía 403 y el front
+# caía en una lista estática vieja y desactualizada. Las mutaciones de aquí
+# abajo siguen siendo exclusivas de Dueño/Administrador.
 
 @router.post("/metodos-caja", response_model=schemas.MetodoCajaResponse, status_code=201)
 def post_metodo_caja(
@@ -252,3 +251,27 @@ def delete_devolucion(
     if not service.eliminar_devolucion(db, devolucion_id):
         raise HTTPException(status_code=404, detail="Devolución no encontrada")
     return None
+
+
+# ------------------------------------------------------------
+# Métodos de caja — listado para los combos de cobro
+# ------------------------------------------------------------
+# Router aparte SIN `es_admin`: un vendedor debe poder elegir la cuenta
+# correcta al registrar un abono (inicial o normal). La respuesta trae solo
+# nombre, código y moneda — sin saldos — así que no expone información
+# sensible. `solo_escritura=True`: las lecturas exigen únicamente estar
+# autenticado; si algún día se agrega una ruta de escritura aquí, exigirá el
+# módulo 'ventas' con gestión.
+router_metodos_cobro = APIRouter(
+    prefix="/reports",
+    tags=["Métodos de caja"],
+    dependencies=[Depends(require_module('ventas', solo_escritura=True))],
+)
+
+
+@router_metodos_cobro.get("/metodos-caja", response_model=List[schemas.MetodoCajaResponse])
+def get_metodos_caja(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    return service.listar_metodos_caja(db)

@@ -22,7 +22,7 @@ from app.modules.gastos.router import router as gastos_router
 from app.modules.cuentas_por_pagar.router import router as cuentas_por_pagar_router
 from app.modules.inventory.router import router as inventario_router
 from app.modules.purchases.router import router as compras_router
-from app.modules.reports.router import router as reportes_router
+from app.modules.reports.router import router as reportes_router, router_metodos_cobro
 from app.modules.reports.cuentas_router import router as cuentas_router
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.envios.router import router as envios_router
@@ -121,6 +121,9 @@ app.include_router(cuentas_por_pagar_router, prefix="/api/v1", tags=["cuentas po
 app.include_router(inventario_router, prefix="/api/v1", tags=["inventario"])
 app.include_router(compras_router, prefix="/api/v1", tags=["compras"])
 app.include_router(reportes_router, prefix="/api/v1", tags=["reportes"])
+# Listado de métodos de caja para los combos de cobro (Ventas/Cotizaciones):
+# accesible a cualquier usuario autenticado; el CRUD sigue en reportes_router.
+app.include_router(router_metodos_cobro, prefix="/api/v1", tags=["metodos-caja"])
 app.include_router(cuentas_router, prefix="/api/v1", tags=["cuentas"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
 app.include_router(envios_router, prefix="/api/v1/envio", tags=["envios"])
