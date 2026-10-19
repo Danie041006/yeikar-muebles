@@ -124,12 +124,21 @@ class ConvertirCotizacionBody(BaseModel):
 
 class RentabilidadPedidoResponse(BaseModel):
     """Compara el costo ESTIMADO (de la cotización) con el costo REAL (producción
-    + flete) de un pedido, para conocer el margen real. Todo expresado en moneda
-    base (COP) salvo `total_cobrado`, que va en la moneda del pedido."""
+    + flete) de un pedido, para conocer el margen real.
+
+    Monedas:
+    - `total_cobrado` y los campos `*_moneda` van en la moneda del pedido
+      (la de la cotización/venta), que es como el cliente ve el precio.
+    - Los campos `*_base` y `margen_*` van en COP (compatibilidad y control
+      interno). El frontend prioriza la moneda original del pedido.
+    """
 
     pedido_id: int
     moneda_id: int
     moneda_codigo: Optional[str] = None
+    moneda_simbolo: Optional[str] = None
+    # Tasa congelada de la venta: COP por 1 unidad de la moneda del pedido.
+    tasa_cambio: float = 1.0
     total_cobrado: float = 0.0
     total_cobrado_base: float = 0.0
     costo_estimado_produccion: float = 0.0
@@ -139,4 +148,11 @@ class RentabilidadPedidoResponse(BaseModel):
     flete_real_base: float = 0.0
     margen_estimado: float = 0.0
     margen_real: float = 0.0
+    # Mismos conceptos convertidos a la moneda original del pedido.
+    costo_estimado_moneda: float = 0.0
+    costo_real_moneda: float = 0.0
+    flete_real_moneda: float = 0.0
+    margen_estimado_moneda: float = 0.0
+    margen_real_moneda: float = 0.0
+    diferencia_costo_moneda: float = 0.0
     tiene_produccion: bool = False

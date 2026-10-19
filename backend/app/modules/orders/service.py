@@ -772,10 +772,11 @@ def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | 
     venta = db.query(Venta).filter(Venta.pedido_id == id_pedido).first()
     moneda_id = venta.moneda_id if venta else 1
     trm = float(venta.tasa_cambio) if venta and venta.tasa_cambio else 1.0
-    moneda_codigo = None
-    if moneda_id != 1:
-        m = db.query(Moneda).filter(Moneda.id == moneda_id).first()
-        moneda_codigo = m.codigo if m else None
+    if trm <= 0:
+        trm = 1.0
+    moneda = db.query(Moneda).filter(Moneda.id == moneda_id).first()
+    moneda_codigo = moneda.codigo if moneda else "COP"
+    moneda_simbolo = moneda.simbolo if moneda else "$"
 
     total_cobrado = 0.0
     costo_estimado = 0.0
@@ -811,10 +812,23 @@ def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | 
     margen_estimado = total_cobrado_base - costo_estimado
     margen_real = total_cobrado_base - costo_real - flete_real_base
 
+    # Vista en la moneda ORIGINAL del pedido: los costos viven en COP, así
+    # que se convierten con la TRM congelada de la venta. Es la cifra que el
+    # dueño reconoce (precio de la cotización) y evita que un pedido en USD
+    # parezca tener el doble de ingreso solo porque está expresado en COP.
+    costo_estimado_moneda = costo_estimado / trm
+    costo_real_moneda = costo_real / trm
+    flete_real_moneda = flete_real_base / trm
+    margen_estimado_moneda = total_cobrado - costo_estimado_moneda
+    margen_real_moneda = total_cobrado - costo_real_moneda - flete_real_moneda
+    diferencia_costo_moneda = costo_real_moneda - costo_estimado_moneda
+
     return schemas.RentabilidadPedidoResponse(
         pedido_id=pedido.id,
         moneda_id=moneda_id,
         moneda_codigo=moneda_codigo,
+        moneda_simbolo=moneda_simbolo,
+        tasa_cambio=round(trm, 6),
         total_cobrado=round(total_cobrado, 2),
         total_cobrado_base=round(total_cobrado_base, 2),
         costo_estimado_produccion=round(costo_estimado, 2),
@@ -824,5 +838,11 @@ def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | 
         flete_real_base=round(flete_real_base, 2),
         margen_estimado=round(margen_estimado, 2),
         margen_real=round(margen_real, 2),
+        costo_estimado_moneda=round(costo_estimado_moneda, 2),
+        costo_real_moneda=round(costo_real_moneda, 2),
+        flete_real_moneda=round(flete_real_moneda, 2),
+        margen_estimado_moneda=round(margen_estimado_moneda, 2),
+        margen_real_moneda=round(margen_real_moneda, 2),
+        diferencia_costo_moneda=round(diferencia_costo_moneda, 2),
         tiene_produccion=n_ordenes > 0,
     )

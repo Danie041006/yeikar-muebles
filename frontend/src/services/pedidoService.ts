@@ -39,6 +39,11 @@ export interface Order {
   created_at?: string;
   updated_at?: string;
   cliente?: Client;
+  /** Moneda original de la cotización que originó el pedido. */
+  cotizacion?: {
+    moneda_id?: number;
+    moneda?: { codigo: string; simbolo?: string; nombre?: string };
+  } | null;
   detalles: OrderDetail[];
 }
 
@@ -68,6 +73,9 @@ export interface RentabilidadPedido {
   pedido_id: number;
   moneda_id: number;
   moneda_codigo?: string | null;
+  moneda_simbolo?: string | null;
+  /** Tasa congelada de la venta: COP por 1 unidad de la moneda del pedido. */
+  tasa_cambio: number;
   total_cobrado: number;
   total_cobrado_base: number;
   costo_estimado_produccion: number;
@@ -77,6 +85,13 @@ export interface RentabilidadPedido {
   flete_real_base: number;
   margen_estimado: number;
   margen_real: number;
+  /** Mismos conceptos en la moneda original del pedido. */
+  costo_estimado_moneda: number;
+  costo_real_moneda: number;
+  flete_real_moneda: number;
+  margen_estimado_moneda: number;
+  margen_real_moneda: number;
+  diferencia_costo_moneda: number;
   tiene_produccion: boolean;
 }
 

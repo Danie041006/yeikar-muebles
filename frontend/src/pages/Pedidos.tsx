@@ -16,6 +16,7 @@ import {
 } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { pedidoService, Order, RentabilidadPedido } from '../services/pedidoService';
+import { formatCurrency } from '../utils/format';
 
 export default function Pedidos() {
   const navigate = useNavigate();
@@ -311,6 +312,15 @@ export default function Pedidos() {
     },
   ];
 
+  // Moneda ORIGINAL del pedido (la de su cotización). Los costos se guardan
+  // en COP, pero el margen se muestra en esta moneda con la tasa congelada.
+  const monedaPedido = selectedOrder?.cotizacion?.moneda?.codigo
+    ?? rentabilidad?.moneda_codigo
+    ?? 'COP';
+  const esMonedaBase = monedaPedido === 'COP';
+  const fmtPedido = (valor: number) => `${formatCurrency(valor, monedaPedido)} ${monedaPedido}`;
+  const fmtBase = (valor: number) => `${formatCurrency(valor, 'COP')} COP`;
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -448,6 +458,9 @@ export default function Pedidos() {
                 <Badge tone={estadoTone(selectedOrder.estado)} dot>
                   {estadoLabel(selectedOrder.estado)}
                 </Badge>
+                <span className="rounded-full border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 px-2 py-0.5 font-mono text-[10px] font-bold text-yeikar-secondary">
+                  Moneda: {monedaPedido}
+                </span>
                 {!tieneFabricables(selectedOrder) && (
                   <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-yeikar-primary/10 text-yeikar-primary-dark border border-yeikar-primary/20">
                     Sin producción · va directo a despacho
@@ -529,7 +542,10 @@ export default function Pedidos() {
                           )}
                         </span>
                         <span className="text-yeikar-primary-dark">
-                          ${Number(det.precio).toLocaleString()} COP
+                          {formatCurrency(Number(det.precio), monedaPedido)}
+                          <span className="ml-1 text-[9px] font-black uppercase tracking-wider text-yeikar-neutral/45">
+                            {monedaPedido}
+                          </span>
                         </span>
                       </div>
                       {det.tipo_item !== 'SERVICIO' && (
@@ -570,38 +586,75 @@ export default function Pedidos() {
                   {rentabilidad.tiene_produccion && (
                     <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800">real vs estimado</span>
                   )}
+                  <span className="ml-auto rounded-full border border-yeikar-secondary-light/20 bg-white/60 px-2 py-0.5 text-[9px] font-black text-yeikar-secondary">
+                    {monedaPedido}
+                  </span>
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs font-mono">
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Total cobrado</span>
-                    <b className="text-yeikar-secondary">${rentabilidad.total_cobrado_base.toLocaleString()} COP</b>
+                    <b className="text-yeikar-secondary">{fmtPedido(rentabilidad.total_cobrado)}</b>
+                    {!esMonedaBase && (
+                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.total_cobrado_base)}</span>
+                    )}
                   </div>
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Costo estimado</span>
-                    <b className="text-yeikar-primary-dark">${rentabilidad.costo_estimado_produccion.toLocaleString()} COP</b>
+                    <b className="text-yeikar-primary-dark">{fmtPedido(rentabilidad.costo_estimado_moneda)}</b>
+                    {!esMonedaBase && (
+                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.costo_estimado_produccion)}</span>
+                    )}
                   </div>
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Costo real (producción)</span>
-                    <b className="text-yeikar-primary-dark">${rentabilidad.costo_real_produccion.toLocaleString()} COP</b>
+                    <b className="text-yeikar-primary-dark">{fmtPedido(rentabilidad.costo_real_moneda)}</b>
+                    {!esMonedaBase && (
+                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.costo_real_produccion)}</span>
+                    )}
                   </div>
-                  {rentabilidad.flete_real_base > 0 && (
+                  {rentabilidad.flete_real_moneda > 0 && (
                     <div>
                       <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Flete real</span>
-                      <b className="text-yeikar-primary-dark">${rentabilidad.flete_real_base.toLocaleString()} COP</b>
+                      <b className="text-yeikar-primary-dark">{fmtPedido(rentabilidad.flete_real_moneda)}</b>
+                      {!esMonedaBase && (
+                        <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.flete_real_base)}</span>
+                      )}
                     </div>
                   )}
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Margen estimado</span>
-                    <b className={rentabilidad.margen_estimado >= 0 ? 'text-emerald-600' : 'text-red-600'}>${rentabilidad.margen_estimado.toLocaleString()} COP</b>
+                    <b className={rentabilidad.margen_estimado_moneda >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                      {fmtPedido(rentabilidad.margen_estimado_moneda)}
+                    </b>
+                    {!esMonedaBase && (
+                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.margen_estimado)}</span>
+                    )}
                   </div>
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Margen real</span>
-                    <b className={rentabilidad.margen_real >= 0 ? 'text-emerald-600' : 'text-red-600'}>${rentabilidad.margen_real.toLocaleString()} COP</b>
+                    <b className={rentabilidad.margen_real_moneda >= 0 ? 'text-emerald-600' : 'text-red-600'}>
+                      {fmtPedido(rentabilidad.margen_real_moneda)}
+                    </b>
+                    {!esMonedaBase && (
+                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.margen_real)}</span>
+                    )}
                   </div>
                 </div>
-                {rentabilidad.diferencia_costo !== 0 && (
-                  <p className={`text-[11px] ${rentabilidad.diferencia_costo > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                    El costo real difiere del estimado en {rentabilidad.diferencia_costo > 0 ? '+' : ''}{rentabilidad.diferencia_costo.toLocaleString()} COP.
+                {!esMonedaBase && (
+                  <p className="text-[10px] text-yeikar-neutral/45">
+                    Cifras en {monedaPedido} a la tasa congelada del pedido
+                    {' '}(1 {monedaPedido} = {(rentabilidad.tasa_cambio || 1).toLocaleString('es-CO')} COP).
+                    Debajo de cada monto va el equivalente en COP.
+                  </p>
+                )}
+                {rentabilidad.diferencia_costo_moneda !== 0 && (
+                  <p className={`text-[11px] ${rentabilidad.diferencia_costo_moneda > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    El costo real difiere del estimado en{' '}
+                    {rentabilidad.diferencia_costo_moneda > 0 ? '+' : ''}
+                    {fmtPedido(rentabilidad.diferencia_costo_moneda)}
+                    {!esMonedaBase && (
+                      <span className="text-yeikar-neutral/45"> (≈ {fmtBase(rentabilidad.diferencia_costo)})</span>
+                    )}.
                   </p>
                 )}
               </div>
