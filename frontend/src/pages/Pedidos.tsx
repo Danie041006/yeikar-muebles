@@ -319,7 +319,6 @@ export default function Pedidos() {
     ?? 'COP';
   const esMonedaBase = monedaPedido === 'COP';
   const fmtPedido = (valor: number) => `${formatCurrency(valor, monedaPedido)} ${monedaPedido}`;
-  const fmtBase = (valor: number) => `${formatCurrency(valor, 'COP')} COP`;
 
   return (
     <div className="space-y-6">
@@ -594,31 +593,19 @@ export default function Pedidos() {
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Total cobrado</span>
                     <b className="text-yeikar-secondary">{fmtPedido(rentabilidad.total_cobrado)}</b>
-                    {!esMonedaBase && (
-                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.total_cobrado_base)}</span>
-                    )}
                   </div>
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Costo estimado</span>
                     <b className="text-yeikar-primary-dark">{fmtPedido(rentabilidad.costo_estimado_moneda)}</b>
-                    {!esMonedaBase && (
-                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.costo_estimado_produccion)}</span>
-                    )}
                   </div>
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Costo real (producción)</span>
                     <b className="text-yeikar-primary-dark">{fmtPedido(rentabilidad.costo_real_moneda)}</b>
-                    {!esMonedaBase && (
-                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.costo_real_produccion)}</span>
-                    )}
                   </div>
                   {rentabilidad.flete_real_moneda > 0 && (
                     <div>
                       <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Flete real</span>
                       <b className="text-yeikar-primary-dark">{fmtPedido(rentabilidad.flete_real_moneda)}</b>
-                      {!esMonedaBase && (
-                        <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.flete_real_base)}</span>
-                      )}
                     </div>
                   )}
                   <div>
@@ -626,35 +613,24 @@ export default function Pedidos() {
                     <b className={rentabilidad.margen_estimado_moneda >= 0 ? 'text-emerald-600' : 'text-red-600'}>
                       {fmtPedido(rentabilidad.margen_estimado_moneda)}
                     </b>
-                    {!esMonedaBase && (
-                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.margen_estimado)}</span>
-                    )}
                   </div>
                   <div>
                     <span className="text-yeikar-neutral/50 block text-[10px] uppercase font-bold">Margen real</span>
                     <b className={rentabilidad.margen_real_moneda >= 0 ? 'text-emerald-600' : 'text-red-600'}>
                       {fmtPedido(rentabilidad.margen_real_moneda)}
                     </b>
-                    {!esMonedaBase && (
-                      <span className="mt-0.5 block text-[9px] text-yeikar-neutral/40">≈ {fmtBase(rentabilidad.margen_real)}</span>
-                    )}
                   </div>
                 </div>
                 {!esMonedaBase && (
                   <p className="text-[10px] text-yeikar-neutral/45">
-                    Cifras en {monedaPedido} a la tasa congelada del pedido
-                    {' '}(1 {monedaPedido} = {(rentabilidad.tasa_cambio || 1).toLocaleString('es-CO')} COP).
-                    Debajo de cada monto va el equivalente en COP.
+                    Cifras en {monedaPedido} a la tasa congelada del pedido.
                   </p>
                 )}
                 {rentabilidad.diferencia_costo_moneda !== 0 && (
                   <p className={`text-[11px] ${rentabilidad.diferencia_costo_moneda > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                     El costo real difiere del estimado en{' '}
                     {rentabilidad.diferencia_costo_moneda > 0 ? '+' : ''}
-                    {fmtPedido(rentabilidad.diferencia_costo_moneda)}
-                    {!esMonedaBase && (
-                      <span className="text-yeikar-neutral/45"> (≈ {fmtBase(rentabilidad.diferencia_costo)})</span>
-                    )}.
+                    {fmtPedido(rentabilidad.diferencia_costo_moneda)}.
                   </p>
                 )}
               </div>
