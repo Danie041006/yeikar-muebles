@@ -6,8 +6,19 @@ import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, Quot
 import { clienteService, Client } from '../services/clienteService';
 import { pedidoService } from '../services/pedidoService';
 import { ventaService, VentaDetalle, METODOS_PAGO, cargarMetodosPago, labelMetodoPago, type MetodoPagoOption } from '../services/ventaService';
-import { formatCurrency, resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
+import { formatCurrency, nombreMoneda, resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
 import { normalizarEstructuraCostos } from '../utils/estructuraCostos';
+import { hoyVE } from '../utils/fechas';
+import {
+  dimensionalidad,
+  factorCapturaABase,
+  cantidadBaseDesdeCaptura,
+  precioBaseDesdeCaptura,
+  precioCapturaDesdeBase,
+  redondear4,
+  type Dimensionalidad,
+  type UnidadCaptura,
+} from '../utils/unidades';
 import EstructuraCostos from '../components/EstructuraCostos';
 import DocumentoCotizacion from '../components/Expediente/DocumentoCotizacion';
 
@@ -23,6 +34,7 @@ import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
 import { Package, Sparkles, Plus, Loader2, Wrench, Truck } from 'lucide-react';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { produccionService } from '../services/produccionService';
 
 interface CotizacionItemForm {
   producto_id: string;
@@ -38,8 +50,16 @@ interface CotizacionItemForm {
   calcResult: CalculationResult | null;
   calcLoading: boolean;
   receta_personalizada?: any[] | null;
-  /** Costo real del insumo suelto (COP): compra + pasada, desde la última entrada. */
+  /** Costo real del insumo suelto (COP): compra + pasada, desde la última entrada.
+   *  SIEMPRE por unidad base del material (m³/m), no por la unidad capturada. */
   insumoCosto?: { costo_compra: number; pasada_unitaria: number; costo_real: number } | null;
+  /** Captura flexible de insumos: '' = unidad base; 'CM'/'M' = convertida. */
+  unidadCaptura?: UnidadCaptura | '';
+  /** Equivalencia en la unidad del inventario (m³/m), 4 decimales. */
+  cantidadBase?: number | null;
+  /** Unidad base y dimensionalidad del material seleccionado. */
+  materialUnidad?: string | null;
+  materialDimension?: Dimensionalidad;
   /** Promo obsequio: renglón del plástico de regalo (precio 0, ligado al colchón). */
   es_obsequio?: boolean;
 }
@@ -66,6 +86,10 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
       moneda_codigo: monedaCodigo,
     };
     if (d.tipo_item === 'INSUMO') {
+      // El costo guardado es el TOTAL del renglón; para la referencia se
+      // vuelve a costo por unidad BASE del inventario (m³), no por cm.
+      const cantidadBase = d.cantidad_base ?? d.cantidad;
+      const unidadBase = d.material?.unidad_medida?.abreviatura ?? null;
       return {
         producto_id: '',
         material_id: d.material_id ? String(d.material_id) : '',
@@ -80,7 +104,15 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
         calcResult,
         calcLoading: false,
         receta_personalizada: null,
-        insumoCosto: { costo_compra: 0, pasada_unitaria: 0, costo_real: (d.costo_total ?? 0) / cantidad },
+        unidadCaptura: d.unidad_captura ?? '',
+        cantidadBase,
+        materialUnidad: unidadBase,
+        materialDimension: dimensionalidad(unidadBase),
+        insumoCosto: {
+          costo_compra: 0,
+          pasada_unitaria: 0,
+          costo_real: (d.costo_total ?? 0) / (cantidadBase || 1),
+        },
       };
     }
     return {
@@ -203,6 +235,79 @@ function asegurarObsequio(
   return sincronizarCantidadesObsequio(next, promos);
 }
 
+/** Input decimal para cantidades de insumo.
+ *
+ *  Un <input type="number"> controlado no deja teclear "0.1128": al escribir
+ *  el punto el estado numérico vuelve a 0 y el navegador además valida el step
+ *  (el famoso "0.1 o 0.2"). Este input guarda el TEXTO mientras el usuario
+ *  escribe y solo publica números válidos al formulario. Al cambiar de unidad
+ *  (cm ↔ m³) el padre cambia `value` y el texto se sincroniza. */
+function CantidadDecimalInput({
+  value,
+  onChange,
+  className,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  className?: string;
+}) {
+  const [texto, setTexto] = useState(() => (value ? String(value) : ''));
+  const enfocado = useRef(false);
+
+  useEffect(() => {
+    if (!enfocado.current) setTexto(value ? String(value) : '');
+  }, [value]);
+
+  const normalizar = (t: string): number | null => {
+    const n = parseFloat(t.replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={texto}
+      onFocus={() => { enfocado.current = true; }}
+      onChange={(e) => {
+        const t = e.target.value;
+        setTexto(t);
+        const n = normalizar(t);
+        if (n !== null) onChange(n);
+      }}
+      onBlur={() => {
+        enfocado.current = false;
+        const n = normalizar(texto);
+        if (n !== null) {
+          onChange(n);
+          setTexto(String(n));
+        } else {
+          setTexto(value ? String(value) : '');
+        }
+      }}
+      className={className}
+    />
+  );
+}
+
+/** Resultado de cálculo de un INSUMO: el costo y el precio son POR UNIDAD
+ *  DE VENTA (cm/m³), no por unidad base del inventario. */
+function calcularResultadoInsumo(costoRealUnidadVenta: number, precio: number): CalculationResult {
+  return {
+    costo_materiales: costoRealUnidadVenta,
+    costo_mano_obra: 0,
+    costo_gastos_indirectos: 0,
+    costo_total: costoRealUnidadVenta,
+    impuesto_porcentaje: 0,
+    impuestos: 0,
+    base_con_impuestos: precio,
+    precio_sugerido: precio,
+    precio_venta: precio,
+    materiales_detalle: [],
+    moneda_codigo: 'COP',
+  };
+}
+
 export default function Cotizaciones() {
   const toast = useToast();
   const { user, esAdmin } = useAuth();
@@ -279,6 +384,9 @@ export default function Cotizaciones() {
   const [adelantoMonedaId, setAdelantoMonedaId] = useState<number>(1);
   const [adelantoTrm, setAdelantoTrm] = useState('');
   const [adelantoMetodo, setAdelantoMetodo] = useState('');
+  // Fecha del abono inicial: el cliente pudo abonar ANTES de convertir.
+  // Por defecto hoy (VE); si se deja vacía, el servidor guarda hoy.
+  const [fechaAdelanto, setFechaAdelanto] = useState(hoyVE());
   // Métodos de pago: cuentas reales (metodo_caja) con fallback al estático.
   const [metodosPago, setMetodosPago] = useState<MetodoPagoOption[]>(METODOS_PAGO.map((m) => ({ ...m })));
 
@@ -289,18 +397,37 @@ export default function Cotizaciones() {
   // así que el trigger necesita saber qué mostrar cuando el valor ya está fijado
   // (cliente recién creado o cliente de una cotización en edición).
   const [clienteSeleccionado, setClienteSeleccionado] = useState<{ value: number; label: string } | null>(null);
+  // Fecha de la cotización: la elige el usuario (permite fechar hacia atrás
+  // al pasar cotizaciones viejas). Default: hoy en hora Venezuela.
+  const [fechaCotizacion, setFechaCotizacion] = useState('');
   const [observaciones, setObservaciones] = useState('');
   const [items, setItems] = useState<CotizacionItemForm[]>([]);
   const [isProductSelectorOpen, setIsProductSelectorOpen] = useState(false);
+  // Piezas de exhibición en retrabajo (chip "En retrabajo" en el selector):
+  // están en el taller y no se pueden vender hasta que vuelvan al showroom.
+  const [piezasEnRetrabajo, setPiezasEnRetrabajo] = useState<number[]>([]);
   const [productSelectorModo, setProductSelectorModo] = useState<'todos' | 'fabricados' | 'reventa' | 'exhibicion'>('todos');
   const [productSelectorTargetIndex, setProductSelectorTargetIndex] = useState<number | null>(null);
+
+  // Al abrir el catálogo, refrescar qué piezas de exhibición están en retrabajo
+  // (sin permiso de Producción o sin red, el chip simplemente no se muestra).
+  useEffect(() => {
+    if (!isProductSelectorOpen) return;
+    produccionService
+      .getRetrabajosAbiertos()
+      .then((rs) =>
+        setPiezasEnRetrabajo(rs.map((r) => r.producto_id).filter((id): id is number => id != null)),
+      )
+      .catch(() => setPiezasEnRetrabajo([]));
+  }, [isProductSelectorOpen]);
 
   // ── "Producto nuevo" desde la cotización (nombre + tipo + foto + precio) ──
   const [showNuevoProductoModal, setShowNuevoProductoModal] = useState(false);
   const [tiposProducto, setTiposProducto] = useState<{ id: number; nombre: string }[]>([]);
   const [npForm, setNpForm] = useState({ nombre: '', tipo_producto_id: '', ancho: '', largo: '', precio: '', moneda_id: '1' });
-  const [fotoNp, setFotoNp] = useState<File | null>(null);
-  const [fotoNpPreview, setFotoNpPreview] = useState<string | null>(null);
+  // Varias fotos a la vez: la PRIMERA que se elija es la portada (sale en la
+  // cotización; las demás como vistas adicionales en la Hoja de Trabajo).
+  const [fotosNp, setFotosNp] = useState<{ file: File; url: string }[]>([]);
   const [savingNp, setSavingNp] = useState(false);
   const npCameraRef = useRef<HTMLInputElement>(null);
   const npGalleryRef = useRef<HTMLInputElement>(null);
@@ -432,7 +559,7 @@ export default function Cotizaciones() {
     if (!currencies.length) return;
     api.get('/tasa/tasas-cambio/', { params: { limit: 200 } })
       .then(({ data }) => {
-        const hoy = new Date().toISOString().slice(0, 10);
+        const hoy = hoyVE();
         const codigoPorId = new Map(currencies.map((c) => [c.id, c.codigo]));
         const mejores: Record<string, { valor: number; fecha: string }> = {};
         for (const t of data as any[]) {
@@ -754,11 +881,131 @@ export default function Cotizaciones() {
     setModalPreviewCalc(null);
   };
 
+  /** Cambia la unidad de captura de un INSUMO (cm ↔ unidad base) sin mover
+   *  el total: convierte cantidad y precio con el mismo factor. */
+  const cambiarUnidadInsumo = (index: number, nueva: UnidadCaptura | '') => {
+    setItems((prev) => {
+      const actual = prev[index];
+      if (!actual) return prev;
+      const dim = actual.materialDimension ?? 'OTRA';
+      const unidadBase = actual.materialUnidad ?? null;
+      const factorActual = factorCapturaABase(dim, unidadBase, actual.unidadCaptura ?? '');
+      const factorNuevo = factorCapturaABase(dim, unidadBase, nueva);
+      const cantidadBase = actual.cantidadBase
+        ?? cantidadBaseDesdeCaptura(actual.cantidad, factorActual);
+      const cantidad = redondear4(cantidadBase / (factorNuevo || 1));
+      const precioActual = Number(actual.calcResult?.precio_venta) || 0;
+      const precioBase = precioBaseDesdeCaptura(precioActual, factorActual);
+      const precio = precioCapturaDesdeBase(precioBase, factorNuevo);
+      const costoVenta = actual.insumoCosto
+        ? actual.insumoCosto.costo_real * factorNuevo
+        : Number(actual.calcResult?.costo_total) || 0;
+
+      const next = [...prev];
+      next[index] = {
+        ...actual,
+        unidadCaptura: nueva,
+        cantidadBase,
+        cantidad,
+        calcResult: calcularResultadoInsumo(costoVenta, precio),
+      };
+      return next;
+    });
+  };
+
+  /** Actualiza la cantidad del INSUMO y su equivalencia en la unidad base. */
+  const cambiarCantidadInsumo = (index: number, cantidad: number) => {
+    setItems((prev) => {
+      const actual = prev[index];
+      if (!actual) return prev;
+      const factor = factorCapturaABase(
+        actual.materialDimension ?? 'OTRA',
+        actual.materialUnidad ?? null,
+        actual.unidadCaptura ?? '',
+      );
+      const next = [...prev];
+      next[index] = {
+        ...actual,
+        cantidad,
+        cantidadBase: cantidadBaseDesdeCaptura(cantidad, factor),
+      };
+      return next;
+    });
+  };
+
   const addItemInsumo = () => {
     setItems((prev) => [
       ...prev,
-      { producto_id: '', material_id: '', tipo_item: 'INSUMO', cantidad: 1, ancho: '', largo: '', ganancia: '', impuesto: '0', descripcion_especifica: '', observaciones: '', calcResult: null, calcLoading: false, receta_personalizada: null }
+      {
+        producto_id: '', material_id: '', tipo_item: 'INSUMO', cantidad: 1,
+        ancho: '', largo: '', ganancia: '', impuesto: '0',
+        descripcion_especifica: '', observaciones: '',
+        calcResult: null, calcLoading: false, receta_personalizada: null,
+        unidadCaptura: '', cantidadBase: null,
+        materialUnidad: null, materialDimension: 'OTRA',
+      }
     ]);
+  };
+
+  /** Al elegir material de un INSUMO: carga su unidad/dimensionalidad y
+   *  aplica la captura por defecto. Para madera (m³) arranca en cm (cuenta
+   *  del taller); para lineales arranca en la unidad base. El costo real se
+   *  pide a Inventario (compra + pasada) y se muestra por unidad vendida. */
+  const aplicarMaterialInsumo = async (index: number, matId: number) => {
+    updateItemField(index, 'material_id', String(matId));
+    updateItemField(index, 'insumoCosto', null);
+
+    const mat = await productosService.getMaterial(matId).catch(() => null);
+    if (!mat) return;
+
+    const unidadBase = mat.unidad_medida?.abreviatura ?? null;
+    const dim = dimensionalidad(unidadBase);
+    const unidadCaptura: UnidadCaptura | '' = dim === 'VOLUMEN' ? 'CM' : '';
+    const costoBase = Number(mat.costo_base) || 0;
+
+    setItems((prev) => {
+      const actual = prev[index];
+      if (!actual || actual.material_id !== String(mat.id)) return prev;
+      const factor = factorCapturaABase(dim, unidadBase, unidadCaptura);
+      const cantidadBase = cantidadBaseDesdeCaptura(actual.cantidad, factor);
+      const next = [...prev];
+      next[index] = {
+        ...actual,
+        materialUnidad: unidadBase,
+        materialDimension: dim,
+        unidadCaptura,
+        cantidadBase,
+        insumoCosto: { costo_compra: costoBase, pasada_unitaria: 0, costo_real: costoBase },
+        calcResult: calcularResultadoInsumo(costoBase * factor, 0),
+      };
+      return next;
+    });
+
+    inventarioService.getCostoUnitarioRealMaterial(mat.id)
+      .then((c) => {
+        setItems((prev) => {
+          if (prev[index]?.material_id !== String(mat.id)) return prev;
+          const actual = prev[index];
+          const factor = factorCapturaABase(
+            actual.materialDimension ?? dim,
+            actual.materialUnidad ?? unidadBase,
+            actual.unidadCaptura ?? '',
+          );
+          const next = [...prev];
+          next[index] = {
+            ...actual,
+            insumoCosto: c,
+            calcResult: calcularResultadoInsumo(
+              c.costo_real * factor,
+              Number(actual.calcResult?.precio_venta) || 0,
+            ),
+          };
+          return next;
+        });
+      })
+      .catch(() => {
+        // Sin red o sin historial: se queda con el costo de compra sin pasada.
+      });
   };
 
   // Reparación: la pieza ya existe (es del cliente), se describe el trabajo y
@@ -894,6 +1141,7 @@ export default function Cotizaciones() {
   const handleOpenCreate = () => {
     setEditingQuote(null);
     setSelectedClientId('');
+    setFechaCotizacion(hoyVE());
     setObservaciones('');
     setSelectedMonedaId(1);
     setTasaCambio(1);
@@ -915,6 +1163,8 @@ export default function Cotizaciones() {
       ? { value: quote.cliente_id, label: `${quote.cliente.nombre} (${quote.cliente.telefono})` }
       : null);
     setObservaciones(quote.observaciones || '');
+    // Se conserva la fecha original, pero queda editable (corregir fechas mal puestas).
+    setFechaCotizacion(quote.fecha ? String(quote.fecha).slice(0, 10) : hoyVE());
     setSelectedMonedaId(quote.moneda_id || 1);
     setTasaCambio(quote.tasa_cambio || 1);
     setTasasDia({});
@@ -1014,23 +1264,34 @@ export default function Cotizaciones() {
         .catch(() => setTiposProducto([]));
     }
     setNpForm({ nombre: '', tipo_producto_id: '', ancho: '', largo: '', precio: '', moneda_id: '1' });
-    setFotoNp(null);
-    setFotoNpPreview(null);
+    limpiarNpFotos();
     setErrorForm('');
     setShowNuevoProductoModal(true);
   };
 
   const handleNpFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    if (fotoNpPreview) URL.revokeObjectURL(fotoNpPreview);
-    setFotoNp(file);
-    setFotoNpPreview(file ? URL.createObjectURL(file) : null);
+    const files = Array.from(e.target.files ?? []);
+    if (files.length > 0) {
+      setFotosNp((prev) => [
+        ...prev,
+        ...files.map((file) => ({ file, url: URL.createObjectURL(file) })),
+      ]);
+    }
     e.target.value = '';
   };
-  const quitarNpFoto = () => {
-    if (fotoNpPreview) URL.revokeObjectURL(fotoNpPreview);
-    setFotoNp(null);
-    setFotoNpPreview(null);
+  const quitarNpFoto = (idx: number) => {
+    setFotosNp((prev) => {
+      const copia = [...prev];
+      const [quitada] = copia.splice(idx, 1);
+      if (quitada) URL.revokeObjectURL(quitada.url);
+      return copia;
+    });
+  };
+  const limpiarNpFotos = () => {
+    setFotosNp((prev) => {
+      prev.forEach((f) => URL.revokeObjectURL(f.url));
+      return [];
+    });
   };
 
   const handleCrearProductoDesdeCotizacion = async (e: React.FormEvent) => {
@@ -1061,14 +1322,15 @@ export default function Cotizaciones() {
         precio_costo_base: undefined,
         precio_venta_base: precio,
       });
-      if (fotoNp && creado.id) {
-        try { await subirAdjunto(fotoNp, TIPO_ADJUNTO.PRODUCTO, creado.id); } catch { /* la foto es opcional */ }
+      // Fotos (opcionales), en orden de selección: la primera es la portada.
+      for (const foto of fotosNp) {
+        try { await subirAdjunto(foto.file, TIPO_ADJUNTO.PRODUCTO, creado.id); } catch { /* foto opcional */ }
       }
       // Lo agrega al listado y lo auto-selecciona en el renglón objetivo
       const creadoComoProducto = creado as Product;
       setProducts((prev) => (prev.some((p) => p.id === creado.id) ? prev : [...prev, creadoComoProducto]));
       setShowNuevoProductoModal(false);
-      quitarNpFoto();
+      limpiarNpFotos();
       handleSelectProductFromModal(creadoComoProducto);
       toast.success(`Producto "${creado.nombre}" creado y agregado al renglón.`);
     } catch (err: any) {
@@ -1231,18 +1493,24 @@ export default function Cotizaciones() {
           Math.round(convertirAPrecioCotizacion(precioUnitCop, r?.moneda_codigo || 'COP') * 100) / 100;
         const subtotal = precioMoneda * item.cantidad;
         globalTotal += subtotal;
+        const cantidadBase = item.cantidadBase ?? item.cantidad;
         return {
           producto_id: null,
           material_id: Number(item.material_id),
           tipo_item: 'INSUMO',
           cantidad: item.cantidad,
           precio: precioMoneda,
+          // Captura flexible: el documento conserva 1128 cm × 160, pero el
+          // costo y el inventario usan 0,1128 m³.
+          unidad_captura: item.unidadCaptura || null,
+          cantidad_base: cantidadBase,
           observaciones: item.observaciones || null,
-          // Costo real en COP (compra + pasada) × cantidad: el backend lo
-          // divide por la cantidad al convertir a pedido para obtener el
-          // costo unitario real del renglón.
-          costo_materiales: item.insumoCosto ? item.insumoCosto.costo_real * item.cantidad : null,
-          costo_total: item.insumoCosto ? item.insumoCosto.costo_real * item.cantidad : null,
+          // Costo real en COP (compra + pasada) × cantidad BASE del
+          // inventario. El backend lo divide por la cantidad vendida al
+          // convertir a pedido para obtener el costo unitario real del
+          // renglón (p. ej. 180.480 / 1128 = 160 COP/cm).
+          costo_materiales: item.insumoCosto ? item.insumoCosto.costo_real * cantidadBase : null,
+          costo_total: item.insumoCosto ? item.insumoCosto.costo_real * cantidadBase : null,
         };
       }
       const r = item.calcResult;
@@ -1281,7 +1549,12 @@ export default function Cotizaciones() {
       }
       if (item.tipo_item === 'INSUMO') {
         const mat = materiales.find((m) => m.id === Number(item.material_id));
-        return `${item.cantidad}x ${mat?.nombre || 'Insumo'}`;
+        const unidad = item.unidadCaptura === 'CM'
+          ? 'cm'
+          : item.unidadCaptura === 'M'
+            ? 'm'
+            : (item.materialUnidad || '');
+        return `${item.cantidad}${unidad ? ` ${unidad}` : ''} x ${mat?.nombre || 'Insumo'}`;
       }
       const selectedProd = products.find(p => p.id === Number(item.producto_id));
       if (item.es_obsequio) {
@@ -1304,8 +1577,9 @@ export default function Cotizaciones() {
 
     const quoteData: QuoteCreate = {
       cliente_id: Number(selectedClientId),
-      // Al editar se conserva la fecha original (no re-fechar a hoy).
-      fecha: editingQuote ? editingQuote.fecha : new Date().toISOString().split('T')[0],
+      // Fecha elegida en el formulario (default hoy VE); al editar arranca con
+      // la original y también puede corregirse. Vacía → hoy (America/Caracas).
+      fecha: fechaCotizacion || hoyVE(),
       estado: editingQuote ? editingQuote.estado : 'BORRADOR',
       total_estimado: totalEstimado,
       moneda_id: selectedMonedaId,
@@ -1375,6 +1649,7 @@ export default function Cotizaciones() {
     setAdelantoMonedaId(quote.moneda_id ?? 1);
     setAdelantoTrm('');
     setAdelantoMetodo('');
+    setFechaAdelanto(hoyVE());
     setConvertError('');
     setIsConvertOpen(true);
   };
@@ -1531,6 +1806,8 @@ export default function Cotizaciones() {
         tasa_cambio_adelanto:
           abonoActivo && monedaPagoDifiere ? factorPago * tasaVenta : undefined,
         metodo_pago: abonoActivo ? adelantoMetodo : undefined,
+        // Fecha real del abono (pudo ser días antes); vacía → hoy (servidor).
+        fecha_adelanto: abonoActivo && fechaAdelanto ? fechaAdelanto : undefined,
       });
       setIsConvertOpen(false);
       const avisoAbono =
@@ -1748,14 +2025,13 @@ export default function Cotizaciones() {
     {
       key: 'total',
       header: 'Total Estimado',
+      // Moneda en palabra clara al lado del monto ("$344.00 Dólares"). El
+      // "≈ equivalente en COP" se retiró del listado: la tasa varía a diario
+      // y mostrarla junto al precio parecía un segundo precio (ver #207).
       render: (q) => (
         <span className="font-mono font-bold text-yeikar-secondary">
-          {formatCurrency(Number(q.total_estimado), q.moneda?.codigo)}
-          {q.moneda && q.moneda_id !== 1 && (
-            <span className="block text-[10px] text-yeikar-neutral/40 font-normal">
-              ≈ {formatCurrency(Number(q.total_en_moneda_base || 0), 'COP')}
-            </span>
-          )}
+          {formatCurrency(Number(q.total_estimado), q.moneda?.codigo)}{' '}
+          <span className="font-normal">{nombreMoneda(q.moneda?.codigo)}</span>
         </span>
       ),
       mobileLabel: 'Total',
@@ -2004,32 +2280,49 @@ export default function Cotizaciones() {
                 </button>
               </div>
 
-              <div>
-                <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
-                  Cliente *
-                </label>
-                <SearchSelect
-                  value={selectedClientId}
-                  onChange={(v) => setSelectedClientId(String(v))}
-                  loadOptions={async (q) =>
-                    (await clienteService.getAll(q || undefined))
-                      .map((c) => ({ value: c.id, label: `${c.nombre} (${c.telefono})` }))
-                  }
-                  minChars={1}
-                  selectedOption={clienteSeleccionado ?? undefined}
-                  placeholder="Selecciona un cliente..."
-                />
-                <button
-                  type="button"
-                  onClick={() => { setErrorForm(''); setShowNuevoClienteModal(true); }}
-                  title="Crear cliente nuevo"
-                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-yeikar-primary/60 bg-yeikar-primary/10 px-3 py-2 text-xs font-bold text-yeikar-primary transition-colors hover:bg-yeikar-primary hover:text-yeikar-neutral"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 5v14M5 12h14" />
-                  </svg>
-                  Nuevo cliente
-                </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                    Cliente *
+                  </label>
+                  <SearchSelect
+                    value={selectedClientId}
+                    onChange={(v) => setSelectedClientId(String(v))}
+                    loadOptions={async (q) =>
+                      (await clienteService.getAll(q || undefined))
+                        .map((c) => ({ value: c.id, label: `${c.nombre} (${c.telefono})` }))
+                    }
+                    minChars={1}
+                    selectedOption={clienteSeleccionado ?? undefined}
+                    placeholder="Selecciona un cliente..."
+                  />
+                  <button
+                    type="button"
+                    onClick={() => { setErrorForm(''); setShowNuevoClienteModal(true); }}
+                    title="Crear cliente nuevo"
+                    className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-yeikar-primary/60 bg-yeikar-primary/10 px-3 py-2 text-xs font-bold text-yeikar-primary transition-colors hover:bg-yeikar-primary hover:text-yeikar-neutral"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 5v14M5 12h14" />
+                    </svg>
+                    Nuevo cliente
+                  </button>
+                </div>
+                <div>
+                  <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                    Fecha *
+                  </label>
+                  <input
+                    type="date"
+                    value={fechaCotizacion}
+                    onChange={(e) => setFechaCotizacion(e.target.value)}
+                    required
+                    className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 text-sm font-mono"
+                  />
+                  <p className="mt-1 text-[11px] text-stone-500">
+                    Puedes ponerle una fecha pasada (p. ej. cotizaciones viejas).
+                  </p>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2205,16 +2498,34 @@ export default function Cotizaciones() {
                       // (los insumos cambian de precio y se venden sueltos
                       // esporádicamente); el costo real (compra + pasada) solo
                       // sirve de referencia para calcular la utilidad.
+                      const matCatalogo = materiales.find((m) => m.id === Number(item.material_id));
+                      const unidadBase = item.materialUnidad
+                        ?? matCatalogo?.unidad_medida?.abreviatura
+                        ?? 'unidad';
+                      const dim = item.materialDimension ?? dimensionalidad(unidadBase);
+                      const captura = item.unidadCaptura ?? '';
+                      const esConversion = !!captura;
+                      const unidadVenta = captura === 'CM'
+                        ? 'cm'
+                        : captura === 'M'
+                          ? 'm'
+                          : unidadBase;
+                      const factor = factorCapturaABase(dim, unidadBase, captura);
+                      const cantidadBase = item.cantidadBase
+                        ?? cantidadBaseDesdeCaptura(item.cantidad, factor);
                       const precioUnitCop = Number(item.calcResult?.precio_venta) || 0;
                       const precioUnitMoneda = precioRenglonEnMoneda(item);
                       const subtotal = (isFinite(precioUnitMoneda) ? precioUnitMoneda : 0) * item.cantidad;
-                      const calcInsumo = (costoReal: number, precio: number): CalculationResult => ({
-                        costo_materiales: costoReal, costo_mano_obra: 0, costo_gastos_indirectos: 0,
-                        costo_total: costoReal, impuesto_porcentaje: 0, impuestos: 0,
-                        base_con_impuestos: precio, precio_sugerido: precio, precio_venta: precio,
-                        materiales_detalle: [],
-                        moneda_codigo: 'COP',
-                      });
+                      const costoRealBase = item.insumoCosto?.costo_real ?? 0;
+                      const costoRealVenta = costoRealBase * factor;
+                      const opcionesUnidad: { valor: UnidadCaptura | ''; label: string }[] =
+                        dim === 'VOLUMEN'
+                          ? [{ valor: 'CM', label: 'cm' }, { valor: '', label: unidadBase }]
+                          : dim === 'LONGITUD'
+                            ? (unidadBase.trim().toLowerCase() === 'cm'
+                              ? [{ valor: '', label: 'cm' }, { valor: 'M', label: 'm' }]
+                              : [{ valor: 'CM', label: 'cm' }, { valor: '', label: unidadBase }])
+                            : [];
                       return (
                         <div key={index} className="bg-white p-4 rounded-2xl border border-yeikar-secondary-light/15 border-l-4 border-l-emerald-500 relative space-y-3 shadow-sm">
                           <div className="flex items-center justify-between border-b border-yeikar-secondary-light/10 pb-2">
@@ -2230,34 +2541,7 @@ export default function Cotizaciones() {
                               <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Material *</label>
                               <SearchSelect
                                 value={item.material_id}
-                                onChange={async (v) => {
-                                  const matId = Number(v);
-                                  updateItemField(index, 'material_id', String(v));
-                                  updateItemField(index, 'insumoCosto', null);
-                                  const mat = await productosService.getMaterial(matId).catch(() => null);
-                                  if (mat) {
-                                    // Mientras llega el costo real, precargamos el
-                                    // costo de compra como referencia (sin pasada).
-                                    updateItemField(index, 'calcResult', calcInsumo(Number(mat.costo_base) || 0, 0));
-                                    inventarioService.getCostoUnitarioRealMaterial(mat.id)
-                                      .then((c) => {
-                                        setItems((prev) => {
-                                          // Si ya cambiaron de material, descartar.
-                                          if (prev[index]?.material_id !== String(mat.id)) return prev;
-                                          const newItems = [...prev];
-                                          newItems[index] = {
-                                            ...newItems[index],
-                                            insumoCosto: c,
-                                            calcResult: calcInsumo(c.costo_real, 0),
-                                          };
-                                          return newItems;
-                                        });
-                                      })
-                                      .catch(() => {
-                                        // fallback: se queda con el costo de compra sin pasada.
-                                      });
-                                  }
-                                }}
+                                onChange={(v) => { if (v) void aplicarMaterialInsumo(index, Number(v)); }}
                                 loadOptions={async (q) =>
                                   (await productosService.getMateriales(q || undefined))
                                     .filter((m) => m.activo !== false)
@@ -2271,27 +2555,47 @@ export default function Cotizaciones() {
                               />
                             </div>
                             <div className="sm:col-span-2">
-                              <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Cantidad *</label>
-                              <input type="number" step="0.01" min="0.01" value={item.cantidad}
-                                onChange={(e) => {
-                                  // Solo cambia la cantidad: el precio UNITARIO
-                                  // no depende de ella (reconstruir calcResult
-                                  // aquí multiplicaba la cantidad dos veces).
-                                  const cant = parseFloat(e.target.value) || 1;
-                                  updateItemField(index, 'cantidad', cant);
-                                }}
+                              {opcionesUnidad.length > 0 && (
+                                <div className="mb-1 flex gap-1" role="group" aria-label="Unidad de captura">
+                                  {opcionesUnidad.map((op) => (
+                                    <button
+                                      key={op.valor || 'base'}
+                                      type="button"
+                                      onClick={() => cambiarUnidadInsumo(index, op.valor)}
+                                      className={`flex-1 rounded-md px-1.5 py-1 text-[10px] font-bold uppercase transition-colors ${
+                                        captura === op.valor
+                                          ? 'bg-emerald-600 text-white'
+                                          : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                                      }`}
+                                      title={
+                                        op.valor === 'CM' && dim === 'VOLUMEN'
+                                          ? 'Cuenta del taller en cm (÷10.000 = m³)'
+                                          : op.valor === 'CM'
+                                            ? 'Captura en centímetros (÷100 = m)'
+                                            : `Unidad base del inventario (${unidadBase})`
+                                      }
+                                    >
+                                      {op.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                              <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Cantidad ({unidadVenta}) *</label>
+                              <CantidadDecimalInput
+                                value={item.cantidad}
+                                onChange={(cant) => cambiarCantidadInsumo(index, cant)}
                                 className="w-full p-2 border border-stone-200 rounded-lg bg-white text-sm font-mono focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
                               />
                             </div>
                             <div className="sm:col-span-3">
-                              <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Precio de Venta (COP) *</label>
+                              <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Precio de Venta (COP / {unidadVenta}) *</label>
                               <input type="number" step="0.01" min="0" value={precioUnitCop > 0 ? precioUnitCop : ''} placeholder="Escribe el precio de venta"
                                 onChange={(e) => {
                                   const precio = parseFloat(e.target.value) || 0;
                                   // El costo NO se pisa con el precio: la utilidad
-                                  // se calcula contra el costo real (compra+pasada).
-                                  const costoReal = item.insumoCosto?.costo_real ?? (Number(item.calcResult?.costo_total) || 0);
-                                  updateItemField(index, 'calcResult', calcInsumo(costoReal, precio));
+                                  // se calcula contra el costo real (compra+pasada)
+                                  // expresado en la MISMA unidad de venta.
+                                  updateItemField(index, 'calcResult', calcularResultadoInsumo(costoRealVenta, precio));
                                 }}
                                 className="w-full p-2 border border-stone-200 rounded-lg bg-white text-sm font-mono focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
                               />
@@ -2301,11 +2605,28 @@ export default function Cotizaciones() {
                               <div className="text-sm font-bold font-mono text-yeikar-secondary">{formatCurrency(subtotal, currencyCode)}</div>
                             </div>
                           </div>
+                          {esConversion && (
+                            <div className="text-[11px] text-emerald-900/80 bg-emerald-50/60 border border-emerald-100 rounded-lg px-3 py-1.5">
+                              <b>{item.cantidad.toLocaleString('es-CO', { maximumFractionDigits: 4 })}</b> {unidadVenta} ={' '}
+                              <b>{cantidadBase.toLocaleString('es-CO', { maximumFractionDigits: 4 })} {unidadBase}</b>
+                              {dim === 'VOLUMEN' && captura === 'CM' && (
+                                <span className="text-emerald-700"> · cuenta del taller ÷ 10.000</span>
+                              )}
+                              {dim === 'LONGITUD' && captura === 'CM' && (
+                                <span className="text-emerald-700"> · ÷ 100</span>
+                              )}
+                            </div>
+                          )}
                           {item.insumoCosto && (
                             <div className="text-[11px] text-emerald-900/80 bg-emerald-50/60 border border-emerald-100 rounded-lg px-3 py-1.5 flex flex-wrap gap-x-4 gap-y-0.5">
-                              <span>Compra: <b>{formatCurrency(item.insumoCosto.costo_compra, 'COP')}</b></span>
-                              <span>Pasada: <b>{formatCurrency(item.insumoCosto.pasada_unitaria, 'COP')}</b></span>
-                              <span>Costo real/und: <b>{formatCurrency(item.insumoCosto.costo_real, 'COP')}</b></span>
+                              <span>Compra ({unidadBase}): <b>{formatCurrency(item.insumoCosto.costo_compra, 'COP')}</b></span>
+                              <span>Pasada ({unidadBase}): <b>{formatCurrency(item.insumoCosto.pasada_unitaria, 'COP')}</b></span>
+                              <span>Costo real ({unidadVenta}): <b>{formatCurrency(costoRealVenta, 'COP')}</b></span>
+                              {esConversion && (
+                                <span className="text-emerald-700">
+                                  ({formatCurrency(costoRealBase, 'COP')} / {unidadBase})
+                                </span>
+                              )}
                               <span className="text-emerald-700">→ El precio de venta se escribe manualmente</span>
                             </div>
                           )}
@@ -2547,8 +2868,16 @@ export default function Cotizaciones() {
                           <div className="flex items-center justify-between gap-3 rounded-xl bg-yeikar-tertiary/40 border border-yeikar-secondary-light/10 px-3 py-2.5">
                             <div className="flex items-center gap-2.5 min-w-0">
                               {firstPhoto ? (
-                                <div className="w-10 h-10 rounded-lg overflow-hidden border border-stone-200 shrink-0 bg-stone-100">
+                                <div className="relative w-10 h-10 rounded-lg overflow-hidden border border-stone-200 shrink-0 bg-stone-100">
                                   <AdjuntoImagen adjunto={firstPhoto} alt={selectedProd.nombre} className="w-full h-full object-cover" />
+                                  {(selectedProd.fotos?.length ?? 0) > 1 && (
+                                    <span
+                                      className="absolute bottom-0 right-0 bg-yeikar-secondary/90 text-yeikar-tertiary text-[8px] font-mono font-bold px-1 leading-3 rounded-tl-md"
+                                      title={`${selectedProd.fotos?.length} fotos del producto`}
+                                    >
+                                      +{(selectedProd.fotos?.length ?? 0) - 1}
+                                    </span>
+                                  )}
                                 </div>
                               ) : (
                                 <div className="w-10 h-10 rounded-lg bg-yeikar-tertiary/60 border border-yeikar-secondary-light/10 flex items-center justify-center text-yeikar-secondary/60 shrink-0">
@@ -3078,6 +3407,25 @@ export default function Cotizaciones() {
                   </select>
                 </div>
 
+                {/* Fecha real del abono (a veces el cliente pagó ANTES) */}
+                {abonoActivo && (
+                  <div className="mt-2">
+                    <label className="block text-xs uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">
+                      Fecha del abono
+                    </label>
+                    <input
+                      type="date"
+                      value={fechaAdelanto}
+                      max={hoyVE()}
+                      onChange={(e) => setFechaAdelanto(e.target.value)}
+                      className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
+                    />
+                    <p className="mt-1 text-[11px] text-stone-500">
+                      Si el cliente abonó antes de este momento, pon la fecha real del pago; vacía = hoy.
+                    </p>
+                  </div>
+                )}
+
                 {/* Tasa SIEMPRE editable cuando la moneda de pago difiere de la cotización.
                     Nunca se deduce de la tasa congelada de la cotización. */}
                 {!monedasIguales && (
@@ -3290,7 +3638,16 @@ export default function Cotizaciones() {
                           producto_nombre: (d.tipo_item === 'REPARACION' || d.tipo_item === 'SERVICIO')
                           ? (d.descripcion_especifica || d.observaciones || (d.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
                           : (prod?.nombre ?? mat?.nombre ?? d.observaciones ?? 'Ítem a medida'),
-                          foto: prod?.fotos?.[0]?.url ?? null,
+                          // Unidad vendida del insumo + equivalencia en la
+                          // unidad del inventario (para la columna Cant.).
+                          unidad_captura: d.unidad_captura ?? null,
+                          cantidad_base: d.cantidad_base ?? null,
+                          unidad_medida: mat?.unidad_medida?.abreviatura
+                            ?? d.material?.unidad_medida?.abreviatura
+                            ?? null,
+                          // Fotos del producto en orden de subida (la primera
+                          // es la portada); el documento muestra hasta 2.
+                          fotos: (prod?.fotos ?? []).map((f) => f.url).filter((u): u is string => !!u),
                         };
                       }) ?? [],
                     }}
@@ -3718,6 +4075,7 @@ export default function Cotizaciones() {
         currencyCode={currencyCode}
         tasaCambio={tasaCambio}
         selectedMonedaId={selectedMonedaId}
+        productosEnRetrabajo={useMemo(() => new Set(piezasEnRetrabajo), [piezasEnRetrabajo])}
         title={
           productSelectorTargetIndex !== null
             ? productSelectorModo === 'reventa'
@@ -3782,13 +4140,34 @@ export default function Cotizaciones() {
                 El cotizador detecta la moneda sola: si no es COP, te pedirá la tasa del día al guardar.
               </p>
               <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Foto de referencia <span className="text-yeikar-neutral/40 font-normal">(opcional · se comprime sola)</span></label>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Fotos de referencia <span className="text-yeikar-neutral/40 font-normal">(opcional · se comprime sola)</span></label>
+                {fotosNp.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2.5 mb-2">
+                    {fotosNp.map((f, i) => (
+                      <div key={i} className="relative group">
+                        <img
+                          src={f.url}
+                          alt={`Vista previa ${i + 1}`}
+                          className={`w-16 h-16 rounded-lg object-cover border ${i === 0 ? 'border-yeikar-primary/60' : 'border-yeikar-secondary-light/15'}`}
+                        />
+                        {i === 0 && (
+                          <span className="absolute -top-1.5 -left-1.5 bg-yeikar-primary text-yeikar-neutral text-[8px] font-black px-1.5 py-0.5 rounded-full shadow">
+                            Principal
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          title="Quitar foto"
+                          onClick={() => quitarNpFoto(i)}
+                          className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
-                  {fotoNpPreview ? (
-                    <img src={fotoNpPreview} alt="Vista previa" className="w-16 h-16 rounded-lg object-cover border border-yeikar-secondary-light/15" />
-                  ) : (
-                    <span className="w-16 h-16 rounded-lg bg-yeikar-tertiary flex items-center justify-center text-yeikar-secondary/40 text-[10px] font-bold">SIN FOTO</span>
-                  )}
                   <div className="flex flex-col gap-2 flex-1">
                     <button
                       type="button"
@@ -3806,11 +4185,11 @@ export default function Cotizaciones() {
                     </button>
                   </div>
                   <input ref={npCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleNpFoto} />
-                  <input ref={npGalleryRef} type="file" accept="image/*" className="hidden" onChange={handleNpFoto} />
+                  <input ref={npGalleryRef} type="file" accept="image/*" multiple className="hidden" onChange={handleNpFoto} />
                 </div>
-                {fotoNp && (
-                  <button type="button" onClick={quitarNpFoto} className="mt-1.5 text-[10px] font-bold text-red-600 hover:underline">Quitar foto</button>
-                )}
+                <p className="text-[10px] text-yeikar-neutral/40 mt-1">
+                  Puedes subir varias: la primera es la principal y sale en la cotización; las demás se ven como vistas adicionales en la Hoja de Trabajo.
+                </p>
               </div>
               {errorForm && (
                 <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-xl px-3 py-2" role="alert">{errorForm}</p>

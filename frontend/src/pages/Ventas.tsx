@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react';
 import api from '../services/api';
 import { SearchInput, SearchSelect, ResponsiveDataTable, Button as UiButton, EmptyState, type DataColumn } from '../components/ui';
 import {
@@ -24,7 +24,7 @@ import {
 } from '../services/ventaService';
 import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, redondearCobroEntero, extractErrorMessage, fmtConversionTasa } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
-import { fmtFechaVE } from '../utils/fechas';
+import { fmtFechaVE, fmtFechaHoraVE, hoyVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -43,6 +43,18 @@ function Badge({ text, className }: { text: string; className: string }) {
       {text}
     </span>
   );
+}
+
+/** Diferencia en días entre la fecha del pago y el día en que se registró. */
+function diasRegistroTardio(fechaPago?: string | null, registradoEn?: string | null): number | null {
+  if (!fechaPago || !registradoEn) return null;
+  const a = String(fechaPago).slice(0, 10);
+  const b = String(registradoEn).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(a) || !/^\d{4}-\d{2}-\d{2}$/.test(b)) return null;
+  const da = new Date(`${a}T12:00:00`).getTime();
+  const db = new Date(`${b}T12:00:00`).getTime();
+  if (isNaN(da) || isNaN(db)) return null;
+  return Math.round((db - da) / 86400000);
 }
 
 // El catálogo manda para el nombre; si no hay producto ni material, el ítem
@@ -519,6 +531,16 @@ function ModalDetalle({
   const [monedaPagoId, setMonedaPagoId] = useState<number | null>(null);
   const [monto, setMonto] = useState('');
   const [metodoPago, setMetodoPago] = useState('EFECTIVO_USD');
+  // Fecha del cobro: a veces el abono ocurrió ANTES y se registra después.
+  // Por defecto hoy (VE); si el usuario la vacía, el servidor guarda hoy.
+  const [fechaPago, setFechaPago] = useState(hoyVE());
+  // ── Corrección de un cobro ya registrado (solo fecha/ref/observaciones) ──
+  const [pagoEditando, setPagoEditando] = useState<Pago | null>(null);
+  const [editFecha, setEditFecha] = useState(hoyVE());
+  const [editReferencia, setEditReferencia] = useState('');
+  const [editObservaciones, setEditObservaciones] = useState('');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editError, setEditError] = useState('');
   const [tasaNaturalInput, setTasaNaturalInput] = useState('');      // tasa en sentido natural: 1 [V] = X [P]
   const [referencia, setReferencia] = useState('');
   const [observaciones, setObservaciones] = useState('');
@@ -631,6 +653,10 @@ function ModalDetalle({
       setErrorPago('Ingresa un monto válido mayor a 0.');
       return;
     }
+    if (fechaPago && fechaPago > hoyVE()) {
+      setErrorPago('La fecha del pago no puede ser futura.');
+      return;
+    }
     if (!monedaPagoId) {
       setErrorPago('Selecciona la moneda del pago.');
       return;
@@ -644,7 +670,9 @@ function ModalDetalle({
       const payload: PagoCreate = {
         venta_id: detalle.id,
         moneda_id: monedaPagoId,
-        fecha: new Date().toISOString(),
+        // Fecha elegida (anclada a mediodía para que el día no se corra al
+        // mostrarla); si el campo quedó vacío, hoy en hora Venezuela.
+        fecha: `${fechaPago || hoyVE()}T12:00:00`,
         monto: parseFloat(monto),
         metodo_pago: metodoPago,
         referencia: referencia || undefined,
@@ -660,6 +688,7 @@ function ModalDetalle({
       setReferencia('');
       setObservaciones('');
       setTasaNaturalInput('');
+      setFechaPago(hoyVE());
       setReciboArchivo(null);
       if (reciboPreview) URL.revokeObjectURL(reciboPreview);
       setReciboPreview(null);
@@ -670,6 +699,43 @@ function ModalDetalle({
       setErrorPago(extractErrorMessage(err, 'Error al registrar el pago.'));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const abrirEdicionPago = (p: Pago) => {
+    setPagoEditando(p);
+    setEditFecha(p.fecha ? String(p.fecha).slice(0, 10) : hoyVE());
+    setEditReferencia(p.referencia ?? '');
+    setEditObservaciones(p.observaciones ?? '');
+    setEditError('');
+    setTab('cobranza');
+  };
+
+  const handleEditarPago = async () => {
+    if (!pagoEditando) return;
+    setEditError('');
+    if (!editFecha) {
+      setEditError('Selecciona la fecha del pago.');
+      return;
+    }
+    if (editFecha > hoyVE()) {
+      setEditError('La fecha del pago no puede ser futura.');
+      return;
+    }
+    try {
+      setEditSubmitting(true);
+      await pagoService.actualizar(pagoEditando.id, {
+        fecha: `${editFecha}T12:00:00`,
+        referencia: editReferencia.trim() || null,
+        observaciones: editObservaciones.trim() || null,
+      });
+      setPagoEditando(null);
+      await cargar();
+      onPagoRegistrado();
+    } catch (err: any) {
+      setEditError(extractErrorMessage(err, 'Error al corregir el cobro.'));
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -708,7 +774,9 @@ function ModalDetalle({
       const payload: DescuentoCreate = {
         venta_id: detalle.id,
         moneda_id: descMonedaId,
-        fecha: new Date().toISOString(),
+        // Mismo criterio que los cobros: día de negocio en hora VE, anclado
+        // a mediodía para que no se corra al mostrarlo.
+        fecha: `${hoyVE()}T12:00:00`,
         monto: parseFloat(descMonto),
         motivo: descMotivo || undefined,
         ...(necesitaTRMDesc ? { tasa_cambio: tasaAlmDesc } : {}),
@@ -759,11 +827,6 @@ function ModalDetalle({
   const porcentajePagado = detalle
     ? Math.min(100, (detalle.total_pagado / detalle.total) * 100)
     : 0;
-  const tasaVenta = Number(detalle?.tasa_cambio ?? 0);
-  // El "≈ COP" solo aporta cuando hay conversión real: moneda extranjera con
-  // TRM mayor a 1 y base registrada. Así no sale "≈ $ 0" en históricas 1:1.
-  const muestraEquivalente = (base: number) =>
-    !!detalle && detalle.moneda?.codigo !== 'COP' && tasaVenta > 1 && Number.isFinite(base) && base > 0;
 
   return (
     <motion.div
@@ -969,11 +1032,6 @@ function ModalDetalle({
                       </span>
                     )}
                   </p>
-                  {muestraEquivalente(Number(detalle.saldo_pendiente) * tasaVenta) && (
-                    <p className="mt-0.5 font-mono text-[11px] text-amber-700/70">
-                      ≈ {formatCurrency(Number(detalle.saldo_pendiente) * tasaVenta, 'COP')}
-                    </p>
-                  )}
                   <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-amber-100">
                     <div
                       className="h-full rounded-full bg-gradient-to-r from-yeikar-primary via-amber-400 to-emerald-500 transition-all duration-500"
@@ -988,9 +1046,6 @@ function ModalDetalle({
                 <div className="flex items-center justify-between border-t border-amber-100 bg-white/60 px-4 py-2.5 sm:px-5">
                   <span className="font-mono text-xs text-yeikar-neutral/55">
                     Total {detalle.moneda?.simbolo}{Number(detalle.total).toLocaleString('es-ES')}
-                    {muestraEquivalente(Number(detalle.total_en_moneda_base)) && (
-                      <> · ≈ {formatCurrency(Number(detalle.total_en_moneda_base), 'COP')}</>
-                    )}
                   </span>
                   <span className="font-mono text-xs font-bold text-emerald-700">
                     {detalle.pagos.length} cobro{detalle.pagos.length !== 1 ? 's' : ''}
@@ -1036,7 +1091,16 @@ function ModalDetalle({
                       </span>
                       <span className="shrink-0 text-right">
                         <span className="block font-mono text-xs text-yeikar-neutral/60">
-                          {d.cantidad} × {detalle.moneda?.simbolo}{Number(d.precio).toLocaleString('es-ES')}
+                          {d.cantidad}
+                          {d.tipo_item === 'INSUMO' && (
+                            d.unidad_captura === 'CM'
+                              ? ' cm'
+                              : d.unidad_captura === 'M'
+                                ? ' m'
+                                : d.material?.unidad_medida?.abreviatura
+                                  ? ` ${d.material.unidad_medida.abreviatura}`
+                                  : ''
+                          )} × {detalle.moneda?.simbolo}{Number(d.precio).toLocaleString('es-ES')}
                         </span>
                         <span className="block font-mono text-sm font-black text-yeikar-secondary">
                           {detalle.moneda?.simbolo}{(Number(d.cantidad) * Number(d.precio)).toLocaleString('es-ES')}
@@ -1077,53 +1141,143 @@ function ModalDetalle({
                       const conversion = esMultimoneda
                         ? fmtConversionTasa(Number(p.monto), Number(p.monto_en_moneda_base), p.tasa_cambio, pagoCodigo, ventaCodigo)
                         : null;
+                      const diasTardio = diasRegistroTardio(p.fecha, p.created_at);
                       return (
-                        <div
-                          key={p.id}
-                          className={`flex items-start justify-between gap-3 px-3.5 py-3 text-sm ${i % 2 ? 'bg-white' : 'bg-yeikar-tertiary/10'}`}
-                        >
-                          <span className="min-w-0">
-                            <span className="flex items-center gap-1.5 font-medium leading-snug text-yeikar-secondary">
-                              <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
-                              {metodoLabel}
-                              {p.referencia && (
-                                <span className="font-mono text-[11px] text-yeikar-neutral/50">#{p.referencia}</span>
+                        <Fragment key={p.id}>
+                          <div
+                            className={`flex items-start justify-between gap-3 px-3.5 py-3 text-sm ${i % 2 ? 'bg-white' : 'bg-yeikar-tertiary/10'}`}
+                          >
+                            <span className="min-w-0">
+                              <span className="flex items-center gap-1.5 font-medium leading-snug text-yeikar-secondary">
+                                <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" />
+                                {metodoLabel}
+                                {p.referencia && (
+                                  <span className="font-mono text-[11px] text-yeikar-neutral/50">#{p.referencia}</span>
+                                )}
+                              </span>
+                              <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
+                                Pago: {fmtFechaVE(p.fecha)}
+                              </span>
+                              <span className="mt-0.5 block font-mono text-[10px] text-yeikar-neutral/40">
+                                Registrado: {fmtFechaHoraVE(p.created_at)}
+                                {p.creador_nombre ? ` · ${p.creador_nombre}` : ''}
+                              </span>
+                              {diasTardio !== null && diasTardio > 0 && (
+                                <span className="mt-1 inline-block rounded-full bg-amber-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-800">
+                                  registrado {diasTardio} día{diasTardio !== 1 ? 's' : ''} después
+                                </span>
+                              )}
+                              {/* Recibos del cobro (comprobantes digitales) */}
+                              {p.recibos && p.recibos.length > 0 && (
+                                <span className="mt-1.5 flex gap-1.5">
+                                  {p.recibos.map((r) => (
+                                    <AdjuntoImagen
+                                      key={r.id}
+                                      adjunto={r}
+                                      alt="recibo"
+                                      className="h-10 w-10 rounded-lg border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
+                                      onClick={() => setReciboVer({ id: r.id, mime: r.mime })}
+                                    />
+                                  ))}
+                                </span>
+                              )}
+                              {esMultimoneda && (
+                                <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
+                                  {conversion ?? `≈ ${fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}`}
+                                </span>
                               )}
                             </span>
-                            <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
-                              {fmtFechaVE(p.fecha)}
+                            <span className="shrink-0 text-right">
+                              <span className="block font-mono text-sm font-black text-yeikar-secondary">
+                                {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
+                              </span>
+                              {p.moneda && (
+                                <span className="mt-1 inline-block rounded bg-emerald-100/70 px-1.5 py-0.5 font-mono text-[10px] font-black text-emerald-800">
+                                  {p.moneda.codigo}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => abrirEdicionPago(p)}
+                                className="mt-2 inline-flex items-center gap-1 rounded-lg px-1.5 py-1 font-mono text-[10px] font-bold text-yeikar-neutral/40 transition-colors hover:bg-amber-100 hover:text-amber-800"
+                                title="Corregir la fecha o la referencia de este cobro"
+                                aria-label="Corregir este cobro"
+                              >
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828 2.828L11.828 15.83a2 2 0 01-.707.464l-3.536 1.414 1.414-3.536A2 2 0 019 13z" />
+                                </svg>
+                                Corregir
+                              </button>
                             </span>
-                            {/* Recibos del cobro (comprobantes digitales) */}
-                            {p.recibos && p.recibos.length > 0 && (
-                              <span className="mt-1.5 flex gap-1.5">
-                                {p.recibos.map((r) => (
-                                  <AdjuntoImagen
-                                    key={r.id}
-                                    adjunto={r}
-                                    alt="recibo"
-                                    className="h-10 w-10 rounded-lg border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
-                                    onClick={() => setReciboVer({ id: r.id, mime: r.mime })}
+                          </div>
+
+                          {pagoEditando?.id === p.id && (
+                            <div className="border-t border-amber-200 bg-amber-50/70 px-3.5 py-3">
+                              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
+                                <div>
+                                  <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                                    Fecha en que se hizo el pago
+                                  </label>
+                                  <input
+                                    type="date"
+                                    value={editFecha}
+                                    max={hoyVE()}
+                                    onChange={(e) => setEditFecha(e.target.value)}
+                                    className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white font-mono"
                                   />
-                                ))}
-                              </span>
-                            )}
-                            {esMultimoneda && (
-                              <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
-                                {conversion ?? `≈ ${fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}`}
-                              </span>
-                            )}
-                          </span>
-                          <span className="shrink-0 text-right">
-                            <span className="block font-mono text-sm font-black text-yeikar-secondary">
-                              {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
-                            </span>
-                            {p.moneda && (
-                              <span className="mt-1 inline-block rounded bg-emerald-100/70 px-1.5 py-0.5 font-mono text-[10px] font-black text-emerald-800">
-                                {p.moneda.codigo}
-                              </span>
-                            )}
-                          </span>
-                        </div>
+                                  <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+                                    La fecha de registro original no se modifica.
+                                  </p>
+                                </div>
+                                <div>
+                                  <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                                    Referencia / Comprobante
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={editReferencia}
+                                    onChange={(e) => setEditReferencia(e.target.value)}
+                                    placeholder="N° de transacción, comprobante..."
+                                    className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
+                                  />
+                                </div>
+                              </div>
+                              <div className="mt-2">
+                                <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                                  Observaciones
+                                </label>
+                                <textarea
+                                  value={editObservaciones}
+                                  onChange={(e) => setEditObservaciones(e.target.value)}
+                                  rows={2}
+                                  className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white resize-none"
+                                />
+                              </div>
+                              {editError && (
+                                <p className="mt-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                                  {editError}
+                                </p>
+                              )}
+                              <div className="mt-3 flex gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => { setPagoEditando(null); setEditError(''); }}
+                                  className="flex-1 py-2 text-sm font-bold text-yeikar-neutral/70 border border-yeikar-secondary-light/20 rounded-xl hover:bg-yeikar-tertiary/20 transition-all"
+                                >
+                                  Cancelar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleEditarPago}
+                                  disabled={editSubmitting}
+                                  className="flex-1 py-2 text-sm font-black bg-yeikar-primary text-yeikar-neutral rounded-xl hover:bg-yeikar-primary/90 transition-all disabled:opacity-50"
+                                >
+                                  {editSubmitting ? 'Guardando...' : 'Guardar corrección'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </Fragment>
                       );
                     })}
                   </div>
@@ -1157,7 +1311,11 @@ function ModalDetalle({
                               <span className="mt-0.5 block break-words text-xs text-yeikar-neutral/60">{d.motivo}</span>
                             )}
                             <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
-                              {fmtFechaVE(d.fecha)} · sin movimiento de caja
+                              Descuento: {fmtFechaVE(d.fecha)} · sin movimiento de caja
+                            </span>
+                            <span className="mt-0.5 block font-mono text-[10px] text-yeikar-neutral/40">
+                              Registrado: {fmtFechaHoraVE(d.created_at)}
+                              {d.creador_nombre ? ` · ${d.creador_nombre}` : ''}
                             </span>
                             {esMulti && (
                               <span className="mt-0.5 block font-mono text-[11px] text-yeikar-neutral/50">
@@ -1203,7 +1361,7 @@ function ModalDetalle({
               {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && !showForm && !showDescForm && tab === 'cobranza' && (
                 <div className="sticky bottom-0 -mx-1 bg-gradient-to-t from-white via-white to-transparent px-1 pb-1 pt-4 space-y-2">
                   <button
-                    onClick={() => { setTab('cobranza'); setShowForm(true); }}
+                    onClick={() => { setTab('cobranza'); setFechaPago(hoyVE()); setPagoEditando(null); setShowForm(true); }}
                     className="w-full py-3 bg-gradient-to-r from-yeikar-primary to-amber-500 text-yeikar-neutral font-black font-headline rounded-2xl hover:brightness-105 active:scale-[0.99] transition-all shadow-lift"
                   >
                     + Registrar cobro
@@ -1341,17 +1499,40 @@ function ModalDetalle({
                         </div>
                       )}
 
-                      <div>
-                        <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
-                          Referencia / Comprobante (opcional)
-                        </label>
-                        <input
-                          type="text"
-                          value={referencia}
-                          onChange={(e) => setReferencia(e.target.value)}
-                          placeholder="N° de transacción, comprobante..."
-                          className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
-                        />
+                      {/* Fecha del pago (editable) + referencia */}
+                      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                            Fecha en que se hizo el pago
+                          </label>
+                          <input
+                            type="date"
+                            value={fechaPago}
+                            max={hoyVE()}
+                            onChange={(e) => setFechaPago(e.target.value)}
+                            className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white font-mono"
+                          />
+                          <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+                            Si el abono fue antes, pon la fecha real. La fecha de registro se guarda sola.
+                          </p>
+                          {fechaPago && fechaPago !== hoyVE() && (
+                            <p className="mt-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                              Se reflejará en caja y reportes del {fmtFechaVE(fechaPago)}.
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                            Referencia / Comprobante (opcional)
+                          </label>
+                          <input
+                            type="text"
+                            value={referencia}
+                            onChange={(e) => setReferencia(e.target.value)}
+                            placeholder="N° de transacción, comprobante..."
+                            className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
+                          />
+                        </div>
                       </div>
 
                       {/* Recibo digital (opcional) */}

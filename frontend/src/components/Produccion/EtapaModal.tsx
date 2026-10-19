@@ -14,14 +14,13 @@ import {
 import { productosService } from '../../services/productosService';
 import { getEmpleados } from '../../services/empleadosService';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
-import type { SobranteLamina } from '../../services/inventarioService';
 import api from '../../services/api';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import { SearchSelect } from '../ui';
 import CostosOrdenEnVivo from '../CostosOrdenEnVivo';
 import { useToast } from '../../context/ToastContext';
 import { fmtFechaVE } from '../../utils/fechas';
-import { esOrdenExhibicion, fmt, type Empleado, type Material } from './tipos';
+import { esOrdenExhibicion, esOrdenRetrabajo, fmt, type Empleado, type Material } from './tipos';
 import {
   dimensionalidad,
   volumenPieza,
@@ -52,7 +51,6 @@ interface EtapaModalProps {
   empleados: Empleado[];
   materiales: Material[];
   inventario: Record<number, number>;
-  sobrantesLamina: SobranteLamina[];
   referenciaReceta: ReferenciaReceta | null;
   loadingReceta: boolean;
   costosEnVivo: CostosEnVivoOrden | null;
@@ -63,7 +61,6 @@ interface EtapaModalProps {
   onCambiarEstado: (stageId: number, nuevoEstado: string) => void;
   onPasarAArea: (stage: EtapaProduccion) => void;
   onAbrirHojaTrabajo: () => void;
-  onRecargarSobrantes: () => void | Promise<void>;
 }
 
 /** Un material es laminar cuando tiene las dos dimensiones de lámina (cm). */
@@ -176,7 +173,6 @@ export default function EtapaModal({
   empleados,
   materiales,
   inventario,
-  sobrantesLamina,
   referenciaReceta,
   loadingReceta,
   costosEnVivo,
@@ -187,7 +183,6 @@ export default function EtapaModal({
   onCambiarEstado,
   onPasarAArea,
   onAbrirHojaTrabajo,
-  onRecargarSobrantes,
 }: EtapaModalProps) {
   const toast = useToast();
 
@@ -215,7 +210,6 @@ export default function EtapaModal({
     motivo_exceso: '',
     ancho_corte_cm: '',
     largo_corte_cm: '',
-    origen_sobrante_id: '' as '',
     es_lamina_completa: false,
     // Pedido general (madera y demás): entrega hoy, uso se confirma después.
     es_pedido: false,
@@ -238,7 +232,6 @@ export default function EtapaModal({
   const [consumoAConfirmar, setConsumoAConfirmar] = useState<ConsumoMaterial | null>(null);
   const [confirmarForm, setConfirmarForm] = useState({
     cantidad_cortes: '', largo_corte_cm: '', ancho_corte_cm: '',
-    sobrante_largo_cm: '', sobrante_ancho_cm: '',
   });
   // Confirmación MULTI-USO (madera y demás): varias líneas en un solo
   // confirmar; cada línea queda como un renglón aislado de costo.
@@ -271,24 +264,6 @@ export default function EtapaModal({
     (u) => u.activo !== false,
   );
   const esUnidadUsoConfirmar = unidadesUsoConfirmar.length > 0 && dimConfirmar === 'OTRA';
-
-  // Sobrantes del material actual que le caben al corte digitado (ambas orientaciones)
-  const sobrantesQueCaben = (() => {
-    if (!materialConsumo || !newConsumo.ancho_corte_cm || !newConsumo.largo_corte_cm) return [];
-    const lc = parseDecimalEs(newConsumo.largo_corte_cm);
-    const ac = parseDecimalEs(newConsumo.ancho_corte_cm);
-    if (!(lc > 0) || !(ac > 0)) return [];
-    const cabe = (L: number, A: number) =>
-      Math.max(
-        lc <= L && ac <= A ? Math.floor(L / lc) * Math.floor(A / ac) : 0,
-        ac <= L && lc <= A ? Math.floor(L / ac) * Math.floor(A / lc) : 0,
-      );
-    return sobrantesLamina
-      .filter((s) => s.material_id === materialConsumo.id)
-      .map((s) => ({ s, caben: cabe(parseFloat(String(s.largo_cm)), parseFloat(String(s.ancho_cm))) }))
-      .filter((x) => x.caben > 0)
-      .sort((a, b) => parseFloat(String(a.s.area_cm2)) - parseFloat(String(b.s.area_cm2)));
-  })();
 
   // ── Totales consolidados (una sola verdad, no dos cajas duplicadas) ──
   const { totalMateriales, totalManoObra, totalEtapa } = useMemo(() => {
@@ -404,7 +379,7 @@ export default function EtapaModal({
       cantidad: cantidadFaltante > 0 ? String(Math.round(cantidadFaltante * 100) / 100) : '',
       unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_cm: false,
       pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
-      ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
+      ancho_corte_cm: '', largo_corte_cm: '',
       es_lamina_completa: false, es_pedido: false,
     }));
     setMaterialSeleccionado(null);
@@ -456,10 +431,6 @@ export default function EtapaModal({
     }
     if (esLaminaCompleta && esCorte) {
       toast.error('Elige un modo: lámina completa (confirmar después) o corte directo.');
-      return;
-    }
-    if (esLaminaCompleta && newConsumo.origen_sobrante_id) {
-      toast.error('El pedido de lámina completa no sale de sobrantes: se pide lámina nueva del depósito.');
       return;
     }
     if (esCorte && (esPieza || esCm)) {
@@ -518,7 +489,6 @@ export default function EtapaModal({
             ? {
                 ancho_corte_cm: parseDecimalEs(newConsumo.ancho_corte_cm),
                 largo_corte_cm: parseDecimalEs(newConsumo.largo_corte_cm),
-                origen_sobrante_id: newConsumo.origen_sobrante_id ? parseInt(newConsumo.origen_sobrante_id) : undefined,
               }
             : esPieza
               ? {
@@ -549,11 +519,10 @@ export default function EtapaModal({
         material_id: '', cantidad: '', observaciones: '',
         unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_cm: false, pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
         componente: '', es_excedente: false, motivo_exceso: '',
-        ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
+        ancho_corte_cm: '', largo_corte_cm: '',
         es_lamina_completa: false, es_pedido: false, unidad_uso_id: '',
       }));
       setMaterialSearch('');
-      await onRecargarSobrantes();
       toast.success(
         esLaminaCompleta
           ? `Lámina completa pedida: ${fmtNum(cantidad!)} lámina(s) descontada(s) del depósito. Costo provisional — confirma el uso por cortes cuando el trabajador diga cuánto se usó.`
@@ -562,7 +531,7 @@ export default function EtapaModal({
             : esPedido
             ? `Pedido registrado: ${fmtNum(cantidadConvertida)} ${materialConsumo?.unidad_medida?.abreviatura || ''} entregadas (costo provisional). Confirma el uso cuando digan cuánto se usó — lo que sobre vuelve solo al depósito.`
             : esCorte
-            ? `Consumo por cortes registrado${newConsumo.origen_sobrante_id ? ' desde sobrante' : ' — lámina(s) descontada(s) y sobrante actualizado'}.`
+            ? 'Consumo por cortes registrado — lámina(s) descontada(s).'
             : stockAntes !== undefined
               ? `Material registrado. Descontado: ${fmtNum(cantidadConvertida)} ${materialConsumo?.unidad_medida?.abreviatura || ''} — Stock restante: ${fmtNum(Math.max(0, stockAntes - cantidadConvertida))}`
               : 'Material registrado y descontado del inventario.'
@@ -581,7 +550,6 @@ export default function EtapaModal({
     try {
       await produccionService.eliminarConsumo(consumoId);
       await onRefrescarEtapa();
-      await onRecargarSobrantes();
       toast.success('Consumo eliminado. El stock fue repuesto y el egreso revertido.');
     } catch (error: any) {
       toast.error(error.response?.data?.detail || 'Error al eliminar el consumo.');
@@ -643,12 +611,6 @@ export default function EtapaModal({
         cantidad_cortes: cortes,
         largo_corte_cm: lc,
         ancho_corte_cm: ac,
-        ...(confirmarForm.sobrante_largo_cm && confirmarForm.sobrante_ancho_cm
-          ? {
-              sobrante_largo_cm: parseDecimalEs(confirmarForm.sobrante_largo_cm),
-              sobrante_ancho_cm: parseDecimalEs(confirmarForm.sobrante_ancho_cm),
-            }
-          : {}),
       };
     }
     setConfirmarSubmitting(true);
@@ -656,9 +618,8 @@ export default function EtapaModal({
       await produccionService.confirmarConsumo(consumoAConfirmar.id, payload);
       setConsumoAConfirmar(null);
       await onRefrescarEtapa();
-      await onRecargarSobrantes();
       toast.success(esLaminar
-        ? 'Uso confirmado: costo real aplicado, láminas ajustadas y sobrante registrado.'
+        ? 'Uso confirmado: costo real aplicado y láminas ajustadas.'
         : usos.length > 1
           ? `Uso confirmado: ${usos.length} renglones de costo registrados; stock y egresos exactos.`
           : 'Uso confirmado: lo que sobró volvió al depósito y el costo quedó en lo usado.');
@@ -836,7 +797,11 @@ export default function EtapaModal({
               )}
               {!detalle && (
                 <span className="text-[11px] font-bold text-yeikar-primary-dark bg-yeikar-primary/10 border border-yeikar-primary/20 rounded-lg px-2 py-1">
-                  {esOrdenExhibicion(stage.orden) ? 'Pieza de exhibición' : 'Sin pedido'}
+                  {esOrdenRetrabajo(stage.orden)
+                    ? 'Retrabajo de pieza'
+                    : esOrdenExhibicion(stage.orden)
+                      ? 'Pieza de exhibición'
+                      : 'Sin pedido'}
                 </span>
               )}
               {pedidoInfo && (
@@ -871,6 +836,11 @@ export default function EtapaModal({
           {esOrdenExhibicion(stage.orden) && (
             <div className="bg-yeikar-primary/10 border border-yeikar-primary/25 rounded-xl px-3 py-2 text-[11px] font-bold text-yeikar-primary-dark">
               PIEZA DE EXHIBICIÓN — al finalizar la orden entra al stock del showroom con su costo real (no se genera envío a cliente).
+            </div>
+          )}
+          {esOrdenRetrabajo(stage.orden) && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-[11px] font-bold text-amber-800">
+              RETRABAJO{stage.orden?.observaciones ? ` — ${stage.orden.observaciones}` : ''} — al finalizar, la pieza vuelve al showroom con su costo anterior + el costo real del retoque (no crea stock nuevo; no toca receta ni precios del catálogo).
             </div>
           )}
         </div>
@@ -943,9 +913,11 @@ export default function EtapaModal({
                       <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-yeikar-neutral/40">
                         {pedidoInfo
                           ? `Pedido #${pedidoInfo.pedidoId} · pieza ${pedidoInfo.indice} de ${pedidoInfo.total}`
-                          : esOrdenExhibicion(stage.orden)
-                            ? 'Pieza de exhibición'
-                            : 'Producción sin pedido'}
+                          : esOrdenRetrabajo(stage.orden)
+                            ? 'Retrabajo de pieza'
+                            : esOrdenExhibicion(stage.orden)
+                              ? 'Pieza de exhibición'
+                              : 'Producción sin pedido'}
                         {' · '}Orden de producción #{stage.orden_produccion_id}
                       </p>
                       <h3 className="text-lg font-black font-headline text-yeikar-secondary leading-tight">{productoNombre}</h3>
@@ -1359,7 +1331,7 @@ export default function EtapaModal({
                                     // El material define el modo de captura: reset.
                                     unidad_captura: '', modo_pieza: false, modo_cm: false, pieza_cm: false,
                                     pieza_largo: '', pieza_ancho: '', pieza_espesor: '',
-                                    ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '',
+                                    ancho_corte_cm: '', largo_corte_cm: '',
                                     es_pedido: false,
                                     unidad_uso_id: '',
                                   }));
@@ -1682,7 +1654,7 @@ export default function EtapaModal({
                         </span>
                         <button
                           type="button"
-                          onClick={() => setNewConsumo(prev => ({ ...prev, es_lamina_completa: !prev.es_lamina_completa, ancho_corte_cm: '', largo_corte_cm: '', origen_sobrante_id: '' }))}
+                          onClick={() => setNewConsumo(prev => ({ ...prev, es_lamina_completa: !prev.es_lamina_completa, ancho_corte_cm: '', largo_corte_cm: '' }))}
                           className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-colors ${
                             newConsumo.es_lamina_completa
                               ? 'bg-amber-500 text-white border-amber-500'
@@ -1708,8 +1680,8 @@ export default function EtapaModal({
                         <p className="text-[10px] font-mono text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1">
                           Se descuenta(n) la(s) lámina(s) completa(s) del depósito ahora (costo provisional{' '}
                           {fmt(materialConsumo.costo_base)} c/u). Cuando el trabajador diga cuánto se usó,
-                          se confirma por cortes: el costo se ajusta al área real usada, se devuelven
-                          láminas sin abrir y el pedazo restante queda como sobrante reutilizable.
+                          se confirma por cortes: el costo se ajusta al área real usada y se devuelven
+                          láminas sin abrir.
                         </p>
                       ) : (
                         <>
@@ -1735,20 +1707,6 @@ export default function EtapaModal({
                               onChange={(e) => setNewConsumo(prev => ({ ...prev, largo_corte_cm: e.target.value }))}
                               className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
                             />
-                            {newConsumo.ancho_corte_cm && newConsumo.largo_corte_cm && (
-                              <select
-                                value={newConsumo.origen_sobrante_id}
-                                onChange={(e) => setNewConsumo(prev => ({ ...prev, origen_sobrante_id: e.target.value as '' }))}
-                                className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary sm:col-span-2"
-                              >
-                                <option value="">Lámina nueva del depósito</option>
-                                {sobrantesQueCaben.map(({ s, caben }) => (
-                                  <option key={s.id} value={s.id}>
-                                    Sobrante {s.largo_cm}×{s.ancho_cm} cm (caben {caben})
-                                  </option>
-                                ))}
-                              </select>
-                            )}
                           </div>
                           {newConsumo.ancho_corte_cm && newConsumo.largo_corte_cm && (() => {
                             const ac = parseDecimalEs(newConsumo.ancho_corte_cm);
@@ -1777,8 +1735,7 @@ export default function EtapaModal({
                                 {cantidad > 0 ? `${cantidad} corte(s) de ${ac}×${lc} cm ≈ ` : `Corte de ${ac}×${lc} cm — `}
                                 {laminasEquiv && <span className="font-bold">{laminasEquiv} lámina(s)</span>}
                                 {porLamina > 0 && <span> · caben {porLamina} por lámina</span>}
-                                {laminaNecesarias && !newConsumo.origen_sobrante_id && <span> · se abrirán {laminaNecesarias} lámina(s) nueva(s) y el resto queda como sobrante</span>}
-                                {newConsumo.origen_sobrante_id && <span> · sin descuento de láminas (sale del sobrante)</span>}
+                                {laminaNecesarias && <span> · se abrirán {laminaNecesarias} lámina(s) nueva(s)</span>}
                               </p>
                             );
                           })()}
@@ -1901,7 +1858,6 @@ export default function EtapaModal({
                                 onClick={() => {
                                   setConfirmarForm({
                                     cantidad_cortes: '', largo_corte_cm: '', ancho_corte_cm: '',
-                                    sobrante_largo_cm: '', sobrante_ancho_cm: '',
                                   });
                                   setUsos([lineaUsoVacia()]);
                                   setConsumoAConfirmar(c);
@@ -2589,7 +2545,7 @@ export default function EtapaModal({
                     </p>
                     {costoReal != null && (
                       <p className="text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1">
-                        Se cobra <b>${Math.round(costoReal).toLocaleString('es-CO')}</b> por lo usado. El pedazo que sobró queda guardado para otro mueble.
+                        Se cobra <b>${Math.round(costoReal).toLocaleString('es-CO')}</b> por lo usado.
                       </p>
                     )}
                   </div>
@@ -2598,27 +2554,6 @@ export default function EtapaModal({
                     Una pieza de {ac}×{lc} no cabe en la lámina de {L}×{A} cm. Revisa las medidas.
                   </p>
                 ) : null}
-                <details className="text-[10px] text-yeikar-neutral/60">
-                  <summary className="cursor-pointer font-semibold">¿El pedazo que sobró tiene otras medidas? (opcional)</summary>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Sobrante largo cm"
-                      value={confirmarForm.sobrante_largo_cm}
-                      onChange={(e) => setConfirmarForm(prev => ({ ...prev, sobrante_largo_cm: e.target.value }))}
-                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-lg p-2 focus:outline-none focus:border-yeikar-primary font-mono"
-                    />
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Sobrante ancho cm"
-                      value={confirmarForm.sobrante_ancho_cm}
-                      onChange={(e) => setConfirmarForm(prev => ({ ...prev, sobrante_ancho_cm: e.target.value }))}
-                      className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-lg p-2 focus:outline-none focus:border-yeikar-primary font-mono"
-                    />
-                  </div>
-                </details>
                 <div className="flex justify-end gap-2 pt-2">
                   <button
                     type="button"

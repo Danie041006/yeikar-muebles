@@ -144,64 +144,6 @@ def movimientos_producto(
 
 
 # =========================================================================
-# Sobrantes de láminas (retazos de materiales laminares)
-# =========================================================================
-
-@router.get("/sobrantes", response_model=List[schemas.SobranteLaminaResponse])
-def listar_sobrantes(
-    material_id: Optional[int] = Query(None),
-    estado: Optional[str] = Query(None, description="DISPONIBLE | CONSUMIDO | DESECHADO"),
-    ubicacion_id: Optional[int] = Query(None),
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
-):
-    """Lista los retazos (sobrantes) de materiales laminares."""
-    return service.obtener_sobrantes(db, material_id, estado, ubicacion_id)
-
-
-@router.post("/sobrantes", response_model=schemas.SobranteLaminaResponse, status_code=201)
-def crear_sobrante(
-    datos: schemas.SobranteLaminaCreate,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
-):
-    """Registra a mano un retazo (ej. pedazos que ya existen en el taller)."""
-    try:
-        return service.crear_sobrante(db, datos)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.put("/sobrantes/{sobrante_id}", response_model=schemas.SobranteLaminaResponse)
-def actualizar_sobrante(
-    sobrante_id: int,
-    datos: schemas.SobranteLaminaUpdate,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
-):
-    """Edita medidas/estado de un sobrante (ej. marcarlo DESECHADO)."""
-    try:
-        s = service.actualizar_sobrante(db, sobrante_id, datos)
-        if not s:
-            raise HTTPException(status_code=404, detail="El sobrante no existe.")
-        return s
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@router.delete("/sobrantes/{sobrante_id}", status_code=204)
-def eliminar_sobrante(
-    sobrante_id: int,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
-):
-    ok = service.eliminar_sobrante(db, sobrante_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="El sobrante no existe.")
-    return None
-
-
-# =========================================================================
 # Categorías de inventario (desglose en la UI)
 # =========================================================================
 

@@ -253,8 +253,9 @@ export default function Productos() {
     precio_venta_base: '',
     precio_costo_base: '',
   });
-  const [fotoArchivo, setFotoArchivo] = useState<File | null>(null);
-  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  // Fotos NUEVAS pendientes de subir (multicarga): la PRIMERA de la lista es
+  // la portada; las existentes se administran desde la galería del modal.
+  const [fotosNuevas, setFotosNuevas] = useState<{ file: File; url: string }[]>([]);
 
   // ── Importar estructura de costos pegada desde Excel ──
   const [showImportModal, setShowImportModal] = useState(false);
@@ -415,6 +416,29 @@ export default function Productos() {
     }
   };
 
+  // ── Fotos de referencia del producto (multicarga con previews) ──
+  const agregarFotosNuevas = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setFotosNuevas((prev) => [
+      ...prev,
+      ...Array.from(files).map((file) => ({ file, url: URL.createObjectURL(file) })),
+    ]);
+  };
+  const quitarFotoNueva = (idx: number) => {
+    setFotosNuevas((prev) => {
+      const copia = [...prev];
+      const [quitada] = copia.splice(idx, 1);
+      if (quitada) URL.revokeObjectURL(quitada.url);
+      return copia;
+    });
+  };
+  const limpiarFotosNuevas = () => {
+    setFotosNuevas((prev) => {
+      prev.forEach((f) => URL.revokeObjectURL(f.url));
+      return [];
+    });
+  };
+
   const handleProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!productForm.nombre || !productForm.tipo_producto_id) return;
@@ -450,14 +474,25 @@ export default function Productos() {
           });
         }
       }
-      // Foto de referencia (opcional): se sube y el servidor la optimiza
-      if (fotoArchivo) {
+      // Fotos de referencia (opcionales): se suben EN ORDEN de selección (la
+      // primera queda como portada) y el servidor las optimiza. Si una falla,
+      // no bloquea el guardado del producto: se avisa y sigue con las demás.
+      if (fotosNuevas.length > 0) {
         setSubiendoFoto(true);
-        await subirAdjunto(fotoArchivo, TIPO_ADJUNTO.PRODUCTO, productoId);
+        let fallidas = 0;
+        for (const foto of fotosNuevas) {
+          try {
+            await subirAdjunto(foto.file, TIPO_ADJUNTO.PRODUCTO, productoId);
+          } catch {
+            fallidas += 1;
+          }
+        }
+        if (fallidas > 0) {
+          toast.error(`El producto se guardó, pero no se pudieron subir ${fallidas} foto(s).`);
+        }
       }
+      limpiarFotosNuevas();
       setShowProductModal(false);
-      setFotoArchivo(null);
-      setFotoPreview(null);
       refreshData();
     } catch (error) {
       console.error('Error saving product:', error);
@@ -944,6 +979,7 @@ export default function Productos() {
         <button
           onClick={() => {
             setProductForm({ id: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo_producto_id: String(p.tipo_producto_id), descripcion: p.descripcion || '', ancho_base: String(p.ancho_base ?? ''), largo_base: String(p.largo_base ?? ''), alto_base: p.alto_base ? String(p.alto_base) : '', precio_venta_base: p.precio_venta_base != null ? String(p.precio_venta_base) : '', precio_costo_base: p.precio_costo_base != null ? String(p.precio_costo_base) : '' });
+            limpiarFotosNuevas();
             setShowProductModal(true);
           }}
           className="flex-1 flex items-center justify-center gap-1 bg-yeikar-tertiary/60 hover:bg-yeikar-tertiary text-yeikar-secondary px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-colors"
@@ -1068,6 +1104,7 @@ export default function Productos() {
           <button
             onClick={() => {
               setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '', largo_base: '', alto_base: '', precio_venta_base: '', precio_costo_base: '' });
+              limpiarFotosNuevas();
               setShowProductModal(true);
             }}
             className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm whitespace-nowrap"
@@ -1893,16 +1930,21 @@ export default function Productos() {
                 />
               </div>
 
-              {/* Foto de referencia (opcional) */}
+              {/* Fotos de referencia (opcionales): galería + multicarga */}
               <div>
                 <label className="block text-xs font-bold text-yeikar-neutral/55 mb-2">
-                  Foto de referencia del mueble (opcional)
+                  Fotos de referencia del mueble (opcional)
                 </label>
-                <div className="flex items-start gap-3">
-                  {/* Fotos existentes */}
-                  {(productForm.id ? productos.find((p) => p.id === productForm.id)?.fotos ?? [] : []).map((f) => (
+                <div className="flex flex-wrap items-start gap-3">
+                  {/* Fotos existentes (en orden de subida: la primera es la portada) */}
+                  {(productForm.id ? productos.find((p) => p.id === productForm.id)?.fotos ?? [] : []).map((f, i) => (
                     <div key={f.id} className="relative group">
-                      <img src={f.url} alt={`Foto de referencia de ${productForm.nombre || 'la pieza'}`} className="h-16 w-16 rounded-xl object-cover border border-yeikar-secondary-light/10" />
+                      <img src={f.url} alt={`Foto de referencia de ${productForm.nombre || 'la pieza'}`} className={`h-16 w-16 rounded-xl object-cover border ${i === 0 ? 'border-yeikar-primary/50' : 'border-yeikar-secondary-light/10'}`} />
+                      {i === 0 && (
+                        <span className="absolute -top-1.5 -left-1.5 bg-yeikar-primary text-yeikar-neutral text-[8px] font-black px-1.5 py-0.5 rounded-full shadow">
+                          Principal
+                        </span>
+                      )}
                       <button
                         type="button"
                         title="Quitar foto"
@@ -1916,37 +1958,52 @@ export default function Productos() {
                       </button>
                     </div>
                   ))}
-                  {/* Preview de la nueva foto */}
-                  {fotoPreview && (
-                    <img src={fotoPreview} alt="Vista previa de la nueva foto de referencia" className="h-16 w-16 rounded-xl object-cover border border-yeikar-primary/40" />
-                  )}
-                  {/* Selector de archivo */}
+                  {/* Preview de las fotos NUEVAS pendientes de subir */}
+                  {fotosNuevas.map((f, i) => (
+                    <div key={`nueva-${i}`} className="relative group">
+                      <img src={f.url} alt={`Vista previa ${i + 1} de la nueva foto de referencia`} className="h-16 w-16 rounded-xl object-cover border border-yeikar-primary/40" />
+                      <button
+                        type="button"
+                        title="Quitar de la subida"
+                        onClick={() => quitarFotoNueva(i)}
+                        className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  {/* Selector de archivo (varias a la vez) */}
                   <label className="flex items-center justify-center gap-1.5 h-16 px-3 rounded-xl border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-[11px] font-bold text-yeikar-neutral/50 transition-colors">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    {subiendoFoto ? 'Subiendo…' : 'Subir foto'}
+                    {subiendoFoto ? 'Subiendo…' : fotosNuevas.length > 0 ? `Subir ${fotosNuevas.length} foto${fotosNuevas.length > 1 ? 's' : ''}` : 'Subir foto'}
                     <input
                       type="file"
+                      multiple
                       accept="image/jpeg,image/png,image/webp,image/heic"
                       className="hidden"
                       onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (!f) return;
-                        setFotoArchivo(f);
-                        if (fotoPreview) URL.revokeObjectURL(fotoPreview);
-                        setFotoPreview(URL.createObjectURL(f));
+                        agregarFotosNuevas(e.target.files);
+                        e.target.value = '';
                       }}
                     />
                   </label>
                 </div>
                 <p className="text-[10px] text-yeikar-neutral/40 mt-1.5">
-                  La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
+                  Puedes subir varias fotos a la vez. La <b>primera</b> es la principal (sale en la cotización y la factura); las demás se ven como vistas adicionales en la Hoja de Trabajo. La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
                 </p>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowProductModal(false)} className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors">
+                <button
+                  type="button"
+                  onClick={() => {
+                    limpiarFotosNuevas();
+                    setShowProductModal(false);
+                  }}
+                  className="px-4 py-2 rounded-xl text-sm font-bold text-yeikar-neutral/60 hover:bg-yeikar-tertiary transition-colors"
+                >
                   Cancelar
                 </button>
                 <button type="submit" className="bg-yeikar-primary text-yeikar-neutral px-5 py-2 rounded-xl text-sm font-bold shadow-sm hover:shadow transition-all">

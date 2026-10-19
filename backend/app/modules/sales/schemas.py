@@ -12,6 +12,9 @@ from app.modules.adjuntos.schemas import AdjuntoInfo
 class DetalleVentaBase(BaseModel):
     cantidad: float = Field(..., gt=0)
     precio: float = Field(..., ge=0)
+    # Unidad vendida (cm/m³) y equivalencia en la unidad del inventario.
+    unidad_captura: Optional[str] = Field(None, pattern=r"^(M|CM)$")
+    cantidad_base: Optional[float] = Field(None, gt=0)
 
 class DetalleVentaCreate(DetalleVentaBase):
     venta_id: int
@@ -76,11 +79,25 @@ class PagoBase(BaseModel):
 class PagoCreate(PagoBase):
     venta_id: int
     moneda_id: int
+    # Fecha del cobro. Si se omite (o viene null), el servidor guarda HOY en
+    # hora Venezuela: a veces el abono ocurrió antes y el usuario la elige.
+    fecha: Optional[datetime] = None
     # Tasa de cambio respecto a la moneda base de la venta.
     # Debe indicarse cuando la moneda del pago difiere de la moneda de la venta.
     # Ej: si la venta es en COP y el pago es en USD, tasa_cambio = TRM del día (ej: 4200.0)
     # Si las monedas coinciden, se puede omitir (se asume 1.0).
     tasa_cambio: Optional[float] = Field(None, gt=0, description="TRM/tasa de conversión. Requerido si moneda_id difiere de la moneda de la venta.")
+
+class PagoUpdate(BaseModel):
+    """Corrección de un cobro ya registrado.
+
+    Solo se permite mover la fecha del pago (y ajustar referencia/observaciones):
+    monto, moneda, método y tasa mueven caja y saldo, así que no se editan aquí.
+    """
+    fecha: Optional[datetime] = None
+    referencia: Optional[str] = None
+    observaciones: Optional[str] = None
+
 
 class PagoResponse(PagoBase):
     id: int
@@ -88,6 +105,8 @@ class PagoResponse(PagoBase):
     moneda_id: int
     tasa_cambio: float
     monto_en_moneda_base: float
+    creado_por_id: Optional[int] = None
+    creador_nombre: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     moneda: Optional[MonedaResponse] = None

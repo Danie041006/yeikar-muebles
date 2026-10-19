@@ -171,14 +171,27 @@ def guardar_adjunto(
     return adj
 
 
-def listar_adjuntos(db: Session, entidad_tipo: str, entidad_id: int):
-    return (
+def listar_adjuntos(db: Session, entidad_tipo: str, entidad_id: int, orden: str = "desc"):
+    """Adjuntos de una entidad.
+
+    `orden="desc"` (default) = el más reciente primero: es la semántica que
+    usan los comprobantes (CRUDO/PAGO/GASTO/COMPRA), donde subir una foto
+    nueva la convierte en la visible (ej. `_foto_crudo`).
+
+    `orden="asc"` = primera subida primero: lo usan las fotos de PRODUCTO,
+    donde la primera foto es la PORTADA (cotización, tarjetas, Hoja de
+    Trabajo) y las nuevas se agregan como vistas adicionales.
+    """
+    q = (
         db.query(model.Adjunto)
         .options(joinedload(model.Adjunto.creador))
         .filter(model.Adjunto.entidad_tipo == entidad_tipo, model.Adjunto.entidad_id == entidad_id)
-        .order_by(model.Adjunto.id.desc())
-        .all()
     )
+    if orden == "asc":
+        q = q.order_by(model.Adjunto.id.asc())
+    else:
+        q = q.order_by(model.Adjunto.id.desc())
+    return q.all()
 
 
 def _info(adj: model.Adjunto, publico: bool) -> dict:
@@ -191,18 +204,18 @@ def _info(adj: model.Adjunto, publico: bool) -> dict:
     }
 
 
-def adjuntos_info(db: Session, entidad_tipo: str, entidad_id: int) -> list[AdjuntoInfo]:
+def adjuntos_info(db: Session, entidad_tipo: str, entidad_id: int, orden: str = "desc") -> list[AdjuntoInfo]:
     """Información de los adjuntos de una entidad (sin los bytes)."""
     publico = entidad_tipo in TIPOS_PUBLICOS
-    return [_info(a, publico) for a in listar_adjuntos(db, entidad_tipo, entidad_id)]
+    return [_info(a, publico) for a in listar_adjuntos(db, entidad_tipo, entidad_id, orden=orden)]
 
 
 def adjuntos_info_batch(
-    db: Session, entidad_tipo: str, entidad_ids: list[int]
+    db: Session, entidad_tipo: str, entidad_ids: list[int], orden: str = "desc"
 ) -> dict[int, list[AdjuntoInfo]]:
     """Información de adjuntos de MUCHAS entidades en UNA sola query (mismo
-    orden que adjuntos_info: id descendente). Evita el N+1 al serializar
-    listados (ej. fotos de cada producto en GET /producto/)."""
+    orden que adjuntos_info). Evita el N+1 al serializar listados (ej. fotos
+    de cada producto en GET /producto/)."""
     if not entidad_ids:
         return {}
     publico = entidad_tipo in TIPOS_PUBLICOS
@@ -212,7 +225,7 @@ def adjuntos_info_batch(
             model.Adjunto.entidad_tipo == entidad_tipo,
             model.Adjunto.entidad_id.in_(entidad_ids),
         )
-        .order_by(model.Adjunto.id.desc())
+        .order_by(model.Adjunto.id.asc() if orden == "asc" else model.Adjunto.id.desc())
         .all()
     )
     por_entidad: dict[int, list[AdjuntoInfo]] = {}

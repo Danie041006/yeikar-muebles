@@ -50,7 +50,7 @@ def listar_productos(
     # Fotos de toda la página en UNA query (evita el N+1 al serializar).
     if productos:
         fotos_por_producto = adjuntos_service.adjuntos_info_batch(
-            db, "PRODUCTO", [p.id for p in productos]
+            db, "PRODUCTO", [p.id for p in productos], orden="asc"
         )
         for p in productos:
             p.__dict__["_fotos_cache"] = fotos_por_producto.get(p.id, [])

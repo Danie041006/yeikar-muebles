@@ -38,6 +38,12 @@ class DetalleCotizacionBase(BaseModel):
     tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO|REPARACION|SERVICIO)$")
     cantidad: float = Field(gt=0)
     precio: float = Field(ge=0)
+    # Captura flexible de insumos (madera): la cantidad/precio van en la unidad
+    # vendida ('CM' o la base) y `cantidad_base` es la equivalencia en la
+    # unidad del inventario. El servicio recalcula `cantidad_base`; se acepta en
+    # el payload para que el frontend pueda mostrar la vista previa exacta.
+    unidad_captura: Optional[str] = Field(None, pattern=r"^(M|CM)$")
+    cantidad_base: Optional[float] = Field(None, gt=0)
     alto: Optional[float] = Field(None, ge=0)
     ancho: Optional[float] = Field(None, ge=0)
     largo: Optional[float] = Field(None, ge=0)
@@ -102,6 +108,10 @@ class CotizacionBase(BaseModel):
 
 class CotizacionCreate(CotizacionBase):
     cliente_id: int
+    # Fecha opcional: si no se envía (o viene null), el servicio guarda HOY en
+    # hora Venezuela (`hoy_ve`). El formulario la manda siempre; esto protege a
+    # scripts, modo offline y clientes viejos de crear cotizaciones sin fecha.
+    fecha: Optional[date] = None
     detalles: List[DetalleCotizacionCreate] = []
 
 class CotizacionUpdate(BaseModel):

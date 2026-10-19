@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { produccionService, OrdenProduccion, EtapaProduccion, Area, ReferenciaReceta, CostosEnVivoOrden } from '../services/produccionService';
-import { inventarioService, SobranteLamina } from '../services/inventarioService';
+import { inventarioService } from '../services/inventarioService';
 import api from '../services/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect } from '../components/ui';
 import DocumentoHojaTrabajo from '../components/Expediente/DocumentoHojaTrabajo';
 import EtapaModal from '../components/Produccion/EtapaModal';
-import { TRANSICIONES_ETAPA, esOrdenExhibicion, type Empleado, type Material } from '../components/Produccion/tipos';
+import { TRANSICIONES_ETAPA, esOrdenExhibicion, esOrdenRetrabajo, etiquetaOrden, type Empleado, type Material } from '../components/Produccion/tipos';
 import { useToast } from '../context/ToastContext';
 
 // (Empleado, Material, TRANSICIONES_ETAPA, fmt y esOrdenExhibicion viven en
@@ -118,7 +118,7 @@ function KanbanCard({ stage, pedidoInfo, onClick, onStatusChange, onPassToArea, 
             </span>
           ) : (
             <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40">
-              {esOrdenExhibicion(stage.orden) ? 'EXHIBICIÓN' : 'SIN PEDIDO'}
+              {etiquetaOrden(stage.orden)}
             </span>
           )}
           <span className="block text-[9px] font-mono text-yeikar-neutral/35">
@@ -167,7 +167,7 @@ function KanbanCard({ stage, pedidoInfo, onClick, onStatusChange, onPassToArea, 
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3l14 0 0 18-10-4-4 4z" />
             </svg>
             <span className="truncate max-w-[180px]">
-              {esOrdenExhibicion(stage.orden) ? 'EXHIBICIÓN' : 'SIN PEDIDO'}
+              {etiquetaOrden(stage.orden)}
             </span>
           </div>
         )}
@@ -272,20 +272,6 @@ export default function ProduccionKanban() {
   // Detail Modal Forms state (datos que consume el EtapaModal)
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [materiales, setMateriales] = useState<Material[]>([]);
-
-  // Sobrantes disponibles del material seleccionado (para origen del corte)
-  const [sobrantesLamina, setSobrantesLamina] = useState<SobranteLamina[]>([]);
-  const cargarSobrantes = useCallback(async () => {
-    try {
-      const data = await inventarioService.getSobrantes({ estado: 'DISPONIBLE' });
-      setSobrantesLamina(data);
-    } catch {
-      setSobrantesLamina([]);
-    }
-  }, []);
-  useEffect(() => {
-    cargarSobrantes();
-  }, [cargarSobrantes]);
 
   // Referencia receta
   const [referenciaReceta, setReferenciaReceta] = useState<ReferenciaReceta | null>(null);
@@ -573,8 +559,8 @@ export default function ProduccionKanban() {
   };
 
   // ── Refrescar la etapa abierta tras registrar/eliminar algo en el modal ──
-  // Recarga la etapa (con sus consumos/MO), los costos en vivo, el inventario,
-  // los sobrantes y el tablero completo.
+  // Recarga la etapa (con sus consumos/MO), los costos en vivo, el inventario
+  // y el tablero completo.
   const refrescarEtapa = async () => {
     if (!selectedStage) return;
     try {
@@ -585,7 +571,6 @@ export default function ProduccionKanban() {
     }
     setRefreshVivo(v => v + 1);
     await cargarInventario();
-    cargarSobrantes();
     fetchKanbanData();
   };
 
@@ -903,7 +888,6 @@ export default function ProduccionKanban() {
           empleados={empleados}
           materiales={materiales}
           inventario={inventario}
-          sobrantesLamina={sobrantesLamina}
           referenciaReceta={referenciaReceta}
           loadingReceta={loadingReceta}
           costosEnVivo={costosEnVivo}
@@ -914,7 +898,6 @@ export default function ProduccionKanban() {
           onCambiarEstado={handleStatusChange}
           onPasarAArea={openPasarModal}
           onAbrirHojaTrabajo={abrirHojaTrabajo}
-          onRecargarSobrantes={cargarSobrantes}
         />
       )}
 
@@ -1116,7 +1099,9 @@ export default function ProduccionKanban() {
         title="Finalizar orden de producción"
         message={(() => {
           const orden = ordenes.find((o) => o.id === confirmFinalizarId);
-          const base = orden && esOrdenExhibicion(orden)
+          const base = orden && esOrdenRetrabajo(orden)
+            ? `¿Finalizar el retrabajo #${confirmFinalizarId ?? ''}? Se calcularán los costos del retoque y la pieza volverá al showroom con su costo actualizado (costo anterior + retoque). No crea stock nuevo ni toca el precio del catálogo.`
+            : orden && esOrdenExhibicion(orden)
             ? `¿Finalizar la orden #${confirmFinalizarId ?? ''}? Se calcularán los costos y la pieza de EXHIBICIÓN entrará al stock del showroom (no se genera envío a cliente).`
             : `¿Estás seguro de finalizar la orden #${confirmFinalizarId ?? ''}? Esto calculará sus costos definitivos y la cerrará.`;
           // Checklist de piezas: AVISA antes de cerrar, no bloquea (el taller

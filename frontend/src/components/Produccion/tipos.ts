@@ -38,3 +38,12 @@ export const fmt = (n: number) =>
  *  showroom con su costo real; nunca se envía a un cliente. */
 export const esOrdenExhibicion = (orden?: OrdenProduccion | null) =>
   orden?.tipo === 'EXHIBICION' || (!orden?.detalle_pedido && !!orden?.producto?.es_exhibicion);
+
+/** La orden RETRABAJA una pieza de exhibición ya fabricada: al finalizar la
+ *  pieza vuelve al showroom con su costo X + el costo real del retoque. */
+export const esOrdenRetrabajo = (orden?: OrdenProduccion | null) =>
+  orden?.tipo === 'RETRABAJO';
+
+/** Etiqueta corta del destino de la orden (tarjetas del Kanban). */
+export const etiquetaOrden = (orden?: OrdenProduccion | null): string =>
+  esOrdenRetrabajo(orden) ? 'RETRABAJO' : esOrdenExhibicion(orden) ? 'EXHIBICIÓN' : 'SIN PEDIDO';

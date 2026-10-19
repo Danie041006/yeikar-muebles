@@ -8,9 +8,9 @@ import math
 import re
 import unicodedata
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
-from app.core.hora_ve import hoy_ve
+from app.core.hora_ve import ahora_ve, hoy_ve
 from app.modules.sales.model import Venta, DetalleVenta, Pago, DescuentoVenta
-from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, DescuentoCreate, DetalleVentaResponse
+from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, PagoUpdate, DescuentoCreate, DetalleVentaResponse
 from app.modules.orders.model import Pedido, DetallePedido
 from app.modules.clients.model import Client
 from app.modules.catalogos.model import Moneda
@@ -158,8 +158,19 @@ def crear_venta_desde_pedido(
             material_id = dp.material_id
             if costo_unit is None and material_id:
                 from app.modules.productos.model import Material
+                from app.modules.production.unidades import resolver_cantidad_consumo
                 mat = db.query(Material).filter(Material.id == material_id).first()
                 costo_unit = float(mat.costo_base) if mat else 0.0
+                # Si el pedido viejo no trae costo_total pero sí captura en cm,
+                # el fallback debe ser costo por cm (0,0001 m³), no por m³.
+                unidad = getattr(dp, "unidad_captura", None)
+                if mat and unidad:
+                    try:
+                        costo_unit = float(mat.costo_base) * float(
+                            resolver_cantidad_consumo(mat, 1, unidad)
+                        )
+                    except ValueError:
+                        pass
         elif costo_unit is None:
             if dp.producto and dp.producto.precio_costo_base is not None:
                 costo_unit = productos_service.convertir_a_moneda_base(
@@ -183,6 +194,8 @@ def crear_venta_desde_pedido(
             tipo_item=item_tipo,
             cantidad=dp.cantidad,
             precio=dp.precio,
+            unidad_captura=getattr(dp, "unidad_captura", None),
+            cantidad_base=getattr(dp, "cantidad_base", None),
             costo_unitario=costo_unit,
             porcentaje_ganancia=pct_ganancia,
             utilidad=0.0 if es_obsequio else round(float(dp.precio) - costo_unit_moneda, 2),
@@ -449,6 +462,20 @@ def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, us
     ))
 
 
+def _normalizar_fecha_pago(fecha: datetime | None) -> datetime:
+    """Fecha de negocio de un cobro, anclada a mediodía.
+
+    El usuario elige un DÍA (pudo cobrar antes y registrarlo después), no una
+    hora. Se guarda a las 12:00 para que el día no se corra al serializar en
+    una zona horaria distinta y para que el movimiento de caja (columna Date)
+    caiga siempre en la fecha correcta. Sin fecha → hoy en hora Venezuela.
+    """
+    base = fecha or ahora_ve()
+    if base.date() > hoy_ve():
+        raise ValueError("La fecha del pago no puede ser futura.")
+    return base.replace(hour=12, minute=0, second=0, microsecond=0)
+
+
 def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: Usuario | None = None):
     # 1. Obtener la venta con FOR UPDATE para serializar pagos concurrentes:
     #    dos abonos simultáneos no pueden validar el saldo al mismo tiempo.
@@ -515,16 +542,22 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
         )
 
     # 6. Crear el pago
+    fecha_pago = _normalizar_fecha_pago(esquema.fecha)
     db_pago = Pago(
         venta_id=esquema.venta_id,
         moneda_id=esquema.moneda_id,
-        fecha=esquema.fecha,
+        # Fecha del cobro elegida por el usuario; sin fecha → HOY en hora VE.
+        # `created_at` es el momento real del registro (auditoría): se fija
+        # desde Python para no depender de la zona horaria del PostgreSQL.
+        fecha=fecha_pago,
         monto=esquema.monto,
         tasa_cambio=tasa_cambio,
         monto_en_moneda_base=monto_en_moneda_base,
         metodo_pago=esquema.metodo_pago,
         referencia=esquema.referencia,
-        observaciones=esquema.observaciones
+        observaciones=esquema.observaciones,
+        creado_por_id=usuario.id if usuario is not None else None,
+        created_at=ahora_ve(),
     )
     db.add(db_pago)
     db.flush()
@@ -543,12 +576,88 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
         action="CREATE",
         entity_type="pago",
         entity_id=db_pago.id,
-        after={"venta_id": db_pago.venta_id, "monto": db_pago.monto, "metodo_pago": db_pago.metodo_pago},
+        after={
+            "venta_id": db_pago.venta_id,
+            "fecha": db_pago.fecha.isoformat(),
+            "monto": db_pago.monto,
+            "metodo_pago": db_pago.metodo_pago,
+        },
     )
 
     # commit=False: el llamador mantiene la transacción atómica (p.ej. conversión de cotización)
     if commit:
         db.commit()
+    db.refresh(db_pago)
+    return db_pago
+
+
+def actualizar_pago(
+    db: Session,
+    id_pago: int,
+    esquema: PagoUpdate,
+    usuario: Usuario | None = None,
+):
+    """Corrige la fecha/referencia/observaciones de un cobro ya registrado.
+
+    No toca monto, moneda, método ni tasa: esos campos mueven caja y saldo.
+    Si cambia la fecha, arrastra el movimiento de caja para que los reportes
+    y el arqueo sigan cuadrando con la fecha real del pago. La fecha de
+    registro (`created_at`) NUNCA se modifica: es la huella de auditoría.
+    """
+    db_pago = db.query(Pago).filter(Pago.id == id_pago).with_for_update().first()
+    if not db_pago:
+        return None
+
+    datos = esquema.model_dump(exclude_unset=True)
+    if not datos:
+        return db_pago
+    antes = {
+        "fecha": db_pago.fecha.isoformat() if db_pago.fecha else None,
+        "referencia": db_pago.referencia,
+        "observaciones": db_pago.observaciones,
+    }
+
+    if datos.get("fecha") is not None:
+        db_pago.fecha = _normalizar_fecha_pago(datos["fecha"])
+    if "referencia" in datos:
+        db_pago.referencia = datos["referencia"]
+    if "observaciones" in datos:
+        db_pago.observaciones = datos["observaciones"]
+
+    # Mantener el movimiento de caja alineado con la fecha y la referencia.
+    from app.modules.reports.model import MovimientoCaja
+    movimientos = (
+        db.query(MovimientoCaja)
+        .filter(MovimientoCaja.pago_id == db_pago.id)
+        .all()
+    )
+    for mov in movimientos:
+        if db_pago.fecha is not None:
+            mov.fecha = db_pago.fecha.date()
+        mov.referencia = f"Pago #{db_pago.id}" + (
+            f" · {db_pago.referencia}" if db_pago.referencia else ""
+        )
+
+    if usuario is not None:
+        venta = db.query(Venta).filter(Venta.id == db_pago.venta_id).first()
+        if venta is not None:
+            venta.actualizado_por_id = usuario.id
+
+    record_event(
+        db,
+        actor=usuario,
+        action="UPDATE",
+        entity_type="pago",
+        entity_id=db_pago.id,
+        before=antes,
+        after={
+            "fecha": db_pago.fecha.isoformat() if db_pago.fecha else None,
+            "referencia": db_pago.referencia,
+            "observaciones": db_pago.observaciones,
+        },
+    )
+
+    db.commit()
     db.refresh(db_pago)
     return db_pago
 
@@ -1230,7 +1339,12 @@ def _descontar_stock_materiales(db: Session, pedido: Pedido, db_venta: Venta, us
                 f"El material '{material.nombre}' no tiene stock registrado en inventario."
             )
 
-        cantidad_a_vender = Decimal(str(dp.cantidad))
+        # La venta/documento muestran la unidad vendida (p. ej. 1128 cm), pero
+        # el inventario SIEMPRE descuenta la equivalencia en su unidad base
+        # (0,1128 m³). Pedidos viejos sin `cantidad_base` conservan el
+        # comportamiento histórico: cantidad tal cual.
+        cantidad_base = getattr(dp, "cantidad_base", None)
+        cantidad_a_vender = Decimal(str(cantidad_base if cantidad_base is not None else dp.cantidad))
         disponible = sum(f.cantidad or Decimal("0") for f in filas)
         if disponible < cantidad_a_vender:
             raise ValueError(

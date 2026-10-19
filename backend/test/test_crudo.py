@@ -174,6 +174,7 @@ def test_produccion_crudo_consumo_y_finalizar_suma_stock(client, cleaner, db):
     assert float(stock_mat) == 7.0, f"Stock de material debió quedar 7, quedó {stock_mat}"
 
     # Finalizar la producción → suma stock al crudo.
+    _avanzar_crudo_a_produccion(client, prod["id"])
     r_fin = client.put(
         f"/api/v1/produccion/crudo-produccion/{prod['id']}/estado",
         json={"estado": "COMPLETADA", "observaciones": "lista"},
@@ -205,6 +206,7 @@ def test_asignar_crudo_descuenta_stock_sin_marcar_etapas(client, cleaner, db):
     }, headers=ADMIN_HEADERS)
     prod = r.json()
     cleaner.registrar("produccion_crudo", prod["id"])
+    _avanzar_crudo_a_produccion(client, prod["id"])
     client.put(f"/api/v1/produccion/crudo-produccion/{prod['id']}/estado",
                json={"estado": "COMPLETADA"}, headers=ADMIN_HEADERS)
 
@@ -259,6 +261,17 @@ def test_asignar_crudo_sin_stock_rechaza(client, cleaner):
 # ---------------------------------------------------------------------------
 # Mano de obra en producción de crudo
 # ---------------------------------------------------------------------------
+def _avanzar_crudo_a_produccion(client, prod_id):
+    """PENDIENTE → EN_PRODUCCION: la máquina de estados no deja saltar a
+    COMPLETADA desde PENDIENTE (flujo real: empezar → trabajar → completar)."""
+    r = client.put(
+        f"/api/v1/produccion/crudo-produccion/{prod_id}/estado",
+        json={"estado": "EN_PRODUCCION"}, headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, f"EN_PRODUCCION crudo → {r.status_code}: {r.text}"
+    return r.json()
+
+
 def _crear_produccion_crudo(client, cleaner, crudo_id, cantidad=1):
     r = client.post("/api/v1/produccion/crudo-produccion/", json={
         "crudo_id": crudo_id, "cantidad": cantidad,
@@ -266,6 +279,7 @@ def _crear_produccion_crudo(client, cleaner, crudo_id, cantidad=1):
     assert r.status_code == 201, f"crear producción → {r.status_code}: {r.text}"
     prod = r.json()
     cleaner.registrar("produccion_crudo", prod["id"])
+    _avanzar_crudo_a_produccion(client, prod["id"])
     return prod
 
 
@@ -395,6 +409,7 @@ def _producir_crudo(client, cleaner, db, crudo, material, cantidad_material, man
         assert r_mo.status_code == 201, f"MO crudo → {r_mo.status_code}: {r_mo.text}"
         cleaner.registrar("produccion_crudo_mano_obra", r_mo.json()["id"])
 
+    _avanzar_crudo_a_produccion(client, prod["id"])
     r_fin = client.put(
         f"/api/v1/produccion/crudo-produccion/{prod['id']}/estado",
         json={"estado": "COMPLETADA"}, headers=ADMIN_HEADERS,

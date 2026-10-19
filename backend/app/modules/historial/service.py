@@ -171,6 +171,13 @@ def _produccion_por_detalle(db: Session, pedido: Pedido) -> list[dict]:
             "tipo_item": det.tipo_item,
             "producto_nombre": _nombre_item(det),
             "cantidad": _f(det.cantidad),
+            "unidad_captura": getattr(det, "unidad_captura", None),
+            "cantidad_base": _f(getattr(det, "cantidad_base", None)),
+            "unidad_medida": (
+                det.material.unidad_medida.abreviatura
+                if getattr(det, "material", None) and det.material.unidad_medida
+                else None
+            ),
             "precio": _f(det.precio),
             "costo_unitario": _f(det.costo_unitario),
             "porcentaje_ganancia": _f(det.porcentaje_ganancia),
@@ -263,6 +270,7 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
             joinedload(Venta.detalles).joinedload(DetalleVenta.producto),
             joinedload(Venta.detalles).joinedload(DetalleVenta.material),
             joinedload(Venta.pagos).joinedload(Pago.moneda),
+            joinedload(Venta.pagos).joinedload(Pago.creador),
         )
         .filter(Venta.pedido_id == pedido_id)
         .first()
@@ -294,10 +302,13 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
     from app.modules.sales.model import DescuentoVenta
 
     pagos = []
-    for p in venta.pagos:
+    for p in sorted(venta.pagos, key=lambda x: (x.fecha, x.id)):
         pagos.append({
             "id": p.id,
             "fecha": _dt(p.fecha),
+            "created_at": _dt(p.created_at),
+            "creado_por_id": p.creado_por_id,
+            "creador_nombre": p.creador_nombre,
             "moneda": p.moneda.codigo if p.moneda else None,
             "monto": _f(p.monto),
             "tasa_cambio": _f(p.tasa_cambio),
@@ -310,11 +321,19 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
         })
 
     total_pagado = sum(float(p.monto_en_moneda_base) for p in venta.pagos)
-    descuentos_db = db.query(DescuentoVenta).filter(DescuentoVenta.venta_id == venta.id).all()
+    descuentos_db = (
+        db.query(DescuentoVenta)
+        .options(joinedload(DescuentoVenta.moneda), joinedload(DescuentoVenta.creador))
+        .filter(DescuentoVenta.venta_id == venta.id)
+        .all()
+    )
     descuentos = [
         {
             "id": d.id,
             "fecha": _dt(d.fecha),
+            "created_at": _dt(d.created_at),
+            "creado_por_id": d.creado_por_id,
+            "creador_nombre": d.creador_nombre,
             "moneda": d.moneda.codigo if d.moneda else None,
             "monto": _f(d.monto),
             "tasa_cambio": _f(d.tasa_cambio),
@@ -322,7 +341,7 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
             "motivo": d.motivo,
             "observaciones": d.observaciones,
         }
-        for d in descuentos_db
+        for d in sorted(descuentos_db, key=lambda x: (x.fecha, x.id))
     ]
     total_descontado = sum(float(d.monto_en_moneda_base) for d in descuentos_db)
     return {
@@ -551,6 +570,13 @@ def _serializar_cotizacion(db: Session, cotizacion: Cotizacion) -> dict:
                 "tipo_item": d.tipo_item,
                 "producto_nombre": _nombre_item(d),
                 "cantidad": _f(d.cantidad),
+                "unidad_captura": getattr(d, "unidad_captura", None),
+                "cantidad_base": _f(getattr(d, "cantidad_base", None)),
+                "unidad_medida": (
+                    d.material.unidad_medida.abreviatura
+                    if getattr(d, "material", None) and d.material.unidad_medida
+                    else None
+                ),
                 "precio": _f(d.precio),
                 "dimensiones": {
                     "alto": _f(d.alto),
@@ -563,8 +589,9 @@ def _serializar_cotizacion(db: Session, cotizacion: Cotizacion) -> dict:
                 "costo_total": _f(d.costo_total),
                 "observaciones": d.observaciones,
                 "receta_personalizada": d.receta_personalizada,
-                # Fotos de referencia del mueble (mismas que salen en el PDF de cotización)
-                "fotos": adjuntos_info(db, "PRODUCTO", d.producto_id),
+                # Fotos de referencia del mueble (mismas que salen en el PDF de
+                # cotización): orden de subida, la primera es la portada.
+                "fotos": adjuntos_info(db, "PRODUCTO", d.producto_id, orden="asc"),
             }
             for d in cotizacion.detalles
         ],

@@ -282,15 +282,21 @@ def crear_factura_desde_pedido(db: Session, esquema: FacturaCreate, commit: bool
     for dp, linea, subtotal_usd in lineas:
         # La línea copia el tipo del pedido: FABRICADO/REVENTA → producto;
         # INSUMO → material vendido suelto (producto_id es NULL).
+        descripcion = (
+            dp.producto.nombre if dp.producto
+            else (dp.material.nombre if dp.material else None)
+        ) or dp.descripcion_especifica or (dp.observaciones or "Servicio")
+        # La factura muestra la cantidad en la unidad vendida; se agrega la
+        # unidad al texto para que "1128" no se confunda con 1128 m³.
+        unidad_venta = getattr(dp, "unidad_captura", None)
+        if (dp.tipo_item or "FABRICADO") == "INSUMO" and unidad_venta:
+            descripcion = f"{descripcion} ({'cm' if unidad_venta == 'CM' else 'm'})"
         db.add(DetalleFactura(
             factura_id=db_factura.id,
             tipo_item=dp.tipo_item or "FABRICADO",
             producto_id=dp.producto_id,
             material_id=dp.material_id,
-            descripcion=(
-                dp.producto.nombre if dp.producto
-                else (dp.material.nombre if dp.material else None)
-            ) or dp.descripcion_especifica or (dp.observaciones or "Servicio"),
+            descripcion=descripcion,
             cantidad=float(dp.cantidad),
             precio_usd=linea.precio_usd,
             subtotal_usd=subtotal_usd,

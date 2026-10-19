@@ -64,8 +64,13 @@ class DetalleVenta(Base):
     producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=True)
     material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
     tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO
-    cantidad = Column(Numeric(10, 2), nullable=False)
+    cantidad = Column(Numeric(14, 4), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
+    # Captura flexible del insumo (copiada del pedido): la venta/documentos
+    # muestran la unidad vendida (cm/m³) y `cantidad_base` es la que descuenta
+    # inventario (p. ej. 1128 cm = 0,1128 m³).
+    unidad_captura = Column(String(4), nullable=True)  # 'M' | 'CM'
+    cantidad_base = Column(Numeric(14, 4), nullable=True)
     # Snapshot de costos al momento de facturar (para Control Interno de Ingresos)
     costo_unitario = Column(Numeric(15, 2), nullable=True)
     porcentaje_ganancia = Column(Numeric(5, 2), nullable=True)
@@ -142,12 +147,20 @@ class Pago(Base):
     metodo_pago = Column(String(50), nullable=False)
     referencia = Column(String(150), nullable=True)
     observaciones = Column(Text, nullable=True)
+    # Quién digitó el cobro. La fecha del pago (`fecha`) puede ser anterior;
+    # este campo y `created_at` conservan la trazabilidad del registro.
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     venta = relationship("Venta", back_populates="pagos")
     moneda = relationship("Moneda")
+    creador = relationship("Usuario", foreign_keys=[creado_por_id])
+
+    @property
+    def creador_nombre(self):
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
 
     @property
     def recibos(self):

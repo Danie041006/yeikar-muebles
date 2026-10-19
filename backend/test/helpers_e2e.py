@@ -206,7 +206,8 @@ def crear_cotizacion_multidetalle(client, cleaner, cliente_id, detalles, moneda_
 
 def convertir_cotizacion(client, cleaner, cot_id, detalles, adelanto=None,
                          moneda_adelanto_id=None, tasa_cambio_adelanto=None,
-                         metodo_pago=None, fecha_entrega_estimada=None):
+                         metodo_pago=None, fecha_entrega_estimada=None,
+                         fecha_adelanto=None):
     """Convierte la cotización en pedido (auto-crea la venta + adelanto).
     Registra pedido/detalles/venta/pagos en el cleaner. Devuelve (r, pedido)."""
     payload = {"detalles": detalles}
@@ -219,6 +220,9 @@ def convertir_cotizacion(client, cleaner, cot_id, detalles, adelanto=None,
             payload["moneda_adelanto_id"] = moneda_adelanto_id
         if tasa_cambio_adelanto is not None:
             payload["tasa_cambio_adelanto"] = tasa_cambio_adelanto
+        # Fecha real del abono (pudo ocurrir días antes de convertir).
+        if fecha_adelanto is not None:
+            payload["fecha_adelanto"] = fecha_adelanto
     r = client.post(f"/api/v1/pedido/convertir/{cot_id}", json=payload, headers=ADMIN_HEADERS)
     if r.status_code not in (200, 201):
         return r, None

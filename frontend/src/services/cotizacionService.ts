@@ -1,6 +1,7 @@
 import api from './api';
 import { Client } from './clienteService';
 import type { AdjuntoInfo } from './adjuntosService';
+import type { Material } from './productosService';
 import {
   actualizarOperacionLocal,
   borrarCache,
@@ -50,6 +51,12 @@ export interface QuoteDetail {
   tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   cantidad: number;
   precio: number;
+  /** Captura flexible de insumos: unidad vendida ('CM'/'M') y equivalencia
+   *  en la unidad del inventario (p. ej. 1128 cm → 0,1128 m³). */
+  unidad_captura?: 'M' | 'CM' | null;
+  cantidad_base?: number | null;
+  /** Material del renglón INSUMO (para mostrar su unidad base). */
+  material?: Material | null;
   alto?: number | null;
   ancho?: number | null;
   largo?: number | null;

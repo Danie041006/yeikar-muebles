@@ -32,6 +32,9 @@ export interface DetalleVenta {
   tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   cantidad: number;
   precio: number;
+  /** Unidad vendida y equivalencia en la unidad del inventario (insumos). */
+  unidad_captura?: 'M' | 'CM' | null;
+  cantidad_base?: number | null;
   costo_unitario?: number;
   utilidad?: number;
   /** Descripción del ítem cuando no hay producto ni material (a medida). */
@@ -47,6 +50,10 @@ export interface Pago {
   venta_id: number;
   moneda_id: number;
   fecha: string;
+  /** Momento en que se digitó el cobro (HORA VE, auditoría). */
+  created_at?: string | null;
+  creado_por_id?: number | null;
+  creador_nombre?: string | null;
   monto: number;
   tasa_cambio: number;
   monto_en_moneda_base: number;
@@ -157,13 +164,22 @@ export interface VentaCreate {
 export interface PagoCreate {
   venta_id: number;
   moneda_id: number;
-  fecha: string;
+  /** Fecha del cobro (el usuario puede elegir una pasada). Sin ella, el
+   * servidor guarda HOY en hora Venezuela. */
+  fecha?: string;
   monto: number;
   metodo_pago: string;
   referencia?: string;
   observaciones?: string;
   /** TRM / tasa de conversión. Requerido cuando moneda_id difiere de la moneda de la venta. */
   tasa_cambio?: number;
+}
+
+/** Corrección de un cobro ya registrado: solo fecha, referencia y observaciones. */
+export interface PagoUpdate {
+  fecha?: string;
+  referencia?: string | null;
+  observaciones?: string | null;
 }
 
 // ─── Descuento de cobro ───────────────────────────────────────────────────────
@@ -174,6 +190,10 @@ export interface Descuento {
   venta_id: number;
   moneda_id: number;
   fecha: string;
+  /** Momento en que se digitó el descuento (HORA VE, auditoría). */
+  created_at?: string | null;
+  creado_por_id?: number | null;
+  creador_nombre?: string | null;
   monto: number;
   tasa_cambio: number;
   monto_en_moneda_base: number;
@@ -278,6 +298,12 @@ export const pagoService = {
   /** Registrar un abono/pago */
   registrar: async (data: PagoCreate): Promise<Pago> => {
     const res = await api.post<Pago>('/pago/', data);
+    return res.data;
+  },
+
+  /** Corregir fecha/referencia/observaciones de un cobro ya registrado */
+  actualizar: async (id: number, data: PagoUpdate): Promise<Pago> => {
+    const res = await api.put<Pago>(`/pago/${id}`, data);
     return res.data;
   },
 };

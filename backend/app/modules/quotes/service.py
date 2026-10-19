@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from datetime import date
 from decimal import Decimal
@@ -182,6 +182,56 @@ def obtener_cotizaciones(
     _anotar_pedido(db, cotizaciones)
     return cotizaciones
 
+def _preparar_detalle_captura(db: Session, detalle: dict) -> dict:
+    """Normaliza la captura de un renglón INSUMO antes de guardarlo.
+
+    La cantidad y el precio del renglón viven en la unidad que ve el cliente
+    (p. ej. 1128 cm × 160 COP/cm). Para costos, stock y reportes se guarda
+    además `cantidad_base` en la unidad del inventario (0,1128 m³), aplicando
+    la misma regla del taller que usa Producción (`unidades.py`):
+      - material en m³ + captura 'CM' → cuenta del taller ÷ 10.000;
+      - material lineal (m) + captura 'CM' → ÷ 100.
+    El valor enviado por el cliente se ignora: el backend es la fuente de
+    verdad y recalcula la equivalencia.
+    """
+    tipo = detalle.get("tipo_item", "FABRICADO")
+    if tipo != "INSUMO":
+        detalle["unidad_captura"] = None
+        detalle["cantidad_base"] = None
+        return detalle
+
+    from app.modules.productos.model import Material
+    from app.modules.production.unidades import resolver_cantidad_consumo
+
+    material_id = detalle.get("material_id")
+    material = (
+        db.query(Material)
+        .options(joinedload(Material.unidad_medida))
+        .filter(Material.id == material_id)
+        .first()
+    )
+    if not material:
+        raise ValueError(f"El material con id {material_id} no existe.")
+
+    unidad = detalle.get("unidad_captura") or None
+    try:
+        cantidad_base = resolver_cantidad_consumo(
+            material, detalle.get("cantidad"), unidad
+        )
+    except ValueError as e:
+        raise ValueError(
+            f"Unidad de captura inválida para «{material.nombre}»: {e}"
+        ) from e
+
+    if cantidad_base <= 0:
+        raise ValueError(
+            f"La cantidad de «{material.nombre}» es demasiado pequeña: "
+            "no alcanza a 0,0001 de su unidad de inventario."
+        )
+    detalle["cantidad_base"] = float(cantidad_base)
+    return detalle
+
+
 def _validar_consistencia_detalles(moneda_id, total_estimado, detalles):
     """Defensa en profundidad: cuando la cotización es en moneda extranjera, los
     precios de los detalles deben estar expresados en esa moneda. Si la suma
@@ -265,9 +315,13 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
     datos = esquema.model_dump(exclude={"detalles"})
     detalles_datos = esquema.detalles
 
+    # Sin fecha (o null) se guarda HOY en hora Venezuela: la columna es NOT NULL
+    # por diseño y ningún cliente debe poder crear una cotización sin fecha.
+    datos["fecha"] = datos.get("fecha") or hoy_ve()
+
     if datos.get("moneda_id", MONEDA_BASE_ID) != MONEDA_BASE_ID:
         datos["tasa_cambio"] = _trm_cotizacion(
-            db, datos["moneda_id"], datos.get("fecha") or hoy_ve(), datos.get("tasa_cambio")
+            db, datos["moneda_id"], datos["fecha"], datos.get("tasa_cambio")
         )
         datos["total_en_moneda_base"] = float(datos.get("total_estimado", 0)) * float(datos["tasa_cambio"])
     else:
@@ -285,7 +339,7 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
     for det in detalles_datos:
         db_det = model.DetalleCotizacion(
             cotizacion_id=db_obj.id,
-            **det.model_dump()
+            **_preparar_detalle_captura(db, det.model_dump())
         )
         db.add(db_det)
 
@@ -332,7 +386,10 @@ def actualizar_cotizacion(
             model.DetalleCotizacion.cotizacion_id == db_obj.id
         ).delete(synchronize_session=False)
         for detalle in detalles_nuevos:
-            db.add(model.DetalleCotizacion(cotizacion_id=db_obj.id, **detalle))
+            db.add(model.DetalleCotizacion(
+                cotizacion_id=db_obj.id,
+                **_preparar_detalle_captura(db, detalle),
+            ))
     # Recalcular total_en_moneda_base si cambió total, moneda o tasa (antes quedaba stale)
     if "total_estimado" in datos or "moneda_id" in datos or "tasa_cambio" in datos:
         if db_obj.moneda_id == MONEDA_BASE_ID:

@@ -39,8 +39,12 @@ class DetallePedido(Base):
     producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=True)
     material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
     tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO
-    cantidad = Column(Numeric(10, 2), nullable=False)
+    cantidad = Column(Numeric(14, 4), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
+    # Captura flexible del insumo (se copia de la cotización): cantidad/precio
+    # en la unidad vendida y `cantidad_base` en la unidad del inventario.
+    unidad_captura = Column(String(4), nullable=True)  # 'M' | 'CM'
+    cantidad_base = Column(Numeric(14, 4), nullable=True)
     # Snapshot de costos al convertir cotización → pedido
     costo_unitario = Column(Numeric(15, 2), nullable=True)
     porcentaje_ganancia = Column(Numeric(5, 2), nullable=True)

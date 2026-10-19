@@ -1,29 +1,24 @@
 """
 laminas.py
 ==========
-Motor de cortes y sobrantes para materiales laminares (MDF, melamina,
-espuma, formica...).
+Motor de cortes para materiales laminares (MDF, melamina, espuma, formica...).
 
 Conceptos:
   - Un material es LAMINAR cuando tiene largo_cm y ancho_cm definidos
     (medidas de la lámina completa de compra, en cm).
   - Un CONTEO de cortes por lámina asume corte de guillotina y prueba las
     dos orientaciones del corte (80×130 cabe igual que 130×80).
-  - Al abrir una LÁMINA NUEVA para cortes, se descuentan láminas enteras
-    del inventario y el pedazo restante se registra como SOBRANTE con
-    dimensiones propuestas (editables por el operario antes de guardar).
-  - Un corte que le cabe a un SOBRANTE lo consume sin tocar el stock de
-    láminas: los sobrantes viven fuera de `inventario`.
+  - Al abrir LÁMINAS NUEVAS para cortes, se descuentan láminas enteras del
+    inventario; el costo del consumo es proporcional al área del corte.
+
+NOTA: el inventario de retazos ("sobrantes de lámina") fue RETIRADO del
+sistema por decisión del dueño: ya no se crean, ni se consumen, ni se
+reponen. Las tablas viejas quedan congeladas en la BD (sin uso).
 
 Todas las medidas son centímetros. El área es la fuente de verdad para el
-costo; las dimensiones del sobrante, para el reúso futuro.
+costo.
 """
 from decimal import Decimal, ROUND_CEILING, ROUND_DOWN, ROUND_HALF_UP
-import math
-
-# Un pedazo menor a esto (cm²) se considera inservible y el sobrante se
-# marca CONSUMIDO en vez de dejar retazos ridículos (10×10 cm).
-AREA_MINIMA_SOBRANTE_CM2 = Decimal("100")
 
 
 def dec(valor) -> Decimal:
@@ -60,36 +55,6 @@ def laminas_necesarias(cantidad_cortes, cortes_por_lamina: int) -> int:
         raise ValueError("El corte no cabe en la lámina del material.")
     n = dec(cantidad_cortes)
     return int((n / Decimal(cortes_por_lamina)).to_integral_value(rounding=ROUND_CEILING))
-
-
-def proponer_sobrante(largo_lamina, ancho_lamina, area_restante_cm2):
-    """
-    Propone el rectángulo utilizable más honesto para un área restante sobre
-    una lámina L×A. Mantiene una dimensión completa de la lámina cuando se
-    puede (el caso típico: cortes en tira a lo ancho). Redondea hacia abajo
-    para nunca prometer más material del que hay.
-
-    Devuelve (largo_cm, ancho_cm) o None si el área es despreciable.
-    """
-    area = dec(area_restante_cm2)
-    if area < AREA_MINIMA_SOBRANTE_CM2:
-        return None
-
-    L, A = dec(largo_lamina), dec(ancho_lamina)
-    candidatos = []
-    for fija, variable in ((L, A), (A, L)):
-        otro = (area / fija).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-        if otro >= 1 and otro <= variable:
-            candidatos.append((max(fija, otro), min(fija, otro)))
-    if candidatos:
-        # El que tenga la dimensión más chica más grande = más reutilizable.
-        largo, ancho = max(candidatos, key=lambda c: c[1])
-        return largo, ancho
-    # Fallback: cuadrado del lado del área disponible.
-    lado = Decimal(str(math.sqrt(float(area)))).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
-    if lado >= 1:
-        return lado, lado
-    return None
 
 
 def costo_por_corte(costo_base_lamina, area_corte_cm2, area_lamina_cm2) -> Decimal:

@@ -11,6 +11,16 @@
  * `fmtFechaVE` lo ancla al mediodía local para que el día nunca se corra.
  */
 
+/**
+ * Hoy en Venezuela como `YYYY-MM-DD` (para inputs `type="date"` y payloads).
+ * NO usar `new Date().toISOString()` para esto: es UTC y en Venezuela
+ * (UTC-4) después de las 8:00 pm la fecha ya saltó a mañana. `en-CA`
+ * formatea como YYYY-MM-DD y `America/Caracas` garantiza el día correcto.
+ */
+export function hoyVE(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Caracas' });
+}
+
 export function fmtFechaVE(
   v: string | Date | null | undefined,
   vacio = '—',
@@ -32,4 +42,50 @@ export function fmtFechaVE(
     month: '2-digit',
     year: 'numeric',
   });
+}
+
+/**
+ * Fecha + hora de un timestamp de negocio.
+ *
+ * El backend guarda los `created_at` como hora pared de Venezuela en columnas
+ * naive (ej. `2026-10-19T09:15:00`). Se leen los componentes del string tal
+ * cual, sin `new Date()`, para que un navegador en otra zona horaria no corra
+ * la hora. Si el valor trae zona (`Z` o `-04:00`), se respeta con `Date`.
+ */
+export function fmtFechaHoraVE(
+  v: string | Date | null | undefined,
+  vacio = '—',
+): string {
+  if (v === null || v === undefined || v === '') return vacio;
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return vacio;
+    const hh = String(v.getHours()).padStart(2, '0');
+    const mm = String(v.getMinutes()).padStart(2, '0');
+    return `${fmtFechaVE(v)} ${hh}:${mm}`;
+  }
+  const s = String(v).trim();
+  if (!s) return vacio;
+
+  // Si trae zona explícita (Z o -04:00), se interpreta con Date y se muestra
+  // en hora de Venezuela. El backend actual guarda naive (sin zona).
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return vacio;
+    return d.toLocaleString('es-VE', {
+      timeZone: 'America/Caracas',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  }
+
+  // Timestamp naive: se muestran los componentes tal cual (ya son hora VE).
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+
+  // Solo fecha (`YYYY-MM-DD`) u otro formato: delega en fmtFechaVE.
+  return fmtFechaVE(s, vacio);
 }

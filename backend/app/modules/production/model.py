@@ -17,9 +17,15 @@ from app.modules.orders.model import DetallePedido
 # EXHIBICION → pieza de showroom (producto es_exhibicion): al finalizar entra
 #   al stock de la ubicación EXHIBICIÓN con su costo real; nunca hay envío.
 # STOCK → fabricación sin pedido de un producto del catálogo (destino manual).
+# RETRABAJO → retoque de una pieza de exhibición YA fabricada y en stock
+#   (recolor, retapizado, ajustes…): al crear sale del showroom (apartada),
+#   el taller trabaja como cualquier orden y al finalizar la pieza VUELVE al
+#   stock con su costo X + el costo real del retoque (no crea stock nuevo,
+#   no toca receta ni precio del catálogo).
 TIPO_PEDIDO = "PEDIDO"
 TIPO_EXHIBICION = "EXHIBICION"
 TIPO_STOCK = "STOCK"
+TIPO_RETRABAJO = "RETRABAJO"
 TIPOS_ORDEN = (TIPO_PEDIDO, TIPO_EXHIBICION, TIPO_STOCK)
 
 
@@ -33,6 +39,20 @@ class OrdenProduccion(Base):
     # producto_id solo se usa en órdenes sin pedido (tipo STOCK/EXHIBICION):
     # dice qué mueble se está fabricando sin depender de un detalle de pedido.
     producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Pieza de inventario sobre la que se hace el RETRABAJO: la fila de
+    # `producto_inventario` que SALIÓ del showroom al abrir la orden y a la que
+    # la pieza vuelve (con su costo actualizado) al finalizar. Solo las órdenes
+    # tipo RETRABAJO la usan.
+    producto_inventario_id = Column(
+        BigInteger,
+        ForeignKey("producto_inventario.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Motivo/contexto libre de la orden: el retrabajo guarda aquí qué se cambia
+    # y para quién ("cambio de color para la Sra. X"). La Hoja de Trabajo y el
+    # Kanban lo muestran. Los demás tipos la dejan NULL.
+    observaciones = Column(Text, nullable=True)
     # Pedidos/órdenes de exhibición se fabrican igual (mismas etapas, consumos
     # y mano de obra); solo cambia el destino al finalizar. `tipo` hace
     # explícito ese destino (es_stock queda como alias heredado de STOCK).
@@ -59,6 +79,8 @@ class OrdenProduccion(Base):
 
     detalle_pedido = relationship("DetallePedido")
     producto = relationship("Producto", foreign_keys=[producto_id])
+    # Fila de inventario de la pieza retrabajada (solo tipo RETRABAJO).
+    producto_inventario = relationship("ProductoInventario")
     etapas = relationship("EtapaProduccion", back_populates="orden", cascade="all, delete-orphan")
     costo = relationship("CostoProduccion", back_populates="orden", uselist=False, cascade="all, delete-orphan")
     # Checklist de piezas del mueble (un juego = varias piezas): se
@@ -155,8 +177,8 @@ class ConsumoMaterial(Base):
     # --- Confirmación de uso de láminas ---
     # Modo "lámina completa": se piden N láminas enteras (SALIDA inmediata,
     # costo provisional) y quedan PENDIENTE hasta que el trabajador dice cuánto
-    # se usó (confirmación por cortes recalcula costo real, ajusta láminas y
-    # genera el sobrante). Default CONFIRMADO = flujo inmediato tradicional.
+    # se usó (confirmación por cortes recalcula costo real y ajusta láminas).
+    # Default CONFIRMADO = flujo inmediato tradicional.
     estado = Column(String(20), nullable=False, server_default="CONFIRMADO", default="CONFIRMADO", index=True)
     # --- Pedido de material (entrega hoy, uso real después) ---
     # `cantidad` = lo que se USÓ (costo final); `cantidad_pedida` conserva lo
@@ -170,7 +192,8 @@ class ConsumoMaterial(Base):
     # corte (no el precio de la lámina completa).
     ancho_corte_cm = Column(Numeric(10, 2), nullable=True)
     largo_corte_cm = Column(Numeric(10, 2), nullable=True)
-    # Sobrante del que salieron los cortes (None = láminas nuevas del depósito).
+    # RETIRADO: sobrante del que salieron los cortes (columna congelada; los
+    # sobrantes de lámina ya no existen — los cortes salen de láminas nuevas).
     origen_sobrante_id = Column(BigInteger, ForeignKey("sobrante_lamina.id", ondelete="SET NULL"), nullable=True, index=True)
     # Láminas enteras descontadas del inventario (para reversa exacta).
     laminas_consumidas = Column(Numeric(12, 2), nullable=True)
@@ -455,6 +478,7 @@ class ProduccionCrudoConsumo(Base):
     # --- Consumo por CORTE (materiales laminares), igual que ConsumoMaterial ---
     ancho_corte_cm = Column(Numeric(10, 2), nullable=True)
     largo_corte_cm = Column(Numeric(10, 2), nullable=True)
+    # RETIRADO: columna congelada (los sobrantes de lámina ya no existen).
     origen_sobrante_id = Column(BigInteger, ForeignKey("sobrante_lamina.id", ondelete="SET NULL"), nullable=True, index=True)
     laminas_consumidas = Column(Numeric(12, 2), nullable=True)
     # --- Captura flexible de madera, igual que ConsumoMaterial ---

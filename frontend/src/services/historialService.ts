@@ -26,6 +26,9 @@ export interface DetalleCotizacionExp {
   tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   producto_nombre?: string | null;
   cantidad: number;
+  unidad_captura?: 'M' | 'CM' | null;
+  cantidad_base?: number | null;
+  unidad_medida?: string | null;
   precio: number;
   dimensiones?: Dimensiones;
   costo_materiales?: number | null;
@@ -129,6 +132,9 @@ export interface DetallePedidoExp {
   tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   producto_nombre?: string | null;
   cantidad: number;
+  unidad_captura?: 'M' | 'CM' | null;
+  cantidad_base?: number | null;
+  unidad_medida?: string | null;
   precio: number;
   costo_unitario?: number | null;
   porcentaje_ganancia?: number | null;
@@ -143,6 +149,10 @@ export interface DetallePedidoExp {
 export interface PagoExp {
   id: number;
   fecha: string;
+  /** Momento en que se digitó el cobro (HORA VE, auditoría). */
+  created_at?: string | null;
+  creado_por_id?: number | null;
+  creador_nombre?: string | null;
   moneda?: string | null;
   monto: number;
   tasa_cambio?: number | null;

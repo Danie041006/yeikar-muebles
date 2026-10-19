@@ -63,28 +63,14 @@ export default function EstadoDia() {
     {
       key: 'inicio',
       header: 'Inicio',
-      render: (s) => (
-        <span className="font-mono">
-          {fmtMoneda(s.saldo_inicial, s.moneda_codigo)}
-          <span className="block text-[10px] font-normal text-yeikar-neutral/40">
-            ≈ {formatCurrency(s.saldo_inicial_cop, 'COP')}
-          </span>
-        </span>
-      ),
+      render: (s) => <span className="font-mono">{fmtMoneda(s.saldo_inicial, s.moneda_codigo)}</span>,
       mobileLabel: 'Inicio',
       align: 'right',
     },
     {
       key: 'final',
       header: 'Final',
-      render: (s) => (
-        <span className="font-mono font-bold">
-          {fmtMoneda(s.saldo_final, s.moneda_codigo)}
-          <span className="block text-[10px] font-normal text-yeikar-neutral/40">
-            ≈ {formatCurrency(s.saldo_final_cop, 'COP')}
-          </span>
-        </span>
-      ),
+      render: (s) => <span className="font-mono font-bold">{fmtMoneda(s.saldo_final, s.moneda_codigo)}</span>,
       mobileLabel: 'Final',
       align: 'right',
     },
@@ -126,14 +112,7 @@ export default function EstadoDia() {
     {
       key: 'moneda',
       header: `Monto (${vista})`,
-      render: (m) => (
-        <span className="font-mono">
-          {fmtMoneda(m.monto, m.moneda_codigo)}
-          <span className="block text-[10px] font-normal text-yeikar-neutral/40">
-            ≈ {formatCurrency(m.monto_cop, 'COP')}
-          </span>
-        </span>
-      ),
+      render: (m) => <span className="font-mono">{fmtMoneda(m.monto, m.moneda_codigo)}</span>,
       mobileLabel: 'Monto',
       align: 'right',
     },
@@ -260,7 +239,7 @@ export default function EstadoDia() {
               <h3 className="font-headline font-black text-yeikar-secondary text-sm uppercase tracking-wider mb-1">
                 Saldos por cuenta en {nombreMoneda(vista)} ({data.saldos_por_cuenta.length})
               </h3>
-              <p className="text-[11px] text-yeikar-neutral/40 mb-3">Valor nativo · ≈ referencia en COP</p>
+              <p className="text-[11px] text-yeikar-neutral/40 mb-3">Valor nativo de cada cuenta</p>
               {data.saldos_por_cuenta.length === 0 ? (
                 <p className="text-sm text-yeikar-neutral/40">Sin saldos en {nombreMoneda(vista)} este día.</p>
               ) : (

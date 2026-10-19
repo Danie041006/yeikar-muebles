@@ -1,6 +1,6 @@
 import React from 'react';
 import { formatCurrency } from '../../utils/format';
-import { fmtFechaVE } from '../../utils/fechas';
+import { fmtFechaVE, fmtFechaHoraVE } from '../../utils/fechas';
 import { accionVerbo } from '../../utils/auditoria';
 import BadgeEstado from '../BadgeEstado';
 import AdjuntoImagen from '../AdjuntoImagen';
@@ -39,6 +39,12 @@ const fmtFecha = (v?: string | null) => fmtFechaVE(v);
 const fmtFechaHora = (v?: string | null) =>
   v ? new Date(v).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 const dinero = (n?: number | null, moneda?: string | null) => formatCurrency(Number(n || 0), moneda || undefined);
+const unidadDetalle = (d: {
+  unidad_captura?: 'M' | 'CM' | null;
+  unidad_medida?: string | null;
+}) => (d.unidad_captura === 'CM' ? 'cm' : d.unidad_captura === 'M' ? 'm' : (d.unidad_medida || ''));
+const cantidadDetalle = (d: { cantidad: number }) =>
+  Number(d.cantidad).toLocaleString('es-CO', { maximumFractionDigits: 4 });
 
 // ─────────────────────────────────────────────────────────────────────────
 // Estructura: tarjetas por etapa de la cadena
@@ -113,7 +119,9 @@ function SeccionCotizacion({ cot }: { cot?: CotizacionExp | null }) {
               <td className={`${tablaTd} whitespace-normal font-semibold`}>
                 {d.producto_nombre || d.observaciones || (d.producto_id ? `Producto #${d.producto_id}` : 'Ítem a medida')}
               </td>
-              <td className={`${tablaTd} text-right`}>{d.cantidad}</td>
+              <td className={`${tablaTd} text-right`}>
+                {cantidadDetalle(d)}{unidadDetalle(d) ? ` ${unidadDetalle(d)}` : ''}
+              </td>
               <td className={`${tablaTd} text-right`}>{dinero(d.precio, cot.moneda)}</td>
               <td className={`${tablaTd} text-right font-bold`}>{dinero(d.precio * d.cantidad, cot.moneda)}</td>
               <td className={`${tablaTd} whitespace-normal`}>
@@ -160,7 +168,9 @@ function SeccionPedido({ exp }: { exp: Expediente }) {
               <td className={`${tablaTd} whitespace-normal font-semibold`}>
                 {d.producto_nombre || d.descripcion_especifica || (d.producto_id ? `Producto #${d.producto_id}` : 'Ítem a medida')}
               </td>
-              <td className={`${tablaTd} text-right`}>{d.cantidad}</td>
+              <td className={`${tablaTd} text-right`}>
+                {cantidadDetalle(d)}{unidadDetalle(d) ? ` ${unidadDetalle(d)}` : ''}
+              </td>
               <td className={`${tablaTd} text-right`}>{dinero(d.precio)}</td>
               <td className={`${tablaTd} text-right`}>{dinero(d.costo_unitario)}</td>
               <td className={`${tablaTd} whitespace-normal max-w-[220px]`}>
@@ -318,16 +328,17 @@ function PagoRow({ pago }: { pago: PagoExp }) {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-mono font-bold text-sm text-emerald-700">+ {dinero(pago.monto, pago.moneda)}</span>
           <span className="text-[11px] text-yeikar-neutral/55 font-mono">
-            {pago.metodo_pago || '—'} · {fmtFechaHora(pago.fecha)}
+            {pago.metodo_pago || '—'} · Pago: {fmtFechaVE(pago.fecha)}
           </span>
-          {pago.moneda && pago.moneda !== 'COP' && (
-            <span className="text-[10px] font-mono bg-amber-50 text-amber-700 border border-amber-200 rounded px-1.5 py-0.5">
-              ≈ {dinero(pago.monto_en_moneda_base)} COP
-            </span>
-          )}
         </div>
         <BadgeEstado dominio="venta" estado="PAGADA" />
       </div>
+      <p className="text-[11px] text-yeikar-neutral/45 font-mono mt-1">
+        Registrado: {fmtFechaHoraVE(pago.created_at)}
+        {(pago.creador_nombre || pago.caja?.responsable)
+          ? ` · ${pago.creador_nombre || pago.caja?.responsable}`
+          : ''}
+      </p>
       {(pago.referencia || pago.observaciones) && (
         <p className="text-[11px] text-yeikar-neutral/55 mt-1">
           {pago.referencia}
@@ -359,11 +370,10 @@ function SeccionVenta({ venta }: { venta?: VentaExp | null }) {
   const pct = venta.total > 0 ? Math.min(100, (venta.total_pagado / venta.total) * 100) : 0;
   return (
     <CardSeccion titulo={`Venta #${venta.id} y cobros`} icono={<DollarSign className="w-4 h-4 text-white" />} estado={venta.estado} dominio="venta">
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
         <Fila k="Total" v={dinero(venta.total, venta.moneda)} mono />
         <Fila k="Pagado" v={dinero(venta.total_pagado, venta.moneda)} mono />
         <Fila k="Saldo pendiente" v={dinero(venta.saldo_pendiente, venta.moneda)} mono />
-        <Fila k="Equiv. COP" v={dinero(venta.total_en_moneda_base)} mono />
       </div>
       <div className="h-2 rounded-full bg-yeikar-tertiary overflow-hidden mb-4">
         <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-600 transition-all" style={{ width: `${pct}%` }} />
@@ -617,10 +627,15 @@ export default function ExpedienteFicha({
                     producto_nombre: d.producto_nombre,
                     cantidad: d.cantidad,
                     precio: d.precio,
+                    unidad_captura: d.unidad_captura ?? null,
+                    cantidad_base: d.cantidad_base ?? null,
+                    unidad_medida: d.unidad_medida ?? null,
                     ancho: d.dimensiones?.ancho,
                     largo: d.dimensiones?.largo,
                     observaciones: d.observaciones,
-                    foto: d.fotos?.[0]?.url ?? null,
+                    // Todas las fotos del producto en orden de subida: el
+                    // documento muestra hasta 2 (portada + segunda vista).
+                    fotos: (d.fotos ?? []).map((f) => f.url).filter((u): u is string => !!u),
                   })),
                 }}
                 rif={rif}
@@ -676,10 +691,15 @@ export default function ExpedienteFicha({
                     producto_nombre: d.producto_nombre,
                     cantidad: d.cantidad,
                     precio: d.precio,
+                    unidad_captura: d.unidad_captura ?? null,
+                    cantidad_base: d.cantidad_base ?? null,
+                    unidad_medida: d.unidad_medida ?? null,
                     ancho: d.dimensiones?.ancho,
                     largo: d.dimensiones?.largo,
                     observaciones: d.observaciones,
-                    foto: d.fotos?.[0]?.url ?? null,
+                    // Todas las fotos del producto en orden de subida: el
+                    // documento muestra hasta 2 (portada + segunda vista).
+                    fotos: (d.fotos ?? []).map((f) => f.url).filter((u): u is string => !!u),
                   })),
                 }}
                 rif={rif}

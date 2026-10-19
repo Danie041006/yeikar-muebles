@@ -7,13 +7,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 from app.modules.production.model import (
-    TIPO_PEDIDO, TIPO_EXHIBICION, TIPO_STOCK, TIPOS_ORDEN,
+    TIPO_PEDIDO, TIPO_EXHIBICION, TIPO_STOCK, TIPO_RETRABAJO, TIPOS_ORDEN,
     OrdenProduccion, EtapaProduccion, ConsumoMaterial, ManoObra, CostoProduccion,
     ProductoCrudoInventario, ProduccionCrudo, ProduccionCrudoConsumo,
     ProduccionCrudoManoObra, ProduccionCrudoUso, MovimientoCrudo, PiezaOrden,
 )
 from app.modules.production.schemas import (
-    OrdenProduccionCreate, OrdenProduccionUpdate,
+    OrdenProduccionCreate, OrdenProduccionUpdate, OrdenRetrabajoCreate,
     EtapaProduccionCreate, EtapaProduccionUpdate,
     ConsumoMaterialCreate, ConsumoConfirmarCreate, ManoObraCreate, CostoProduccionCreate,
     CrudoCreate, ProduccionCrudoCreate, ProduccionCrudoEstadoUpdate, CrudoConsumoCreate,
@@ -107,6 +107,9 @@ def _snapshot_orden(orden: OrdenProduccion) -> dict:
     return {
         "detalle_pedido_id": orden.detalle_pedido_id,
         "producto_id": orden.producto_id,
+        "producto_inventario_id": orden.producto_inventario_id,
+        "tipo": orden.tipo,
+        "observaciones": orden.observaciones,
         "es_stock": orden.es_stock,
         "estado": orden.estado,
         "fecha_inicio": orden.fecha_inicio,
@@ -302,6 +305,198 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuari
     db.commit()
     db.refresh(db_orden)
     return db_orden
+# ------------------------------------------------------------
+# Retrabajo de piezas de exhibición (tipo RETRABAJO)
+# ------------------------------------------------------------
+def _nombre_es_exhibicion(nombre: str | None) -> bool:
+    """True si el nombre de la ubicación es de exhibición (sin acentos)."""
+    import unicodedata
+
+    if not nombre:
+        return False
+    n = unicodedata.normalize("NFKD", nombre).encode("ascii", "ignore").decode().upper()
+    return "EXHIBIC" in n
+
+
+def _movimientos_retrabajo(db: Session, id_orden: int):
+    """Movimientos de inventario de producto ligados a una orden de retrabajo."""
+    from app.modules.inventory.model import MovimientoProductoInventario
+
+    return db.query(MovimientoProductoInventario).filter(
+        MovimientoProductoInventario.referencia_tipo == "PRODUCCION_RETRABAJO",
+        MovimientoProductoInventario.referencia_id == id_orden,
+    ).all()
+
+
+def _texto_retrabajo(esquema: "OrdenRetrabajoCreate") -> str | None:
+    """Motivo + para quién, en un solo texto para la orden y el kardex."""
+    motivo = (esquema.motivo or "").strip()
+    cliente = (esquema.cliente_nombre or "").strip()
+    if cliente:
+        motivo = f"{motivo} — para {cliente}" if motivo else f"para {cliente}"
+    return motivo or None
+
+
+def crear_orden_retrabajo(db: Session, esquema: OrdenRetrabajoCreate, usuario: Usuario | None = None):
+    """Abre una orden RETRABAJO sobre una pieza de exhibición EN STOCK.
+
+    La pieza sale del showroom (movimiento SALIDA: queda apartada, imposible de
+    vender) y el taller la trabaja como cualquier orden (etapas, consumos, MO).
+    Al finalizar, la pieza vuelve al stock con su costo X + el costo real del
+    retoque. Nada toca la receta ni el precio del catálogo del producto.
+    """
+    from app.modules.inventory.model import ProductoInventario
+    from app.modules.inventory.schemas import MovimientoProductoCreate
+    from app.modules.inventory.service import registrar_movimiento_producto
+
+    producto = db.query(Producto).filter(Producto.id == esquema.producto_id).first()
+    if not producto:
+        raise ValueError("El producto especificado no existe.")
+    if not producto.es_exhibicion:
+        raise ValueError(
+            "El retrabajo solo aplica a piezas de exhibición. "
+            "Para muebles de pedido usa el flujo normal de producción."
+        )
+
+    # Un solo retrabajo abierto por pieza: dos salidas simultáneas dejarían el
+    # inventario en negativo o pisarían el costo.
+    abierto = db.query(OrdenProduccion).filter(
+        OrdenProduccion.tipo == TIPO_RETRABAJO,
+        OrdenProduccion.producto_id == producto.id,
+        OrdenProduccion.estado.in_(["PENDIENTE", "EN_PRODUCCION", "PAUSADA"]),
+    ).first()
+    if abierto:
+        raise ValueError(
+            f"Ya hay un retrabajo abierto para esta pieza (orden #{abierto.id}). "
+            "Finalízalo o cancélalo antes de abrir otro."
+        )
+
+    # La pieza debe estar en stock (típicamente en EXHIBICIÓN): es la fila que
+    # sale y a la que vuelve. FOR UPDATE: serializa con ventas/entradas.
+    filas = db.query(ProductoInventario).filter(
+        ProductoInventario.producto_id == producto.id,
+        ProductoInventario.cantidad >= 1,
+    ).with_for_update().all()
+    if not filas:
+        raise ValueError(
+            "La pieza no tiene stock: no hay nada que retrabajar. "
+            "Las piezas sin entradas de inventario se venden directo."
+        )
+    fila = next((f for f in filas if _nombre_es_exhibicion(f.ubicacion.nombre if f.ubicacion else None)), None)
+    if fila is None:
+        # Sin ubicación de exhibición configurada: usar la primera fila con stock.
+        fila = filas[0]
+
+    texto = _texto_retrabajo(esquema)
+    db_orden = OrdenProduccion(
+        detalle_pedido_id=None,
+        producto_id=producto.id,
+        producto_inventario_id=fila.id,
+        tipo=TIPO_RETRABAJO,
+        es_stock=False,
+        estado="PENDIENTE",
+        observaciones=texto,
+        creado_por_id=usuario.id if usuario is not None else None,
+        actualizado_por_id=usuario.id if usuario is not None else None,
+    )
+    db.add(db_orden)
+    db.flush()
+
+    # SALIDA de la pieza: está en el taller, no en el showroom. Nadie puede
+    # venderla mientras dure el retrabajo (el stock es 0) y la venta natural
+    # la descuenta contra la fila al volver.
+    registrar_movimiento_producto(
+        db,
+        MovimientoProductoCreate(
+            producto_id=producto.id,
+            ubicacion_id=fila.ubicacion_id,
+            tipo="SALIDA",
+            cantidad=Decimal("1"),
+            # Guardar el costo vigente: si el retrabajo se cancela, la pieza
+            # vuelve con ESTE costo exacto (el original).
+            costo_unitario=fila.costo_promedio,
+            referencia_tipo="PRODUCCION_RETRABAJO",
+            referencia_id=db_orden.id,
+            cliente_nombre=(esquema.cliente_nombre or None),
+            observaciones=(
+                f"Retrabajo (orden #{db_orden.id})"
+                + (f": {texto}" if texto else "")
+            ),
+        ),
+        usuario=usuario,
+    )
+    db.flush()
+
+    record_event(db, actor=usuario, action="CREATE", entity_type="orden_produccion", entity_id=db_orden.id, after=_snapshot_orden(db_orden))
+    db.commit()
+    db.refresh(db_orden)
+    return db_orden
+
+
+def listar_retrabajos_abiertos(db: Session, usuario: Usuario | None = None):
+    """Retrabajos vivos (sin finalizar/cancelar), para marcar las piezas
+    'EN RETRABAJO' en el inventario de exhibición."""
+    query = _scope_orders(
+        db.query(OrdenProduccion).filter(
+            OrdenProduccion.tipo == TIPO_RETRABAJO,
+            OrdenProduccion.estado.in_(["PENDIENTE", "EN_PRODUCCION", "PAUSADA"]),
+        ),
+        usuario,
+    )
+    return [
+        {
+            "id": orden.id,
+            "producto_id": orden.producto_id,
+            "producto_inventario_id": orden.producto_inventario_id,
+            "estado": orden.estado,
+            "observaciones": orden.observaciones,
+        }
+        for orden in query.order_by(OrdenProduccion.id.desc()).all()
+    ]
+
+
+def _restaurar_pieza_retrabajo(
+    db: Session, db_orden: OrdenProduccion, usuario: Usuario | None = None, motivo: str = "cancelado"
+) -> None:
+    """Devuelve la pieza al showroom cuando el retrabajo se cancela/elimina
+    ANTES de finalizar: ENTRADA con el costo original que guardó la salida.
+    Idempotente: si ya existe una ENTRADA del retrabajo, no hace nada."""
+    if db_orden.tipo != TIPO_RETRABAJO or not db_orden.producto_inventario_id:
+        return
+    from app.modules.inventory.model import MovimientoProductoInventario, ProductoInventario
+    from app.modules.inventory.schemas import MovimientoProductoCreate
+    from app.modules.inventory.service import registrar_movimiento_producto
+
+    movs = _movimientos_retrabajo(db, db_orden.id)
+    salida = next((m for m in movs if m.tipo == "SALIDA"), None)
+    entrada = next((m for m in movs if m.tipo == "ENTRADA"), None)
+    if not salida or entrada:
+        return  # nunca salió o ya volvió (finalizado): nada que restaurar
+
+    fila = db.query(ProductoInventario).filter(
+        ProductoInventario.id == db_orden.producto_inventario_id
+    ).with_for_update().first()
+    if not fila:
+        return
+
+    registrar_movimiento_producto(
+        db,
+        MovimientoProductoCreate(
+            producto_id=db_orden.producto_id,
+            ubicacion_id=fila.ubicacion_id,
+            tipo="ENTRADA",
+            cantidad=Decimal("1"),
+            # El costo original que dejó la salida (o el vigente como respaldo).
+            costo_unitario=(salida.costo_unitario if salida.costo_unitario is not None else fila.costo_promedio),
+            referencia_tipo="PRODUCCION_RETRABAJO",
+            referencia_id=db_orden.id,
+            observaciones=f"Retrabajo {motivo} (orden #{db_orden.id}): la pieza vuelve al showroom",
+        ),
+        usuario=usuario,
+    )
+    db.flush()
+
+
 def actualizar_orden_produccion(db: Session, id_orden: int, esquema: OrdenProduccionUpdate, usuario: Usuario | None = None):
     db_orden = obtener_orden_produccion(db, id_orden, usuario)
     if not db_orden:
@@ -368,23 +563,27 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
         # Si el producto NO tiene estructura, se genera con lo que se usó de
         # verdad (consumos + mano de obra). Nunca pisa estructuras existentes
         # y un fallo aquí NO bloquea la finalización de la orden.
+        # RETRABAJO: se salta a propósito — la pieza es única y su retoque NO
+        # debe volverse la receta (ni el costo) del producto para futuras
+        # cotizaciones. Solo suma al costo de ESA pieza en inventario.
         estructura_generada = False
-        try:
-            from app.modules.production.estructura_generador import _producto_de_orden, generar_estructura_desde_orden
-            estructura_generada = generar_estructura_desde_orden(db, id_orden)
-            db.flush()
-            if estructura_generada:
-                # El costo recién generado se vuelve el costo base del producto
-                # (precio_costo_base / precio_venta_base): insumos + producción
-                # con su recargo + gastos por sección, como en el Excel.
-                producto_gen = _producto_de_orden(db, db_orden)
-                if producto_gen:
-                    from app.modules.productos.cost_service import actualizar_snapshot_desde_estructura
-                    actualizar_snapshot_desde_estructura(db, producto_gen.id)
-                    db.flush()
-        except Exception:  # noqa: BLE001
-            logger.exception("No se pudo generar la estructura de costes desde la orden #%s", id_orden)
-            estructura_generada = False
+        if db_orden.tipo != TIPO_RETRABAJO:
+            try:
+                from app.modules.production.estructura_generador import _producto_de_orden, generar_estructura_desde_orden
+                estructura_generada = generar_estructura_desde_orden(db, id_orden)
+                db.flush()
+                if estructura_generada:
+                    # El costo recién generado se vuelve el costo base del producto
+                    # (precio_costo_base / precio_venta_base): insumos + producción
+                    # con su recargo + gastos por sección, como en el Excel.
+                    producto_gen = _producto_de_orden(db, db_orden)
+                    if producto_gen:
+                        from app.modules.productos.cost_service import actualizar_snapshot_desde_estructura
+                        actualizar_snapshot_desde_estructura(db, producto_gen.id)
+                        db.flush()
+            except Exception:  # noqa: BLE001
+                logger.exception("No se pudo generar la estructura de costes desde la orden #%s", id_orden)
+                estructura_generada = False
 
         db.flush()
 
@@ -428,6 +627,64 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
                             referencia_tipo="PRODUCCION_EXHIBICION",
                             referencia_id=id_orden,
                             observaciones=f"Producción de pieza de exhibición (orden #{id_orden})",
+                        ),
+                        usuario=usuario,
+                    )
+                    db.flush()
+
+        # ── Retrabajo: al finalizar, la pieza VUELVE al showroom revaluada ──
+        # No crea stock nuevo: la pieza salió al abrir la orden y regresa con su
+        # costo X + Y (el costo real del retoque: materiales + mano de obra +
+        # gastos de sección). Idempotente por referencia (finalizar dos veces
+        # no suma dos veces). No toca receta ni precio del catálogo.
+        if db_orden.tipo == TIPO_RETRABAJO and db_orden.producto_inventario_id:
+            from app.modules.inventory.model import MovimientoProductoInventario, ProductoInventario
+            ya_contado = db.query(MovimientoProductoInventario.id).filter(
+                MovimientoProductoInventario.referencia_tipo == "PRODUCCION_RETRABAJO",
+                MovimientoProductoInventario.referencia_id == id_orden,
+                MovimientoProductoInventario.tipo == "ENTRADA",
+            ).first()
+            if not ya_contado:
+                fila = db.query(ProductoInventario).filter(
+                    ProductoInventario.id == db_orden.producto_inventario_id
+                ).with_for_update().first()
+                if fila:
+                    pieza = db.query(Producto).filter(Producto.id == db_orden.producto_id).first()
+                    costo_orden = obtener_costo_por_orden(db, id_orden)
+                    costo_retrabajo_cop = costo_orden.costo_total if costo_orden else Decimal("0")
+                    # El costo del retoque se calcula en moneda base (COP) y la
+                    # pieza guarda su costo en SU moneda: se convierte. Sin tasa
+                    # disponible se conserva el costo anterior (no se inventa).
+                    from app.modules.productos.service import convertir_desde_moneda_base
+                    costo_retoque = (
+                        convertir_desde_moneda_base(db, pieza.moneda_id, float(costo_retrabajo_cop))
+                        if pieza and costo_retrabajo_cop > 0
+                        else None
+                    )
+                    costo_retoque_d = _redondear2(Decimal(str(costo_retoque))) if costo_retoque is not None else None
+                    costo_anterior = Decimal(str(fila.costo_promedio)) if fila.costo_promedio is not None else None
+                    if costo_retoque_d is None:
+                        costo_nuevo = costo_anterior
+                    else:
+                        costo_nuevo = _redondear2((costo_anterior or Decimal("0")) + costo_retoque_d)
+                    from app.modules.inventory.service import registrar_movimiento_producto
+                    from app.modules.inventory.schemas import MovimientoProductoCreate
+                    registrar_movimiento_producto(
+                        db,
+                        MovimientoProductoCreate(
+                            producto_id=db_orden.producto_id,
+                            ubicacion_id=fila.ubicacion_id,
+                            tipo="ENTRADA",
+                            cantidad=Decimal("1"),
+                            costo_unitario=costo_nuevo if (costo_nuevo or Decimal("0")) > 0 else None,
+                            referencia_tipo="PRODUCCION_RETRABAJO",
+                            referencia_id=id_orden,
+                            observaciones=(
+                                f"Retrabajo finalizado (orden #{id_orden}): "
+                                f"costo {costo_anterior if costo_anterior is not None else '—'} "
+                                f"+ retoque {costo_retoque_d if costo_retoque_d is not None else '—'} "
+                                f"= {costo_nuevo if costo_nuevo is not None else '—'}"
+                            ),
                         ),
                         usuario=usuario,
                     )
@@ -477,6 +734,12 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
                     from app.modules.envios.service import crear_envio_automatico
                     crear_envio_automatico(db, pedido.id, usuario)
 
+    elif nuevo_estado == 'CANCELADA' and db_orden.tipo == TIPO_RETRABAJO:
+        # Retrabajo cancelado ANTES de finalizar: la pieza vuelve al showroom
+        # con su costo original (revierte la salida). Si ya se hubiera
+        # finalizado no se llegaría aquí: FINALIZADA es terminal.
+        _restaurar_pieza_retrabajo(db, db_orden, usuario, motivo="cancelado")
+
     if usuario is not None:
         db_orden.actualizado_por_id = usuario.id
     record_event(db, actor=usuario, action="STATE_CHANGE", entity_type="orden_produccion", entity_id=db_orden.id, before=antes, after=_snapshot_orden(db_orden))
@@ -502,6 +765,10 @@ def eliminar_orden_produccion(db: Session, id_orden: int, usuario: Usuario | Non
             "Elimine primero las etapas o mantenga la orden para preservar el "
             "historial de consumos, stock y gastos."
         )
+    # Retrabajo sin etapas: devolver la pieza al showroom ANTES de borrar la
+    # orden (si no, la salida quedaría huérfana y la pieza desaparecería).
+    if db_orden.tipo == TIPO_RETRABAJO:
+        _restaurar_pieza_retrabajo(db, db_orden, usuario, motivo="eliminado")
     record_event(db, actor=usuario, action="DELETE", entity_type="orden_produccion", entity_id=db_orden.id, before=_snapshot_orden(db_orden))
     db.delete(db_orden)
     db.commit()
@@ -816,6 +1083,12 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
     seccion = esquema.seccion or _normalizar_seccion(etapa.area.nombre if etapa.area else None)
     corte_activo = bool(getattr(esquema, "ancho_corte_cm", None) and getattr(esquema, "largo_corte_cm", None))
     lamina_completa = bool(getattr(esquema, "es_lamina_completa", False))
+    # Los sobrantes de lámina fueron retirados: un cliente viejo que mande
+    # "corte desde sobrante" se rechaza con mensaje claro (no se descuenta en
+    # silencio una lámina nueva).
+    if corte_activo:
+        from app.modules.inventory.cortes_service import rechazar_origen_sobrante
+        rechazar_origen_sobrante(getattr(esquema, "origen_sobrante_id", None))
     # 4.0.0b Pedido GENERAL (madera y demás: entrega hoy, uso después).
     # Híbrido: modos excluyentes — pedido general, lámina completa, corte o
     # uso directo. El pedido admite captura flexible (cm/por pieza) porque la
@@ -893,7 +1166,6 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         cantidad_pedida=(cantidad_base if pendiente and not pedido_abierto else None),
         ancho_corte_cm=Decimal(str(esquema.ancho_corte_cm)) if corte_activo else None,
         largo_corte_cm=Decimal(str(esquema.largo_corte_cm)) if corte_activo else None,
-        origen_sobrante_id=esquema.origen_sobrante_id if corte_activo else None,
         unidad_captura=esquema.unidad_captura,
         pieza_largo=Decimal(str(esquema.pieza_largo)) if esquema.pieza_largo else None,
         pieza_ancho=Decimal(str(esquema.pieza_ancho)) if esquema.pieza_ancho else None,
@@ -949,7 +1221,7 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
         costo_total_consumo = cantidad_base * material.costo_base
         detalle_corte = None
     elif corte_activo:
-        # Material laminar: consumo por CORTES con registro de sobrantes.
+        # Material laminar: consumo por CORTES (costo proporcional al área).
         # El movimiento de SALIDA (láminas enteras) lo genera consumir_por_cortes.
         from app.modules.inventory.cortes_service import consumir_por_cortes
         try:
@@ -962,10 +1234,6 @@ def crear_consumo_material(db: Session, esquema: ConsumoMaterialCreate, usuario:
                 ubicacion_id=ubicacion_id,
                 referencia_tipo="produccion",
                 referencia_id=db_consumo.id,
-                consumo_origen_tipo="produccion",
-                origen_sobrante_id=esquema.origen_sobrante_id,
-                sobrante_largo_cm=getattr(esquema, "sobrante_largo_cm", None),
-                sobrante_ancho_cm=getattr(esquema, "sobrante_ancho_cm", None),
             )
         except ValueError as e:
             db.rollback()
@@ -1079,15 +1347,15 @@ def confirmar_consumo_material(
     """Confirma el uso real de un material pedido (PENDIENTE → CONFIRMADO).
 
     Dos modos excluyentes (híbrido): láminas por cortes —recalcula el costo
-    proporcional al área, devuelve láminas sin abrir y genera el sobrante— o
-    general (madera y demás) por cantidad usada —lo que sobró vuelve solo al
-    depósito—. En ambos el gasto automático se ajusta al costo real.
+    proporcional al área y devuelve láminas sin abrir— o general (madera y
+    demás) por cantidad usada —lo que sobró vuelve solo al depósito—. En
+    ambos el gasto automático se ajusta al costo real.
 
     No bloquea nada: puede confirmarse aunque la etapa esté COMPLETADA o la
     orden FINALIZADA (el costo real se congela al confirmar).
     """
     from app.modules.inventory import laminas
-    from app.modules.inventory.model import Inventario, SobranteLamina
+    from app.modules.inventory.model import Inventario
 
     # FOR UPDATE: dos confirmaciones simultáneas se serializan; la segunda ve
     # CONFIRMADO y cae en el 400 en vez de duplicar stock/gastos.
@@ -1231,27 +1499,9 @@ def confirmar_consumo_material(
                           f"para cortes {lc.normalize()}×{ac.normalize()} cm",
         ))
 
-    # ── Sobrante del pedazo restante de la ÚLTIMA lámina abierta ──
-    cortes_en_ultima = cantidad_cortes - (n_laminas - 1) * por_lamina
-    area_restante = area_lamina - cortes_en_ultima * area_corte
-    dims = None
-    if esquema.sobrante_largo_cm and esquema.sobrante_ancho_cm:
-        dims = (Decimal(str(esquema.sobrante_largo_cm)), Decimal(str(esquema.sobrante_ancho_cm)))
-    else:
-        dims = laminas.proponer_sobrante(material.largo_cm, material.ancho_cm, area_restante)
-    if dims is not None:
-        db.add(SobranteLamina(
-            material_id=material.id,
-            ubicacion_id=ubicacion_id,
-            largo_cm=dims[0],
-            ancho_cm=dims[1],
-            estado="DISPONIBLE",
-            consumo_origen_id=db_consumo.id,
-            consumo_origen_tipo="produccion",
-            observaciones=f"Restante de confirmar consumo #{db_consumo.id}: "
-                          f"{cantidad_cortes.normalize()} corte(s) de {lc.normalize()}×{ac.normalize()} cm",
-        ))
-        db.flush()
+    # ── Sobrantes de lámina RETIRADOS: el pedazo restante de la última
+    #    lámina ya no se registra como retazo reutilizable (decisión del
+    #    dueño). El costo del consumo sigue siendo proporcional a los cortes.
 
     # ── Congelar el costo real y marcar CONFIRMADO ──
     # (cantidad_pedida conserva lo pedido: en pedidos viejos puede venir NULL
@@ -1741,7 +1991,7 @@ def eliminar_consumo_material(db: Session, id_consumo: int, usuario: Usuario | N
         # violaba el gt>0 del esquema y hacía imposible borrar el pedido.
         pass
     elif db_consumo.largo_corte_cm and db_consumo.ancho_corte_cm:
-        # Consumo por cortes: reversa exacta de láminas/sobrantes.
+        # Consumo por cortes: reversa de las láminas descontadas.
         from app.modules.inventory.cortes_service import revertir_consumo_por_cortes
         material_rev = db.query(Material).filter(Material.id == material_id).first()
         if material_rev is None:
@@ -1751,10 +2001,8 @@ def eliminar_consumo_material(db: Session, id_consumo: int, usuario: Usuario | N
             material=material_rev,
             consumo_id=db_consumo.id,
             consumo_tipo="produccion",
-            cantidad_cortes=cantidad,
             largo_corte_cm=db_consumo.largo_corte_cm,
             ancho_corte_cm=db_consumo.ancho_corte_cm,
-            origen_sobrante_id=db_consumo.origen_sobrante_id,
             laminas_consumidas=db_consumo.laminas_consumidas,
             ubicacion_id=ubicacion_id,
         )
@@ -2716,6 +2964,10 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
     unidad_uso = _resolver_unidad_uso(db, material, getattr(esquema, "unidad_uso_id", None))
     now = ahora_ve()
     corte_activo = bool(getattr(esquema, "ancho_corte_cm", None) and getattr(esquema, "largo_corte_cm", None))
+    # Los sobrantes de lámina fueron retirados (misma regla que en pedidos).
+    if corte_activo:
+        from app.modules.inventory.cortes_service import rechazar_origen_sobrante
+        rechazar_origen_sobrante(getattr(esquema, "origen_sobrante_id", None))
     # El motor de cortes no admite captura flexible (igual que producción por pedidos).
     if corte_activo and (
         esquema.unidad_captura or esquema.pieza_largo or esquema.pieza_ancho
@@ -2740,7 +2992,6 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
         seccion=esquema.seccion,
         ancho_corte_cm=Decimal(str(esquema.ancho_corte_cm)) if corte_activo else None,
         largo_corte_cm=Decimal(str(esquema.largo_corte_cm)) if corte_activo else None,
-        origen_sobrante_id=esquema.origen_sobrante_id if corte_activo else None,
         unidad_captura=esquema.unidad_captura,
         pieza_largo=Decimal(str(esquema.pieza_largo)) if esquema.pieza_largo else None,
         pieza_ancho=Decimal(str(esquema.pieza_ancho)) if esquema.pieza_ancho else None,
@@ -2770,10 +3021,6 @@ def registrar_consumo_crudo(db, produccion_id, esquema: CrudoConsumoCreate, usua
                 ubicacion_id=ubicacion_id,
                 referencia_tipo="produccion_crudo",
                 referencia_id=consumo.id,
-                consumo_origen_tipo="produccion_crudo",
-                origen_sobrante_id=esquema.origen_sobrante_id,
-                sobrante_largo_cm=getattr(esquema, "sobrante_largo_cm", None),
-                sobrante_ancho_cm=getattr(esquema, "sobrante_ancho_cm", None),
             )
         except ValueError as e:
             db.rollback()
@@ -2867,10 +3114,8 @@ def _revertir_produccion_crudo_cancelada(db, pc, usuario=None) -> None:
                 material=material,
                 consumo_id=consumo.id,
                 consumo_tipo="produccion_crudo",
-                cantidad_cortes=cantidad,
                 largo_corte_cm=consumo.largo_corte_cm,
                 ancho_corte_cm=consumo.ancho_corte_cm,
-                origen_sobrante_id=consumo.origen_sobrante_id,
                 laminas_consumidas=consumo.laminas_consumidas,
                 ubicacion_id=ubicacion_id,
             )

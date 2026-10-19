@@ -89,7 +89,6 @@ export interface ConsumoMaterial {
   // --- Consumo por corte (materiales laminares) ---
   ancho_corte_cm?: number | null;
   largo_corte_cm?: number | null;
-  origen_sobrante_id?: number | null;
   laminas_consumidas?: number | null;
   solicitante_empleado_id?: number;
   solicitante_nombre?: string;
@@ -178,8 +177,8 @@ export interface OrdenProduccion {
   detalle_pedido?:DetallePedidoBasico;
   producto?: ProductoBasico;
   es_stock?: boolean;
-  /** Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK. */
-  tipo?: 'PEDIDO' | 'EXHIBICION' | 'STOCK';
+  /** Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK | RETRABAJO. */
+  tipo?: 'PEDIDO' | 'EXHIBICION' | 'STOCK' | 'RETRABAJO';
   estado: 'PENDIENTE' | 'EN_PRODUCCION' | 'PAUSADA' | 'FINALIZADA' | 'CANCELADA';
   creado_por_id?: number | null;
   creador_nombre?: string | null;
@@ -188,6 +187,10 @@ export interface OrdenProduccion {
   ancho?: number;
   largo?: number;
   alto?: number;
+  /** RETRABAJO: fila de inventario (pieza del showroom) que se retrabaja. */
+  producto_inventario_id?: number | null;
+  /** Motivo/contexto libre (el retrabajo guarda qué se cambia y para quién). */
+  observaciones?: string | null;
   etapas: EtapaProduccion[];
   /** Checklist de piezas del mueble (auto-detectado de la descripción). */
   piezas?: PiezaOrden[];
@@ -196,6 +199,15 @@ export interface OrdenProduccion {
   estructura_generada?: boolean | null;
   // Detalle del producto (opcional, para visualización)
   producto_nombre?: string;
+}
+
+/** Retrabajo vivo sobre una pieza de exhibición (para marcar EN RETRABAJO). */
+export interface RetrabajoAbierto {
+  id: number;
+  producto_id: number | null;
+  producto_inventario_id: number | null;
+  estado: 'PENDIENTE' | 'EN_PRODUCCION' | 'PAUSADA';
+  observaciones: string | null;
 }
 
 export interface ProductoBasico {
@@ -325,6 +337,25 @@ export const produccionService = {
   }): Promise<OrdenProduccion> => {
     const response = await api.post<OrdenProduccion>('/produccion/orden/', payload);
     return response.data;
+  },
+
+  /** Abre un retrabajo sobre una pieza de exhibición EN STOCK: sale del
+   *  showroom (apartada) y al finalizar vuelve con su costo X + el retoque. */
+  crearRetrabajo: async (payload: {
+    producto_id: number;
+    motivo?: string;
+    cliente_nombre?: string;
+  }): Promise<OrdenProduccion> => {
+    const response = await api.post<OrdenProduccion>('/produccion/orden/retrabajo', payload);
+    return response.data;
+  },
+
+  /** Retrabajos vivos (para marcar las piezas EN RETRABAJO en Inventario). */
+  getRetrabajosAbiertos: async (): Promise<RetrabajoAbierto[]> => {
+    return conCache('retrabajos-abiertos', async () => {
+      const response = await api.get<RetrabajoAbierto[]>('/produccion/orden/retrabajos-abiertos');
+      return response.data;
+    });
   },
 
   getAreas: async (): Promise<Area[]> => {
@@ -491,9 +522,6 @@ export const produccionService = {
     // --- Consumo por corte (materiales laminares) ---
     ancho_corte_cm?: number;
     largo_corte_cm?: number;
-    origen_sobrante_id?: number;
-    sobrante_largo_cm?: number;
-    sobrante_ancho_cm?: number;
   }): Promise<ConsumoMaterial> => {
     const estadoLocal = consumo.es_pedido || consumo.es_lamina_completa ? 'PENDIENTE' as const : 'CONFIRMADO' as const;
     const fabricar = (idLocal: number): ConsumoMaterial => ({
@@ -535,8 +563,6 @@ export const produccionService = {
       cantidad_cortes?: number;
       largo_corte_cm?: number;
       ancho_corte_cm?: number;
-      sobrante_largo_cm?: number;
-      sobrante_ancho_cm?: number;
       /** Legacy: un solo uso en unidad base (o con captura flexible). */
       cantidad_usada?: number;
       unidad_captura?: 'M' | 'CM';

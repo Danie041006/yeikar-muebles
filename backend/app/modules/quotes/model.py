@@ -40,8 +40,15 @@ class DetalleCotizacion(Base):
     producto_id = Column(BigInteger, ForeignKey("producto.id"), nullable=True)
     material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
     tipo_item = Column(String(20), nullable=False, server_default="FABRICADO")  # FABRICADO | REVENTA | INSUMO | REPARACION | SERVICIO
-    cantidad = Column(Numeric(10, 2), nullable=False)
+    cantidad = Column(Numeric(14, 4), nullable=False)
     precio = Column(Numeric(15, 2), nullable=False)
+    # Captura flexible del insumo: la cantidad/precio del renglón se guardan
+    # en la unidad que ve el cliente (p. ej. 1128 cm × 160 COP/cm) y
+    # `cantidad_base` guarda la equivalencia en la unidad del inventario
+    # (0,1128 m³) para costos, stock y reportes. NULL = captura en la unidad
+    # base del material (comportamiento histórico).
+    unidad_captura = Column(String(4), nullable=True)  # 'M' | 'CM'
+    cantidad_base = Column(Numeric(14, 4), nullable=True)
     alto = Column(Numeric(10, 2), nullable=True)
     ancho = Column(Numeric(10, 2), nullable=True)
     largo = Column(Numeric(10, 2), nullable=True)

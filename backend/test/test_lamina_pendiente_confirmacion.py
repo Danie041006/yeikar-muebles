@@ -6,7 +6,8 @@ Flujo "lámina completa → PENDIENTE → confirmación por cortes":
   1. Pedido de lámina completa: SALIDA de N láminas, costo provisional
      (N × costo_base), gasto provisional, consumo en estado PENDIENTE.
   2. Confirmación con MENOS láminas de las pedidas → ENTRADA de la
-     diferencia, costo real por área, sobrante reutilizable, gasto ajustado.
+     diferencia, costo real por área, gasto ajustado (sin sobrantes: los
+     retazos fueron retirados del sistema).
   3. Confirmación con MÁS láminas (stock suficiente) → SALIDA extra.
   4. Confirmación con MÁS láminas sin stock → rechazada (400), sin tocar nada.
   5. Validación dura: material sin dimensiones no puede pedirse por láminas;
@@ -128,7 +129,7 @@ def test_lamina_completa_no_admite_medidas_de_corte(client, cleaner):
 # 2. Confirmación con MENOS láminas de las pedidas
 # ============================================================================
 
-def test_confirmar_devuelve_laminas_sobrantes_y_ajusta_gasto(client, cleaner, db):
+def test_confirmar_devuelve_laminas_y_ajusta_gasto(client, cleaner, db):
     _, _, etapa = _pedido_con_etapa_en_proceso(client, cleaner)
     mat = crear_material_laminar(client, cleaner)  # 150×80, $180.000
     dar_stock(client, cleaner, mat["id"], 10)
@@ -152,14 +153,11 @@ def test_confirmar_devuelve_laminas_sobrantes_y_ajusta_gasto(client, cleaner, db
     # Stock: 10 − 2 (pedido) + 1 (devolución) = 9
     assert stock_actual(db, mat["id"]) == Decimal("9")
 
-    # Sobrante creado: 12000 − 2×5250 = 1500 cm² (150×10)
-    row = db.execute(text(
-        "SELECT largo_cm, ancho_cm, estado FROM sobrante_lamina WHERE consumo_origen_id = :c"
-    ), {"c": consumo["id"]}).fetchone()
-    assert row is not None, "La confirmación debe crear el sobrante reutilizable"
-    largo, ancho, estado = row
-    assert Decimal(str(largo)) * Decimal(str(ancho)) == Decimal("1500.00")
-    assert estado == "DISPONIBLE"
+    # Sin sobrantes: la confirmación ya no registra el retazo reutilizable
+    n = db.execute(text(
+        "SELECT COUNT(*) FROM sobrante_lamina WHERE consumo_origen_id = :c"
+    ), {"c": consumo["id"]}).scalar()
+    assert n == 0, "La confirmación ya no debe crear sobrantes"
 
     # Gasto ajustado al costo real: 2 × 78.750 = 157.500
     assert gasto_monto(db, consumo["id"]) == Decimal("157500.00")
@@ -197,14 +195,11 @@ def test_confirmar_descarta_laminas_extra_si_hay_stock(client, cleaner, db):
     assert stock_actual(db, mat["id"]) == Decimal("2")
     assert gasto_monto(db, consumo["id"]) == Decimal("393750.00")
 
-    # Sobrante: última lámina con 1 corte → restan 6750 cm². El motor propone
-    # el rectángulo honesto (redondea hacia abajo): 84.37×80 = 6749.6 cm².
-    row = db.execute(text(
-        "SELECT largo_cm, ancho_cm FROM sobrante_lamina WHERE consumo_origen_id = :c"
-    ), {"c": consumo["id"]}).fetchone()
-    assert row is not None
-    area = Decimal(str(row[0])) * Decimal(str(row[1]))
-    assert Decimal("6749.00") <= area <= Decimal("6750.00")
+    # Sin sobrantes: el retazo de la última lámina ya no se inventaría
+    n = db.execute(text(
+        "SELECT COUNT(*) FROM sobrante_lamina WHERE consumo_origen_id = :c"
+    ), {"c": consumo["id"]}).scalar()
+    assert n == 0
 
 
 # ============================================================================
@@ -240,10 +235,13 @@ def test_confirmar_sin_stock_suficiente_rechazado(client, cleaner, db):
 
 
 # ============================================================================
-# 5. Confirmación manual del sobrante (dimensiones editadas por el operario)
+# 5. Dimensiones de sobrante de clientes viejos: se ignoran sin romper
 # ============================================================================
 
-def test_confirmar_con_sobrante_manual(client, cleaner, db):
+def test_confirmar_ignora_dimensiones_de_sobrante_viejas(client, cleaner, db):
+    """Un cliente viejo puede mandar sobrante_largo_cm/sobrante_ancho_cm en la
+    confirmación: el campo se ignora en silencio (feature retirada) y la
+    confirmación funciona igual, sin crear retazos."""
     _, _, etapa = _pedido_con_etapa_en_proceso(client, cleaner)
     mat = crear_material_laminar(client, cleaner)
     dar_stock(client, cleaner, mat["id"], 10)
@@ -257,12 +255,11 @@ def test_confirmar_con_sobrante_manual(client, cleaner, db):
         "sobrante_largo_cm": 80, "sobrante_ancho_cm": 18,
     })
     assert r.status_code == 200, r.text
-    registrar_sobrantes_de_material(db, cleaner, mat["id"])
-    row = db.execute(text(
-        "SELECT largo_cm, ancho_cm FROM sobrante_lamina WHERE consumo_origen_id = :c"
-    ), {"c": consumo["id"]}).fetchone()
-    assert row is not None
-    assert float(row[0]) == 80.0 and float(row[1]) == 18.0
+    assert r.json()["estado"] == "CONFIRMADO"
+    n = db.execute(text(
+        "SELECT COUNT(*) FROM sobrante_lamina WHERE consumo_origen_id = :c"
+    ), {"c": consumo["id"]}).scalar()
+    assert n == 0
 
 
 # ============================================================================

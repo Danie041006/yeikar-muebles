@@ -22,13 +22,14 @@ class Inventario(Base):
 
 class SobranteLamina(Base):
     """
-    Retazo de un material laminar (MDF, melamina, espuma...) con dimensiones
-    reales, disponible para satisfacer cortes futuros.
+    RETIRADO (tabla congelada): el inventario de retazos ("sobrantes de
+    lámina") fue descontinuado por decisión del dueño — ya no se crean, ni se
+    consumen, ni se reponen. La tabla y el modelo se conservan solo para no
+    romper los datos históricos y las FKs existentes (`consumo_material.
+    origen_sobrante_id` / `produccion_crudo_consumo.origen_sobrante_id`).
 
-    Los sobrantes NO viven en `inventario` (que cuenta solo láminas enteras):
-    se crean al abrir una lámina nueva para un corte (lámina - corte = pedazo
-    restante) o se registran a mano. Un corte que le quepa a un sobrante lo
-    consume sin tocar el stock de láminas.
+    Historia original: retazo de un material laminar con dimensiones reales,
+    disponible para satisfacer cortes futuros, fuera de `inventario`.
     """
     __tablename__ = "sobrante_lamina"
 

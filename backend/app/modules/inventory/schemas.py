@@ -233,48 +233,6 @@ class AlertaStockProductoResponse(BaseModel):
 
 
 # =========================================================================
-# Sobrantes de láminas (retazos reutilizables de materiales laminares)
-# =========================================================================
-
-class SobranteLaminaCreate(BaseModel):
-    material_id: int
-    ubicacion_id: int = 1
-    largo_cm: Decimal = Field(..., gt=0)
-    ancho_cm: Decimal = Field(..., gt=0)
-    observaciones: Optional[str] = None
-
-
-class SobranteLaminaUpdate(BaseModel):
-    largo_cm: Optional[Decimal] = Field(None, gt=0)
-    ancho_cm: Optional[Decimal] = Field(None, gt=0)
-    estado: Optional[str] = Field(None, pattern="^(DISPONIBLE|CONSUMIDO|DESECHADO)$")
-    ubicacion_id: Optional[int] = None
-    observaciones: Optional[str] = None
-
-
-class SobranteLaminaResponse(BaseModel):
-    id: int
-    material_id: int
-    material_nombre: Optional[str] = None
-    material_largo_cm: Optional[Decimal] = None
-    material_ancho_cm: Optional[Decimal] = None
-    ubicacion_id: int
-    ubicacion_nombre: Optional[str] = None
-    largo_cm: Decimal
-    ancho_cm: Decimal
-    area_cm2: Decimal
-    estado: str
-    consumo_origen_id: Optional[int] = None
-    consumo_origen_tipo: Optional[str] = None
-    observaciones: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-
-# =========================================================================
 # Libro de Entradas y Salidas (consulta consolidada por rango de fechas)
 # =========================================================================
 

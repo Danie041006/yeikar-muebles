@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, SobranteLamina, CategoriaInventario } from '../services/inventarioService';
+import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, CategoriaInventario } from '../services/inventarioService';
 import { productosService, type MonedaInfo } from '../services/productosService';
-import { crudoService, produccionService, type Crudo, type CrudoMovimiento } from '../services/produccionService';
+import { crudoService, produccionService, type Crudo, type CrudoMovimiento, type RetrabajoAbierto } from '../services/produccionService';
 import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO, type AdjuntoInfo } from '../services/adjuntosService';
 import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
@@ -51,7 +51,7 @@ interface Material {
   fotos?: { id?: number; mime?: string; url?: string }[];
 }
 
-type Tab = 'insumos' | 'sobrantes' | 'productos' | 'plasticos' | 'exhibicion' | 'crudo';
+type Tab = 'insumos' | 'productos' | 'plasticos' | 'exhibicion' | 'crudo';
 
 const TIPOS_MOVIMIENTO = ['ENTRADA', 'SALIDA', 'AJUSTE', 'DAÑO', 'DEVOLUCION'];
 
@@ -142,12 +142,6 @@ export default function Inventario() {
   const [filtroCatProducto, setFiltroCatProducto] = useState<number | null>(null);
   // Departamento del taller activo en el tab Insumos (null = todos, 'GENERAL' = sin departamento)
   const [filtroDepto, setFiltroDepto] = useState<string | null>(null);
-
-  // ---- Sobrantes de láminas (retazos reutilizables) ----
-  const [sobrantes, setSobrantes] = useState<SobranteLamina[]>([]);
-  const [showSobranteModal, setShowSobranteModal] = useState(false);
-  const [newSobrante, setNewSobrante] = useState({ material_id: '', largo_cm: '', ancho_cm: '', observaciones: '' });
-  const [savingSobrante, setSavingSobrante] = useState(false);
 
   // Formulario de movimiento de MATERIAL (dentro del panel)
   const [movMaterial, setMovMaterial] = useState({
@@ -272,6 +266,12 @@ export default function Inventario() {
   // Modal "Orden de Producción": fabricar la pieza (etapas, consumos, nómina).
   const [producirPieza, setProducirPieza] = useState<{ producto_id: number; nombre: string } | null>(null);
   const [savingProducir, setSavingProducir] = useState(false);
+  // Retrabajo de la pieza: la saca del showroom (apartada, no vendible) y al
+  // finalizar vuelve con su costo + el costo real del retoque.
+  const [retrabajosAbiertos, setRetrabajosAbiertos] = useState<RetrabajoAbierto[]>([]);
+  const [retrabajarPieza, setRetrabajarPieza] = useState<{ producto_id: number; nombre: string } | null>(null);
+  const [retrabajoForm, setRetrabajoForm] = useState({ motivo: '', cliente: '' });
+  const [savingRetrabajo, setSavingRetrabajo] = useState(false);
 
   // ---- Productos en Crudo (ítem libre de inventario) ----
   const [crudo, setCrudo] = useState<Crudo[]>([]);
@@ -458,12 +458,14 @@ export default function Inventario() {
     }
   }, []);
 
-  const fetchSobrantes = useCallback(async () => {
+  const fetchRetrabajos = useCallback(async () => {
     try {
-      const data = await inventarioService.getSobrantes({ estado: 'DISPONIBLE' });
-      setSobrantes(data);
+      const data = await produccionService.getRetrabajosAbiertos();
+      setRetrabajosAbiertos(data);
     } catch (error) {
-      console.error('Error fetching sobrantes:', error);
+      // Sin permiso del módulo Producción o sin red: simplemente no se marca
+      // el chip "EN RETRABAJO" (la pieza sin stock tampoco se puede vender).
+      console.error('Error fetching retrabajos:', error);
     }
   }, []);
 
@@ -472,8 +474,8 @@ export default function Inventario() {
     fetchInsumos();
     fetchProductos();
     fetchCrudo();
-    fetchSobrantes();
-  }, [fetchData, fetchInsumos, fetchProductos, fetchCrudo, fetchSobrantes]);
+    fetchRetrabajos();
+  }, [fetchData, fetchInsumos, fetchProductos, fetchCrudo, fetchRetrabajos]);
 
   const handleCreateCrudo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -567,51 +569,6 @@ export default function Inventario() {
       toast.success('Insumo registrado.');
     } catch (error: any) {
       toast.error(extractErrorMessage(error, 'Error al crear el insumo.'));
-    }
-  };
-
-  // ---- Registrar sobrante manual (retazo) ----
-  const handleCreateSobrante = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSobrante.material_id || !newSobrante.largo_cm || !newSobrante.ancho_cm) return;
-    setSavingSobrante(true);
-    try {
-      await inventarioService.crearSobrante({
-        material_id: parseInt(newSobrante.material_id),
-        ubicacion_id: 1,
-        largo_cm: parseFloat(newSobrante.largo_cm),
-        ancho_cm: parseFloat(newSobrante.ancho_cm),
-        observaciones: newSobrante.observaciones.trim() || 'Registro manual',
-      });
-      setShowSobranteModal(false);
-      setNewSobrante({ material_id: '', largo_cm: '', ancho_cm: '', observaciones: '' });
-      toast.success('Sobrante registrado. Ya puede usarse en cortes.');
-      fetchSobrantes();
-    } catch (error: any) {
-      toast.error(extractErrorMessage(error, 'Error al registrar el sobrante.'));
-    } finally {
-      setSavingSobrante(false);
-    }
-  };
-
-  const handleDeshecharSobrante = async (s: SobranteLamina) => {
-    try {
-      await inventarioService.actualizarSobrante(s.id, { estado: 'DESECHADO' });
-      toast.success('Sobrante marcado como desechado.');
-      fetchSobrantes();
-    } catch (error: any) {
-      toast.error(extractErrorMessage(error, 'Error al deshechar.'));
-    }
-  };
-
-  const handleEliminarSobrante = async (s: SobranteLamina) => {
-    if (!window.confirm(`¿Eliminar el retazo ${s.largo_cm}×${s.ancho_cm} cm del listado?`)) return;
-    try {
-      await inventarioService.eliminarSobrante(s.id);
-      toast.success('Sobrante eliminado.');
-      fetchSobrantes();
-    } catch (error: any) {
-      toast.error(extractErrorMessage(error, 'Error al eliminar.'));
     }
   };
 
@@ -1211,6 +1168,38 @@ export default function Inventario() {
     }
   };
 
+  // ---- Retrabajo de la pieza (retoque sobre un mueble ya fabricado) ----
+  const abrirRetrabajoModal = (p: { id: number; nombre: string }) => {
+    setRetrabajarPieza({ producto_id: p.id, nombre: p.nombre });
+    setRetrabajoForm({ motivo: '', cliente: '' });
+  };
+
+  const handleRetrabajarPieza = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!retrabajarPieza) return;
+    setSavingRetrabajo(true);
+    try {
+      const orden = await produccionService.crearRetrabajo({
+        producto_id: retrabajarPieza.producto_id,
+        motivo: retrabajoForm.motivo.trim() || undefined,
+        cliente_nombre: retrabajoForm.cliente.trim() || undefined,
+      });
+      setRetrabajarPieza(null);
+      toast.success(`Retrabajo #${orden.id} abierto: la pieza salió del showroom y vuelve al finalizar en Producción.`);
+      fetchProductos();
+      fetchRetrabajos();
+      navigate('/produccion');
+    } catch (error: any) {
+      toast.error(extractErrorMessage(error, 'Error al abrir el retrabajo.'));
+    } finally {
+      setSavingRetrabajo(false);
+    }
+  };
+
+  /** Retrabajo abierto (si lo hay) de una pieza del showroom. */
+  const retrabajoDePieza = (productoId: number) =>
+    retrabajosAbiertos.find((r) => r.producto_id === productoId) ?? null;
+
   // ---- Vender la pieza: abre el cotizador con la pieza pre-cargada ----
   const venderPieza = (productoId: number) => {
     navigate(`/cotizaciones?pieza=${productoId}`);
@@ -1770,14 +1759,6 @@ export default function Inventario() {
                Nuevo Material
             </button>
           )}
-          {tab === 'sobrantes' && (
-            <button
-              onClick={() => setShowSobranteModal(true)}
-              className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
-            >
-               Registrar Sobrante
-            </button>
-          )}
           {(tab === 'productos' || tab === 'plasticos') && (
             <button
               onClick={() => setShowProductoModal(true)}
@@ -1811,7 +1792,6 @@ export default function Inventario() {
       <div className="flex gap-2 border-b border-yeikar-secondary-light/10 overflow-x-auto scroll-touch whitespace-nowrap">
         {([
           ['insumos', 'Insumos (Materiales)'],
-          ['sobrantes', 'Sobrantes de Láminas'],
           ['productos', 'Productos de Reventa'],
           ['plasticos', 'Plásticos'],
           ['exhibicion', 'Productos terminados'],
@@ -1839,9 +1819,6 @@ export default function Inventario() {
             {key === 'exhibicion' && filasExhibicion.length > 0 && (
               <span className="ml-2 bg-yeikar-secondary/10 text-yeikar-secondary text-[10px] font-bold px-1.5 py-0.5 rounded-full">{filasExhibicion.length}</span>
             )}
-            {key === 'sobrantes' && sobrantes.length > 0 && (
-              <span className="ml-2 bg-yeikar-secondary/10 text-yeikar-secondary text-[10px] font-bold px-1.5 py-0.5 rounded-full">{sobrantes.length}</span>
-            )}
           </button>
         ))}
       </div>
@@ -1853,18 +1830,16 @@ export default function Inventario() {
           <p className="text-xs font-mono uppercase tracking-widest text-yeikar-neutral/50 mb-1">
             {tab === 'insumos'
               ? 'Materiales Registrados'
-              : tab === 'sobrantes'
-                ? 'Sobrantes Disponibles'
-                : tab === 'crudo'
-                  ? 'Productos en Crudo'
-                  : tab === 'exhibicion'
-                    ? 'Piezas en Exhibición'
-                    : tab === 'plasticos'
-                      ? 'Productos Plásticos'
-                      : 'Productos Registrados'}
+              : tab === 'crudo'
+                ? 'Productos en Crudo'
+                : tab === 'exhibicion'
+                  ? 'Piezas en Exhibición'
+                  : tab === 'plasticos'
+                    ? 'Productos Plásticos'
+                    : 'Productos Registrados'}
           </p>
           <p className="text-3xl font-black font-headline text-yeikar-secondary">
-            {tab === 'insumos' ? materiales.length : tab === 'sobrantes' ? sobrantes.length : tab === 'crudo' ? crudo.length : tab === 'exhibicion' ? piezasEnExhibicion.toLocaleString('es-ES') : tab === 'plasticos' ? productosPlasticos.length : productosReventa.length}
+            {tab === 'insumos' ? materiales.length : tab === 'crudo' ? crudo.length : tab === 'exhibicion' ? piezasEnExhibicion.toLocaleString('es-ES') : tab === 'plasticos' ? productosPlasticos.length : productosReventa.length}
           </p>
         </div>
 
@@ -1879,7 +1854,7 @@ export default function Inventario() {
             <>
               <p className="text-xs font-mono uppercase tracking-widest text-yeikar-neutral/50 mb-1">Alertas de Stock Bajo</p>
               <p className="text-3xl font-black font-headline text-red-500">
-                {tab === 'insumos' ? alertas.length : tab === 'crudo' ? 0 : tab === 'sobrantes' ? 0 : tab === 'plasticos' ? alertasPlasticos.length : alertasReventa.length}
+                {tab === 'insumos' ? alertas.length : tab === 'crudo' ? 0 : tab === 'plasticos' ? alertasPlasticos.length : alertasReventa.length}
               </p>
             </>
           )}
@@ -1900,7 +1875,7 @@ export default function Inventario() {
             <div className="relative w-full sm:w-72">
               <input
                 type="text"
-                placeholder={tab === 'insumos' ? 'Buscar material...' : tab === 'sobrantes' ? 'Buscar sobrante...' : tab === 'exhibicion' ? 'Buscar pieza...' : tab === 'plasticos' ? 'Buscar por nombre o código...' : 'Buscar producto...'}
+                placeholder={tab === 'insumos' ? 'Buscar material...' : tab === 'exhibicion' ? 'Buscar pieza...' : tab === 'plasticos' ? 'Buscar por nombre o código...' : 'Buscar producto...'}
                 value={tab === 'productos' || tab === 'plasticos' ? searchProducto : tab === 'exhibicion' ? searchExhibicion : search}
                 onChange={(e) => (tab === 'productos' || tab === 'plasticos') ? setSearchProducto(e.target.value) : tab === 'exhibicion' ? setSearchExhibicion(e.target.value) : setSearch(e.target.value)}
                 className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl pl-10 pr-4 py-2 text-sm text-yeikar-neutral placeholder-yeikar-neutral/40 focus:outline-none focus:border-yeikar-primary"
@@ -2054,51 +2029,6 @@ export default function Inventario() {
                 </div>
               }
             />
-          ) : tab === 'sobrantes' ? (
-            <div className="p-5">
-              <p className="text-xs text-yeikar-neutral/50 mb-4">
-                Retazos de láminas (MDF, melamina, espuma...) que pueden usarse en cortes futuros.
-                Al abrir una lámina nueva para un corte, el pedazo restante se registra aquí automáticamente.
-              </p>
-              {sobrantes.length === 0 ? (
-                <div className="p-8 text-center text-sm italic text-yeikar-neutral/40">
-                  No hay sobrantes disponibles. Se generan al consumir cortes de láminas nuevas o regístralos con "Registrar Sobrante".
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {sobrantes
-                    .filter(s => (s.material_nombre || '').toLowerCase().includes(search.toLowerCase()))
-                    .map((s) => (
-                      <div key={s.id} className="border border-yeikar-secondary-light/10 rounded-2xl p-4 space-y-2 bg-white">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-sm text-yeikar-secondary truncate" title={s.material_nombre || ''}>{s.material_nombre}</p>
-                            <p className="text-[10px] font-mono text-yeikar-neutral/40">{s.ubicacion_nombre}</p>
-                          </div>
-                          <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">DISPONIBLE</span>
-                        </div>
-                        <p className="font-mono font-black text-lg text-yeikar-secondary">{s.largo_cm} × {s.ancho_cm} <span className="text-xs font-bold text-yeikar-neutral/40">cm</span></p>
-                        <p className="text-[10px] font-mono text-yeikar-neutral/40">Área: {(s.area_cm2 / 10000).toFixed(2)} m²</p>
-                        {s.observaciones && <p className="text-[11px] text-yeikar-neutral/50 italic truncate" title={s.observaciones}>{s.observaciones}</p>}
-                        <div className="flex gap-2 pt-1">
-                          <button
-                            onClick={() => handleDeshecharSobrante(s)}
-                            className="flex-1 text-[11px] font-bold py-1.5 rounded-lg bg-yeikar-tertiary text-yeikar-secondary hover:bg-yeikar-secondary-light/20 transition-colors"
-                          >
-                            Deshechar
-                          </button>
-                          <button
-                            onClick={() => handleEliminarSobrante(s)}
-                            className="flex-1 text-[11px] font-bold py-1.5 rounded-lg bg-yeikar-tertiary text-red-600 hover:bg-red-50 transition-colors"
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
           ) : tab === 'exhibicion' ? (
             <>
               {ubicacionesExhibicion.length === 0 && (
@@ -2723,7 +2653,7 @@ export default function Inventario() {
                       </div>
                       {editMaterial.largo_cm && editMaterial.ancho_cm ? (
                         <p className="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                          Material laminar: admite consumos por cortes y sobrantes ({(parseFloat(editMaterial.largo_cm) * parseFloat(editMaterial.ancho_cm) / 10000).toFixed(2)} m² por lámina).
+                          Material laminar: admite consumos por cortes ({(parseFloat(editMaterial.largo_cm) * parseFloat(editMaterial.ancho_cm) / 10000).toFixed(2)} m² por lámina).
                         </p>
                       ) : (
                         <p className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
@@ -2957,46 +2887,73 @@ export default function Inventario() {
                 </div>
               )}
 
-            {tab === 'exhibicion' && (
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                <button
-                  onClick={() => setProducirPieza({ producto_id: productoSeleccionado.id, nombre: productoSeleccionado.nombre })}
-                  className="py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-xs transition-colors"
-                >
-                  Orden de Producción
-                </button>
-                <button
-                  onClick={() => venderPieza(productoSeleccionado.id)}
-                  className="py-2 bg-white hover:bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/20 rounded-xl font-bold font-headline text-xs transition-colors"
-                >
-                  Vender
-                </button>
-                <button
-                  onClick={() => abrirEditarPieza(productoSeleccionado)}
-                  className="py-2 bg-white hover:bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/20 rounded-xl font-bold font-headline text-xs transition-colors"
-                  title="Editar nombre, precio, costo y foto (el stock se mueve con producción/ventas)"
-                >
-                  Editar
-                </button>
-                <button
-                  onClick={async () => {
-                    if (!window.confirm(`¿Dar de baja "${productoSeleccionado.nombre}"? Desaparecerá del listado (el historial de ventas queda intacto).`)) return;
-                    try {
-                      await productosService.actualizarProducto(productoSeleccionado.id, { activo: false });
-                      setSelectedProductoId(null);
-                      fetchProductos();
-                      toast.success('Pieza dada de baja.');
-                    } catch (error: any) {
-                      toast.error(extractErrorMessage(error, 'No se pudo dar de baja la pieza.'));
-                    }
-                  }}
-                  className="py-2 bg-white hover:bg-red-50 text-red-500 border border-red-200 rounded-xl font-bold font-headline text-xs transition-colors"
-                  title="Quitar la pieza del listado sin borrar su historial"
-                >
-                  Borrar
-                </button>
-              </div>
-            )}
+            {tab === 'exhibicion' && (() => {
+              const stockPieza = (stockExhPorProducto.get(productoSeleccionado.id) ?? [])
+                .reduce((a, f) => a + (parseFloat(String(f.cantidad)) || 0), 0);
+              const retrabajoAbierto = retrabajoDePieza(productoSeleccionado.id);
+              return (
+                <div className="space-y-2 mb-4">
+                  {retrabajoAbierto && (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
+                      EN RETRABAJO (orden #{retrabajoAbierto.id}) — la pieza está en el taller y vuelve al showroom al finalizar. No se puede vender mientras tanto.
+                      {retrabajoAbierto.observaciones ? ` · ${retrabajoAbierto.observaciones}` : ''}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setProducirPieza({ producto_id: productoSeleccionado.id, nombre: productoSeleccionado.nombre })}
+                      className="py-2 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-xs transition-colors"
+                    >
+                      Orden de Producción
+                    </button>
+                    <button
+                      onClick={() => abrirRetrabajoModal(productoSeleccionado)}
+                      disabled={!!retrabajoAbierto || stockPieza < 1}
+                      className="py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold font-headline text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      title={
+                        retrabajoAbierto
+                          ? `Ya hay un retrabajo abierto (orden #${retrabajoAbierto.id})`
+                          : stockPieza < 1
+                            ? 'La pieza no está en stock: se retrabaja una pieza ya fabricada'
+                            : 'Retocar esta pieza (cambio de color, retapizado…): sale del showroom y vuelve con su costo + el retoque'
+                      }
+                    >
+                      {retrabajoAbierto ? 'Retrabajo en curso' : 'Retrabajo'}
+                    </button>
+                    <button
+                      onClick={() => venderPieza(productoSeleccionado.id)}
+                      className="py-2 bg-white hover:bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/20 rounded-xl font-bold font-headline text-xs transition-colors"
+                    >
+                      Vender
+                    </button>
+                    <button
+                      onClick={() => abrirEditarPieza(productoSeleccionado)}
+                      className="py-2 bg-white hover:bg-yeikar-tertiary/40 text-yeikar-secondary border border-yeikar-secondary-light/20 rounded-xl font-bold font-headline text-xs transition-colors"
+                      title="Editar nombre, precio, costo y foto (el stock se mueve con producción/ventas)"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm(`¿Dar de baja "${productoSeleccionado.nombre}"? Desaparecerá del listado (el historial de ventas queda intacto).`)) return;
+                        try {
+                          await productosService.actualizarProducto(productoSeleccionado.id, { activo: false });
+                          setSelectedProductoId(null);
+                          fetchProductos();
+                          toast.success('Pieza dada de baja.');
+                        } catch (error: any) {
+                          toast.error(extractErrorMessage(error, 'No se pudo dar de baja la pieza.'));
+                        }
+                      }}
+                      className="py-2 bg-white hover:bg-red-50 text-red-500 border border-red-200 rounded-xl font-bold font-headline text-xs transition-colors col-span-2"
+                      title="Quitar la pieza del listado sin borrar su historial"
+                    >
+                      Borrar
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ── TAB: Registrar movimiento ── */}
             {detalleTabProducto === 'movimiento' && (
@@ -3669,7 +3626,7 @@ export default function Inventario() {
                 </div>
               </div>
               <p className="text-[11px] text-yeikar-neutral/50 -mt-2">
-                Solo para láminas (MDF, melamina, espuma...): permite consumir por <b>cortes</b> y registrar sobrantes.
+                Solo para láminas (MDF, melamina, espuma...): permite consumir por <b>cortes</b> con costo proporcional al área.
               </p>
               {(!newMaterial.largo_cm || !newMaterial.ancho_cm) && (
                 <p className="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
@@ -4094,49 +4051,6 @@ export default function Inventario() {
         </div>
       )}
 
-      {/* Modal para Registrar Sobrante (retazo manual) */}
-      {showSobranteModal && (
-        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10">
-            <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
-              <h3 className="font-headline font-black text-lg">Registrar Sobrante</h3>
-              <p className="text-xs text-white/70">Retazo de lámina reutilizable para cortes futuros</p>
-            </div>
-            <form onSubmit={handleCreateSobrante} className="p-6 space-y-4 font-body">
-              <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Material Laminar *</label>
-                <SearchSelect
-                  value={newSobrante.material_id}
-                  onChange={(v) => setNewSobrante(prev => ({ ...prev, material_id: String(v) }))}
-                  options={materiales
-                    .filter(m => m.largo_cm != null && m.ancho_cm != null)
-                    .map(m => ({ value: m.id, label: m.nombre }))}
-                  placeholder="Seleccionar lámina..."
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Largo (cm) *</label>
-                  <input type="number" min="0" step="0.01" required placeholder="Ej. 120" value={newSobrante.largo_cm} onChange={(e) => setNewSobrante(prev => ({ ...prev, largo_cm: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Ancho (cm) *</label>
-                  <input type="number" min="0" step="0.01" required placeholder="Ej. 45" value={newSobrante.ancho_cm} onChange={(e) => setNewSobrante(prev => ({ ...prev, ancho_cm: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Observaciones</label>
-                <input type="text" placeholder="Ej. retazo del taller, quedó del pedido #123" value={newSobrante.observaciones} onChange={(e) => setNewSobrante(prev => ({ ...prev, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
-              </div>
-              <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
-                <button type="button" onClick={() => setShowSobranteModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
-                <button type="submit" disabled={savingSobrante} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingSobrante ? 'Guardando...' : 'Registrar Sobrante'}</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Modal Nueva Pieza de Exhibición */}
       {showPiezaModal && (
         <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -4352,6 +4266,57 @@ export default function Inventario() {
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setProducirPieza(null)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" disabled={savingProducir} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingProducir ? 'Creando...' : 'Crear Orden'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Retrabajo (pieza de exhibición ya fabricada) */}
+      {retrabajarPieza && (
+        <div className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10">
+            <div className="bg-gradient-to-r from-amber-500 to-amber-400 text-white px-6 py-5">
+              <h3 className="font-headline font-black text-lg">Retrabajo de pieza</h3>
+              <p className="text-xs text-white/80">Retocar un mueble del showroom: cambio de color, retapizado, ajustes…</p>
+            </div>
+            <form onSubmit={handleRetrabajarPieza} className="p-6 space-y-4 font-body">
+              <div className="bg-yeikar-tertiary/10 border border-yeikar-secondary-light/10 rounded-xl px-4 py-3">
+                <p className="text-xs text-yeikar-neutral/50">Se retrabajará la pieza</p>
+                <p className="font-headline font-black text-yeikar-secondary text-sm mt-0.5">{retrabajarPieza.nombre}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">¿Qué se le va a hacer? (motivo)</label>
+                <textarea
+                  value={retrabajoForm.motivo}
+                  onChange={(e) => setRetrabajoForm((f) => ({ ...f, motivo: e.target.value }))}
+                  rows={2}
+                  placeholder="Ej. Cambio de color: pintar en nogal oscuro y retapizar"
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-3 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">¿Para quién? (opcional)</label>
+                <input
+                  value={retrabajoForm.cliente}
+                  onChange={(e) => setRetrabajoForm((f) => ({ ...f, cliente: e.target.value }))}
+                  placeholder="Ej. Sra. Martínez / interesado"
+                  className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-3 py-2 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs text-yeikar-neutral/60">
+                  Al abrir el retrabajo, la pieza <b>sale del showroom</b> (queda apartada, no se puede vender) y entra al <b>Kanban de Producción</b> como tarjeta "RETRABAJO":
+                </p>
+                <ul className="text-[11px] text-yeikar-neutral/50 list-disc pl-4 space-y-1">
+                  <li>El taller registra los materiales y la mano de obra del retoque (trabajo pagado)</li>
+                  <li>Al finalizar, la pieza vuelve al stock con su <b>costo anterior + el costo real del retoque</b></li>
+                  <li>No crea stock nuevo; no toca la receta ni el precio del catálogo</li>
+                </ul>
+              </div>
+              <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                <button type="button" onClick={() => setRetrabajarPieza(null)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
+                <button type="submit" disabled={savingRetrabajo} className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingRetrabajo ? 'Abriendo...' : 'Crear Retrabajo'}</button>
               </div>
             </form>
           </div>

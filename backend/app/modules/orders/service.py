@@ -1,5 +1,5 @@
 from datetime import date
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from app.modules.orders import model, schemas
 from app.modules.quotes.model import Cotizacion
@@ -421,6 +421,7 @@ def convertir_cotizacion_a_pedido(
     moneda_adelanto_id: int = None,
     tasa_cambio_adelanto: float = None,
     metodo_pago: str = None,
+    fecha_adelanto=None,
     usuario: Usuario | None = None,
 ):
     # Buscar la cotización con FOR UPDATE: dos conversiones simultáneas quedan
@@ -588,8 +589,27 @@ def convertir_cotizacion_a_pedido(
         # medida descrito en el renglón).
         if tipo == "INSUMO":
             from app.modules.productos.model import Material as MaterialModel
-            if not db.query(MaterialModel.id).filter(MaterialModel.id == detalle_dict.get("material_id")).first():
+            material_insumo = (
+                db.query(MaterialModel)
+                .options(joinedload(MaterialModel.unidad_medida))
+                .filter(MaterialModel.id == detalle_dict.get("material_id"))
+                .first()
+            )
+            if not material_insumo:
                 raise ValueError(f"El material con id {detalle_dict.get('material_id')} no existe.")
+            # Captura flexible del insumo: la cantidad vendida (cm/m³) se
+            # convierte a la unidad del inventario para descontar stock. Se
+            # calcula con la cantidad DE ESTA LÍNEA, no con la de la
+            # cotización, para que dividir un renglón siga funcionando.
+            unidad_captura = getattr(dc_cot, "unidad_captura", None)
+            detalle_dict["unidad_captura"] = unidad_captura
+            if unidad_captura:
+                from app.modules.production.unidades import resolver_cantidad_consumo
+                detalle_dict["cantidad_base"] = float(resolver_cantidad_consumo(
+                    material_insumo, detalle_dict.get("cantidad"), unidad_captura
+                ))
+            else:
+                detalle_dict["cantidad_base"] = float(detalle_dict.get("cantidad") or 0)
         elif tipo not in ("REPARACION", "SERVICIO"):
             from app.modules.productos.model import Producto as ProductoModel
             pid = detalle_dict.get("producto_id")
@@ -696,7 +716,9 @@ def convertir_cotizacion_a_pedido(
             PagoCreate(
                 venta_id=db_venta.id,
                 moneda_id=moneda_pago,
-                fecha=hoy_ve(),
+                # Fecha elegida por el usuario (el cliente pudo abonar antes de
+                # convertir); sin fecha → HOY en hora Venezuela.
+                fecha=fecha_adelanto or hoy_ve(),
                 monto=adelanto_monto,
                 tasa_cambio=tasa_pago,
                 metodo_pago=metodo_pago,

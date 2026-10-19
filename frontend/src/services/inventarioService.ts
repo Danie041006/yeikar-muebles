@@ -28,33 +28,6 @@ export interface InventarioItem {
   };
 }
 
-export interface SobranteLamina {
-  id: number;
-  material_id: number;
-  material_nombre?: string;
-  material_largo_cm?: number;
-  material_ancho_cm?: number;
-  ubicacion_id: number;
-  ubicacion_nombre?: string;
-  largo_cm: number;
-  ancho_cm: number;
-  area_cm2: number;
-  estado: 'DISPONIBLE' | 'CONSUMIDO' | 'DESECHADO';
-  consumo_origen_id?: number;
-  consumo_origen_tipo?: string;
-  observaciones?: string;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export interface SobranteLaminaCreate {
-  material_id: number;
-  ubicacion_id: number;
-  largo_cm: number;
-  ancho_cm: number;
-  observaciones?: string;
-}
-
 export interface CategoriaInventario {
   id: number;
   nombre: string;
@@ -316,26 +289,6 @@ export const inventarioService = {
       params: { limit },
     });
     return response.data;
-  },
-
-  // ---- Sobrantes de láminas (retazos de materiales laminares) ----
-  getSobrantes: async (params?: { material_id?: number; estado?: string; ubicacion_id?: number }): Promise<SobranteLamina[]> => {
-    const response = await api.get<SobranteLamina[]>('/inventario/sobrantes', { params });
-    return response.data;
-  },
-
-  crearSobrante: async (datos: SobranteLaminaCreate): Promise<SobranteLamina> => {
-    const response = await api.post<SobranteLamina>('/inventario/sobrantes', datos);
-    return response.data;
-  },
-
-  actualizarSobrante: async (id: number, datos: Partial<SobranteLaminaCreate> & { estado?: string }): Promise<SobranteLamina> => {
-    const response = await api.put<SobranteLamina>(`/inventario/sobrantes/${id}`, datos);
-    return response.data;
-  },
-
-  eliminarSobrante: async (id: number): Promise<void> => {
-    await api.delete(`/inventario/sobrantes/${id}`);
   },
 
   // ---- Categorías de inventario (desglose en la UI) ----

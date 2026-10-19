@@ -798,13 +798,12 @@ export default function InformeMensual() {
                             <th className="p-2 text-left">Método</th>
                             <th className="p-2 text-left">Tipo</th>
                             <th className="p-2 text-right">Monto</th>
-                            <th className="p-2 text-right">COP</th>
                             <th></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-yeikar-secondary-light/5">
                           {movimientos.length === 0 ? (
-                            <tr><td colSpan={6} className="p-4 text-center text-yeikar-neutral/40 italic">Sin movimientos.</td></tr>
+                            <tr><td colSpan={5} className="p-4 text-center text-yeikar-neutral/40 italic">Sin movimientos.</td></tr>
                           ) : (
                             [...movimientos].sort((a, b) => a.fecha.localeCompare(b.fecha)).map((m) => (
                               <tr key={m.id} className={m.tipo === 'APERTURA' ? 'bg-yeikar-tertiary/20' : ''}>
@@ -816,7 +815,6 @@ export default function InformeMensual() {
                                   }`}>{m.tipo}</span>
                                 </td>
                                 <td className="p-2 text-right font-mono">{m.moneda?.codigo ?? ''} {Math.round(m.monto).toLocaleString('es-CO')}</td>
-                                <td className="p-2 text-right font-mono font-semibold">{fmtCop(m.monto_en_moneda_base)}</td>
                                 <td className="p-2 text-right">
                                   <button onClick={() => eliminarMovimiento(m.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">×</button>
                                 </td>
@@ -880,14 +878,13 @@ export default function InformeMensual() {
                             <th className="p-2 text-left">Venta</th>
                             <th className="p-2 text-right">Cant.</th>
                             <th className="p-2 text-right">Monto</th>
-                            <th className="p-2 text-right">COP</th>
                             <th className="p-2 text-left">Motivo</th>
                             <th></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-yeikar-secondary-light/5">
                           {devoluciones.length === 0 ? (
-                            <tr><td colSpan={7} className="p-4 text-center text-yeikar-neutral/40 italic">Sin devoluciones.</td></tr>
+                            <tr><td colSpan={6} className="p-4 text-center text-yeikar-neutral/40 italic">Sin devoluciones.</td></tr>
                           ) : (
                             devoluciones.map((d) => (
                               <tr key={d.id}>
@@ -895,7 +892,6 @@ export default function InformeMensual() {
                                 <td className="p-2">#{d.venta_id}</td>
                                 <td className="p-2 text-right font-mono">{d.cantidad}</td>
                                 <td className="p-2 text-right font-mono">{d.moneda?.codigo ?? ''} {Math.round(d.monto_devuelto).toLocaleString('es-CO')}</td>
-                                <td className="p-2 text-right font-mono font-semibold text-red-500">−{fmtCop(d.monto_en_moneda_base ?? d.monto_devuelto)}</td>
                                 <td className="p-2 text-yeikar-neutral/60 italic">{d.motivo ?? ''}</td>
                                 <td className="p-2 text-right">
                                   <button onClick={() => eliminarDevolucion(d.id)} className="text-red-400 hover:text-red-600 text-xs font-bold">×</button>

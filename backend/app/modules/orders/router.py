@@ -115,6 +115,7 @@ def convertir_cotizacion_a_pedido(
             moneda_adelanto_id=body.moneda_adelanto_id,
             tasa_cambio_adelanto=body.tasa_cambio_adelanto,
             metodo_pago=body.metodo_pago,
+            fecha_adelanto=body.fecha_adelanto,
             usuario=usuario_actual,
         )
     except ValueError as e:

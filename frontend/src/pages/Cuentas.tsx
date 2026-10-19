@@ -335,13 +335,6 @@ export default function Cuentas() {
       mobileLabel: 'Monto',
     },
     {
-      key: 'cop',
-      header: 'COP',
-      align: 'right',
-      render: (m) => <span className="font-mono">${fmt(Number(m.monto_en_moneda_base))}</span>,
-      mobileLabel: 'COP',
-    },
-    {
       key: 'referencia',
       header: 'Referencia / Razón',
       render: (m) => (
@@ -801,12 +794,6 @@ export default function Cuentas() {
                 <span className="ml-1.5 text-sm font-normal text-yeikar-neutral/50">
                   {monedaDe(detalleMov.moneda_id)?.codigo ?? ''}
                 </span>
-              </p>
-              <p className="mt-1 text-sm text-yeikar-neutral/55">
-                ≈ <span className="font-mono font-semibold text-yeikar-primary-dark">${fmt(Number(detalleMov.monto_en_moneda_base))}</span> COP
-                {Number(detalleMov.tasa_cambio) !== 1 && (
-                  <span className="ml-1.5 font-mono text-xs text-yeikar-neutral/40">tasa {Number(detalleMov.tasa_cambio)}</span>
-                )}
               </p>
             </div>
 

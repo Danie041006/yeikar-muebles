@@ -52,6 +52,10 @@ class Producto(Base):
     def fotos(self):
         """Fotos de referencia del mueble (adjuntos tipo PRODUCTO).
 
+        Se listan en orden de subida (asc): la PRIMERA es la portada (sale en
+        la cotización, tarjetas y en el hero de la Hoja de Trabajo) y las
+        siguientes son vistas adicionales.
+
         Si el listado precargó el batch (ver adjuntos_info_batch), se usa ese
         resultado; si no, se consulta la BD (1 query por producto)."""
         cache = self.__dict__.get("_fotos_cache")
@@ -62,7 +66,7 @@ class Producto(Base):
         s = object_session(self)
         if s is None:
             return []
-        return adjuntos_info(s, "PRODUCTO", self.id)
+        return adjuntos_info(s, "PRODUCTO", self.id, orden="asc")
 
 
 class Material(Base):
@@ -77,7 +81,7 @@ class Material(Base):
     # --- Dimensiones de la unidad de compra (solo materiales laminares) ---
     # Ej: lámina MDF de 1.83 × 2.44 m → largo_cm=244, ancho_cm=183.
     # Si ambos están definidos el material es "laminar": la receta puede pedir
-    # CORTES (ej. 80×130) y el inventario registra sobrantes.
+    # CORTES (ej. 80×130) con costo proporcional al área.
     largo_cm        = Column(Numeric(10, 2), nullable=True)
     ancho_cm        = Column(Numeric(10, 2), nullable=True)
     # Categoría para el desglose del inventario (LÁMINAS MDF, ESPUMA, PINTURA...)

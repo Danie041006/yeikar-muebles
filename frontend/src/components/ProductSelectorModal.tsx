@@ -20,6 +20,9 @@ interface ProductSelectorModalProps {
   // ('reventa' incluye piezas de exhibición por compatibilidad: ambas son
   // stock; 'exhibicion' muestra SOLO piezas del showroom.)
   modo?: 'todos' | 'fabricados' | 'reventa' | 'exhibicion';
+  // Piezas de exhibición con RETRABAJO ABIERTO (están en el taller): chip
+  // "En retrabajo" — no se pueden vender hasta que vuelvan al showroom.
+  productosEnRetrabajo?: Set<number>;
   // Mueble a la medida: usa lo que el usuario escribió como renglón sin
   // catálogo (descripción libre + precio manual). Sin botones nuevos: es una
   // fila contextual que aparece al escribir una búsqueda.
@@ -41,6 +44,7 @@ export default function ProductSelectorModal({
   selectedMonedaId = 1,
   title = 'Catálogo de Modelos y Muebles',
   modo = 'todos',
+  productosEnRetrabajo,
   onSelectPersonalizado,
 }: ProductSelectorModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -373,6 +377,14 @@ export default function ProductSelectorModal({
                           >
                             {p.es_exhibicion ? 'Exhibición' : esItemStock(p) ? 'Reventa' : 'Fabricado'}
                           </span>
+                          {p.es_exhibicion && productosEnRetrabajo?.has(p.id) && (
+                            <span
+                              className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md tracking-wider bg-rose-100 text-rose-800 border border-rose-200"
+                              title="La pieza está en el taller (retrabajo): no se puede vender hasta que vuelva al showroom"
+                            >
+                              En retrabajo
+                            </span>
+                          )}
                           <span className="text-[10px] font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded-md">
                             {catName}
                           </span>
@@ -516,6 +528,14 @@ export default function ProductSelectorModal({
                             >
                               {p.es_exhibicion ? 'Exhibición' : esItemStock(p) ? 'Reventa' : 'Fabricado'}
                             </span>
+                            {p.es_exhibicion && productosEnRetrabajo?.has(p.id) && (
+                              <span
+                                className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-rose-100 text-rose-800"
+                                title="La pieza está en el taller (retrabajo): no se puede vender hasta que vuelva al showroom"
+                              >
+                                En retrabajo
+                              </span>
+                            )}
                             <span className="text-stone-600">{catName}</span>
                           </div>
                         </td>

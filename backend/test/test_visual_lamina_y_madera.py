@@ -284,115 +284,89 @@ def test_01_lamina_nueva_corte_y_sobrante(client, cleaner, db):
         db, material=material, cantidad_cortes=2,
         largo_corte_cm=lc, ancho_corte_cm=ac,
         ubicacion_id=1, referencia_tipo="produccion", referencia_id=99901,
-        consumo_origen_tipo="produccion",
     )
     db.flush()
     registrar_movs_y_sobrantes(db, cleaner, mat["id"])
 
     stock_despues = stock_actual(db, mat["id"])
-    sob = res["sobrante"]
-    area_sob = Decimal(str(sob.largo_cm)) * Decimal(str(sob.ancho_cm)) if sob else 0
 
     paso("DESPUÉS de cortar",
          f"  Stock: {int(stock_antes)} → {int(stock_despues)} láminas "
          f"(se descontó 1 lámina entera)\n"
          f"  Costo REAL del consumo: {dinero(res['costo_total'])}\n"
-         f"  Sobrante: {sob.largo_cm}×{sob.ancho_cm} = {area_sob:,} cm² "
-         f"(estado: {sob.estado})")
-
-    if sob:
-        dibujar_retazo(sob.largo_cm, sob.ancho_cm, "SOBRANTE reutilizable")
+         f"  Sobrante: RETIRADO — el retazo restante ya no se inventaría\n"
+         f"  (decisión del dueño: se acabó el registro de sobrantes)")
 
     paso("VERIFICACIONES",
          f"  ✅ Se abrió 1 lámina (stock bajó de {int(stock_antes)} a {int(stock_despues)})\n"
          f"  ✅ Costo proporcional: {dinero(costo_unit)} por corte "
          f"(NO {dinero(90_000)} por lámina)\n"
-         f"  ✅ Sobrante {float(area_sob):,.0f} cm² queda disponible para otro mueble")
+         f"  ✅ Sin sobrantes: el motor de cortes ya no crea retazos")
 
     assert res["laminas_consumidas"] == 1
     assert float(stock_despues) == float(stock_antes) - 1
-    assert sob.estado == "DISPONIBLE"
-    assert area_sob > 0
+    assert "sobrante" not in res
 
-    resaltado(f"RESULTADO: el pedido paga {dinero(res['costo_total'])} por 2 tableros, "
-              f"y {float(area_sob):,.0f} cm² de MDF quedan en el taller.")
+    n = db.execute(text(
+        "SELECT COUNT(*) FROM sobrante_lamina WHERE consumo_origen_id = 99901"
+    )).scalar()
+    assert n == 0
+
+    resaltado(f"RESULTADO: el pedido paga {dinero(res['costo_total'])} por 2 tableros "
+              f"y se descontó 1 lámina del stock (sin retazos registrados).")
     print("  ✅ CASO 1 OK")
     print()
 
 
 # ============================================================================
-# TEST 2 — Consumo desde sobrante: no toca stock
+# TEST 2 — Cortes "desde sobrante": feature retirada → rechazo claro
 # ============================================================================
 
-def test_02_consumo_desde_sobrante_no_toca_stock(client, cleaner, db):
+def test_02_consumo_desde_sobrante_rechazado(client, cleaner, db):
     print("\n" + LINEA)
-    paso("CASO 2 — El siguiente mueble 'cabe' en el sobrante",
-         "Otro pedido necesita 1 pieza de 45×45 cm.\n"
-         "En vez de abrir una lámina nueva, el operario usa un retazo del taller.\n"
-         "La regla: si cabe en el sobrante, NO se toca el stock de láminas.")
+    paso("CASO 2 — El viejo 'corte desde sobrante' ya no existe",
+         "Antes, si una pieza cabía en un retazo del taller, se cortaba sin\n"
+         "tocar el stock. El inventario de sobrantes fue RETIRADO: si un\n"
+         "cliente viejo manda origen_sobrante_id, el sistema lo rechaza con\n"
+         "un mensaje claro (no descuenta nada en silencio).")
 
     mat = crear_material_laminar(client, cleaner, largo=244, ancho=183, costo=90_000)
     stock_inicial = 5
     dar_stock(client, cleaner, mat["id"], stock_inicial)
     stock_antes = stock_actual(db, mat["id"])
 
-    from app.modules.inventory.model import SobranteLamina
-    sob = SobranteLamina(
-        material_id=mat["id"], ubicacion_id=1,
-        largo_cm=Decimal("120"), ancho_cm=Decimal("100"),
-        estado="DISPONIBLE", observaciones="retazo del taller",
-    )
-    db.add(sob)
-    db.commit()
-    registrar_sobrantes_de_material(db, cleaner, mat["id"])
-
     paso("ANTES",
-         f"  Retazo disponible: 120×100 cm (área {120*100:,} cm²)\n"
          f"  Stock láminas nuevas: {int(stock_antes)}\n"
-         f"  Corte que necesita: 45×45 cm = {45*45:,} cm²")
+         f"  Corte que se intenta: 45×45 cm 'desde un retazo'")
 
-    por_retazo = cortes_que_caban(120, 100, 45, 45)
-    caja("MATEMÁTICA DEL MOTOR", [
-        f"cortes_que_caban(120, 100, 45, 45) = {por_retazo}",
-        f"→ Caben {por_retazo} pieza(s) de 45×45 en el retazo",
-    ])
-
-    # Consumo real
-    from app.modules.inventory.cortes_service import consumir_por_cortes
-    from app.modules.productos.model import Material
-    material = db.query(Material).filter(Material.id == mat["id"]).first()
-
-    res = consumir_por_cortes(
-        db, material=material, cantidad_cortes=1,
-        largo_corte_cm=45, ancho_corte_cm=45,
-        ubicacion_id=1, referencia_tipo="produccion", referencia_id=99902,
-        consumo_origen_tipo="produccion", origen_sobrante_id=sob.id,
-    )
-    db.flush()
-    db.refresh(sob)
-    registrar_movs_y_sobrantes(db, cleaner, mat["id"])
-
+    _, _, etapa = _pedido_y_etapa(client, cleaner)
+    payload = {
+        "etapa_produccion_id": etapa,
+        "material_id": mat["id"],
+        "cantidad": 1,
+        "ancho_corte_cm": 45,
+        "largo_corte_cm": 45,
+        "origen_sobrante_id": 999999,
+        "solicitante_empleado_id": 3,
+        "fecha": datetime.utcnow().isoformat(),
+    }
+    r = client.post("/api/v1/produccion/consumo/", json=payload, headers=ADMIN_HEADERS)
     stock_despues = stock_actual(db, mat["id"])
-    area_sob_nuevo = Decimal(str(sob.largo_cm)) * Decimal(str(sob.ancho_cm))
 
     paso("DESPUÉS",
-         f"  Stock láminas: {int(stock_antes)} → {int(stock_despues)} (NO CAMBIÓ)\n"
-         f"  Costo del corte: {dinero(res['costo_unitario'])} (proporcional)\n"
-         f"  Retazo ahora: {sob.largo_cm}×{sob.ancho_cm} = {area_sob_nuevo:,} cm²")
-
-    dibujar_retazo(sob.largo_cm, sob.ancho_cm, "RETAZO tras el corte")
+         f"  Respuesta: {r.status_code} — {r.json().get('detail', r.text)}\n"
+         f"  Stock láminas: {int(stock_antes)} → {int(stock_despues)} (NO CAMBIÓ)")
 
     paso("VERIFICACIONES",
-         f"  ✅ Stock NO se tocó (sigue en {int(stock_despues)})\n"
-         f"  ✅ El retazo se redujo de {120*100:,} a {float(area_sob_nuevo):,.0f} cm²\n"
-         f"  ✅ Costo: solo cobramos el área que se usó, no lámina entera")
+         f"  ✅ El corte desde sobrante se rechaza (400) con mensaje claro\n"
+         f"  ✅ El stock NO se tocó (no se descuenta una lámina en silencio)")
 
-    assert res["laminas_consumidas"] == 0
+    assert r.status_code == 400
+    assert "ya no está disponible" in r.json()["detail"]
     assert float(stock_despues) == float(stock_antes)
-    assert area_sob_nuevo < 120 * 100
 
-    resaltado(f"RESULTADO: 1 pieza de 45×45 sale de un retazo por {dinero(res['costo_unitario'])}, "
-              f"sin gastar ninguna lámina nueva.")
+    resaltado("RESULTADO: los sobrantes de lámina quedaron retirados: el corte "
+              "se registra desde lámina nueva o como consumo normal.")
     print("  ✅ CASO 2 OK")
     print()
 
@@ -612,12 +586,12 @@ def test_resumen_visual():
     caja("RESUMEN DE CASOS", [
         "CASO 1 — Corte desde lámina nueva (MDF 244×183, $90.000)",
         "  Se corta en tableros de 80×130 (caben 3 por lámina).",
-        "  Se abre 1 lámina y el sobrante queda reutilizable.",
+        "  Se abre 1 lámina (sin registro de retazos: sobrantes retirados).",
         "  Costo por corte = $90.000 × 10.400 / 44.652 = $20.962",
         "",
-        "CASO 2 — Consumo desde sobrante",
-        "  Un retazo 120×100 da 4 piezas de 45×45.",
-        "  NO se toca el stock de láminas; solo se cobra el área usada.",
+        "CASO 2 — 'Corte desde sobrante': retirado",
+        "  El inventario de retazos ya no existe: un cliente viejo recibe",
+        "  400 con mensaje claro y el stock no se toca.",
         "",
         "CASO 3 — Lámina completa PENDIENTE → CONFIRMAR",
         "  Piden 2 láminas ($180.000 provisional). Se confirma que solo",
@@ -635,7 +609,7 @@ def test_resumen_visual():
     caja("CONCLUSIÓN", [
         "El sistema NO cobra una lámina entera a cada pedido:",
         "cobra PROPORCIONAL AL ÁREA que realmente se usa.",
-        "Los sobrantes quedan disponibles para otros pedidos.",
+        "El registro de sobrantes de lámina fue retirado del sistema.",
         "La madera masiva se costea con una fórmula simple de m³.",
         "",
         "SI VA ACORDE AL FLUJO QUE QUEREMOS ✓",

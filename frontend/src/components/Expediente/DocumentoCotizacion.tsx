@@ -25,6 +25,35 @@ export interface DetalleDocumento {
   largo?: number | null;
   observaciones?: string | null;
   foto?: string | null | undefined;
+  /** Unidad vendida del insumo (cm/m) y equivalencia en la unidad base. */
+  unidad_captura?: 'M' | 'CM' | null;
+  cantidad_base?: number | null;
+  unidad_medida?: string | null;
+  /** Fotos del producto EN ORDEN DE SUBIDA (la primera es la portada). El
+   * documento muestra hasta 2; las demás solo salen en la Hoja de Trabajo. */
+  fotos?: string[] | null;
+}
+
+/**
+ * Miniaturas de un renglón: 1 foto se ve como siempre (64 px); con 2 fotos
+ * se muestran lado a lado un poco más chicas para no apretar la columna.
+ */
+function FotosRenglon({ urls, alt }: { urls: string[]; alt: string }) {
+  if (urls.length === 0) return null;
+  const doble = urls.length > 1;
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      {urls.map((u, i) => (
+        <img
+          key={i}
+          src={u}
+          alt={doble ? `${alt} (vista ${i + 1})` : alt}
+          className={`${doble ? 'h-14 w-14' : 'h-16 w-16'} rounded-lg object-cover border border-stone-300 shrink-0`}
+          loading="lazy"
+        />
+      ))}
+    </div>
+  );
 }
 
 export interface ClienteDocumento {
@@ -168,24 +197,49 @@ export default function DocumentoCotizacion({
                     const modelName = det.producto_nombre
                       || (det.material_id ? `Insumo #${det.material_id}` : 'Ítem a medida');
                     const dims = sinAsociar || esInsumo ? null : `${det.ancho ?? 1.0}×${det.largo ?? 1.0} m`;
-                    const desc = [dims, det.observaciones].filter(Boolean).join(' — ');
+                    // Unidad vendida del insumo: cm/m capturados o la unidad
+                    // base del material. En la cotización se muestra lo que
+                    // ve el cliente (1128 cm), no la equivalencia interna.
+                    const unidadInsumo = esInsumo
+                      ? (det.unidad_captura === 'CM'
+                        ? 'cm'
+                        : det.unidad_captura === 'M'
+                          ? 'm'
+                          : (det.unidad_medida || ''))
+                      : '';
+                    const equivalencia = esInsumo
+                      && det.cantidad_base != null
+                      && unidadInsumo === 'cm'
+                      && det.unidad_medida
+                      ? `${Number(det.cantidad_base).toLocaleString('es-CO', { maximumFractionDigits: 4 })} ${det.unidad_medida}`
+                      : null;
+                    const desc = [
+                      dims,
+                      det.observaciones,
+                      equivalencia ? `Equivale a ${equivalencia}` : null,
+                    ].filter(Boolean).join(' — ');
                     const rowTotal = Number(det.precio) * Number(det.cantidad);
-                    const cantTexto = Number(det.cantidad) % 1 === 0
-                      ? Number(det.cantidad).toFixed(0)
-                      : Number(det.cantidad).toFixed(2);
+                    const cantidadTxt = Number.isFinite(Number(det.cantidad))
+                      ? Number(det.cantidad).toLocaleString('es-CO', { maximumFractionDigits: 4 })
+                      : '0';
+                    const cantTexto = unidadInsumo ? `${cantidadTxt} ${unidadInsumo}` : cantidadTxt;
+                    // Hasta 2 fotos por renglón (portada + segunda vista). El
+                    // resto queda para la Hoja de Trabajo del taller.
+                    const fotosDet = (
+                      det.fotos && det.fotos.length > 0
+                        ? det.fotos
+                        : det.foto
+                          ? [det.foto]
+                          : []
+                    )
+                      .filter((u): u is string => !!u)
+                      .slice(0, 2);
                     return (
                       <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                         {sinAsociar ? (
                           <td colSpan={3} className="px-3 py-2 font-serif font-bold text-stone-950">
-                            <div className="flex items-start gap-2">
-                              {det.foto && (
-                                <img
-                                  src={det.foto || undefined}
-                                  alt={textoItem}
-                                  className="h-16 w-16 rounded-lg object-cover border border-stone-300 shrink-0"
-                                  loading="lazy"
-                                />
-                              )}
+                            <div className={fotosDet.length > 1 ? 'flex flex-col gap-1' : 'flex items-start gap-2'}>
+                              <FotosRenglon urls={fotosDet} alt={textoItem} />
                               <span>
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
@@ -195,17 +249,17 @@ export default function DocumentoCotizacion({
                         ) : (
                           <>
                             <td className="px-3 py-2 font-serif font-bold text-stone-950">
-                              <div className="flex items-center gap-2">
-                                {det.foto && (
-                                  <img
-                                    src={det.foto || undefined}
-                                    alt={modelName}
-                                    className="h-16 w-16 rounded-lg object-cover border border-stone-300 shrink-0"
-                                    loading="lazy"
-                                  />
-                                )}
-                                <span>{modelName}</span>
-                              </div>
+                              {fotosDet.length > 1 ? (
+                                <div className="flex flex-col gap-1">
+                                  <FotosRenglon urls={fotosDet} alt={modelName} />
+                                  <span>{modelName}</span>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <FotosRenglon urls={fotosDet} alt={modelName} />
+                                  <span>{modelName}</span>
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
                             <td className="px-3 py-2 text-stone-700 italic font-medium">{desc}</td>

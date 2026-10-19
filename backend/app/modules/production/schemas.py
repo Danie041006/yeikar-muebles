@@ -39,11 +39,10 @@ class ConsumoMaterialCreate(ConsumoMaterialBase):
     # Si se envían las dos medidas, `cantidad` = NÚMERO de cortes de ese tamaño.
     ancho_corte_cm: Optional[float] = Field(None, gt=0)
     largo_corte_cm: Optional[float] = Field(None, gt=0)
-    # Sobrante del que salen los cortes (None = láminas nuevas del depósito).
+    # RETIRADO: los sobrantes de lámina ya no existen (decisión del dueño).
+    # El campo se conserva SOLO para rechazar limpiamente a clientes viejos
+    # que aún lo envíen: los cortes siempre salen de láminas nuevas.
     origen_sobrante_id: Optional[int] = None
-    # Opcional: medidas reales del pedazo restante que el operario editó.
-    sobrante_largo_cm: Optional[float] = Field(None, gt=0)
-    sobrante_ancho_cm: Optional[float] = Field(None, gt=0)
     # --- Captura flexible de madera (cm/mts, pieza volumétrica) ---
     # `cantidad` = número digitado por el operario (en modo pieza: N.º de
     # piezas). El backend lo convierte a la unidad base del material antes de
@@ -96,8 +95,8 @@ class ConsumoConfirmarCreate(BaseModel):
     """Confirmación de uso de un material pedido (PENDIENTE → CONFIRMADO).
 
     Dos modos excluyentes:
-    - Láminas: `cantidad_cortes` + medidas → costo proporcional al área,
-      devuelve láminas sin abrir y genera el sobrante reutilizable.
+    - Láminas: `cantidad_cortes` + medidas → costo proporcional al área y
+      devuelve láminas sin abrir (los sobrantes de lámina fueron retirados).
     - General (madera y demás): `cantidad_usada` (un uso) o `usos` (varios
       usos en una sola confirmación) → lo que sobró vuelve solo al depósito;
       si se usó de más se descuenta del stock (validando disponibilidad). El
@@ -106,9 +105,6 @@ class ConsumoConfirmarCreate(BaseModel):
     cantidad_cortes: Optional[float] = Field(None, gt=0)
     largo_corte_cm: Optional[float] = Field(None, gt=0)
     ancho_corte_cm: Optional[float] = Field(None, gt=0)
-    # Opcional: medidas reales del pedazo restante que el operario editó.
-    sobrante_largo_cm: Optional[float] = Field(None, gt=0)
-    sobrante_ancho_cm: Optional[float] = Field(None, gt=0)
     # Modo general: cuánto se usó de verdad (unidad base del material).
     cantidad_usada: Optional[float] = Field(None, gt=0)
     # --- Captura flexible al confirmar (madera y demás) ---
@@ -359,6 +355,19 @@ class OrdenProduccionUpdate(BaseModel):
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
 
+
+class OrdenRetrabajoCreate(BaseModel):
+    """Abre un RETRABAJO sobre una pieza de exhibición que está EN STOCK.
+
+    La pieza sale del showroom al taller (movimiento SALIDA → apartada, no
+    vendible) y vuelve al finalizar la orden con su costo X + el costo real
+    del retoque. Nada toca la receta ni el precio del catálogo.
+    """
+    producto_id: int
+    # Qué se cambia ("cambio de color, retapizado…") y para quién (opcional).
+    motivo: Optional[str] = None
+    cliente_nombre: Optional[str] = None
+
 class ClienteBasicoResponse(BaseModel):
     id: int
     nombre: str
@@ -399,7 +408,7 @@ class OrdenProduccionMinima(BaseModel):
     detalle_pedido: Optional[DetalleDePedidoBasico] = None
     producto: Optional[ProductoResponse] = None
     es_stock: bool = False
-    # Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK.
+    # Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK | RETRABAJO.
     tipo: str = "PEDIDO"
     estado: str
     ancho: Optional[float] = None
@@ -407,6 +416,9 @@ class OrdenProduccionMinima(BaseModel):
     alto: Optional[float] = None
     fecha_inicio: Optional[date] = None
     fecha_fin: Optional[date] = None
+    # RETRABAJO: pieza de inventario retrabajada + motivo/contexto libre.
+    producto_inventario_id: Optional[int] = None
+    observaciones: Optional[str] = None
     # Checklist de piezas del mueble (juego = varias piezas). El tablero la
     # muestra para marcar avance; no altera precio, receta ni costos.
     piezas: List[PiezaOrdenResponse] = []
@@ -420,8 +432,11 @@ class OrdenProduccionResponse(OrdenProduccionBase):
     detalle_pedido: Optional[DetalleDePedidoBasico] = None
     producto: Optional[ProductoResponse] = None
     es_stock: bool = False
-    # Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK.
+    # Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK | RETRABAJO.
     tipo: str = "PEDIDO"
+    # RETRABAJO: pieza de inventario retrabajada + motivo/contexto libre.
+    producto_inventario_id: Optional[int] = None
+    observaciones: Optional[str] = None
     creado_por_id: Optional[int] = None
     creador_nombre: Optional[str] = None
     # Transitorio (no es columna): True si al finalizar se generó la
@@ -598,9 +613,9 @@ class CrudoConsumoCreate(BaseModel):
     # --- Consumo por CORTE (materiales laminares) ---
     ancho_corte_cm: Optional[float] = Field(None, gt=0)
     largo_corte_cm: Optional[float] = Field(None, gt=0)
+    # RETIRADO: los sobrantes de lámina ya no existen. Se conserva SOLO para
+    # rechazar limpiamente a clientes viejos que aún lo envíen.
     origen_sobrante_id: Optional[int] = None
-    sobrante_largo_cm: Optional[float] = Field(None, gt=0)
-    sobrante_ancho_cm: Optional[float] = Field(None, gt=0)
     # --- Captura flexible de madera, igual que ConsumoMaterialCreate ---
     unidad_captura: Optional[str] = Field(None, pattern="^(M|CM)$")
     pieza_largo: Optional[float] = Field(None, gt=0)

@@ -11,6 +11,11 @@ class DetallePedidoBase(BaseModel):
     tipo_item: str = Field("FABRICADO", pattern=r"^(FABRICADO|REVENTA|INSUMO|REPARACION|SERVICIO)$")
     cantidad: float = Field(gt=0)
     precio: float = Field(ge=0)
+    # Unidad vendida vs. unidad de inventario (insumos). La conversión la
+    # calcula el backend al convertir la cotización; el campo es opcional para
+    # pedidos creados por otras vías.
+    unidad_captura: Optional[str] = Field(None, pattern=r"^(M|CM)$")
+    cantidad_base: Optional[float] = Field(None, gt=0)
     costo_unitario: Optional[float] = Field(None, ge=0)
     porcentaje_ganancia: Optional[float] = None
     alto: Optional[float] = Field(None, ge=0)
@@ -112,6 +117,9 @@ class ConvertirCotizacionBody(BaseModel):
     tasa_cambio_adelanto: Optional[float] = None
     # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE | BINANCE
     metodo_pago: Optional[str] = None
+    # Fecha del abono inicial (YYYY-MM-DD): a veces el cliente abonó ANTES de
+    # convertir. Si se omite, se usa HOY en hora Venezuela.
+    fecha_adelanto: Optional[date] = None
 
 
 class RentabilidadPedidoResponse(BaseModel):

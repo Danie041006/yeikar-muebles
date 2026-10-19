@@ -63,7 +63,9 @@ class DetalleFactura(Base):
     producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=True)
     material_id = Column(BigInteger, ForeignKey("material.id", ondelete="RESTRICT"), nullable=True)
     descripcion = Column(String(250), nullable=True)
-    cantidad = Column(Numeric(10, 2), nullable=False)
+    # Cuatro decimales: una venta en m³ puede ser 0,1128 (no se redondea a
+    # 0,11 en la factura; el subtotal debe cuadrar con la cantidad impresa).
+    cantidad = Column(Numeric(14, 4), nullable=False)
     precio_usd = Column(Numeric(15, 2), nullable=False)
     subtotal_usd = Column(Numeric(15, 2), nullable=False)
     subtotal_bs = Column(Numeric(15, 2), nullable=False)

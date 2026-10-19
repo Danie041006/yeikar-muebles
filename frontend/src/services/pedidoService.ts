@@ -13,6 +13,9 @@ export interface OrderDetail {
   tipo_item?: TipoItem;
   cantidad: number;
   precio: number;
+  /** Unidad vendida y equivalencia en la unidad del inventario (insumos). */
+  unidad_captura?: 'M' | 'CM' | null;
+  cantidad_base?: number | null;
   alto?: number;
   ancho?: number;
   largo?: number;
@@ -84,6 +87,8 @@ export interface ConvertQuoteBody {
   moneda_adelanto_id?: number;
   tasa_cambio_adelanto?: number;
   metodo_pago?: string;
+  /** Fecha del abono inicial (YYYY-MM-DD); sin ella, HOY en hora Venezuela. */
+  fecha_adelanto?: string;
 }
 
 export const pedidoService = {

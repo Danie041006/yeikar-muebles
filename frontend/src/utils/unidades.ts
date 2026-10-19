@@ -77,6 +77,52 @@ export function convertirUnidadUso(cantidad: number, factorBase: number): number
   return Math.round(cantidad * factorBase * 10000) / 10000;
 }
 
+/** Factor de conversión de la unidad de captura a la unidad BASE del material
+ *  (multiplicando: cantidad_base = cantidad_captura × factor).
+ *
+ *  - Material en m³ + captura en cm → regla del taller: ÷ 10.000 (factor 0,0001).
+ *  - Material lineal en m + captura en cm → ÷ 100 (factor 0,01).
+ *  - Material definido en cm + captura en m → × 100 (factor 100).
+ *  - Captura en la unidad base (sin unidad) → 1.
+ *
+ *  Es el ESPEJO de backend/app/modules/production/unidades.py: la conversión
+ *  definitiva la hace el backend; esto solo alimenta la vista previa y el
+ *  precio por unidad que ve el vendedor. */
+export function factorCapturaABase(
+  dimension: Dimensionalidad,
+  abreviaturaBase: string | null | undefined,
+  unidad: UnidadCaptura | '' | null | undefined,
+): number {
+  if (!unidad) return 1;
+  const baseCm = (abreviaturaBase ?? '').trim().toLowerCase() === 'cm';
+  if (dimension === 'VOLUMEN') return unidad === 'CM' ? 1 / DIVISOR_PIEZA : 1;
+  if (dimension === 'LONGITUD') {
+    if (unidad === 'CM') return baseCm ? 1 : 1 / CM_POR_METRO;
+    if (unidad === 'M') return baseCm ? CM_POR_METRO : 1;
+  }
+  return 1;
+}
+
+/** Redondeo a 4 decimales (la precisión de las columnas de cantidad). */
+export function redondear4(n: number): number {
+  return Math.round((Number.isFinite(n) ? n : 0) * 10000) / 10000;
+}
+
+/** Cantidad base (inventario) a partir de la cantidad capturada. */
+export function cantidadBaseDesdeCaptura(cantidad: number, factor: number): number {
+  return redondear4((Number(cantidad) || 0) * factor);
+}
+
+/** Precio por unidad base a partir del precio por unidad de captura. */
+export function precioBaseDesdeCaptura(precio: number, factor: number): number {
+  return redondear4((Number(precio) || 0) / (factor || 1));
+}
+
+/** Precio por unidad de captura a partir del precio por unidad base. */
+export function precioCapturaDesdeBase(precioBase: number, factor: number): number {
+  return redondear4((Number(precioBase) || 0) * (factor || 1));
+}
+
 /** Etiqueta de trazabilidad: cómo se digitó la cantidad del consumo. */
 export function etiquetaCaptura(c: {
   unidad_captura?: 'M' | 'CM' | null;

@@ -48,6 +48,29 @@ def listar_ordenes(
 ):
     return service.obtener_ordenes_produccion(db, salto=salto, limite=limite, buscar=buscar, usuario=usuario_actual)
 
+@router.get("/orden/retrabajos-abiertos")
+def listar_retrabajos_abiertos(
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Retrabajos vivos sobre piezas de exhibición (para marcar las piezas
+    "EN RETRABAJO" en el inventario del showroom)."""
+    return service.listar_retrabajos_abiertos(db, usuario_actual)
+
+@router.post("/orden/retrabajo", response_model=schemas.OrdenProduccionResponse, status_code=status.HTTP_201_CREATED)
+def crear_orden_retrabajo(
+    esquema: schemas.OrdenRetrabajoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Abre un retrabajo sobre una pieza de exhibición EN STOCK: la pieza sale
+    del showroom (apartada, no vendible) y al finalizar vuelve con su costo
+    X + el costo real del retoque. No crea stock nuevo ni toca el catálogo."""
+    try:
+        return service.crear_orden_retrabajo(db, esquema, usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @router.get("/orden/{id}", response_model=schemas.OrdenProduccionResponse)
 def ver_orden(
     id: int,
@@ -424,7 +447,7 @@ def confirmar_consumo(
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     """Confirma el uso real de una lámina pedida completa: los cortes que
-    salieron de las láminas. Recalcula el costo, ajusta láminas y sobrante."""
+    salieron de las láminas. Recalcula el costo y ajusta láminas."""
     try:
         return service.confirmar_consumo_material(db, id, esquema, usuario_actual)
     except ValueError as e:

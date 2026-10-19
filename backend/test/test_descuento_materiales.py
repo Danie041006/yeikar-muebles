@@ -5,7 +5,8 @@ Verificación de INTEGRACIÓN (vía API, con etapa EN_PROCESO) de que el stock
 descuenta bien cuando los materiales se toman POR MEDIDAS:
 
   Láminas (espuma, melamina — igual que MDF: cortes bidimensionales):
-    consumo por cortes → descuenta LÁMINAS enteras y deja el sobrante.
+    consumo por cortes → descuenta LÁMINAS enteras (los sobrantes de lámina
+    fueron retirados del sistema: no se crean retazos).
 
   Madera:
     volumétrica (m³) por pieza con medidas → descuenta la fórmula de la casa
@@ -69,7 +70,7 @@ def _movimiento_material(db, material_id):
 # Láminas: espuma y melamina se comportan igual que MDF (cortes 2D)
 # ============================================================================
 
-def test_espuma_lamina_cortes_descuenta_lamina_y_deja_sobrante(client, cleaner, db):
+def test_espuma_lamina_cortes_descuenta_lamina_sin_sobrante(client, cleaner, db):
     _, _, etapa = _pedido_con_etapa_en_proceso(client, cleaner)
     # Espuma de lámina 200×140 cm (como una espuma real de colchón)
     espuma = crear_material(client, cleaner, nombre="ESPUMA TEST 200X140",
@@ -92,11 +93,11 @@ def test_espuma_lamina_cortes_descuenta_lamina_y_deja_sobrante(client, cleaner, 
     mov = _movimiento_material(db, espuma["id"])
     assert mov is not None and float(mov[0]) == 1.0
 
-    # Dejó sobrante (140×100 = 14000 cm²)
+    # Sin sobrantes: el retazo ya no se inventaría (feature retirada)
     n = db.execute(text(
         "SELECT COUNT(*) FROM sobrante_lamina WHERE material_id = :m AND estado='DISPONIBLE'"
     ), {"m": espuma["id"]}).scalar()
-    assert n == 1, "El corte de espuma debe registrar el sobrante"
+    assert n == 0, "El corte ya no debe registrar sobrantes"
 
 
 def test_melamina_lamina_cortes_descuenta_bien(client, cleaner, db):
@@ -119,7 +120,7 @@ def test_melamina_lamina_cortes_descuenta_bien(client, cleaner, db):
     mov = _movimiento_material(db, mel["id"])
     assert float(mov[0]) == 1.0
 
-    # 6 cortes (2 láminas) → stock 3 y sobrante del área de la última
+    # 6 cortes (2 láminas) → stock 3 (sin sobrantes: retazos retirados)
     consumo2 = _consumir(client, cleaner, db, etapa, mel["id"], {
         "cantidad": 6,
         "extra": {"ancho_corte_cm": 80, "largo_corte_cm": 130},
@@ -128,8 +129,9 @@ def test_melamina_lamina_cortes_descuenta_bien(client, cleaner, db):
     assert stock_actual(db, mel["id"]) == Decimal("3")
 
 
-def test_espuma_sirve_desde_sobrante_sin_tocar_stock(client, cleaner, db):
-    from app.modules.inventory.model import SobranteLamina
+def test_espuma_corte_desde_sobrante_rechazado(client, cleaner, db):
+    """Los cortes "desde sobrante" de clientes viejos se rechazan (400):
+    el inventario de retazos fue retirado y no se descuenta nada en silencio."""
     _, _, etapa = _pedido_con_etapa_en_proceso(client, cleaner)
     espuma = crear_material(client, cleaner, nombre="ESPUMA SOB 140X100",
                             costo_base=30000, unidad_medida_id=36)
@@ -139,23 +141,19 @@ def test_espuma_sirve_desde_sobrante_sin_tocar_stock(client, cleaner, db):
     assert r.status_code == 200
     dar_stock(client, cleaner, espuma["id"], 4)
 
-    sob = SobranteLamina(
-        material_id=espuma["id"], ubicacion_id=1,
-        largo_cm=Decimal("140"), ancho_cm=Decimal("100"), estado="DISPONIBLE",
-    )
-    db.add(sob)
-    db.commit()
-    registrar_sobrantes_de_material(db, cleaner, espuma["id"])
-
-    # 2 cortes de 50×50 desde el sobrante → NO toca el stock de láminas
-    consumo = _consumir(client, cleaner, db, etapa, espuma["id"], {
+    r = client.post("/api/v1/produccion/consumo/", json={
+        "etapa_produccion_id": etapa,
+        "material_id": espuma["id"],
         "cantidad": 2,
-        "extra": {"ancho_corte_cm": 50, "largo_corte_cm": 50, "origen_sobrante_id": sob.id},
-    })
-    assert float(consumo["laminas_consumidas"]) == 0.0
-    assert stock_actual(db, espuma["id"]) == Decimal("4"), "Desde sobrante no se descuentan láminas"
-    db.refresh(sob)
-    assert Decimal(str(sob.largo_cm)) * Decimal(str(sob.ancho_cm)) == Decimal("9000.00")
+        "ancho_corte_cm": 50,
+        "largo_corte_cm": 50,
+        "origen_sobrante_id": 999999,
+        "solicitante_empleado_id": 3,
+        "fecha": datetime.utcnow().isoformat(),
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 400, f"corte desde sobrante → {r.status_code}: {r.text}"
+    assert "ya no está disponible" in r.json()["detail"]
+    assert stock_actual(db, espuma["id"]) == Decimal("4"), "el rechazo no toca el stock"
 
 
 # ============================================================================

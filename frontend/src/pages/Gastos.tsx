@@ -540,13 +540,6 @@ export default function Gastos() {
       mobileLabel: 'Monto',
       align: 'right',
     },
-    {
-      key: 'base',
-      header: 'Moneda Base',
-      render: (g) => <span className="font-mono">${Number(g.monto_en_moneda_base).toLocaleString()}</span>,
-      mobileLabel: 'Base COP',
-      align: 'right',
-    },
   ];
 
   return (
@@ -1396,7 +1389,6 @@ export default function Gastos() {
                     <div>
                       <p className="text-sm font-bold text-emerald-700">
                         {fmtMoneda(Number(p.monto), historialDeuda.moneda?.codigo || 'COP')}
-                        <span className="ml-2 text-[11px] font-mono text-yeikar-neutral/50">≈ {fmtMoneda(Number(p.monto_en_moneda_base), 'COP')}</span>
                       </p>
                       <p className="text-[11px] text-yeikar-neutral/60">
                         {p.fecha} · desde <b>{p.metodo_caja_nombre || 'cuenta'}</b>

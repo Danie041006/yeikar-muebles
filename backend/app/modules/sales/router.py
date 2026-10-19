@@ -69,6 +69,10 @@ def ver_factura_venta(
     resp.total_descontado = total_descontado
     resp.saldo_pendiente = float(db_obj.total) - total_pagado - total_descontado
     resp.detalles = service.detalles_venta_mostrar(db, db_obj)
+    # Un abono registrado tarde puede traer una fecha anterior: se ordena por
+    # la fecha del pago para que caiga en su lugar cronológico, no al final.
+    resp.pagos.sort(key=lambda p: (p.fecha, p.id))
+    resp.descuentos.sort(key=lambda d: (d.fecha, d.id))
     return resp
 
 @router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -99,6 +103,23 @@ def registrar_pago(
         return service.crear_pago(db, esquema, usuario=usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@pago_router.put("/{id}", response_model=schemas.PagoResponse)
+def actualizar_pago(
+    id: int,
+    esquema: schemas.PagoUpdate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user),
+):
+    """Corrige la fecha/referencia/observaciones de un cobro ya registrado."""
+    try:
+        db_pago = service.actualizar_pago(db, id, esquema, usuario=usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not db_pago:
+        raise HTTPException(status_code=404, detail="Pago no encontrado")
+    return db_pago
 
 
 # ------------------------------------------------------------

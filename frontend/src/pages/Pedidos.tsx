@@ -536,7 +536,18 @@ export default function Pedidos() {
                         <div className="grid grid-cols-3 text-xs text-yeikar-neutral/50 font-mono">
                           <div>Ancho: {det.ancho}m</div>
                           <div>Largo: {det.largo}m</div>
-                          <div>Cantidad: {det.cantidad}</div>
+                          <div>
+                            Cantidad: {det.cantidad}
+                            {det.tipo_item === 'INSUMO' && (
+                              det.unidad_captura === 'CM'
+                                ? ' cm'
+                                : det.unidad_captura === 'M'
+                                  ? ' m'
+                                  : det.material?.unidad_medida?.abreviatura
+                                    ? ` ${det.material.unidad_medida.abreviatura}`
+                                    : ''
+                            )}
+                          </div>
                         </div>
                       )}
                       {det.observaciones && (
