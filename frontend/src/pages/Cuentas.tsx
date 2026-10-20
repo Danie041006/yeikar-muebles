@@ -25,7 +25,7 @@ const emptyMovForm = (metodoId = 0, monedaCopId = 1) => ({
   metodo_caja_id: metodoId,
   fecha: new Date().toISOString().split('T')[0],
   tipo: 'ENTRADA' as MovimientoCreate['tipo'],
-  monto: 0,
+  monto: '',
   moneda_id: monedaCopId,
   persona_entidad: '',
   concepto: '',
@@ -189,7 +189,7 @@ export default function Cuentas() {
         metodo_caja_id: mov.metodo_caja_id,
         fecha: mov.fecha.slice(0, 10),
         tipo: mov.tipo,
-        monto: Number(mov.monto),
+        monto: String(mov.monto),
         moneda_id: mov.moneda_id,
         persona_entidad: mov.persona_entidad ?? '',
         concepto: mov.concepto ?? '',
@@ -204,14 +204,15 @@ export default function Cuentas() {
   };
 
   const guardarMovimiento = async () => {
-    if (!movForm.metodo_caja_id || !movForm.monto || movForm.monto <= 0) {
+    const monto = Number(movForm.monto);
+    if (!movForm.metodo_caja_id || !Number.isFinite(monto) || monto <= 0) {
       setError('Cuenta y monto son obligatorios (mayor a 0).');
       return;
     }
     const payload = {
       fecha: movForm.fecha,
       tipo: movForm.tipo,
-      monto: Number(movForm.monto),
+      monto,
       moneda_id: movForm.moneda_id,
       persona_entidad: movForm.persona_entidad.trim() || null,
       concepto: movForm.concepto.trim() || null,
@@ -761,33 +762,18 @@ export default function Cuentas() {
               />
             </Field>
           </div>
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
-            <Field label="Monto" required>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={movForm.monto}
-                onChange={(e) => setMovForm({ ...movForm, monto: Number(e.target.value) })}
-              />
-            </Field>
-            <Field label="Moneda">
-              <SearchSelect
-                value={movForm.moneda_id}
-                onChange={(v) => setMovForm({ ...movForm, moneda_id: Number(v) })}
-                options={monedas.map((m) => ({ value: m.id, label: `${m.codigo} (${m.simbolo})` }))}
-                placeholder="Seleccione moneda..."
-              />
-            </Field>
-          </div>
+          <Field label="Monto" required>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={movForm.monto}
+              onChange={(e) => setMovForm({ ...movForm, monto: e.target.value })}
+              placeholder="0"
+            />
+          </Field>
           <Field
-            label={
-              movForm.tipo === 'ENTRADA'
-                ? '¿De quién entra el dinero? (persona o entidad)'
-                : movForm.tipo === 'SALIDA'
-                  ? '¿A quién se le entrega? (persona o entidad)'
-                  : 'Persona o entidad (opcional)'
-            }
+            label="Persona o entidad"
             hint="Cliente, proveedor, empleado, familiar... Es la otra parte del movimiento, no quien lo registra."
           >
             <Input

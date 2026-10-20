@@ -758,7 +758,14 @@ export default function InformeMensual() {
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                       <SearchSelect
                         value={cajaForm.metodo_caja_id}
-                        onChange={(v) => setCajaForm((f) => ({ ...f, metodo_caja_id: Number(v) }))}
+                        onChange={(v) => {
+                          const metodo = metodosCaja.find((m) => m.id === Number(v));
+                          setCajaForm((f) => ({
+                            ...f,
+                            metodo_caja_id: Number(v),
+                            moneda_id: metodo?.moneda_id || f.moneda_id,
+                          }));
+                        }}
                         options={[
                           { value: 0, label: 'Método...' },
                           ...metodosCaja.map((m) => ({ value: m.id, label: m.nombre })),
@@ -773,12 +780,6 @@ export default function InformeMensual() {
                         <option value="AJUSTE">Ajuste</option>
                       </select>
                       <input type="number" min="0" step="0.01" value={cajaForm.monto} onChange={(e) => setCajaForm((f) => ({ ...f, monto: e.target.value }))} placeholder="Monto" className={inputCls} />
-                      <SearchSelect
-                        value={cajaForm.moneda_id}
-                        onChange={(v) => setCajaForm((f) => ({ ...f, moneda_id: Number(v) }))}
-                        options={monedas.map((m) => ({ value: m.id, label: m.codigo }))}
-                        placeholder="Moneda..."
-                      />
                       <input value={cajaForm.persona_entidad} onChange={(e) => setCajaForm((f) => ({ ...f, persona_entidad: e.target.value }))} placeholder="Persona o entidad" className={inputCls} />
                       <input value={cajaForm.concepto} onChange={(e) => setCajaForm((f) => ({ ...f, concepto: e.target.value }))} placeholder="Concepto" className={inputCls} />
                       <button onClick={registrarMovimiento} disabled={guardando} className="bg-yeikar-primary text-yeikar-neutral font-bold text-sm rounded-lg hover:bg-yeikar-secondary transition-colors disabled:opacity-50 py-2">
