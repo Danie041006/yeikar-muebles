@@ -14,6 +14,8 @@ import { fmtMoneda } from '../../utils/format';
 const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+const POR_PAGINA = 40;
+
 const primerDiaMes = () => {
   const hoy = new Date();
   return iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
@@ -40,6 +42,7 @@ export default function LibroCajaView({ cuentas }: Props) {
   const [data, setData] = useState<LibroCajaVista | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pagina, setPagina] = useState(1);
 
   // Si las cuentas llegan después del primer render, se elige la de COP.
   useEffect(() => {
@@ -66,11 +69,20 @@ export default function LibroCajaView({ cuentas }: Props) {
   }, [cuentaId, desde, hasta]);
 
   useEffect(() => {
+    setPagina(1);
+  }, [cuentaId, desde, hasta]);
+
+  useEffect(() => {
     cargar();
   }, [cargar]);
 
   const moneda = data?.moneda_codigo || 'COP';
   const fmt = (v: string | number) => fmtMoneda(Number(v || 0), moneda);
+
+  const totalPaginas = Math.max(1, Math.ceil((data?.filas.length ?? 0) / POR_PAGINA));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const inicioPagina = (paginaActual - 1) * POR_PAGINA;
+  const filasPagina = (data?.filas ?? []).slice(inicioPagina, inicioPagina + POR_PAGINA);
 
   const columns: DataColumn<LibroCajaVistaFila>[] = [
     {
@@ -249,7 +261,7 @@ export default function LibroCajaView({ cuentas }: Props) {
           >
             <ResponsiveDataTable
               columns={columns}
-              rows={data.filas}
+              rows={filasPagina}
               rowKey={(f) => f.id}
               empty={
                 <div className="p-8">
@@ -261,6 +273,34 @@ export default function LibroCajaView({ cuentas }: Props) {
                 </div>
               }
             />
+            {data.filas.length > POR_PAGINA && (
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-yeikar-secondary-light/10 px-4 py-3">
+                <span className="text-[11px] font-mono text-yeikar-neutral/45">
+                  Mostrando {inicioPagina + 1}–{Math.min(inicioPagina + POR_PAGINA, data.filas.length)} de {data.filas.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={paginaActual <= 1}
+                    onClick={() => setPagina((p) => Math.max(1, p - 1))}
+                  >
+                    Anterior
+                  </Button>
+                  <span className="text-xs font-bold text-yeikar-neutral/60">
+                    Página {paginaActual} de {totalPaginas}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={paginaActual >= totalPaginas}
+                    onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+                  >
+                    Siguiente
+                  </Button>
+                </div>
+              </div>
+            )}
           </Card>
         </>
       ) : null}
