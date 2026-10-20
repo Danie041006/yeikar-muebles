@@ -954,8 +954,10 @@ def _tipo_concepto_movimiento(
     match = _TAG_LIBRO.match(obs)
     if match:
         resto = match.group(1).strip()
-        if " · " in resto:
-            tipo, concepto = resto.split(" · ", 1)
+        # El separador es " · " pero, si el CONCEPTO está vacío, el strip deja
+        # " ·" sin espacio final: hay que aceptar las dos formas.
+        if " ·" in resto:
+            tipo, concepto = resto.split(" ·", 1)
         else:
             tipo, concepto = "", resto
         tipo = tipo.strip() or ("GASTO" if gasto else mov.tipo)

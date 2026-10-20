@@ -296,6 +296,22 @@ def test_tipo_solo_sin_concepto_y_tipo_con_concepto():
     assert parsed.filas[2].concepto == "PAGO DE MERCADO"
 
 
+def test_vista_conserva_tipo_sin_concepto():
+    """La vista no debe convertir el TIPO en 'GASTO' cuando no hay CONCEPTO."""
+    from app.modules.reports.libro_caja import _tipo_concepto_movimiento
+
+    class Mov:
+        observaciones = "[Libro EFECTIVO_COP 2026-10] QUESILLO GP · "
+        tipo = "SALIDA"
+        pago_id = None
+        transferencia_id = None
+        referencia = "Gasto #180"
+
+    tipo, concepto = _tipo_concepto_movimiento(Mov(), None)
+    assert tipo == "QUESILLO GP"
+    assert concepto == ""
+
+
 def test_clasificacion_invalida_se_rechaza(client, cleaner):
     r = client.post("/api/v1/gasto/gastos/", json={
         "tipo_gasto_id": 1,
