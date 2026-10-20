@@ -76,6 +76,7 @@ def upgrade() -> None:
             ) s
             WHERE movimiento_caja.id = s.id
               AND movimiento_caja.persona_entidad IS NULL
+              AND substring(concepto FROM '^\\[Libro [^\\]]+\\] *(.*)$') LIKE '% ·%'
             """
         )
     )
