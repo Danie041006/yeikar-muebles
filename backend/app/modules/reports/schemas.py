@@ -570,6 +570,40 @@ class LibroCajaDeshacerResponse(BaseModel):
     movimientos_borrados: int
 
 
+class LibroCajaVistaFila(BaseModel):
+    id: int
+    fecha: date
+    tipo: str = ""
+    concepto: str = ""
+    ingreso: Decimal = Decimal("0.0")
+    egreso: Decimal = Decimal("0.0")
+    saldo: Decimal = Decimal("0.0")
+    clasificacion: Optional[str] = None
+    origen: str = "MANUAL"
+    referencia: Optional[str] = None
+
+
+class LibroCajaVistaClasificacion(BaseModel):
+    clasificacion: str
+    label: str
+    count: int
+    total: Decimal = Decimal("0.0")
+
+
+class LibroCajaVistaResponse(BaseModel):
+    cuenta_id: int
+    cuenta_nombre: str
+    moneda_codigo: str = "COP"
+    fecha_desde: date
+    fecha_hasta: date
+    saldo_inicial: Decimal = Decimal("0.0")
+    total_ingresos: Decimal = Decimal("0.0")
+    total_egresos: Decimal = Decimal("0.0")
+    saldo_final: Decimal = Decimal("0.0")
+    filas: List[LibroCajaVistaFila] = []
+    clasificaciones: List[LibroCajaVistaClasificacion] = []
+
+
 # Rebuilds para referencias circulares
 from app.modules.catalogos.schemas import MonedaResponse  # noqa: E402
 from app.modules.sales.schemas import VentaResponse  # noqa: E402

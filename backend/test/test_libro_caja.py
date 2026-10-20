@@ -118,6 +118,27 @@ def test_preview_e_importacion_del_libro(client, cleaner, db):
     # Los cuatro gastos descontaron la cuenta: la suma de sus montos es 600.000.
     assert sum(Decimal(str(g.monto)) for g in gastos) == Decimal("600000")
 
+    # 2b. El libro se ve como la hoja: tipo, concepto y saldo corrido.
+    r = client.get("/api/v1/cuenta/libro", params={
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-01",
+        "fecha_hasta": "2026-10-31",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    assert Decimal(str(libro["saldo_inicial"])) == Decimal("0")
+    assert Decimal(str(libro["saldo_final"])) == Decimal("3163600")
+    assert len(libro["filas"]) == 7
+    primera = libro["filas"][0]
+    assert primera["tipo"] == "APERTURA"
+    assert "Ajuste para cuadrar" in primera["concepto"]
+    assert Decimal(str(primera["saldo"])) == Decimal("3683600")
+    segunda = libro["filas"][1]
+    assert segunda["tipo"] == "DOÑA ROSA G C"
+    assert segunda["concepto"] == "PAGO DE MERCADO"
+    assert segunda["clasificacion"] == "GASTO_CASA"
+    assert Decimal(str(segunda["saldo"])) == Decimal("3563600")
+
     # 3. No se puede importar dos veces el mismo período.
     r = client.post(
         "/api/v1/cuenta/libro/importar",

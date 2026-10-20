@@ -22,6 +22,7 @@ Reglas de la importación:
 """
 from __future__ import annotations
 
+import calendar
 import re
 import unicodedata
 from collections import Counter
@@ -34,6 +35,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.caja import registrar_movimiento_caja
+from app.core.hora_ve import hoy_ve
 from app.modules.auditoria.service import record_event
 from app.modules.catalogos.model import Moneda, TipoGasto
 from app.modules.gastos import schemas as gastos_schemas
@@ -902,7 +904,6 @@ def deshacer_importacion(
     periodo: str,
     usuario: Optional[Usuario] = None,
 ) -> dict:
-    """Borra los movimientos y gastos creados por una importación concreta."""
     cuenta = _cuenta(db, metodo_caja_id)
     etiqueta = _etiqueta(cuenta, periodo)
     gastos = (
@@ -937,3 +938,168 @@ def deshacer_importacion(
         "gastos_borrados": gastos_borrados,
         "movimientos_borrados": int(movimientos_borrados or 0),
     }
+
+
+# ---------------------------------------------------------------------------
+# Vista del libro (como la hoja de Excel: fecha, tipo, concepto, ingreso,
+# egreso y saldo corrido)
+# ---------------------------------------------------------------------------
+_TAG_LIBRO = re.compile(r"^\[Libro [^\]]+\]\s*(.*)$")
+
+
+def _tipo_concepto_movimiento(
+    mov: MovimientoCaja, gasto: Optional[Gasto]
+) -> tuple[str, str]:
+    obs = (mov.observaciones or "").strip()
+    match = _TAG_LIBRO.match(obs)
+    if match:
+        resto = match.group(1).strip()
+        if " · " in resto:
+            tipo, concepto = resto.split(" · ", 1)
+        else:
+            tipo, concepto = "", resto
+        tipo = tipo.strip() or ("GASTO" if gasto else mov.tipo)
+        return tipo, concepto.strip()
+    if gasto:
+        return "GASTO", (gasto.descripcion or obs or mov.referencia or "")
+    if mov.pago_id:
+        return "VENTA", (obs or mov.referencia or "Cobro de venta")
+    if mov.transferencia_id:
+        return "TRANSFERENCIA", (obs or "Transferencia entre cuentas")
+    if mov.tipo == "APERTURA":
+        return "APERTURA", (obs or "Saldo inicial")
+    return "MOVIMIENTO", (obs or mov.referencia or "")
+
+
+def obtener_libro_caja(
+    db: Session,
+    metodo_caja_id: int,
+    fecha_desde: Optional[date] = None,
+    fecha_hasta: Optional[date] = None,
+) -> dict:
+    """Devuelve el libro de una cuenta con saldo corrido, como la hoja."""
+    cuenta = _cuenta(db, metodo_caja_id)
+
+    # Rango por defecto: el mes del último movimiento (o el mes actual).
+    ultima = (
+        db.query(func.max(MovimientoCaja.fecha))
+        .filter(MovimientoCaja.metodo_caja_id == cuenta.id)
+        .scalar()
+    )
+    base = fecha_hasta or ultima or hoy_ve()
+    if fecha_hasta is None:
+        fecha_hasta = date(
+            base.year, base.month, calendar.monthrange(base.year, base.month)[1]
+        )
+    if fecha_desde is None:
+        fecha_desde = date(base.year, base.month, 1)
+    if fecha_desde > fecha_hasta:
+        fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+
+    saldo_inicial = _saldo_cuenta_hasta(
+        db, cuenta.id, fecha_desde - timedelta(days=1)
+    )
+    movimientos = (
+        db.query(MovimientoCaja)
+        .filter(
+            MovimientoCaja.metodo_caja_id == cuenta.id,
+            MovimientoCaja.fecha >= fecha_desde,
+            MovimientoCaja.fecha <= fecha_hasta,
+        )
+        .order_by(MovimientoCaja.fecha, MovimientoCaja.id)
+        .all()
+    )
+
+    gasto_ids: set[int] = set()
+    for mov in movimientos:
+        if mov.referencia and mov.referencia.startswith("Gasto #"):
+            try:
+                gasto_ids.add(int(mov.referencia.split("#", 1)[1].split()[0]))
+            except (ValueError, IndexError):
+                pass
+    gastos = {
+        gasto.id: gasto
+        for gasto in (
+            db.query(Gasto).filter(Gasto.id.in_(gasto_ids)).all()
+            if gasto_ids else []
+        )
+    }
+
+    saldo = saldo_inicial
+    total_ingresos = _CERO
+    total_egresos = _CERO
+    filas: list[dict] = []
+    por_clasificacion: dict[str, dict] = {}
+
+    for mov in movimientos:
+        monto = Decimal(str(mov.monto or 0))
+        ingreso = monto if mov.tipo != "SALIDA" else _CERO
+        egreso = monto if mov.tipo == "SALIDA" else _CERO
+        saldo += ingreso - egreso
+        total_ingresos += ingreso
+        total_egresos += egreso
+
+        gasto = None
+        if mov.referencia and mov.referencia.startswith("Gasto #"):
+            try:
+                gasto = gastos.get(int(mov.referencia.split("#", 1)[1].split()[0]))
+            except (ValueError, IndexError):
+                gasto = None
+        tipo, concepto = _tipo_concepto_movimiento(mov, gasto)
+        clasificacion = gasto.clasificacion if gasto else None
+        if clasificacion:
+            acumulado = por_clasificacion.setdefault(
+                clasificacion, {"count": 0, "total": _CERO}
+            )
+            acumulado["count"] += 1
+            acumulado["total"] += monto
+
+        if _TAG_LIBRO.match((mov.observaciones or "").strip()):
+            origen = "LIBRO"
+        elif gasto:
+            origen = "GASTO"
+        elif mov.pago_id:
+            origen = "VENTA"
+        elif mov.transferencia_id:
+            origen = "TRANSFERENCIA"
+        else:
+            origen = "MANUAL"
+
+        filas.append({
+            "id": mov.id,
+            "fecha": mov.fecha,
+            "tipo": tipo,
+            "concepto": concepto,
+            "ingreso": ingreso,
+            "egreso": egreso,
+            "saldo": saldo,
+            "clasificacion": clasificacion,
+            "origen": origen,
+            "referencia": mov.referencia,
+        })
+
+    clasificaciones = []
+    for clave, etiqueta in gastos_service.CLASIFICACIONES_GASTO.items():
+        datos = por_clasificacion.get(clave)
+        if datos:
+            clasificaciones.append({
+                "clasificacion": clave,
+                "label": etiqueta,
+                "count": datos["count"],
+                "total": datos["total"],
+            })
+
+    return {
+        "cuenta_id": cuenta.id,
+        "cuenta_nombre": cuenta.nombre,
+        "moneda_codigo": cuenta.moneda.codigo if cuenta.moneda else "COP",
+        "fecha_desde": fecha_desde,
+        "fecha_hasta": fecha_hasta,
+        "saldo_inicial": saldo_inicial,
+        "total_ingresos": total_ingresos,
+        "total_egresos": total_egresos,
+        "saldo_final": saldo,
+        "filas": filas,
+        "clasificaciones": clasificaciones,
+    }
+

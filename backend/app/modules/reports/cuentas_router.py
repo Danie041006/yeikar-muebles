@@ -155,6 +155,23 @@ def delete_movimiento_cuenta(
 # ------------------------------------------------------------
 # Importación del libro de caja (texto pegado desde Excel)
 # ------------------------------------------------------------
+@router.get("/libro", response_model=schemas.LibroCajaVistaResponse)
+def get_libro_caja(
+    metodo_caja_id: int = Query(..., description="Cuenta de caja"),
+    fecha_desde: Optional[date] = Query(None),
+    fecha_hasta: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Libro de la cuenta con tipo, concepto y saldo corrido (como la hoja)."""
+    try:
+        return libro_caja.obtener_libro_caja(
+            db, metodo_caja_id, fecha_desde, fecha_hasta
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/libro/preview", response_model=schemas.LibroCajaResumen)
 def preview_libro_caja(
     esquema: schemas.LibroCajaRequest,

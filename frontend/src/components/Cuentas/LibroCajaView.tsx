@@ -1,0 +1,269 @@
+import { useCallback, useEffect, useState } from 'react';
+import {
+  cuentasService, type LibroCajaVista, type LibroCajaVistaFila,
+  type ResumenCuenta,
+} from '../../services/cuentasService';import {
+  CLASIFICACIONES_GASTO, nombreClasificacion,
+} from '../../services/gastoService';
+import {
+  Badge, Button, Card, EmptyState, Input, SearchSelect, Spinner, StatCard,
+  ResponsiveDataTable, type DataColumn,
+} from '../ui';
+import { fmtMoneda } from '../../utils/format';
+
+const iso = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+const primerDiaMes = () => {
+  const hoy = new Date();
+  return iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
+};
+const ultimoDiaMes = () => {
+  const hoy = new Date();
+  return iso(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0));
+};
+
+const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold'> =
+  Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
+
+interface Props {
+  cuentas: ResumenCuenta[];
+}
+
+export default function LibroCajaView({ cuentas }: Props) {
+  const cuentaCop = cuentas.find((c) => c.metodo_caja.codigo === 'EFECTIVO_COP')
+    || cuentas.find((c) => c.metodo_caja.moneda_codigo === 'COP');
+
+  const [cuentaId, setCuentaId] = useState<number>(cuentaCop?.metodo_caja.id || 0);
+  const [desde, setDesde] = useState(primerDiaMes());
+  const [hasta, setHasta] = useState(ultimoDiaMes());
+  const [data, setData] = useState<LibroCajaVista | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Si las cuentas llegan después del primer render, se elige la de COP.
+  useEffect(() => {
+    if (!cuentaId && cuentaCop) setCuentaId(cuentaCop.metodo_caja.id);
+  }, [cuentaId, cuentaCop]);
+
+  const cargar = useCallback(async () => {
+    if (!cuentaId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await cuentasService.getLibro({
+        metodo_caja_id: cuentaId,
+        fecha_desde: desde || undefined,
+        fecha_hasta: hasta || undefined,
+      });
+      setData(res);
+    } catch (e: any) {
+      setError(e?.response?.data?.detail ?? 'No se pudo cargar el libro de caja.');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [cuentaId, desde, hasta]);
+
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+
+  const moneda = data?.moneda_codigo || 'COP';
+  const fmt = (v: string | number) => fmtMoneda(Number(v || 0), moneda);
+
+  const columns: DataColumn<LibroCajaVistaFila>[] = [
+    {
+      key: 'fecha',
+      header: 'Fecha',
+      render: (f) => (
+        <span className="font-mono text-xs text-yeikar-neutral/60 whitespace-nowrap">
+          {new Date(`${f.fecha}T00:00:00`).toLocaleDateString('es-CO')}
+        </span>
+      ),
+      mobilePrimary: true,
+    },
+    {
+      key: 'tipo',
+      header: 'Tipo',
+      render: (f) => (
+        <span className="text-xs font-bold text-yeikar-secondary">
+          {f.tipo || '—'}
+        </span>
+      ),
+      mobileLabel: 'Tipo',
+    },
+    {
+      key: 'concepto',
+      header: 'Concepto',
+      render: (f) => (
+        <span className="text-sm text-yeikar-neutral/80 break-words">
+          {f.concepto || '—'}
+        </span>
+      ),
+      mobileLabel: 'Concepto',
+      mobileFull: true,
+    },
+    {
+      key: 'clasificacion',
+      header: 'Clasificación',
+      render: (f) => (
+        f.clasificacion ? (
+          <Badge tone={TONE[f.clasificacion] ?? 'neutral'} size="sm">
+            {nombreClasificacion(f.clasificacion)}
+          </Badge>
+        ) : (
+          <span className="text-[11px] text-yeikar-neutral/25">—</span>
+        )
+      ),
+      mobileLabel: 'Clasificación',
+    },
+    {
+      key: 'ingreso',
+      header: 'Ingreso',
+      align: 'right',
+      render: (f) => (
+        Number(f.ingreso) > 0
+          ? <span className="font-mono text-sm font-semibold text-emerald-700">{fmt(f.ingreso)}</span>
+          : <span className="text-yeikar-neutral/20">—</span>
+      ),
+      mobileLabel: 'Ingreso',
+    },
+    {
+      key: 'egreso',
+      header: 'Egreso',
+      align: 'right',
+      render: (f) => (
+        Number(f.egreso) > 0
+          ? <span className="font-mono text-sm font-semibold text-rose-700">{fmt(f.egreso)}</span>
+          : <span className="text-yeikar-neutral/20">—</span>
+      ),
+      mobileLabel: 'Egreso',
+    },
+    {
+      key: 'saldo',
+      header: 'Saldo',
+      align: 'right',
+      render: (f) => (
+        <span className={`font-mono text-sm font-black ${Number(f.saldo) < 0 ? 'text-rose-700' : 'text-yeikar-secondary'}`}>
+          {fmt(f.saldo)}
+        </span>
+      ),
+      mobileLabel: 'Saldo',
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <div className="card p-4 flex flex-wrap items-end gap-3">
+        <div className="w-full sm:w-64">
+          <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-yeikar-neutral/45 mb-1">
+            Cuenta
+          </label>
+          <SearchSelect
+            value={cuentaId}
+            onChange={(v) => setCuentaId(Number(v))}
+            options={cuentas.map((c) => ({
+              value: c.metodo_caja.id,
+              label: `${c.metodo_caja.nombre} · ${c.metodo_caja.moneda_codigo || '?'}`,
+            }))}
+            placeholder="Seleccione la cuenta..."
+          />
+        </div>
+        <div>
+          <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-yeikar-neutral/45 mb-1">
+            Desde
+          </label>
+          <Input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} className="w-auto" />
+        </div>
+        <div>
+          <label className="block text-[10px] font-mono font-bold uppercase tracking-wider text-yeikar-neutral/45 mb-1">
+            Hasta
+          </label>
+          <Input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} className="w-auto" />
+        </div>
+        <Button variant="outline" onClick={cargar} disabled={loading}>
+          {loading ? 'Cargando...' : 'Actualizar'}
+        </Button>
+        <p className="ml-auto text-[11px] text-yeikar-neutral/35">
+          Saldo corrido del libro, como la hoja
+        </p>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+          {error}
+        </div>
+      )}
+
+      {loading && !data ? (
+        <div className="py-12"><Spinner label="Cargando libro..." /></div>
+      ) : data ? (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              label="Saldo inicial"
+              value={fmt(data.saldo_inicial)}
+              accent="from-yeikar-secondary to-yeikar-secondary-light"
+              hint="Antes del período"
+            />
+            <StatCard
+              label="Ingresos"
+              value={fmt(data.total_ingresos)}
+              accent="from-emerald-500 to-emerald-400"
+            />
+            <StatCard
+              label="Egresos"
+              value={fmt(data.total_egresos)}
+              accent="from-rose-500 to-rose-400"
+            />
+            <StatCard
+              label="Saldo final"
+              value={fmt(data.saldo_final)}
+              accent="from-yeikar-primary to-yeikar-primary-light"
+              hint={`${data.filas.length} movimientos`}
+            />
+          </div>
+
+          {data.clasificaciones.length > 0 && (
+            <div className="card p-4">
+              <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-yeikar-neutral/45 mb-2">
+                Gastos del período por clasificación
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {data.clasificaciones.map((c) => (
+                  <div key={c.clasificacion} className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/20 px-3 py-2">
+                    <Badge tone={TONE[c.clasificacion] ?? 'neutral'} size="sm">{c.label}</Badge>
+                    <span className="ml-2 font-mono text-sm font-black text-yeikar-secondary">{fmt(c.total)}</span>
+                    <span className="ml-1 text-[10px] text-yeikar-neutral/40">({c.count})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Card
+            title="Libro de caja"
+            subtitle={`${data.cuenta_nombre} · ${new Date(`${data.fecha_desde}T00:00:00`).toLocaleDateString('es-CO')} a ${new Date(`${data.fecha_hasta}T00:00:00`).toLocaleDateString('es-CO')}`}
+            bodyClassName="p-0"
+          >
+            <ResponsiveDataTable
+              columns={columns}
+              rows={data.filas}
+              rowKey={(f) => f.id}
+              empty={
+                <div className="p-8">
+                  <EmptyState
+                    compact
+                    title="Sin movimientos"
+                    description="No hay movimientos en esta cuenta para el período."
+                  />
+                </div>
+              }
+            />
+          </Card>
+        </>
+      ) : null}
+    </div>
+  );
+}

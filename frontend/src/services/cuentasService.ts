@@ -154,6 +154,40 @@ export interface LibroCajaDeshacerResponse {
   movimientos_borrados: number;
 }
 
+export interface LibroCajaVistaFila {
+  id: number;
+  fecha: string;
+  tipo: string;
+  concepto: string;
+  ingreso: string | number;
+  egreso: string | number;
+  saldo: string | number;
+  clasificacion?: string | null;
+  origen: string;
+  referencia?: string | null;
+}
+
+export interface LibroCajaVistaClasificacion {
+  clasificacion: string;
+  label: string;
+  count: number;
+  total: string | number;
+}
+
+export interface LibroCajaVista {
+  cuenta_id: number;
+  cuenta_nombre: string;
+  moneda_codigo: string;
+  fecha_desde: string;
+  fecha_hasta: string;
+  saldo_inicial: string | number;
+  total_ingresos: string | number;
+  total_egresos: string | number;
+  saldo_final: string | number;
+  filas: LibroCajaVistaFila[];
+  clasificaciones: LibroCajaVistaClasificacion[];
+}
+
 export const cuentasService = {
   getMonedas: async (): Promise<Moneda[]> => {
     const res = await api.get<Moneda[]>('/catalogos/moneda/');
@@ -219,6 +253,14 @@ export const cuentasService = {
     const res = await api.delete<LibroCajaDeshacerResponse>(`/cuenta/libro/${periodo}`, {
       params: { metodo_caja_id: metodoCajaId },
     });
+    return res.data;
+  },
+  getLibro: async (params: {
+    metodo_caja_id: number;
+    fecha_desde?: string;
+    fecha_hasta?: string;
+  }): Promise<LibroCajaVista> => {
+    const res = await api.get<LibroCajaVista>('/cuenta/libro', { params });
     return res.data;
   },
 };

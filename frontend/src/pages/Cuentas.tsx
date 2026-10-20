@@ -11,6 +11,7 @@ import {
 } from '../components/ui';
 import { nombreMoneda, fmtMoneda } from '../utils/format';
 import { useToast } from '../context/ToastContext';
+import LibroCajaView from '../components/Cuentas/LibroCajaView';
 
 const TIPOS = [
   { key: '', label: 'Todos' },
@@ -61,6 +62,7 @@ function DetalleFila({ label, children }: { label: string; children: ReactNode }
 
 export default function Cuentas() {
   const toast = useToast();
+  const [vista, setVista] = useState<'libro' | 'cuentas'>('libro');
   const [resumen, setResumen] = useState<ResumenCuenta[]>([]);
   const [movimientos, setMovimientos] = useState<MovimientoCaja[]>([]);
   const [monedas, setMonedas] = useState<Moneda[]>([]);
@@ -454,7 +456,9 @@ export default function Cuentas() {
       <PageHeader
         eyebrow="Finanzas"
         title="Cuentas y Medios de Pago"
-        subtitle={`${resumen.length} cuentas · ${movimientos.length} movimientos en el filtro`}
+        subtitle={vista === 'libro'
+          ? 'Libro de caja con tipo, concepto, ingreso, egreso y saldo corrido'
+          : `${resumen.length} cuentas · ${movimientos.length} movimientos en el filtro`}
         actions={
           <>
             <Button variant="outline" onClick={abrirLibro}>
@@ -479,12 +483,42 @@ export default function Cuentas() {
         }
       />
 
+      {/* El "apartadito": Libro de caja ↔ Cuentas y saldos */}
+      <div className="flex items-center gap-1 bg-white border border-yeikar-secondary-light/10 rounded-xl p-1 shadow-card w-fit">
+        <button
+          type="button"
+          onClick={() => setVista('libro')}
+          className={`px-4 py-1.5 rounded-lg text-sm font-bold font-headline transition-colors ${
+            vista === 'libro'
+              ? 'bg-yeikar-primary text-yeikar-neutral shadow-sm'
+              : 'text-yeikar-neutral/50 hover:text-yeikar-secondary hover:bg-yeikar-tertiary'
+          }`}
+        >
+          Libro de caja
+        </button>
+        <button
+          type="button"
+          onClick={() => setVista('cuentas')}
+          className={`px-4 py-1.5 rounded-lg text-sm font-bold font-headline transition-colors ${
+            vista === 'cuentas'
+              ? 'bg-yeikar-primary text-yeikar-neutral shadow-sm'
+              : 'text-yeikar-neutral/50 hover:text-yeikar-secondary hover:bg-yeikar-tertiary'
+          }`}
+        >
+          Cuentas y saldos
+        </button>
+      </div>
+
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm animate-fade-in">
           {error}
         </div>
       )}
 
+      {vista === 'libro' ? (
+        <LibroCajaView cuentas={resumen} />
+      ) : (
+        <>
       <div className="grid grid-cols-1 gap-5">
         <StatCard
           label="Cuentas activas"
@@ -608,6 +642,9 @@ export default function Cuentas() {
           />
         )}
       </Card>
+
+        </>
+      )}
 
       {/* Modal cuenta */}
       <Modal
