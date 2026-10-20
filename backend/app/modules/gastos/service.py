@@ -204,7 +204,7 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None
             tasa_cambio=float(tasa),
             fecha=gasto.fecha,
             referencia=f"Gasto #{db_gasto.id}",
-            observaciones=gasto.descripcion or f"Gasto #{db_gasto.id}",
+            concepto=gasto.descripcion or f"Gasto #{db_gasto.id}",
             usuario_id=usuario.id if usuario is not None else None,
         )
 
@@ -292,7 +292,7 @@ def actualizar_gasto(
             if campo in data:
                 setattr(movimiento, campo, data[campo])
         if "descripcion" in data:
-            movimiento.observaciones = data["descripcion"]
+            movimiento.concepto = data["descripcion"]
 
     for key, value in data.items():
         setattr(db_gasto, key, value)

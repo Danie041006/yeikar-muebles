@@ -160,7 +160,7 @@ def test_movimiento_caja_monto_negativo_rechazado(client, cleaner, db):
     metodo_id = _metodo_caja_id(db)
     r = client.post(f"/api/v1/cuenta/{metodo_id}/movimiento", json={
         "fecha": "2026-08-12", "tipo": "SALIDA", "monto": -100000, "moneda_id": 1,
-        "observaciones": "intento drenar caja",
+        "concepto": "intento drenar caja",
     }, headers=ADMIN_HEADERS)
     assert r.status_code == 422, f"monto negativo → 422, fue {r.status_code}: {r.text}"
 

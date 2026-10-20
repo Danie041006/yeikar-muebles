@@ -390,7 +390,7 @@ function ContenidoDinero({
               <th className="py-2 pr-2 font-bold">Cuenta</th>
               <th className="py-2 pr-2 font-bold">Movimiento</th>
               <th className="py-2 pr-2 font-bold text-right">Monto</th>
-              <th className="py-2 pr-2 font-bold">Referencia / Notas</th>
+              <th className="py-2 pr-2 font-bold">Persona o entidad / Concepto</th>
               <th className="py-2 font-bold">Quién</th>
             </tr>
           </thead>
@@ -423,10 +423,12 @@ function ContenidoDinero({
                       {formatCurrency(Number(movimiento.monto), movimiento.moneda?.codigo || 'COP')}
                     </td>
                     <td className="py-1.5 pr-2">
-                      {movimiento.referencia || '—'}
-                      {movimiento.observaciones && (
+                      <span className="font-semibold text-yeikar-secondary">
+                        {movimiento.persona_entidad || '—'}
+                      </span>
+                      {movimiento.concepto && (
                         <span className="block text-[10px] text-yeikar-neutral/40 max-w-[260px] truncate">
-                          {movimiento.observaciones}
+                          {movimiento.concepto}
                         </span>
                       )}
                     </td>
@@ -585,7 +587,7 @@ export default function LibroEntradasSalidas() {
     const q = buscarDinero.trim().toLowerCase();
     if (q) {
       filas = filas.filter((m) =>
-        [m.metodo_caja?.nombre, m.referencia, m.observaciones]
+        [m.metodo_caja?.nombre, m.persona_entidad, m.concepto, m.referencia]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(q)),
       );

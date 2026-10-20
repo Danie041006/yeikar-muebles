@@ -338,7 +338,8 @@ def abonar(db: Session, cxp_id: int, abono: schemas.AbonoCreate, usuario: Option
         tasa_cambio=float(tasa_cuenta),
         fecha=abono.fecha,
         referencia=f"CxP #{cxp.id} abono #{pago.id}",
-        observaciones=f"Abono a Por Pagar #{cxp.id}",
+        concepto=f"Abono a Por Pagar #{cxp.id}",
+        persona_entidad=cxp.proveedor.nombre if cxp.proveedor else None,
         usuario_id=usuario.id if usuario is not None else None,
     )
 

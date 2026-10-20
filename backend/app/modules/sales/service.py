@@ -458,7 +458,8 @@ def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, us
         tasa_cambio=tasa_caja,
         monto_en_moneda_base=monto_cop,
         referencia=f"Pago #{db_pago.id}" + (f" · {db_pago.referencia}" if db_pago.referencia else ""),
-        observaciones=f"Cobro de {venta.cliente.nombre} · Venta #{venta.id} · {cuenta.nombre}",
+        concepto=f"Cobro de {venta.cliente.nombre} · Venta #{venta.id} · {cuenta.nombre}",
+        persona_entidad=venta.cliente.nombre if venta.cliente else None,
     ))
 
 

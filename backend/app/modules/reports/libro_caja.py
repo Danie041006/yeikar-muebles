@@ -582,7 +582,7 @@ def _marcar_duplicados(
             # social: dos ventas de 100.000 a personas distintas no son la
             # misma operación.
             tokens_mov = _tokens_nombre(
-                f"{mov.observaciones or ''} {mov.referencia or ''}"
+                f"{mov.concepto or ''} {mov.persona_entidad or ''} {mov.referencia or ''}"
             )
             if not (tokens_fila & tokens_mov):
                 continue
@@ -777,7 +777,7 @@ def importar_libro(
                     tasa_cambio=1.0,
                     fecha=min(fechas),
                     referencia=etiqueta,
-                    observaciones=(
+                    concepto=(
                         f"[{etiqueta}] Ajuste para cuadrar con el saldo inicial "
                         f"del libro ({parsed.saldo_inicial:,.2f})"
                     ),
@@ -824,9 +824,10 @@ def importar_libro(
                     .first()
                 )
                 if movimiento is not None:
-                    movimiento.observaciones = (
+                    movimiento.concepto = (
                         f"[{etiqueta}] {fila.tipo or 'Gasto'} · {fila.concepto or ''}"
                     )[:1000]
+                    movimiento.persona_entidad = (fila.tipo or "").strip() or None
                 gastos += 1
             else:
                 registrar_movimiento_caja(
@@ -838,9 +839,10 @@ def importar_libro(
                     tasa_cambio=1.0,
                     fecha=fila.fecha,
                     referencia=etiqueta,
-                    observaciones=(
+                    concepto=(
                         f"[{etiqueta}] {fila.tipo or ''} · {fila.concepto or ''}"
                     )[:1000],
+                    persona_entidad=(fila.tipo or "").strip() or None,
                     usuario_id=usuario.id if usuario else None,
                 )
                 movimientos += 1
@@ -950,7 +952,8 @@ _TAG_LIBRO = re.compile(r"^\[Libro [^\]]+\]\s*(.*)$")
 def _tipo_concepto_movimiento(
     mov: MovimientoCaja, gasto: Optional[Gasto]
 ) -> tuple[str, str]:
-    obs = (mov.observaciones or "").strip()
+    obs = (mov.concepto or "").strip()
+    persona = (mov.persona_entidad or "").strip()
     match = _TAG_LIBRO.match(obs)
     if match:
         resto = match.group(1).strip()
@@ -960,8 +963,10 @@ def _tipo_concepto_movimiento(
             tipo, concepto = resto.split(" ·", 1)
         else:
             tipo, concepto = "", resto
-        tipo = tipo.strip() or ("GASTO" if gasto else mov.tipo)
+        tipo = persona or tipo.strip() or ("GASTO" if gasto else mov.tipo)
         return tipo, concepto.strip()
+    if persona:
+        return persona, (obs or mov.referencia or "")
     if gasto:
         return "GASTO", (gasto.descripcion or obs or mov.referencia or "")
     if mov.pago_id:
@@ -1056,7 +1061,7 @@ def obtener_libro_caja(
             acumulado["count"] += 1
             acumulado["total"] += monto
 
-        if _TAG_LIBRO.match((mov.observaciones or "").strip()):
+        if _TAG_LIBRO.match((mov.concepto or "").strip()):
             origen = "LIBRO"
         elif gasto:
             origen = "GASTO"
@@ -1078,6 +1083,7 @@ def obtener_libro_caja(
             "clasificacion": clasificacion,
             "origen": origen,
             "referencia": mov.referencia,
+            "persona_entidad": mov.persona_entidad,
         })
 
     clasificaciones = []

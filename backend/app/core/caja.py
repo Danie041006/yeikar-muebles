@@ -50,7 +50,8 @@ def registrar_movimiento_caja(
     tasa_cambio: float = 1.0,
     fecha: date | None = None,
     referencia: str | None = None,
-    observaciones: str | None = None,
+    concepto: str | None = None,
+    persona_entidad: str | None = None,
     usuario_id: int | None = None,
     pago_id: int | None = None,
 ):
@@ -81,6 +82,7 @@ def registrar_movimiento_caja(
         tasa_cambio=round(float(tasa_cambio or 1.0), 6),
         monto_en_moneda_base=monto_base,
         referencia=referencia,
-        observaciones=observaciones,
+        concepto=concepto,
+        persona_entidad=persona_entidad,
     ))
     db.flush()

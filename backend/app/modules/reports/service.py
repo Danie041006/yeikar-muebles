@@ -1145,7 +1145,7 @@ def crear_metodo_caja(db: Session, esquema: schemas.MetodoCajaCreate) -> model.M
             tasa_cambio=1.0,
             fecha=hoy_ve(),
             referencia="Saldo inicial por defecto",
-            observaciones=f"Apertura por defecto: {monto_inicial:,.0f} {codigo_moneda}",
+            concepto=f"Apertura por defecto: {monto_inicial:,.0f} {codigo_moneda}",
         )
     db.commit()
     db.refresh(obj)
@@ -1194,8 +1194,21 @@ def listar_movimientos_caja(db: Session, metodo_id: Optional[int] = None, fecha_
 def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, usuario_id: Optional[int] = None) -> model.MovimientoCaja:
     datos = esquema.model_dump()
     monto = Decimal(str(datos["monto"]))
-    tasa = Decimal(str(datos.get("tasa_cambio") or 1.0))
+    # La tasa no se pide en el formulario de caja: se resuelve sola. Para COP
+    # es 1; para otra moneda se usa la TRM registrada a la fecha.
+    tasa = datos.get("tasa_cambio")
+    moneda = db.query(Moneda).filter(Moneda.id == datos["moneda_id"]).first()
+    if moneda is not None and moneda.codigo == "COP":
+        tasa = Decimal("1.0")
+    elif tasa is None:
+        from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+        tasa = obtener_tasa_moneda_a_cop(db, datos["moneda_id"], datos["fecha"])
+    tasa = Decimal(str(tasa or 1.0))
+    datos["tasa_cambio"] = tasa
     datos["monto_en_moneda_base"] = round(monto * tasa, 2)
+    for campo in ("persona_entidad", "concepto", "referencia"):
+        if datos.get(campo) is not None:
+            datos[campo] = str(datos[campo]).strip() or None
     datos["usuario_id"] = usuario_id
     obj = model.MovimientoCaja(**datos)
     db.add(obj)
@@ -1346,7 +1359,8 @@ def _mov_caja_response(m: model.MovimientoCaja) -> schemas.MovimientoCajaRespons
         moneda_id=m.moneda_id,
         tasa_cambio=m.tasa_cambio,
         referencia=m.referencia,
-        observaciones=m.observaciones,
+        persona_entidad=m.persona_entidad,
+        concepto=m.concepto,
         id=m.id,
         usuario_id=m.usuario_id,
         monto_en_moneda_base=m.monto_en_moneda_base,
@@ -1388,7 +1402,7 @@ def _transferencia_response(db: Session, salida: model.MovimientoCaja) -> schema
             db, salida.metodo_caja_id, salida.moneda_id, salida.fecha
         ),
         referencia=salida.referencia,
-        observaciones=salida.observaciones,
+        concepto=salida.concepto,
         pata_salida=_mov_caja_response(salida),
         pata_entrada=_mov_caja_response(entrada),
     )
@@ -1477,7 +1491,7 @@ def crear_transferencia(
         tasa_cambio=tasa_salida,
         monto_en_moneda_base=base_salida,
         referencia=(esquema.referencia or f"Transferencia a {destino.nombre}")[:150],
-        observaciones=esquema.observaciones,
+        concepto=esquema.concepto,
     )
     db.add(salida)
     db.flush()
@@ -1497,7 +1511,7 @@ def crear_transferencia(
         tasa_cambio=tasa_entrada,
         monto_en_moneda_base=round(monto_entrada * tasa_entrada, 2),
         referencia=f"Transferencia #T{salida.id} de {origen.nombre}"[:150],
-        observaciones=esquema.observaciones,
+        concepto=esquema.concepto,
     )
     db.add(entrada)
     db.flush()
@@ -2094,7 +2108,8 @@ def crear_devolucion(db: Session, esquema: schemas.DevolucionVentaCreate) -> mod
             tasa_cambio=float(esquema.tasa_cambio or 1.0),
             fecha=esquema.fecha,
             referencia=f"Devolución venta #{venta.id}",
-            observaciones=esquema.motivo or f"Devolución de la venta #{venta.id}",
+            concepto=esquema.motivo or f"Devolución de la venta #{venta.id}",
+            persona_entidad=venta.cliente.nombre if venta.cliente else None,
         )
 
     db.commit()

@@ -21,15 +21,14 @@ const TIPOS = [
   { key: 'AJUSTE', label: 'Ajuste' },
 ];
 
-const emptyMovForm = (metodoId = 0, monedaCopId = 1): Omit<MovimientoCreate, 'tasa_cambio' | 'referencia' | 'observaciones'> & { tasa_cambio: number; referencia: string; observaciones: string } => ({
+const emptyMovForm = (metodoId = 0, monedaCopId = 1) => ({
   metodo_caja_id: metodoId,
   fecha: new Date().toISOString().split('T')[0],
-  tipo: 'ENTRADA',
+  tipo: 'ENTRADA' as MovimientoCreate['tipo'],
   monto: 0,
   moneda_id: monedaCopId,
-  tasa_cambio: 1,
-  referencia: '',
-  observaciones: '',
+  persona_entidad: '',
+  concepto: '',
 });
 
 const fmt = (n: number) => (Number.isFinite(n) ? n.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '0');
@@ -48,7 +47,7 @@ const emptyTransferForm = () => ({
   fecha: new Date().toISOString().split('T')[0],
   tasa_cambio: '',
   referencia: '',
-  observaciones: '',
+  concepto: '',
 });
 
 function DetalleFila({ label, children }: { label: string; children: ReactNode }) {
@@ -192,9 +191,8 @@ export default function Cuentas() {
         tipo: mov.tipo,
         monto: Number(mov.monto),
         moneda_id: mov.moneda_id,
-        tasa_cambio: Number(mov.tasa_cambio || 1),
-        referencia: mov.referencia ?? '',
-        observaciones: mov.observaciones ?? '',
+        persona_entidad: mov.persona_entidad ?? '',
+        concepto: mov.concepto ?? '',
       });
     } else {
       // Movimiento nuevo: la moneda arranca en la moneda propia de la cuenta.
@@ -215,9 +213,8 @@ export default function Cuentas() {
       tipo: movForm.tipo,
       monto: Number(movForm.monto),
       moneda_id: movForm.moneda_id,
-      tasa_cambio: Number(movForm.tasa_cambio || 1),
-      referencia: movForm.referencia.trim() || null,
-      observaciones: movForm.observaciones.trim() || null,
+      persona_entidad: movForm.persona_entidad.trim() || null,
+      concepto: movForm.concepto.trim() || null,
     };
     try {
       if (editMov) {
@@ -372,7 +369,7 @@ export default function Cuentas() {
       moneda_id: transferMonedaSalida,
       tasa_cambio: transferForm.tasa_cambio ? Number(transferForm.tasa_cambio) : null,
       referencia: transferForm.referencia.trim() || null,
-      observaciones: transferForm.observaciones.trim() || null,
+      concepto: transferForm.concepto.trim() || null,
     };
     try {
       await cuentasService.transferir(payload);
@@ -434,14 +431,25 @@ export default function Cuentas() {
       mobileLabel: 'Monto',
     },
     {
-      key: 'referencia',
-      header: 'Referencia / Razón',
+      key: 'persona_entidad',
+      header: 'Persona o entidad',
       render: (m) => (
-        <span className="text-yeikar-neutral/60 max-w-xs truncate" title={m.referencia ?? m.observaciones ?? ''}>
-          {m.referencia || m.observaciones || '-'}
+        <span className="font-medium text-yeikar-secondary">
+          {m.persona_entidad || '—'}
         </span>
       ),
-      mobileLabel: 'Referencia',
+      mobileLabel: 'Persona o entidad',
+    },
+    {
+      key: 'concepto',
+      header: 'Concepto',
+      render: (m) => (
+        <span className="text-yeikar-neutral/60 max-w-xs truncate" title={m.concepto ?? ''}>
+          {m.concepto || '—'}
+        </span>
+      ),
+      mobileLabel: 'Concepto',
+      mobileFull: true,
     },
     {
       key: 'responsable',
@@ -753,7 +761,7 @@ export default function Cuentas() {
               />
             </Field>
           </div>
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
             <Field label="Monto" required>
               <Input
                 type="number"
@@ -771,35 +779,31 @@ export default function Cuentas() {
                 placeholder="Seleccione moneda..."
               />
             </Field>
-            <Field label="Tasa → COP">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                value={movForm.tasa_cambio}
-                onChange={(e) => setMovForm({ ...movForm, tasa_cambio: Number(e.target.value) || 1 })}
-              />
-            </Field>
           </div>
-          <Field label="Referencia">
+          <Field
+            label={
+              movForm.tipo === 'ENTRADA'
+                ? '¿De quién entra el dinero? (persona o entidad)'
+                : movForm.tipo === 'SALIDA'
+                  ? '¿A quién se le entrega? (persona o entidad)'
+                  : 'Persona o entidad (opcional)'
+            }
+            hint="Cliente, proveedor, empleado, familiar... Es la otra parte del movimiento, no quien lo registra."
+          >
             <Input
-              value={movForm.referencia}
-              onChange={(e) => setMovForm({ ...movForm, referencia: e.target.value })}
-              placeholder="Ej: Pago de venta #10, compra de madera"
+              value={movForm.persona_entidad}
+              onChange={(e) => setMovForm({ ...movForm, persona_entidad: e.target.value })}
+              placeholder="Ej: DOÑA ROSA, CAMARA DE COMERCIO, un cliente..."
             />
           </Field>
-          <Field label="Observaciones">
+          <Field label="Concepto">
             <Textarea
               rows={2}
-              value={movForm.observaciones}
-              onChange={(e) => setMovForm({ ...movForm, observaciones: e.target.value })}
+              value={movForm.concepto}
+              onChange={(e) => setMovForm({ ...movForm, concepto: e.target.value })}
+              placeholder="Ej: pago de mercado, compra de madera, abono de cliente..."
             />
           </Field>
-          {movForm.moneda_id !== monedaCopId && movForm.monto > 0 && (
-            <p className="text-sm text-yeikar-neutral/50">
-              ≈ <span className="font-mono font-semibold text-yeikar-primary-dark">${fmt(Number(movForm.monto) * Number(movForm.tasa_cambio || 1))}</span> COP
-            </p>
-          )}
         </div>
       </Modal>
 
@@ -901,11 +905,12 @@ export default function Cuentas() {
               placeholder="Ej: consignación Banco → caja, arqueo de fin de día"
             />
           </Field>
-          <Field label="Observaciones">
+          <Field label="Concepto">
             <Textarea
               rows={2}
-              value={transferForm.observaciones}
-              onChange={(e) => setTransferForm({ ...transferForm, observaciones: e.target.value })}
+              value={transferForm.concepto}
+              onChange={(e) => setTransferForm({ ...transferForm, concepto: e.target.value })}
+              placeholder="Ej: consignación Banco → caja, arqueo de fin de día"
             />
           </Field>
         </div>
@@ -955,11 +960,11 @@ export default function Cuentas() {
               <DetalleFila label="Responsable">
                 {detalleMov.usuario?.nombre || detalleMov.usuario?.nombre_usuario || (detalleMov.usuario_id ? `Usuario #${detalleMov.usuario_id}` : 'Sistema')}
               </DetalleFila>
-              <DetalleFila label="Referencia">
-                {detalleMov.referencia || '—'}
+              <DetalleFila label="Persona o entidad">
+                {detalleMov.persona_entidad || '—'}
               </DetalleFila>
-              <DetalleFila label="Observaciones">
-                {detalleMov.observaciones || '—'}
+              <DetalleFila label="Concepto">
+                {detalleMov.concepto || '—'}
               </DetalleFila>
               {(detalleMov.pago_id || detalleMov.transferencia_id) && (
                 <DetalleFila label="Origen">

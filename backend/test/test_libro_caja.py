@@ -134,6 +134,7 @@ def test_preview_e_importacion_del_libro(client, cleaner, db):
     assert "Ajuste para cuadrar" in primera["concepto"]
     assert Decimal(str(primera["saldo"])) == Decimal("3683600")
     segunda = libro["filas"][1]
+    assert segunda["persona_entidad"] == "DOÑA ROSA G C"
     assert segunda["tipo"] == "DOÑA ROSA G C"
     assert segunda["concepto"] == "PAGO DE MERCADO"
     assert segunda["clasificacion"] == "GASTO_CASA"
@@ -301,7 +302,8 @@ def test_vista_conserva_tipo_sin_concepto():
     from app.modules.reports.libro_caja import _tipo_concepto_movimiento
 
     class Mov:
-        observaciones = "[Libro EFECTIVO_COP 2026-10] QUESILLO GP · "
+        concepto = "[Libro EFECTIVO_COP 2026-10] QUESILLO GP · "
+        persona_entidad = None
         tipo = "SALIDA"
         pago_id = None
         transferencia_id = None
@@ -310,6 +312,35 @@ def test_vista_conserva_tipo_sin_concepto():
     tipo, concepto = _tipo_concepto_movimiento(Mov(), None)
     assert tipo == "QUESILLO GP"
     assert concepto == ""
+
+
+def test_movimiento_manual_persona_concepto_sin_tasa_ni_referencia(client, cleaner, db):
+    """El formulario de caja ya no pide tasa ni referencia; sí persona/concepto."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-05",
+        "tipo": "ENTRADA",
+        "monto": 50000,
+        "moneda_id": 1,
+        "persona_entidad": "CLIENTE DE PRUEBA",
+        "concepto": "Abono de prueba",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar("movimiento_caja", mov["id"])
+    assert mov["persona_entidad"] == "CLIENTE DE PRUEBA"
+    assert mov["concepto"] == "Abono de prueba"
+    assert mov["referencia"] is None
+    assert Decimal(str(mov["tasa_cambio"])) == Decimal("1")
+
+    r = client.put(f"/api/v1/cuenta/movimiento/{mov['id']}", json={
+        "persona_entidad": "OTRO CLIENTE",
+        "concepto": "Abono corregido",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    assert r.json()["persona_entidad"] == "OTRO CLIENTE"
+    assert r.json()["concepto"] == "Abono corregido"
 
 
 def test_clasificacion_invalida_se_rechaza(client, cleaner):

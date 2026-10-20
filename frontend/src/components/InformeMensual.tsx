@@ -34,9 +34,8 @@ type CajaForm = {
   tipo: 'APERTURA' | 'ENTRADA' | 'SALIDA' | 'AJUSTE';
   monto: string;
   moneda_id: number;
-  tasa_cambio: string;
-  referencia: string;
-  observaciones: string;
+  persona_entidad: string;
+  concepto: string;
 };
 
 type DevolucionForm = {
@@ -55,9 +54,8 @@ const emptyCajaForm = (monedaCopId?: number): CajaForm => ({
   tipo: 'ENTRADA',
   monto: '',
   moneda_id: monedaCopId ?? 1,
-  tasa_cambio: '',
-  referencia: '',
-  observaciones: '',
+  persona_entidad: '',
+  concepto: '',
 });
 
 const emptyDevolucionForm = (monedaCopId?: number): DevolucionForm => ({
@@ -250,9 +248,8 @@ export default function InformeMensual() {
         tipo: cajaForm.tipo,
         monto,
         moneda_id: cajaForm.moneda_id,
-        tasa_cambio: cajaForm.tasa_cambio ? Number(cajaForm.tasa_cambio) : undefined,
-        referencia: cajaForm.referencia || undefined,
-        observaciones: cajaForm.observaciones || undefined,
+        persona_entidad: cajaForm.persona_entidad || undefined,
+        concepto: cajaForm.concepto || undefined,
       });
       setCajaForm(emptyCajaForm(monedaCop?.id));
       avisar('Movimiento de caja registrado.');
@@ -782,8 +779,8 @@ export default function InformeMensual() {
                         options={monedas.map((m) => ({ value: m.id, label: m.codigo }))}
                         placeholder="Moneda..."
                       />
-                      <input type="number" min="0" step="0.01" value={cajaForm.tasa_cambio} onChange={(e) => setCajaForm((f) => ({ ...f, tasa_cambio: e.target.value }))} placeholder="Tasa (COP/1) si no es COP" className={inputCls} />
-                      <input value={cajaForm.referencia} onChange={(e) => setCajaForm((f) => ({ ...f, referencia: e.target.value }))} placeholder="Referencia" className={inputCls} />
+                      <input value={cajaForm.persona_entidad} onChange={(e) => setCajaForm((f) => ({ ...f, persona_entidad: e.target.value }))} placeholder="Persona o entidad" className={inputCls} />
+                      <input value={cajaForm.concepto} onChange={(e) => setCajaForm((f) => ({ ...f, concepto: e.target.value }))} placeholder="Concepto" className={inputCls} />
                       <button onClick={registrarMovimiento} disabled={guardando} className="bg-yeikar-primary text-yeikar-neutral font-bold text-sm rounded-lg hover:bg-yeikar-secondary transition-colors disabled:opacity-50 py-2">
                         {guardando ? '...' : '+ Registrar'}
                       </button>

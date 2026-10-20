@@ -137,9 +137,14 @@ class MovimientoCajaBase(BaseModel):
     # INGRESABA dinero a la cuenta y permitía drenar caja con un solo request).
     monto: Decimal = Field(..., gt=0)
     moneda_id: int = 1
-    tasa_cambio: Decimal = Decimal("1.0")
+    # La tasa es interna: para movimientos manuales se resuelve sola con la
+    # TRM del día (o 1 si es COP). No se pide en el formulario de caja.
+    tasa_cambio: Optional[Decimal] = Field(None, gt=0)
     referencia: Optional[str] = None
-    observaciones: Optional[str] = None
+    # Persona o entidad de la otra parte: quien entrega (entrada) o recibe
+    # (salida). Opcional; no es el usuario que registra.
+    persona_entidad: Optional[str] = None
+    concepto: Optional[str] = None
 
 class MovimientoCajaCreate(MovimientoCajaBase):
     pass
@@ -151,7 +156,9 @@ class MovimientoCajaUpdate(BaseModel):
     # es positivo (un monto negativo invertía la contribución al saldo).
     tipo: Optional[str] = Field(None, pattern="^(APERTURA|ENTRADA|SALIDA|AJUSTE)$")
     monto: Optional[Decimal] = Field(None, gt=0)
-    observaciones: Optional[str] = None
+    persona_entidad: Optional[str] = None
+    concepto: Optional[str] = None
+    referencia: Optional[str] = None
     referencia: Optional[str] = None
 
 class MovimientoCajaResponse(MovimientoCajaBase):
@@ -180,7 +187,7 @@ class TransferenciaCreate(BaseModel):
     # registrada a la fecha; si se indica, no puede desviarse más de 50%.
     tasa_cambio: Optional[Decimal] = Field(None, gt=0)
     referencia: Optional[str] = None
-    observaciones: Optional[str] = None
+    concepto: Optional[str] = None
 
 
 class TransferenciaResponse(BaseModel):
@@ -194,7 +201,7 @@ class TransferenciaResponse(BaseModel):
     tasa_cambio: Decimal
     saldo_disponible_origen: Decimal = Decimal("0.0")
     referencia: Optional[str] = None
-    observaciones: Optional[str] = None
+    concepto: Optional[str] = None
     pata_salida: MovimientoCajaResponse
     pata_entrada: MovimientoCajaResponse
 
@@ -581,6 +588,7 @@ class LibroCajaVistaFila(BaseModel):
     clasificacion: Optional[str] = None
     origen: str = "MANUAL"
     referencia: Optional[str] = None
+    persona_entidad: Optional[str] = None
 
 
 class LibroCajaVistaClasificacion(BaseModel):

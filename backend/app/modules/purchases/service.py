@@ -109,7 +109,8 @@ def _movimiento_caja_compra(db: Session, compra: model.Compra, registrar: bool) 
             tasa_cambio=1.0,
             fecha=compra.fecha,
             referencia=referencia,
-            observaciones=f"Compra #{compra.id} a {compra.proveedor.nombre if compra.proveedor else 'proveedor'}",
+            concepto=f"Compra #{compra.id} a {compra.proveedor.nombre if compra.proveedor else 'proveedor'}",
+            persona_entidad=compra.proveedor.nombre if compra.proveedor else None,
         )
     elif not registrar and mov is not None:
         db.delete(mov)

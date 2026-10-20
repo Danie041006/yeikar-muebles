@@ -178,7 +178,8 @@ export const reportesService = {
     moneda_id: number;
     tasa_cambio?: number;
     referencia?: string;
-    observaciones?: string;
+    persona_entidad?: string;
+    concepto?: string;
   }): Promise<MovimientoCaja> => {
     const response = await api.post<MovimientoCaja>('/reports/movimientos-caja', data);
     return response.data;
@@ -421,7 +422,8 @@ export interface MovimientoCaja {
   tasa_cambio: number;
   monto_en_moneda_base: number;
   referencia?: string | null;
-  observaciones?: string | null;
+  persona_entidad?: string | null;
+  concepto?: string | null;
   metodo_caja?: MetodoCaja | null;
   moneda?: { codigo: string } | null;
   usuario?: { nombre?: string | null; nombre_usuario?: string } | null;

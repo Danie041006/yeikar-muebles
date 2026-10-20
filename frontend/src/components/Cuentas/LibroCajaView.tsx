@@ -96,14 +96,14 @@ export default function LibroCajaView({ cuentas }: Props) {
       mobilePrimary: true,
     },
     {
-      key: 'tipo',
-      header: 'Tipo',
+      key: 'persona_entidad',
+      header: 'Persona o entidad',
       render: (f) => (
         <span className="text-xs font-bold text-yeikar-secondary">
-          {f.tipo || '—'}
+          {f.persona_entidad || '—'}
         </span>
       ),
-      mobileLabel: 'Tipo',
+      mobileLabel: 'Persona o entidad',
     },
     {
       key: 'concepto',

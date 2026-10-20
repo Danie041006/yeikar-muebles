@@ -31,7 +31,8 @@ export interface MovimientoCaja {
   transferencia_id?: number | null;
   pago_id?: number | null;
   referencia?: string | null;
-  observaciones?: string | null;
+  persona_entidad?: string | null;
+  concepto?: string | null;
   created_at?: string | null;
   metodo_caja?: MetodoCaja | null;
   moneda?: { id: number; codigo: string; simbolo: string } | null;
@@ -66,7 +67,8 @@ export interface MovimientoCreate {
   moneda_id: number;
   tasa_cambio?: number;
   referencia?: string | null;
-  observaciones?: string | null;
+  persona_entidad?: string | null;
+  concepto?: string | null;
 }
 
 export interface TransferenciaPayload {
@@ -77,7 +79,7 @@ export interface TransferenciaPayload {
   moneda_id?: number | null;
   tasa_cambio?: number | null;
   referencia?: string | null;
-  observaciones?: string | null;
+  concepto?: string | null;
 }
 
 export interface Transferencia {
@@ -90,7 +92,7 @@ export interface Transferencia {
   tasa_cambio: number;
   saldo_disponible_origen: number;
   referencia?: string | null;
-  observaciones?: string | null;
+  concepto?: string | null;
   pata_salida: MovimientoCaja;
   pata_entrada: MovimientoCaja;
 }
@@ -165,6 +167,7 @@ export interface LibroCajaVistaFila {
   clasificacion?: string | null;
   origen: string;
   referencia?: string | null;
+  persona_entidad?: string | null;
 }
 
 export interface LibroCajaVistaClasificacion {
