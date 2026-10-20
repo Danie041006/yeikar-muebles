@@ -15,6 +15,9 @@ class GastoBase(BaseModel):
     tasa_cambio: Decimal = Field(default=Decimal("1.0"), gt=0)
     # Área/departamento al que se imputa el gasto (opcional).
     area_id: Optional[int] = None
+    # Destino del dinero (G D/C/P/F/I), con nombre explícito. Opcional para
+    # los gastos que no vienen del libro de caja (NULL = sin clasificar).
+    clasificacion: Optional[str] = None
     # Método de caja del egreso (id de MetodoCaja). Si se indica, el gasto
     # descuenta esa cuenta al crearse (el efectivo "sale" de verdad).
     metodo_caja_id: Optional[int] = None
@@ -32,6 +35,7 @@ class GastoUpdate(BaseModel):
     monto: Optional[Decimal] = Field(None, gt=0)
     tasa_cambio: Optional[Decimal] = Field(None, gt=0)
     area_id: Optional[int] = None
+    clasificacion: Optional[str] = None
     metodo_caja_id: Optional[int] = None
     observaciones: Optional[str] = None
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   getGastos, getTiposGasto, getMonedas, createGasto, deleteGasto, createTipoGasto, getAreas,
   Gasto, GastoCreate, TipoGasto, Moneda, Area,
+  CLASIFICACIONES_GASTO, nombreClasificacion,
 } from '../services/gastoService';
 import { cuentasService, ResumenCuenta } from '../services/cuentasService';
 import {
@@ -30,6 +31,9 @@ const CAT_TONE: Record<string, 'blue' | 'red' | 'green' | 'neutral'> = {
   PRODUCCION: 'green',
 };
 
+const CLASIF_TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold'> =
+  Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
+
 const hoy = () => new Date().toISOString().split('T')[0];
 
 export default function Gastos() {
@@ -45,6 +49,7 @@ export default function Gastos() {
   const [deudas, setDeudas] = useState<CuentaPorPagar[]>([]);
   const [resumen, setResumen] = useState<ResumenCuentasPorPagar | null>(null);
   const [categoria, setCategoria] = useState('');
+  const [clasificacionFiltro, setClasificacionFiltro] = useState('');
   const [areaFiltro, setAreaFiltro] = useState('');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
@@ -84,6 +89,7 @@ export default function Gastos() {
     fecha: new Date().toISOString().split('T')[0],
     monto: 0,
     tasa_cambio: 1,
+    clasificacion: null,
     metodo_caja_id: 0,
     descripcion: '',
     observaciones: '',
@@ -94,6 +100,7 @@ export default function Gastos() {
     try {
       const data = await getGastos({
         categoria: categoria || undefined,
+        clasificacion: clasificacionFiltro || undefined,
         area_id: areaFiltro ? Number(areaFiltro) : undefined,
         fecha_desde: fechaDesde || undefined,
         fecha_hasta: fechaHasta || undefined,
@@ -102,7 +109,7 @@ export default function Gastos() {
     } finally {
       setLoading(false);
     }
-  }, [categoria, fechaDesde, fechaHasta, areaFiltro]);
+  }, [categoria, clasificacionFiltro, fechaDesde, fechaHasta, areaFiltro]);
 
   const cargarCatalogos = useCallback(async () => {
     const [tipos, monedasData, cuentasData, areasData] = await Promise.all([
@@ -180,6 +187,7 @@ export default function Gastos() {
       fecha: new Date().toISOString().split('T')[0],
       monto: 0,
       tasa_cambio: 1,
+      clasificacion: null,
       metodo_caja_id: cuentas[0]?.metodo_caja.id || 0,
       descripcion: '',
       observaciones: '',
@@ -310,6 +318,20 @@ export default function Gastos() {
     pasivos: gastos.filter((g) => g.tipo_gasto?.categoria === 'PASIVO').reduce((s, g) => s + Number(g.monto_en_moneda_base), 0),
     produccion: gastos.filter((g) => g.tipo_gasto?.categoria === 'PRODUCCION').reduce((s, g) => s + Number(g.monto_en_moneda_base), 0),
   };
+
+  // Desglose por clasificación del libro de caja (Gasto Deducible, de Casa,
+  // Personal, Familiar, de Inversión). El campo es opcional.
+  const clasificacionesResumen = CLASIFICACIONES_GASTO.map((c) => {
+    const filas = gastos.filter((g) => g.clasificacion === c.value);
+    return {
+      ...c,
+      count: filas.length,
+      total: filas.reduce((s, g) => s + Number(g.monto_en_moneda_base), 0),
+    };
+  });
+  const sinClasificar = gastos.filter((g) => !g.clasificacion);
+  const totalSinClasificar = sinClasificar.reduce((s, g) => s + Number(g.monto_en_moneda_base), 0);
+  const hayClasificados = clasificacionesResumen.some((c) => c.count > 0);
 
   // Desglose de egresos por moneda (total en su moneda + equivalente COP)
   const porMoneda: Record<string, { codigo: string; simbolo: string; total: number; totalCOP: number; count: number }> = {};
@@ -488,6 +510,20 @@ export default function Gastos() {
         </Badge>
       ),
       mobileHidden: true,
+    },
+    {
+      key: 'clasificacion',
+      header: 'Clasificación',
+      render: (g) => (
+        g.clasificacion ? (
+          <Badge tone={CLASIF_TONE[g.clasificacion] ?? 'neutral'}>
+            {nombreClasificacion(g.clasificacion)}
+          </Badge>
+        ) : (
+          <span className="text-[11px] text-yeikar-neutral/30">Sin clasificar</span>
+        )
+      ),
+      mobileLabel: 'Clasificación',
     },
     {
       key: 'area',
@@ -736,6 +772,52 @@ export default function Gastos() {
         />
       </div>
 
+      {/* Clasificación del libro de caja (opcional) */}
+      {hayClasificados && (
+        <div className="card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-headline font-black text-yeikar-secondary text-sm uppercase tracking-wider">
+              Gastos por clasificación
+            </h3>
+            <span className="text-xs font-mono text-yeikar-neutral/40">
+              Según el libro de caja
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            {clasificacionesResumen.map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                onClick={() => setClasificacionFiltro(clasificacionFiltro === c.value ? '' : c.value)}
+                className={`rounded-xl border p-3 text-left transition-all hover:shadow-sm ${
+                  clasificacionFiltro === c.value
+                    ? 'border-yeikar-primary bg-yeikar-primary/5'
+                    : 'border-yeikar-secondary-light/10 bg-yeikar-tertiary/10'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <Badge tone={c.tone} size="sm">{c.label}</Badge>
+                  <span className="text-[10px] font-mono text-yeikar-neutral/40">{c.count}</span>
+                </div>
+                <p className="mt-2 font-mono text-lg font-black text-yeikar-secondary">
+                  ${c.total.toLocaleString()}
+                </p>
+              </button>
+            ))}
+          </div>
+          {sinClasificar.length > 0 && (
+            <div className="mt-3 flex items-center justify-between rounded-lg bg-yeikar-tertiary/20 px-3 py-2">
+              <span className="text-xs text-yeikar-neutral/50">
+                Sin clasificar: {sinClasificar.length} gasto{sinClasificar.length === 1 ? '' : 's'}
+              </span>
+              <span className="font-mono text-sm font-bold text-yeikar-neutral/70">
+                ${totalSinClasificar.toLocaleString()}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Egresos por moneda */}
       {monedasResumen.length > 0 && (
         <div className="card p-5">
@@ -809,6 +891,16 @@ export default function Gastos() {
             placeholder="Filtrar por área"
           />
         </div>
+        <Select
+          value={clasificacionFiltro}
+          onChange={(e) => setClasificacionFiltro(e.target.value)}
+          className="w-auto py-1.5 text-xs"
+        >
+          <option value="">Todas las clasificaciones</option>
+          {CLASIFICACIONES_GASTO.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </Select>
         <div className="flex items-center gap-2 ml-auto">
           <Input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className="w-auto" />
           <span className="text-yeikar-neutral/40 text-sm">a</span>
@@ -877,6 +969,17 @@ export default function Gastos() {
                 <option key={t.id} value={t.nombre} />
               ))}
             </datalist>
+          </Field>
+          <Field label="Clasificación (opcional)" hint="Gasto Deducible, de Casa, Personal, Familiar o de Inversión">
+            <Select
+              value={form.clasificacion ?? ''}
+              onChange={(e) => setForm({ ...form, clasificacion: e.target.value || null })}
+            >
+              <option value="">Sin clasificar</option>
+              {CLASIFICACIONES_GASTO.map((c) => (
+                <option key={c.value} value={c.value}>{c.label}</option>
+              ))}
+            </Select>
           </Field>
           <Field label="Cuenta de egreso" required>
             <SearchSelect

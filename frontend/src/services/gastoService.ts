@@ -30,6 +30,7 @@ export interface Gasto {
   monto: number;
   tasa_cambio: number;
   monto_en_moneda_base: number;
+  clasificacion?: string | null;
   observaciones?: string;
   metodo_caja_id?: number | null;
   metodo_caja_nombre?: string | null;
@@ -50,6 +51,7 @@ export interface GastoCreate {
   descripcion?: string;
   monto: number;
   tasa_cambio?: number;
+  clasificacion?: string | null;
   metodo_caja_id?: number;
   observaciones?: string;
 }
@@ -62,7 +64,25 @@ export interface GastoUpdate {
   descripcion?: string;
   monto?: number;
   tasa_cambio?: number;
+  clasificacion?: string | null;
   observaciones?: string;
+}
+
+/**
+ * Clasificación del egreso según el libro de caja. Es opcional y se muestra
+ * con el nombre completo (nunca con las siglas G D/C/P/F/I).
+ */
+export const CLASIFICACIONES_GASTO = [
+  { value: 'GASTO_DEDUCIBLE', label: 'Gasto Deducible', tone: 'green' as const },
+  { value: 'GASTO_CASA', label: 'Gasto de Casa', tone: 'blue' as const },
+  { value: 'GASTO_PERSONAL', label: 'Gasto Personal', tone: 'amber' as const },
+  { value: 'GASTO_FAMILIAR', label: 'Gasto Familiar', tone: 'purple' as const },
+  { value: 'GASTO_INVERSION', label: 'Gasto de Inversión', tone: 'gold' as const },
+];
+
+export function nombreClasificacion(valor?: string | null): string {
+  if (!valor) return 'Sin clasificar';
+  return CLASIFICACIONES_GASTO.find((c) => c.value === valor)?.label ?? valor;
 }
 
 export async function getGastos(params?: {
@@ -71,6 +91,7 @@ export async function getGastos(params?: {
   tipo_gasto_id?: number;
   categoria?: string;
   area_id?: number;
+  clasificacion?: string;
   fecha_desde?: string;
   fecha_hasta?: string;
 }): Promise<Gasto[]> {

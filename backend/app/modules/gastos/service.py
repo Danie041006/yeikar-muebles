@@ -2,11 +2,61 @@ from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import date
 from decimal import Decimal
+import re
+import unicodedata
 from app.modules.gastos import model, schemas
 from app.modules.catalogos.model import TipoGasto, Moneda, Area
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios
 from app.modules.users.model import Usuario
+
+
+# Destino del dinero en el libro de caja (códigos G D/C/P/F/I), con el
+# nombre explícito que se muestra en la interfaz. Es una dimensión aparte de
+# la categoría del tipo de gasto: no la reemplaza. El campo es opcional.
+CLASIFICACIONES_GASTO = {
+    "GASTO_DEDUCIBLE": "Gasto Deducible",
+    "GASTO_CASA": "Gasto de Casa",
+    "GASTO_PERSONAL": "Gasto Personal",
+    "GASTO_FAMILIAR": "Gasto Familiar",
+    "GASTO_INVERSION": "Gasto de Inversión",
+}
+CLASIFICACIONES_VALIDAS = set(CLASIFICACIONES_GASTO)
+
+
+def normalizar_clasificacion(valor: str | None) -> str | None:
+    """Acepta 'G D', 'GD', 'DEDUCIBLE', 'GASTO DEDUCIBLE'... y devuelve la
+    clave canónica. None/'' significa sin clasificar (el campo es opcional)."""
+    if valor is None:
+        return None
+    limpio = str(valor).strip().upper()
+    if not limpio:
+        return None
+    # Quita el prefijo "G " / "G" pegado y separadores, para aceptar tanto el
+    # código del libro como el nombre completo (con o sin acentos).
+    sin_acentos = unicodedata.normalize("NFKD", limpio).encode("ascii", "ignore").decode()
+    compacto = re.sub(r"[^A-Z]", "", sin_acentos)
+    if len(compacto) == 2 and compacto.startswith("G"):
+        compacto = compacto[1:]
+    equivalencias = {
+        "D": "GASTO_DEDUCIBLE", "DEDUCIBLE": "GASTO_DEDUCIBLE",
+        "GASTODEDUCIBLE": "GASTO_DEDUCIBLE",
+        "C": "GASTO_CASA", "CASA": "GASTO_CASA", "GASTOCASA": "GASTO_CASA",
+        "P": "GASTO_PERSONAL", "PERSONAL": "GASTO_PERSONAL",
+        "GASTOPERSONAL": "GASTO_PERSONAL",
+        "F": "GASTO_FAMILIAR", "FAMILIAR": "GASTO_FAMILIAR",
+        "FAMILIA": "GASTO_FAMILIAR", "GASTOFAMILIAR": "GASTO_FAMILIAR",
+        "I": "GASTO_INVERSION", "INVERSION": "GASTO_INVERSION",
+        "GASTOINVERSION": "GASTO_INVERSION",
+    }
+    clave = equivalencias.get(compacto)
+    if clave is None:
+        raise ValueError(
+            "Clasificación inválida. Usa Gasto Deducible, Gasto de Casa, "
+            "Gasto Personal, Gasto Familiar o Gasto de Inversión."
+        )
+    return clave
+
 
 
 def _validar_fks(db: Session, tipo_gasto_id: int, moneda_id: int) -> Moneda:
@@ -62,6 +112,7 @@ def _snapshot(gasto: model.Gasto) -> dict:
         "fecha": gasto.fecha,
         "monto": gasto.monto,
         "descripcion": gasto.descripcion,
+        "clasificacion": gasto.clasificacion,
         "observaciones": gasto.observaciones,
     }
 
@@ -89,6 +140,7 @@ def obtener_gastos(
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
     usuario: Usuario | None = None,
+    clasificacion: Optional[str] = None,
 ) -> List[model.Gasto]:
     query = db.query(model.Gasto).options(
         joinedload(model.Gasto.tipo_gasto),
@@ -107,6 +159,10 @@ def obtener_gastos(
         query = query.filter(model.Gasto.fecha >= fecha_desde)
     if fecha_hasta:
         query = query.filter(model.Gasto.fecha <= fecha_hasta)
+    if clasificacion:
+        query = query.filter(
+            model.Gasto.clasificacion == normalizar_clasificacion(clasificacion)
+        )
     gastos = query.order_by(model.Gasto.fecha.desc()).offset(skip).limit(limit).all()
     return _adjuntar_metodo_caja(db, gastos)
 
@@ -126,6 +182,7 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None
         monto=gasto.monto,
         tasa_cambio=tasa,
         monto_en_moneda_base=monto_en_moneda_base,
+        clasificacion=normalizar_clasificacion(gasto.clasificacion),
         observaciones=gasto.observaciones,
         creado_por_id=usuario.id if usuario is not None else None,
         actualizado_por_id=usuario.id if usuario is not None else None,
@@ -192,6 +249,10 @@ def actualizar_gasto(
     # Validar el área si viene en el update (None es válido: limpia el área).
     if "area_id" in data:
         _validar_area(db, data["area_id"])
+
+    # Clasificación del libro de caja (None limpia la marca).
+    if "clasificacion" in data:
+        data["clasificacion"] = normalizar_clasificacion(data["clasificacion"])
 
     # Recalcular monto_en_moneda_base si cambió moneda, monto o tasa
     if "monto" in data or "tasa_cambio" in data or "moneda_id" in data:

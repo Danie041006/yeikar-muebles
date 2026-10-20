@@ -8,6 +8,7 @@ from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
 from app.modules.users.deps import require_module
 from app.modules.reports import service, schemas
+from app.modules.reports import libro_caja
 
 router = APIRouter(prefix="/cuenta", tags=["cuentas"], dependencies=[Depends(require_module('cuentas'))])
 
@@ -149,3 +150,58 @@ def delete_movimiento_cuenta(
     if not eliminado:
         raise HTTPException(status_code=404, detail="Movimiento no encontrado")
     return None
+
+
+# ------------------------------------------------------------
+# Importación del libro de caja (texto pegado desde Excel)
+# ------------------------------------------------------------
+@router.post("/libro/preview", response_model=schemas.LibroCajaResumen)
+def preview_libro_caja(
+    esquema: schemas.LibroCajaRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Analiza el texto pegado y devuelve el resumen, sin escribir nada."""
+    try:
+        return libro_caja.previsualizar_libro(
+            db, esquema.texto, esquema.metodo_caja_id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/libro/importar", response_model=schemas.LibroCajaResumen, status_code=201)
+def importar_libro_caja(
+    esquema: schemas.LibroCajaImportarRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Crea los movimientos y los gastos del libro en la cuenta indicada."""
+    try:
+        return libro_caja.importar_libro(
+            db,
+            texto=esquema.texto,
+            metodo_caja_id=esquema.metodo_caja_id,
+            usuario=current_user,
+            cuadrar_saldo_inicial=esquema.cuadrar_saldo_inicial,
+            permitir_saldo_distinto=esquema.permitir_saldo_distinto,
+            omitir_duplicados=esquema.omitir_duplicados,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/libro/{periodo}", response_model=schemas.LibroCajaDeshacerResponse)
+def deshacer_libro_caja(
+    periodo: str,
+    metodo_caja_id: int = Query(..., description="Cuenta de la importación"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Borra los movimientos y gastos de una importación (por período)."""
+    try:
+        return libro_caja.deshacer_importacion(
+            db, metodo_caja_id=metodo_caja_id, periodo=periodo, usuario=current_user
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))

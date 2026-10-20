@@ -95,6 +95,65 @@ export interface Transferencia {
   pata_entrada: MovimientoCaja;
 }
 
+// ── Importación del libro de caja (texto pegado) ─────────────────────────
+export interface LibroCajaFila {
+  linea: number;
+  fecha: string;
+  tipo: string;
+  concepto: string;
+  ingreso: string | number;
+  egreso: string | number;
+  saldo: string | number;
+  clasificacion?: string | null;
+  codigo?: string | null;
+  es_saldo_inicial: boolean;
+  duplicado_de?: string | null;
+  advertencias: string[];
+}
+
+export interface LibroCajaOmitida {
+  linea: number;
+  texto: string;
+  motivo: string;
+}
+
+export interface LibroCajaResumen {
+  periodo: string;
+  cuenta_id: number;
+  cuenta_nombre: string;
+  filas: number;
+  movimientos: number;
+  gastos: number;
+  duplicados: number;
+  omitidos: number;
+  saldo_inicial?: string | number | null;
+  saldo_final?: string | number | null;
+  total_ingresos: string | number;
+  total_egresos: string | number;
+  saldo_previo_cuenta?: string | number | null;
+  diferencia_saldo_inicial?: string | number | null;
+  ya_importado: boolean;
+  advertencias: string[];
+  errores: string[];
+  omitidas: LibroCajaOmitida[];
+  filas_detalle: LibroCajaFila[];
+}
+
+export interface LibroCajaImportarPayload {
+  texto: string;
+  metodo_caja_id: number;
+  cuadrar_saldo_inicial?: boolean;
+  permitir_saldo_distinto?: boolean;
+  omitir_duplicados?: boolean;
+}
+
+export interface LibroCajaDeshacerResponse {
+  periodo: string;
+  cuenta_nombre: string;
+  gastos_borrados: number;
+  movimientos_borrados: number;
+}
+
 export const cuentasService = {
   getMonedas: async (): Promise<Moneda[]> => {
     const res = await api.get<Moneda[]>('/catalogos/moneda/');
@@ -145,5 +204,21 @@ export const cuentasService = {
   },
   eliminarMovimiento: async (id: number): Promise<void> => {
     await api.delete(`/cuenta/movimiento/${id}`);
+  },
+
+  // Libro de caja: pegar el mes, revisar y confirmar.
+  previsualizarLibro: async (data: { texto: string; metodo_caja_id: number }): Promise<LibroCajaResumen> => {
+    const res = await api.post<LibroCajaResumen>('/cuenta/libro/preview', data);
+    return res.data;
+  },
+  importarLibro: async (data: LibroCajaImportarPayload): Promise<LibroCajaResumen> => {
+    const res = await api.post<LibroCajaResumen>('/cuenta/libro/importar', data);
+    return res.data;
+  },
+  deshacerLibro: async (periodo: string, metodoCajaId: number): Promise<LibroCajaDeshacerResponse> => {
+    const res = await api.delete<LibroCajaDeshacerResponse>(`/cuenta/libro/${periodo}`, {
+      params: { metodo_caja_id: metodoCajaId },
+    });
+    return res.data;
   },
 };

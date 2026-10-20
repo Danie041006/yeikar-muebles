@@ -503,6 +503,73 @@ class InformeMensualResponse(BaseModel):
     estado_resultados_por_moneda: List[EstadoPorMoneda] = []
 
 
+# ------------------------------------------------------------
+# Importación del libro de caja (texto pegado)
+# ------------------------------------------------------------
+class LibroCajaFila(BaseModel):
+    linea: int
+    fecha: date
+    tipo: str = ""
+    concepto: str = ""
+    ingreso: Decimal = Decimal("0.0")
+    egreso: Decimal = Decimal("0.0")
+    saldo: Decimal = Decimal("0.0")
+    clasificacion: Optional[str] = None
+    codigo: Optional[str] = None
+    es_saldo_inicial: bool = False
+    duplicado_de: Optional[str] = None
+    advertencias: List[str] = []
+
+
+class LibroCajaOmitida(BaseModel):
+    linea: int
+    texto: str
+    motivo: str
+
+
+class LibroCajaRequest(BaseModel):
+    texto: str = Field(..., min_length=1)
+    metodo_caja_id: int
+
+
+class LibroCajaImportarRequest(LibroCajaRequest):
+    cuadrar_saldo_inicial: bool = False
+    permitir_saldo_distinto: bool = False
+    omitir_duplicados: bool = True
+
+    class Config:
+        extra = "forbid"
+
+
+class LibroCajaResumen(BaseModel):
+    periodo: str
+    cuenta_id: int
+    cuenta_nombre: str
+    filas: int
+    movimientos: int
+    gastos: int
+    duplicados: int = 0
+    omitidos: int = 0
+    saldo_inicial: Optional[Decimal] = None
+    saldo_final: Optional[Decimal] = None
+    total_ingresos: Decimal = Decimal("0.0")
+    total_egresos: Decimal = Decimal("0.0")
+    saldo_previo_cuenta: Optional[Decimal] = None
+    diferencia_saldo_inicial: Optional[Decimal] = None
+    ya_importado: bool = False
+    advertencias: List[str] = []
+    errores: List[str] = []
+    omitidas: List[LibroCajaOmitida] = []
+    filas_detalle: List[LibroCajaFila] = []
+
+
+class LibroCajaDeshacerResponse(BaseModel):
+    periodo: str
+    cuenta_nombre: str
+    gastos_borrados: int
+    movimientos_borrados: int
+
+
 # Rebuilds para referencias circulares
 from app.modules.catalogos.schemas import MonedaResponse  # noqa: E402
 from app.modules.sales.schemas import VentaResponse  # noqa: E402

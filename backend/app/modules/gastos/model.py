@@ -11,6 +11,10 @@ class Gasto(Base):
     moneda_id = Column(BigInteger, ForeignKey("moneda.id", ondelete="RESTRICT"), nullable=False)
     # Área/departamento al que se imputa el gasto (opcional, se limpia si el área se elimina).
     area_id = Column(BigInteger, ForeignKey("area.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Destino del dinero según el libro de caja: GASTO_DEDUCIBLE |
+    # GASTO_CASA | GASTO_PERSONAL | GASTO_FAMILIAR | GASTO_INVERSION.
+    # Es independiente del tipo de gasto y es OPCIONAL (NULL = sin clasificar).
+    clasificacion = Column(String(30), nullable=True, index=True)
     fecha = Column(Date, nullable=False)
     descripcion = Column(Text, nullable=True)
     monto = Column(Numeric(15,2), nullable=False)
