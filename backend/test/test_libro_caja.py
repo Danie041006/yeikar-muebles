@@ -280,6 +280,22 @@ def test_fechas_mezcladas_y_gf_es_gasto_familiar():
     ]
 
 
+def test_tipo_solo_sin_concepto_y_tipo_con_concepto():
+    """El TIPO no se debe perder cuando la fila no trae CONCEPTO."""
+    from app.modules.reports.libro_caja import parsear_libro
+
+    texto = "\n".join([
+        "10/1/2026\tSALDO\tMES DE SEPTIEMBRE\t\t\t$ 1,000,000",
+        "10/1/2026\tQUESILLO GP\t\t\t$ 12,000\t$ 988,000",
+        "10/1/2026\tDOÑA ROSA G C\tPAGO DE MERCADO\t\t$ 100,000\t$ 888,000",
+    ])
+    parsed = parsear_libro(texto)
+    assert parsed.filas[1].tipo == "QUESILLO GP"
+    assert parsed.filas[1].concepto == ""
+    assert parsed.filas[2].tipo == "DOÑA ROSA G C"
+    assert parsed.filas[2].concepto == "PAGO DE MERCADO"
+
+
 def test_clasificacion_invalida_se_rechaza(client, cleaner):
     r = client.post("/api/v1/gasto/gastos/", json={
         "tipo_gasto_id": 1,

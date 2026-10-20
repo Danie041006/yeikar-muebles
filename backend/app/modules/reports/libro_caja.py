@@ -295,7 +295,7 @@ def _parse_linea(
     elif len(corrida) == 2:
         monto_declarado = _parse_monto(corrida[-2].group())
 
-    medio = linea[match.end():corrida[0].start()].strip()
+    medio = linea[match.end():corrida[0].start()]
     tipo, concepto = _partir_tipo_concepto(medio)
     texto_clasif = f"{tipo} {concepto}"
     clasif_match = _CLASIF_RE.search(texto_clasif)
