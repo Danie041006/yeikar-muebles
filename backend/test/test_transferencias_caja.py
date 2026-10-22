@@ -244,6 +244,167 @@ def test_transferencia_tasa_desviada_rechazada(client, cleaner, db):
     assert "50%" in r.text
 
 
+def test_tasa_transferencia_prellenado_entre_monedas(client, cleaner, db):
+    """El endpoint que prellena el formulario devuelve destino por origen."""
+    cop, _ = _cuenta(db, cleaner, "COP")
+    usd, mo_usd = _cuenta(db, cleaner, "USD")
+    if _tasa_registrada(db, mo_usd, date.today()) is None:
+        _registrar_tasa(db, cleaner, mo_usd, 4000, date.today())
+    tasa = _tasa_registrada(db, mo_usd, date.today())
+
+    r = client.get(
+        "/api/v1/cuenta/tasa-transferencia",
+        params={
+            "cuenta_origen_id": cop,
+            "cuenta_destino_id": usd,
+            "fecha": str(date.today()),
+        },
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, f"tasa-transferencia → {r.status_code}: {r.text}"
+    body = r.json()
+    assert body["monedas_distintas"] is True
+    esperada = (Decimal("1") / tasa).quantize(Decimal("0.000001"))
+    assert Decimal(str(body["tasa_conversion"])) == esperada
+    assert Decimal(str(body["tasa_origen_cop"])) == Decimal("1")
+    assert Decimal(str(body["tasa_destino_cop"])) == tasa
+
+    # Misma moneda: la tasa es 1.
+    cop2, _ = _cuenta(db, cleaner, "COP")
+    r = client.get(
+        "/api/v1/cuenta/tasa-transferencia",
+        params={"cuenta_origen_id": cop, "cuenta_destino_id": cop2},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    assert Decimal(str(r.json()["tasa_conversion"])) == Decimal("1")
+
+
+def test_transferencia_cop_a_usd_con_tasa_editable(client, cleaner, db):
+    """2.000.000 COP a 4.000 son 500 USD, no 200.000 USD."""
+    origen, mo_cop = _cuenta(db, cleaner, "COP")
+    destino, mo_usd = _cuenta(db, cleaner, "USD")
+    _fondear(client, cleaner, origen, mo_cop, 2000000)
+
+    if _tasa_registrada(db, mo_usd, date.today()) is None:
+        _registrar_tasa(db, cleaner, mo_usd, 4000, date.today())
+    tasa = _tasa_registrada(db, mo_usd, date.today())
+    tasa_conversion = (Decimal("1") / tasa).quantize(Decimal("0.000001"))
+
+    r, body = _transferir(
+        client, origen, destino, 2000000, tasa_conversion=float(tasa_conversion)
+    )
+    assert r.status_code == 201, f"transferir → {r.status_code}: {r.text}"
+    try:
+        esperado = (Decimal("2000000") * tasa_conversion).quantize(Decimal("0.01"))
+        tasa_implicita = (Decimal("2000000") / esperado).quantize(Decimal("0.000001"))
+        assert Decimal(str(body["tasa_conversion"])) == tasa_conversion
+        assert Decimal(str(body["monto_convertido"])) == esperado
+        assert Decimal(str(body["monto_entrada"])) == esperado
+        assert Decimal(str(body["pata_entrada"]["tasa_cambio"])) == tasa_implicita
+        assert Decimal(str(body["pata_entrada"]["monto"])) == esperado
+
+        assert _saldo(db, origen, mo_cop) == Decimal("0")
+        assert _saldo(db, destino, mo_usd) == esperado
+    finally:
+        assert _borrar_transferencia(client, body) == 204
+        assert _saldo(db, origen, mo_cop) == Decimal("2000000")
+
+
+def test_transferencia_tasa_conversion_desviada_rechazada(client, cleaner, db):
+    """La tasa manual conserva el guardia de ±50% contra la TRM registrada."""
+    origen, mo_cop = _cuenta(db, cleaner, "COP")
+    destino, mo_usd = _cuenta(db, cleaner, "USD")
+    _fondear(client, cleaner, origen, mo_cop, 2000000)
+
+    if _tasa_registrada(db, mo_usd, date.today()) is None:
+        _registrar_tasa(db, cleaner, mo_usd, 4000, date.today())
+    tasa = _tasa_registrada(db, mo_usd, date.today())
+    # 1 USD = 1.600 COP: 60% por debajo de la TRM registrada.
+    tasa_inventada = (Decimal("1") / (tasa * Decimal("0.4"))).quantize(Decimal("0.000001"))
+
+    r, _ = _transferir(
+        client, origen, destino, 2000000, tasa_conversion=float(tasa_inventada)
+    )
+    assert r.status_code == 400, f"esperaba 400 por tasa inventada → {r.status_code}: {r.text}"
+    assert "50%" in r.text
+
+
+def test_transferencia_usd_a_usd_valoriza_en_cop(client, cleaner, db):
+    """Misma moneda extranjera: la tasa → COP solo valoriza la pata en base."""
+    origen, mo_usd = _cuenta(db, cleaner, "USD")
+    destino, mo_usd_destino = _cuenta(db, cleaner, "USD")
+    _fondear(client, cleaner, origen, mo_usd, 100)
+
+    if _tasa_registrada(db, mo_usd, date.today()) is None:
+        _registrar_tasa(db, cleaner, mo_usd, 4000, date.today())
+    tasa = _tasa_registrada(db, mo_usd, date.today())
+
+    r, body = _transferir(client, origen, destino, 10, tasa_cambio=float(tasa))
+    assert r.status_code == 201, f"transferir → {r.status_code}: {r.text}"
+    try:
+        assert Decimal(str(body["monto_entrada"])) == Decimal("10")
+        assert Decimal(str(body["pata_salida"]["monto_en_moneda_base"])) == (Decimal("10") * tasa)
+        assert Decimal(str(body["pata_entrada"]["monto_en_moneda_base"])) == (Decimal("10") * tasa)
+        assert _saldo(db, destino, mo_usd_destino) == Decimal("10")
+    finally:
+        _borrar_transferencia(client, body)
+
+
+def test_transferencia_interes_suma_y_resta(client, cleaner, db):
+    """El interés (en moneda destino) ajusta lo que entra, con signo explícito."""
+    origen, mo = _cuenta(db, cleaner)
+    destino, _ = _cuenta(db, cleaner)
+    _fondear(client, cleaner, origen, mo, 100000)
+
+    # RESTA: llegan 9.500 de 10.000.
+    r, resta = _transferir(
+        client, origen, destino, 10000,
+        interes=500, interes_signo="RESTA", persona_entidad="Prestamista XYZ",
+    )
+    assert r.status_code == 201, f"transferir → {r.status_code}: {r.text}"
+    try:
+        assert Decimal(str(resta["monto_convertido"])) == Decimal("10000")
+        assert Decimal(str(resta["monto_entrada"])) == Decimal("9500")
+        assert Decimal(str(resta["interes"])) == Decimal("500")
+        assert resta["interes_signo"] == "RESTA"
+        assert resta["persona_entidad"] == "Prestamista XYZ"
+        assert resta["pata_salida"]["persona_entidad"] == "Prestamista XYZ"
+        assert resta["pata_entrada"]["persona_entidad"] == "Prestamista XYZ"
+        assert Decimal(str(resta["pata_entrada"]["interes"])) == Decimal("-500")
+        assert _saldo(db, origen, mo) == Decimal("90000")
+        assert _saldo(db, destino, mo) == Decimal("9500")
+    finally:
+        _borrar_transferencia(client, resta)
+
+    # SUMA: llegan 10.500 de 10.000.
+    r, suma = _transferir(
+        client, origen, destino, 10000,
+        interes=500, interes_signo="SUMA", persona_entidad="Tercero ABC",
+    )
+    assert r.status_code == 201, f"transferir → {r.status_code}: {r.text}"
+    try:
+        assert Decimal(str(suma["monto_entrada"])) == Decimal("10500")
+        assert suma["interes_signo"] == "SUMA"
+        assert Decimal(str(suma["pata_entrada"]["interes"])) == Decimal("500")
+        assert _saldo(db, origen, mo) == Decimal("90000")
+        assert _saldo(db, destino, mo) == Decimal("10500")
+    finally:
+        _borrar_transferencia(client, suma)
+
+
+def test_transferencia_interes_no_puede_dejar_entrada_en_cero(client, cleaner, db):
+    origen, mo = _cuenta(db, cleaner)
+    destino, _ = _cuenta(db, cleaner)
+    _fondear(client, cleaner, origen, mo, 10000)
+
+    r, _ = _transferir(
+        client, origen, destino, 1000, interes=1000, interes_signo="RESTA"
+    )
+    assert r.status_code == 400, f"esperaba 400 → {r.status_code}: {r.text}"
+    assert "cero o negativo" in r.text.lower()
+
+
 # ---------------------------------------------------------------------------
 # Integración con reportes
 # ---------------------------------------------------------------------------

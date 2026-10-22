@@ -93,6 +93,21 @@ def post_movimiento_cuenta(
 # ------------------------------------------------------------
 # Transferencias entre cuentas
 # ------------------------------------------------------------
+@router.get("/tasa-transferencia", response_model=schemas.TasaTransferenciaResponse)
+def get_tasa_transferencia(
+    cuenta_origen_id: int = Query(...),
+    cuenta_destino_id: int = Query(...),
+    fecha: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """Tasa sugerida (destino por origen) para prellenar el formulario."""
+    try:
+        return service.tasa_transferencia(db, cuenta_origen_id, cuenta_destino_id, fecha)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/transferencia", response_model=schemas.TransferenciaResponse, status_code=201)
 def post_transferencia(
     esquema: schemas.TransferenciaCreate,

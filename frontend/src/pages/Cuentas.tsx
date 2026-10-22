@@ -32,6 +32,11 @@ const emptyMovForm = (metodoId = 0, monedaCopId = 1) => ({
 });
 
 const fmt = (n: number) => (Number.isFinite(n) ? n.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '0');
+const fmtTasa = (n: number) => (
+  Number.isFinite(n) && n > 0
+    ? n.toLocaleString('es-CO', { maximumFractionDigits: 6 })
+    : '—'
+);
 
 const TIPO_TONE: Record<string, 'neutral' | 'green' | 'red' | 'amber'> = {
   APERTURA: 'neutral',
@@ -45,7 +50,12 @@ const emptyTransferForm = () => ({
   cuenta_destino_id: 0,
   monto: 0,
   fecha: new Date().toISOString().split('T')[0],
+  tasa_conversion: '',
+  tasa_invertida: false,
   tasa_cambio: '',
+  interes: '',
+  interes_signo: 'RESTA' as 'SUMA' | 'RESTA',
+  persona_entidad: '',
   referencia: '',
   concepto: '',
 });
@@ -78,6 +88,7 @@ export default function Cuentas() {
 
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [transferForm, setTransferForm] = useState(emptyTransferForm());
+  const [transferTasaManual, setTransferTasaManual] = useState(false);
 
   const [filtroCuenta, setFiltroCuenta] = useState<number | ''>('');
   const [filtroTipo, setFiltroTipo] = useState('');
@@ -333,16 +344,132 @@ export default function Cuentas() {
   };
 
   const transferCuenta = (id: number) => resumen.find((r) => r.metodo_caja.id === id)?.metodo_caja;
+  const sugerirTasaInvertida = (origenId: number, destinoId: number) => {
+    const moOrigen = transferCuenta(origenId)?.moneda_id || monedaCopId;
+    const moDestino = transferCuenta(destinoId)?.moneda_id || moOrigen;
+    return moOrigen === monedaCopId && moDestino !== monedaCopId;
+  };
   const transferMonedaSalida = transferCuenta(transferForm.cuenta_origen_id)?.moneda_id || monedaCopId;
-  const transferMonedaDestino = transferCuenta(transferForm.cuenta_destino_id)?.moneda_id || monedaCopId;
+  // El backend, si la cuenta destino no tiene moneda, usa la de origen.
+  const transferMonedaDestino = transferCuenta(transferForm.cuenta_destino_id)?.moneda_id || transferMonedaSalida;
+  const transferCodigoOrigen = transferCuenta(transferForm.cuenta_origen_id)?.moneda_codigo
+    || monedaDe(transferMonedaSalida)?.codigo || 'COP';
+  const transferCodigoDestino = transferCuenta(transferForm.cuenta_destino_id)?.moneda_codigo
+    || monedaDe(transferMonedaDestino)?.codigo || 'COP';
   const transferSaldoDisponible = saldoDe(transferForm.cuenta_origen_id, transferMonedaSalida);
   const transferSaldoExcede = transferForm.monto > transferSaldoDisponible + 0.005;
   const transferMultimoneda = transferMonedaSalida !== transferMonedaDestino;
   const transferMontoValido = transferForm.monto > 0;
+  // La tasa → COP solo hace falta cuando la moneda origen no es COP y la
+  // contraparte tampoco (incluye transferencias USD→USD): sirve para valorar
+  // la pata en moneda base si no hay TRM registrada.
+  const transferNecesitaTasaCop = transferMonedaSalida !== monedaCopId
+    && transferMonedaDestino !== monedaCopId;
+
+  // La tasa interna siempre es "unidades de destino por 1 de origen".
+  // El formulario puede mostrarla invertida (1 destino = X origen).
+  const transferTasaInput = Number(transferForm.tasa_conversion) || 0;
+  const transferTasaConversion = !transferMultimoneda
+    ? 1
+    : (transferForm.tasa_invertida
+        ? (transferTasaInput > 0 ? 1 / transferTasaInput : 0)
+        : transferTasaInput);
+  const transferTasaValida = !transferMultimoneda || transferTasaConversion > 0;
+  const transferMontoConvertido = transferMultimoneda
+    ? transferForm.monto * transferTasaConversion
+    : transferForm.monto;
+  const transferInteresMonto = Number(transferForm.interes) || 0;
+  const transferInteresFirmado = transferForm.interes_signo === 'SUMA'
+    ? transferInteresMonto
+    : -transferInteresMonto;
+  const transferMontoEntrada = Number(
+    (transferMontoConvertido + transferInteresFirmado).toFixed(2)
+  );
+  const transferEntradaValida = transferMontoEntrada > 0;
+  const transferFormListo = transferForm.cuenta_origen_id > 0
+    && transferForm.cuenta_destino_id > 0
+    && transferForm.cuenta_origen_id !== transferForm.cuenta_destino_id
+    && transferForm.monto > 0;
+  const transferEtiquetaTasa = transferForm.tasa_invertida
+    ? `1 ${transferCodigoDestino} = ? ${transferCodigoOrigen}`
+    : `1 ${transferCodigoOrigen} = ? ${transferCodigoDestino}`;
+  const transferTasaEquivalente = transferTasaConversion > 0
+    ? (transferForm.tasa_invertida
+        ? `Equivale a 1 ${transferCodigoOrigen} = ${fmtTasa(transferTasaConversion)} ${transferCodigoDestino}`
+        : `Equivale a 1 ${transferCodigoDestino} = ${fmtTasa(1 / transferTasaConversion)} ${transferCodigoOrigen}`)
+    : '';
+  const transferTasaHint = transferTasaConversion > 0
+    ? `${transferTasaEquivalente}. Usa la tasa real de la operación.`
+    : 'No hay TRM registrada para este par: escribe la tasa real de la operación.';
+  const transferMontoEntradaFmt = fmtMoneda(transferMontoEntrada, transferCodigoDestino);
+
+  // Prellena la tasa con la TRM registrada; si no hay, se digita a mano.
+  useEffect(() => {
+    if (!showTransferModal) return;
+    const origenId = transferForm.cuenta_origen_id;
+    const destinoId = transferForm.cuenta_destino_id;
+    if (!origenId || !destinoId || origenId === destinoId) return;
+    if (!transferMultimoneda) {
+      if (transferForm.tasa_conversion !== '1') {
+        setTransferForm((f) => ({ ...f, tasa_conversion: '1', tasa_invertida: false }));
+      }
+      return;
+    }
+    if (transferTasaManual) return;
+    let cancelado = false;
+    cuentasService.getTasaTransferencia({
+      cuenta_origen_id: origenId,
+      cuenta_destino_id: destinoId,
+      fecha: transferForm.fecha,
+    }).then((data) => {
+      if (cancelado) return;
+      setTransferForm((f) => {
+        if (f.cuenta_origen_id !== origenId || f.cuenta_destino_id !== destinoId) return f;
+        // El usuario pudo escribir la tasa mientras respondía la petición.
+        if (f.tasa_conversion.trim() !== '') return f;
+        const valor = Number(data.tasa_conversion);
+        // Si una punta es COP, se muestra en la dirección humana:
+        // 1 USD = 4.000 COP (no 1 COP = 0,00025 USD).
+        const invertida = f.tasa_invertida
+          || (transferMonedaSalida === monedaCopId && transferMonedaDestino !== monedaCopId);
+        const mostrado = invertida
+          ? (valor > 0 ? 1 / valor : 0)
+          : valor;
+        return {
+          ...f,
+          tasa_invertida: invertida,
+          tasa_conversion: String(mostrado),
+        };
+      });
+    }).catch(() => {
+      // Sin TRM registrada para el par: la tasa se puede escribir a mano.
+    });
+    return () => { cancelado = true; };
+  }, [
+    showTransferModal,
+    transferForm.cuenta_origen_id,
+    transferForm.cuenta_destino_id,
+    transferForm.fecha,
+    transferMultimoneda,
+    transferTasaManual,
+    monedaCopId,
+    transferMonedaSalida,
+    transferMonedaDestino,
+  ]);
 
   const abrirTransfer = () => {
     setTransferForm(emptyTransferForm());
+    setTransferTasaManual(false);
     setShowTransferModal(true);
+  };
+
+  const invertirTasa = () => {
+    setTransferForm({
+      ...transferForm,
+      tasa_conversion: transferTasaInput > 0 ? String(1 / transferTasaInput) : '',
+      tasa_invertida: !transferForm.tasa_invertida,
+    });
+    setTransferTasaManual(true);
   };
 
   const guardarTransferencia = async () => {
@@ -358,6 +485,14 @@ export default function Cuentas() {
       setError('El monto debe ser mayor a 0.');
       return;
     }
+    if (!transferTasaValida) {
+      setError('Escribe la tasa de cambio de la transferencia.');
+      return;
+    }
+    if (!transferEntradaValida) {
+      setError('El interés deja en cero o negativo lo que entra a la cuenta destino.');
+      return;
+    }
     if (transferSaldoExcede) {
       setError('La cuenta de origen no tiene saldo suficiente para ese monto.');
       return;
@@ -368,7 +503,13 @@ export default function Cuentas() {
       monto: Number(transferForm.monto),
       fecha: transferForm.fecha,
       moneda_id: transferMonedaSalida,
-      tasa_cambio: transferForm.tasa_cambio ? Number(transferForm.tasa_cambio) : null,
+      tasa_conversion: transferMultimoneda ? Number(transferTasaConversion) : null,
+      tasa_cambio: transferNecesitaTasaCop && transferForm.tasa_cambio
+        ? Number(transferForm.tasa_cambio)
+        : null,
+      interes: transferInteresMonto > 0 ? transferInteresMonto : null,
+      interes_signo: transferForm.interes_signo,
+      persona_entidad: transferForm.persona_entidad.trim() || null,
       referencia: transferForm.referencia.trim() || null,
       concepto: transferForm.concepto.trim() || null,
     };
@@ -428,7 +569,17 @@ export default function Cuentas() {
       key: 'monto',
       header: 'Monto',
       align: 'right',
-      render: (m) => <span className="font-mono font-semibold">{monedaDe(m.moneda_id)?.simbolo ?? ''}{fmt(Number(m.monto))}</span>,
+      render: (m) => (
+        <div className="flex flex-col items-end">
+          <span className="font-mono font-semibold">{monedaDe(m.moneda_id)?.simbolo ?? ''}{fmt(Number(m.monto))}</span>
+          {m.tipo === 'ENTRADA' && m.interes != null && Number(m.interes) !== 0 && (
+            <span className={`text-[10px] font-medium ${Number(m.interes) > 0 ? 'text-green-700' : 'text-red-600'}`}>
+              incl. interés {Number(m.interes) > 0 ? '+' : '−'}
+              {fmtMoneda(Math.abs(Number(m.interes)), m.moneda?.codigo)}
+            </span>
+          )}
+        </div>
+      ),
       mobileLabel: 'Monto',
     },
     {
@@ -798,7 +949,7 @@ export default function Cuentas() {
         open={showTransferModal}
         onClose={() => setShowTransferModal(false)}
         title="Transferir entre Cuentas"
-        subtitle="Sale de una cuenta y entra en la otra: el total del negocio no cambia"
+        subtitle="Sale de una cuenta y entra en la otra; si cambias de moneda, la tasa manda"
         size="lg"
         footer={
           <>
@@ -812,7 +963,17 @@ export default function Cuentas() {
             <Field label="Cuenta origen" required>
               <SearchSelect
                 value={transferForm.cuenta_origen_id}
-                onChange={(v) => setTransferForm({ ...transferForm, cuenta_origen_id: Number(v) })}
+                onChange={(v) => {
+                  const origenId = Number(v);
+                  setTransferForm({
+                    ...transferForm,
+                    cuenta_origen_id: origenId,
+                    tasa_conversion: '',
+                    tasa_invertida: sugerirTasaInvertida(origenId, transferForm.cuenta_destino_id),
+                    tasa_cambio: '',
+                  });
+                  setTransferTasaManual(false);
+                }}
                 options={[
                   { value: 0, label: 'Seleccione...' },
                   ...resumen.filter((r) => r.metodo_caja.activo).map((r) => ({
@@ -826,7 +987,17 @@ export default function Cuentas() {
             <Field label="Cuenta destino" required>
               <SearchSelect
                 value={transferForm.cuenta_destino_id}
-                onChange={(v) => setTransferForm({ ...transferForm, cuenta_destino_id: Number(v) })}
+                onChange={(v) => {
+                  const destinoId = Number(v);
+                  setTransferForm({
+                    ...transferForm,
+                    cuenta_destino_id: destinoId,
+                    tasa_conversion: '',
+                    tasa_invertida: sugerirTasaInvertida(transferForm.cuenta_origen_id, destinoId),
+                    tasa_cambio: '',
+                  });
+                  setTransferTasaManual(false);
+                }}
                 options={[
                   { value: 0, label: 'Seleccione...' },
                   ...resumen.filter((r) => r.metodo_caja.activo && r.metodo_caja.id !== transferForm.cuenta_origen_id).map((r) => ({
@@ -838,7 +1009,8 @@ export default function Cuentas() {
               />
             </Field>
           </div>
-          <div className="grid grid-cols-1 min-[420px]:grid-cols-3 gap-4">
+
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
             <Field label="Monto" required>
               <Input
                 type="number"
@@ -852,22 +1024,54 @@ export default function Cuentas() {
               <Input
                 type="date"
                 value={transferForm.fecha}
-                onChange={(e) => setTransferForm({ ...transferForm, fecha: e.target.value })}
+                onChange={(e) => {
+                  setTransferForm({ ...transferForm, fecha: e.target.value, tasa_conversion: '', tasa_cambio: '' });
+                  setTransferTasaManual(false);
+                }}
               />
             </Field>
-            {transferMonedaSalida !== monedaCopId ? (
-              <Field label="Tasa → COP">
+          </div>
+
+          {transferMultimoneda && transferForm.cuenta_origen_id > 0 && transferForm.cuenta_destino_id > 0 && (
+            <Field
+              label={transferEtiquetaTasa}
+              hint={transferTasaHint}
+            >
+              <div className="flex gap-2">
                 <Input
                   type="number"
-                  step="0.01"
+                  step="0.000001"
                   min="0"
-                  value={transferForm.tasa_cambio}
-                  onChange={(e) => setTransferForm({ ...transferForm, tasa_cambio: e.target.value })}
-                  placeholder="Tasa del día (auto)"
+                  value={transferForm.tasa_conversion}
+                  onChange={(e) => {
+                    setTransferForm({ ...transferForm, tasa_conversion: e.target.value });
+                    setTransferTasaManual(true);
+                  }}
+                  placeholder={transferForm.tasa_invertida ? 'Ej: 4000' : 'Ej: 0.00025'}
                 />
-              </Field>
-            ) : <div />}
-          </div>
+                <Button type="button" variant="outline" onClick={invertirTasa} title="Invertir la dirección de la tasa">
+                  Invertir
+                </Button>
+              </div>
+            </Field>
+          )}
+
+          {transferNecesitaTasaCop && (
+            <Field
+              label={`Tasa ${transferCodigoOrigen} → COP (opcional)`}
+              hint="Si la dejas vacía se usa la TRM registrada del día."
+            >
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={transferForm.tasa_cambio}
+                onChange={(e) => setTransferForm({ ...transferForm, tasa_cambio: e.target.value })}
+                placeholder="Tasa del día (auto)"
+              />
+            </Field>
+          )}
+
           {transferForm.cuenta_origen_id > 0 && (
             <p className="text-sm text-yeikar-neutral/50">
               Disponible en origen:{' '}
@@ -879,11 +1083,91 @@ export default function Cuentas() {
               )}
             </p>
           )}
-          {transferMultimoneda && transferForm.cuenta_destino_id > 0 && (
-            <p className="text-sm text-yeikar-neutral/50">
-              Cuentas en monedas distintas: la cuenta destino recibe el equivalente convertido con la tasa registrada de su moneda.
-            </p>
+
+          <div className="grid grid-cols-1 min-[420px]:grid-cols-[1fr_180px] gap-4">
+            <Field
+              label={`Interés (opcional, en ${transferForm.cuenta_destino_id > 0 ? transferCodigoDestino : 'la moneda destino'})`}
+              hint="Se aplica a lo que entra a la cuenta destino; puede sumar o restar."
+            >
+              <Input
+                type="number"
+                step="0.01"
+                min="0"
+                value={transferForm.interes}
+                onChange={(e) => setTransferForm({ ...transferForm, interes: e.target.value })}
+                placeholder="0"
+              />
+            </Field>
+            <Field label="Efecto del interés">
+              <Select
+                value={transferForm.interes_signo}
+                onChange={(e) => setTransferForm({
+                  ...transferForm,
+                  interes_signo: e.target.value as 'SUMA' | 'RESTA',
+                })}
+              >
+                <option value="RESTA">Resta (se descuenta)</option>
+                <option value="SUMA">Suma (se agrega)</option>
+              </Select>
+            </Field>
+          </div>
+
+          <Field
+            label="Persona o entidad (tercero)"
+            hint="Banco, prestamista, intermediario... Opcional."
+          >
+            <Input
+              value={transferForm.persona_entidad}
+              onChange={(e) => setTransferForm({ ...transferForm, persona_entidad: e.target.value })}
+              placeholder="Ej: Banco XYZ, prestamista..."
+            />
+          </Field>
+
+          {transferFormListo && (
+            <div className="space-y-1.5 rounded-xl border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 p-4 text-sm">
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-yeikar-neutral/55">
+                  Sale de {transferCuenta(transferForm.cuenta_origen_id)?.nombre ?? '—'}
+                </span>
+                <span className="font-mono font-semibold">
+                  {fmtMoneda(transferForm.monto, transferCodigoOrigen)}
+                </span>
+              </div>
+              {transferMultimoneda && (
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-yeikar-neutral/55">Tasa aplicada</span>
+                  <span className="font-mono">
+                    1 {transferCodigoOrigen} = {fmtTasa(transferTasaConversion)} {transferCodigoDestino}
+                  </span>
+                </div>
+              )}
+              {transferInteresMonto > 0 && (
+                <div className="flex items-start justify-between gap-3">
+                  <span className="text-yeikar-neutral/55">
+                    Interés ({transferForm.interes_signo === 'SUMA' ? 'suma' : 'resta'})
+                  </span>
+                  <span className={`font-mono ${transferForm.interes_signo === 'SUMA' ? 'text-green-700' : 'text-red-600'}`}>
+                    {transferForm.interes_signo === 'SUMA' ? '+' : '−'}
+                    {fmtMoneda(transferInteresMonto, transferCodigoDestino)}
+                  </span>
+                </div>
+              )}
+              <div className="flex items-start justify-between gap-3 border-t border-yeikar-secondary-light/20 pt-1.5">
+                <span className="text-yeikar-neutral/55">
+                  Llega a {transferCuenta(transferForm.cuenta_destino_id)?.nombre ?? '—'}
+                </span>
+                <span className={`font-mono font-bold ${transferEntradaValida ? 'text-yeikar-primary-dark' : 'text-red-600'}`}>
+                  {transferMontoEntradaFmt}
+                </span>
+              </div>
+              {!transferEntradaValida && (
+                <p className="text-xs text-red-600">
+                  El interés deja en cero o negativo lo que entra a la cuenta destino.
+                </p>
+              )}
+            </div>
           )}
+
           <Field label="Referencia">
             <Input
               value={transferForm.referencia}
@@ -949,6 +1233,27 @@ export default function Cuentas() {
               <DetalleFila label="Persona o entidad">
                 {detalleMov.persona_entidad || '—'}
               </DetalleFila>
+              {detalleMov.tasa_conversion != null && Number(detalleMov.tasa_conversion) !== 1 && (
+                <DetalleFila label="Tasa de conversión">
+                  <span className="font-mono">
+                    {fmtTasa(Number(detalleMov.tasa_conversion))}
+                  </span>
+                  <span className="ml-1 text-xs text-yeikar-neutral/40">(destino por 1 de origen)</span>
+                </DetalleFila>
+              )}
+              {detalleMov.interes != null && Number(detalleMov.interes) !== 0 && (
+                <DetalleFila label="Interés">
+                  <span className={Number(detalleMov.interes) > 0 ? 'font-semibold text-green-700' : 'font-semibold text-red-600'}>
+                    {Number(detalleMov.interes) > 0 ? '+' : '−'}
+                    {detalleMov.tipo === 'ENTRADA'
+                      ? fmtMoneda(Math.abs(Number(detalleMov.interes)), detalleMov.moneda?.codigo)
+                      : Number(Math.abs(Number(detalleMov.interes))).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
+                  </span>
+                  {detalleMov.tipo !== 'ENTRADA' && (
+                    <span className="ml-1 text-xs text-yeikar-neutral/40">(en moneda destino)</span>
+                  )}
+                </DetalleFila>
+              )}
               <DetalleFila label="Concepto">
                 {detalleMov.concepto || '—'}
               </DetalleFila>

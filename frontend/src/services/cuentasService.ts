@@ -29,6 +29,8 @@ export interface MovimientoCaja {
   tasa_cambio: number;
   monto_en_moneda_base: number;
   transferencia_id?: number | null;
+  tasa_conversion?: number | null;
+  interes?: number | null;
   pago_id?: number | null;
   referencia?: string | null;
   persona_entidad?: string | null;
@@ -77,19 +79,43 @@ export interface TransferenciaPayload {
   monto: number;
   fecha?: string;
   moneda_id?: number | null;
+  // Tasa moneda salida → COP (se conserva por compatibilidad; la UI usa
+  // `tasa_conversion`).
   tasa_cambio?: number | null;
+  // Unidades de moneda DESTINO por 1 unidad de moneda ORIGEN.
+  tasa_conversion?: number | null;
+  // Interés en moneda DESTINO; el signo decide si suma o resta.
+  interes?: number | null;
+  interes_signo?: 'SUMA' | 'RESTA';
+  persona_entidad?: string | null;
   referencia?: string | null;
   concepto?: string | null;
+}
+
+export interface TasaTransferencia {
+  cuenta_origen_id: number;
+  cuenta_destino_id: number;
+  moneda_origen_id: number;
+  moneda_destino_id: number;
+  monedas_distintas: boolean;
+  tasa_conversion: number;
+  tasa_origen_cop: number;
+  tasa_destino_cop: number;
 }
 
 export interface Transferencia {
   transferencia_id: number;
   fecha: string;
   monto_salida: number;
+  monto_convertido: number;
   monto_entrada: number;
   moneda_salida_codigo: string;
   moneda_entrada_codigo: string;
   tasa_cambio: number;
+  tasa_conversion: number;
+  interes: number;
+  interes_signo: 'SUMA' | 'RESTA';
+  persona_entidad?: string | null;
   saldo_disponible_origen: number;
   referencia?: string | null;
   concepto?: string | null;
@@ -200,6 +226,14 @@ export const cuentasService = {
   // Transferencias entre cuentas (dos patas: SALIDA en origen + ENTRADA en destino)
   transferir: async (data: TransferenciaPayload): Promise<Transferencia> => {
     const res = await api.post<Transferencia>('/cuenta/transferencia', data);
+    return res.data;
+  },
+  getTasaTransferencia: async (params: {
+    cuenta_origen_id: number;
+    cuenta_destino_id: number;
+    fecha?: string;
+  }): Promise<TasaTransferencia> => {
+    const res = await api.get<TasaTransferencia>('/cuenta/tasa-transferencia', { params });
     return res.data;
   },
   getTransferencias: async (params?: { fecha_desde?: string; fecha_hasta?: string }): Promise<Transferencia[]> => {

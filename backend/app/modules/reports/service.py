@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func, extract, orm as sa_orm
 from typing import List, Dict, Optional
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from datetime import datetime, date
 import calendar
 
@@ -1350,6 +1350,58 @@ def _tasa_transferencia_salida(db: Session, moneda_salida_id: int, tasa_indicada
     return tasa
 
 
+def _tasa_cop_registrada(db: Session, moneda_id: int, fecha: date) -> Decimal:
+    """1.0 para COP; para otra moneda exige una TRM registrada a la fecha."""
+    if moneda_id in (None, 1):
+        return Decimal("1.0")
+    tasa = _tasa_registrada_a_cop(db, moneda_id, fecha)
+    if tasa is None:
+        raise ValueError(
+            f"No hay tasa de cambio registrada para la moneda {moneda_id}. "
+            "Regístrala o indica la tasa de la transferencia."
+        )
+    return tasa
+
+
+def _tasa_conversion_registrada(
+    db: Session, moneda_origen_id: int, moneda_destino_id: int, fecha: date
+) -> Optional[Decimal]:
+    """Tasa destino por origen derivada de las TRM a COP, o None si falta alguna.
+
+    No falla: una transferencia puede indicar la tasa a mano aunque no haya
+    TRM registrada para una de las dos monedas.
+    """
+    if moneda_origen_id == moneda_destino_id:
+        return Decimal("1.0")
+    try:
+        tasa_origen = _tasa_cop_registrada(db, moneda_origen_id, fecha)
+        tasa_destino = _tasa_cop_registrada(db, moneda_destino_id, fecha)
+    except ValueError:
+        return None
+    return (tasa_origen / tasa_destino).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+
+def _validar_tasa_conversion(
+    db: Session,
+    moneda_origen_id: int,
+    moneda_destino_id: int,
+    tasa_conversion: Decimal,
+    fecha: date,
+) -> None:
+    """Mismo anti TRM inventada de los pagos: ±50% contra la tasa registrada.
+
+    Si no hay TRM registrada para el par, se permite la tasa manual (es la
+    única forma de operar cuando el negocio aún no cargó la TRM del día).
+    """
+    registrada = _tasa_conversion_registrada(db, moneda_origen_id, moneda_destino_id, fecha)
+    if registrada and registrada > 0:
+        if abs(tasa_conversion - registrada) / registrada > Decimal("0.5"):
+            raise ValueError(
+                f"La tasa de conversión indicada ({tasa_conversion}) difiere más de "
+                f"50% de la registrada ({registrada}). Usa la tasa real del día."
+            )
+
+
 def _mov_caja_response(m: model.MovimientoCaja) -> schemas.MovimientoCajaResponse:
     return schemas.MovimientoCajaResponse(
         metodo_caja_id=m.metodo_caja_id,
@@ -1365,6 +1417,8 @@ def _mov_caja_response(m: model.MovimientoCaja) -> schemas.MovimientoCajaRespons
         usuario_id=m.usuario_id,
         monto_en_moneda_base=m.monto_en_moneda_base,
         transferencia_id=m.transferencia_id,
+        tasa_conversion=m.tasa_conversion,
+        interes=m.interes,
         created_at=m.created_at,
         metodo_caja=schemas.MetodoCajaResponse(
             id=m.metodo_caja.id, nombre=m.metodo_caja.nombre, codigo=m.metodo_caja.codigo,
@@ -1390,14 +1444,36 @@ def _transferencia_response(db: Session, salida: model.MovimientoCaja) -> schema
     )
     if entrada is None:
         raise ValueError("La transferencia está incompleta (falta la pata de entrada).")
+    interes = Decimal(str(salida.interes or 0))
+    if salida.tasa_conversion is not None:
+        tasa_conversion = Decimal(str(salida.tasa_conversion))
+        monto_convertido = (Decimal(str(salida.monto)) * tasa_conversion).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    else:
+        # Transferencias anteriores a la tasa editable: lo convertido es lo
+        # que entró, descontando el interés si lo hubiera.
+        monto_convertido = Decimal(str(entrada.monto)) - interes
+        tasa_conversion = (
+            (monto_convertido / Decimal(str(salida.monto))).quantize(
+                Decimal("0.000001"), rounding=ROUND_HALF_UP
+            )
+            if salida.monto
+            else Decimal("1.0")
+        )
     return schemas.TransferenciaResponse(
         transferencia_id=destino_id,
         fecha=salida.fecha,
         monto_salida=salida.monto,
+        monto_convertido=monto_convertido,
         monto_entrada=entrada.monto,
         moneda_salida_codigo=salida.moneda.codigo if salida.moneda else "?",
         moneda_entrada_codigo=entrada.moneda.codigo if entrada.moneda else "?",
         tasa_cambio=salida.tasa_cambio,
+        tasa_conversion=tasa_conversion,
+        interes=abs(interes),
+        interes_signo="SUMA" if interes >= 0 else "RESTA",
+        persona_entidad=salida.persona_entidad,
         saldo_disponible_origen=_saldo_cuenta_a_fecha(
             db, salida.metodo_caja_id, salida.moneda_id, salida.fecha
         ),
@@ -1408,6 +1484,56 @@ def _transferencia_response(db: Session, salida: model.MovimientoCaja) -> schema
     )
 
 
+def tasa_transferencia(
+    db: Session,
+    cuenta_origen_id: int,
+    cuenta_destino_id: int,
+    fecha: Optional[date] = None,
+) -> schemas.TasaTransferenciaResponse:
+    """Tasa sugerida (destino por origen) para una transferencia entre cuentas.
+
+    Sirve para prellenar y previsualizar el formulario. Si falta la TRM de
+    alguna moneda devuelve 400: la tasa se puede digitar a mano al transferir.
+    """
+    fecha = fecha or hoy_ve()
+    if cuenta_origen_id == cuenta_destino_id:
+        raise ValueError("La cuenta de origen y la de destino deben ser distintas.")
+    cuentas = (
+        db.query(model.MetodoCaja)
+        .filter(model.MetodoCaja.id.in_([cuenta_origen_id, cuenta_destino_id]))
+        .all()
+    )
+    por_id = {c.id: c for c in cuentas}
+    origen = por_id.get(cuenta_origen_id)
+    destino = por_id.get(cuenta_destino_id)
+    if not origen:
+        raise ValueError("La cuenta de origen no existe.")
+    if not destino:
+        raise ValueError("La cuenta de destino no existe.")
+    if not origen.activo or not destino.activo:
+        raise ValueError("Ambas cuentas deben estar activas.")
+
+    moneda_origen = origen.moneda_id or 1
+    moneda_destino = destino.moneda_id or moneda_origen
+    tasa_origen = _tasa_cop_registrada(db, moneda_origen, fecha)
+    tasa_destino = _tasa_cop_registrada(db, moneda_destino, fecha)
+    tasa_conversion = (
+        Decimal("1.0")
+        if moneda_origen == moneda_destino
+        else (tasa_origen / tasa_destino).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    )
+    return schemas.TasaTransferenciaResponse(
+        cuenta_origen_id=origen.id,
+        cuenta_destino_id=destino.id,
+        moneda_origen_id=moneda_origen,
+        moneda_destino_id=moneda_destino,
+        monedas_distintas=moneda_origen != moneda_destino,
+        tasa_conversion=tasa_conversion,
+        tasa_origen_cop=tasa_origen,
+        tasa_destino_cop=tasa_destino,
+    )
+
+
 def crear_transferencia(
     db: Session,
     esquema: schemas.TransferenciaCreate,
@@ -1415,14 +1541,18 @@ def crear_transferencia(
 ) -> schemas.TransferenciaResponse:
     """Mueve dinero entre dos cuentas de caja como UNA operación contable de
     dos patas: SALIDA en origen + ENTRADA en destino, emparejadas por
-    `transferencia_id`. El saldo total del negocio no cambia.
+    `transferencia_id`.
 
     - Valida cuentas distintas, activas y saldo disponible en origen.
-    - Multimoneda (p. ej. EFECTIVO_USD → BANCOLOMBIA): la pata de destino
-      lleva el monto convertido con la TRM de su moneda (del catálogo).
+    - La tasa de conversión es editable: unidades de moneda DESTINO por 1
+      unidad de moneda ORIGEN. Si se omite, se deriva de las TRM registradas.
+    - `interes` (en moneda destino) se suma o se resta al monto convertido
+      antes de acreditar la cuenta destino.
     """
     fecha = esquema.fecha or hoy_ve()
     monto = Decimal(str(esquema.monto))
+    if monto <= 0:
+        raise ValueError("El monto debe ser mayor que cero.")
 
     if esquema.cuenta_origen_id == esquema.cuenta_destino_id:
         raise ValueError("La cuenta de origen y la de destino deben ser distintas.")
@@ -1449,27 +1579,83 @@ def crear_transferencia(
     moneda_salida = esquema.moneda_id or origen.moneda_id or 1
     moneda_entrada = destino.moneda_id or moneda_salida
 
-    # Tasa de la pata de salida (moneda que sale → COP) y monto en base.
-    tasa_salida = _tasa_transferencia_salida(db, moneda_salida, esquema.tasa_cambio, fecha)
-    base_salida = round(monto * tasa_salida, 2)
+    # Tasa de la pata de salida (moneda que sale → COP). Si el destino es COP
+    # y el usuario dio la tasa de conversión, esa MISMA tasa es la TRM de la
+    # moneda origen (1 USD = 4.000 COP); manda sobre `tasa_cambio` para que la
+    # pata de entrada y la base cuadren.
+    tasa_cambio_indicada = esquema.tasa_cambio
+    if (
+        esquema.tasa_conversion is not None
+        and moneda_salida != 1
+        and moneda_entrada == 1
+    ):
+        tasa_cambio_indicada = esquema.tasa_conversion
+    tasa_salida = _tasa_transferencia_salida(db, moneda_salida, tasa_cambio_indicada, fecha)
+    base_salida = (monto * tasa_salida).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    # Pata de entrada: misma moneda (1:1) o convertida con la TRM de destino.
+    interes = Decimal(str(esquema.interes or 0))
+    if interes < 0:
+        raise ValueError("El interés no puede ser negativo; usa el signo (SUMA/RESTA).")
+    interes_firmado = interes if esquema.interes_signo == "SUMA" else -interes
+
+    # Pata de entrada: misma moneda (1:1) o convertida con la tasa editable.
     if moneda_entrada == moneda_salida:
+        if esquema.tasa_conversion is not None:
+            tasa_indicada = Decimal(str(esquema.tasa_conversion)).quantize(
+                Decimal("0.000001"), rounding=ROUND_HALF_UP
+            )
+            if tasa_indicada != Decimal("1"):
+                raise ValueError("Para cuentas en la misma moneda la tasa de conversión debe ser 1.")
+        tasa_conversion = Decimal("1.0")
+        monto_convertido = monto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         tasa_entrada = tasa_salida
-        monto_entrada = monto
     else:
+        if esquema.tasa_conversion is not None:
+            tasa_conversion = Decimal(str(esquema.tasa_conversion)).quantize(
+                Decimal("0.000001"), rounding=ROUND_HALF_UP
+            )
+            if tasa_conversion <= 0:
+                raise ValueError("La tasa de conversión debe ser mayor que cero.")
+            _validar_tasa_conversion(
+                db, moneda_salida, moneda_entrada, tasa_conversion, fecha
+            )
+        else:
+            registrada = _tasa_conversion_registrada(
+                db, moneda_salida, moneda_entrada, fecha
+            )
+            if registrada is None:
+                raise ValueError(
+                    "No hay tasa de cambio registrada para convertir entre estas "
+                    "monedas. Indica la tasa de la transferencia."
+                )
+            tasa_conversion = registrada
+
+        redondeo = Decimal("0.01")
+        monto_convertido = (monto * tasa_conversion).quantize(
+            redondeo, rounding=ROUND_HALF_UP
+        )
+        if monto_convertido <= 0:
+            raise ValueError("El monto convertido a la moneda de destino queda en 0. Revisa la tasa.")
+
+        # Tasa implícita de la pata de entrada (destino → COP), derivada de la
+        # operación real para que la suma en moneda base cuadre.
         if moneda_entrada == 1:
             tasa_entrada = Decimal("1.0")
         else:
-            tasa_entrada = _tasa_registrada_a_cop(db, moneda_entrada, fecha)
-            if tasa_entrada is None:
-                raise ValueError(
-                    f"La cuenta destino opera en la moneda {moneda_entrada} y no hay "
-                    "tasa de cambio registrada para ella. Regístrala primero."
-                )
-        monto_entrada = (base_salida / tasa_entrada).quantize(Decimal("0.01"), rounding="ROUND_HALF_UP")
-        if monto_entrada <= 0:
-            raise ValueError("El monto convertido a la moneda de destino queda en 0. Revisa la tasa.")
+            tasa_entrada = (base_salida / monto_convertido).quantize(
+                Decimal("0.000001"), rounding=ROUND_HALF_UP
+            )
+            if tasa_entrada <= 0:
+                raise ValueError("La tasa de la cuenta destino queda en 0. Revisa la tasa.")
+
+    redondeo_entrada = Decimal("0.01")
+    monto_entrada = (monto_convertido + interes_firmado).quantize(
+        redondeo_entrada, rounding=ROUND_HALF_UP
+    )
+    if monto_entrada <= 0:
+        raise ValueError(
+            "El interés deja en cero o negativo el monto que entra a la cuenta destino."
+        )
 
     # Saldo disponible en origen contra la posición registrada completa:
     # la fecha elegida para el asiento no puede habilitar el chequeo.
@@ -1490,6 +1676,9 @@ def crear_transferencia(
         moneda_id=moneda_salida,
         tasa_cambio=tasa_salida,
         monto_en_moneda_base=base_salida,
+        tasa_conversion=tasa_conversion,
+        interes=interes_firmado,
+        persona_entidad=esquema.persona_entidad,
         referencia=(esquema.referencia or f"Transferencia a {destino.nombre}")[:150],
         concepto=esquema.concepto,
     )
@@ -1509,7 +1698,12 @@ def crear_transferencia(
         monto=monto_entrada,
         moneda_id=moneda_entrada,
         tasa_cambio=tasa_entrada,
-        monto_en_moneda_base=round(monto_entrada * tasa_entrada, 2),
+        monto_en_moneda_base=(monto_entrada * tasa_entrada).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        ),
+        tasa_conversion=tasa_conversion,
+        interes=interes_firmado,
+        persona_entidad=esquema.persona_entidad,
         referencia=f"Transferencia #T{salida.id} de {origen.nombre}"[:150],
         concepto=esquema.concepto,
     )
@@ -1527,6 +1721,11 @@ def crear_transferencia(
             "cuenta_destino_id": destino.id,
             "monto": float(monto),
             "moneda_salida_id": moneda_salida,
+            "tasa_conversion": float(tasa_conversion),
+            "monto_convertido": float(monto_convertido),
+            "interes": float(interes_firmado),
+            "interes_signo": esquema.interes_signo,
+            "persona_entidad": esquema.persona_entidad,
             "monto_entrada": float(monto_entrada),
             "moneda_entrada_id": moneda_entrada,
         },

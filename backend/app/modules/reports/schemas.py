@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Literal, Optional
 from decimal import Decimal
 from datetime import date, datetime
 
@@ -166,6 +166,10 @@ class MovimientoCajaResponse(MovimientoCajaBase):
     usuario_id: Optional[int] = None
     monto_en_moneda_base: Optional[Decimal] = None
     transferencia_id: Optional[int] = None
+    # Solo en transferencias: tasa de conversión usada e interés aplicado a la
+    # pata de entrada (en moneda destino; positivo suma, negativo resta).
+    tasa_conversion: Optional[Decimal] = None
+    interes: Optional[Decimal] = None
     created_at: Optional[datetime] = None
     metodo_caja: Optional[MetodoCajaResponse] = None
     moneda: Optional["MonedaResponse"] = None
@@ -186,6 +190,16 @@ class TransferenciaCreate(BaseModel):
     # Tasa moneda de salida → COP. Opcional: si se omite se usa la TRM
     # registrada a la fecha; si se indica, no puede desviarse más de 50%.
     tasa_cambio: Optional[Decimal] = Field(None, gt=0)
+    # Tasa de la operación: unidades de moneda DESTINO por 1 unidad de moneda
+    # ORIGEN (ej. 1 USD = 4.000 COP → 4000; 1 COP = 0.00025 USD → 0.00025).
+    # Si se omite, se deriva de las TRM registradas (comportamiento anterior).
+    tasa_conversion: Optional[Decimal] = Field(None, gt=0)
+    # Interés opcional en moneda DESTINO. `interes_signo` decide si se suma o
+    # se resta al monto convertido que entra a la cuenta destino.
+    interes: Optional[Decimal] = Field(None, ge=0)
+    interes_signo: Literal["SUMA", "RESTA"] = "RESTA"
+    # Persona o entidad de la otra parte (tercero): banco, prestamista, etc.
+    persona_entidad: Optional[str] = None
     referencia: Optional[str] = None
     concepto: Optional[str] = None
 
@@ -195,15 +209,32 @@ class TransferenciaResponse(BaseModel):
     transferencia_id: int
     fecha: date
     monto_salida: Decimal
+    monto_convertido: Decimal
     monto_entrada: Decimal
     moneda_salida_codigo: str
     moneda_entrada_codigo: str
     tasa_cambio: Decimal
+    tasa_conversion: Decimal
+    interes: Decimal = Decimal("0.0")
+    interes_signo: str = "SUMA"
+    persona_entidad: Optional[str] = None
     saldo_disponible_origen: Decimal = Decimal("0.0")
     referencia: Optional[str] = None
     concepto: Optional[str] = None
     pata_salida: MovimientoCajaResponse
     pata_entrada: MovimientoCajaResponse
+
+
+class TasaTransferenciaResponse(BaseModel):
+    """Tasa sugerida para una transferencia entre dos cuentas (destino por origen)."""
+    cuenta_origen_id: int
+    cuenta_destino_id: int
+    moneda_origen_id: int
+    moneda_destino_id: int
+    monedas_distintas: bool
+    tasa_conversion: Decimal
+    tasa_origen_cop: Decimal
+    tasa_destino_cop: Decimal
 
 
 class ListTransferenciasResponse(BaseModel):

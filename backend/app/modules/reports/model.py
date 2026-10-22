@@ -84,6 +84,10 @@ class MovimientoCaja(Base):
     cuentas (SALIDA en origen + ENTRADA en destino): una sola operación
     contable que redistribuye saldo sin tocar el total del negocio.
 
+    `tasa_conversion` e `interes` solo se llenan en las transferencias:
+    la tasa expresa cuántas unidades de la moneda destino recibe 1 unidad de
+    la moneda origen; el interés (en moneda destino) ajusta lo que entra.
+
     `persona_entidad` es la PERSONA O ENTIDAD de la otra parte del
     movimiento: quien entrega el dinero (en una entrada) o quien lo recibe
     (en una salida). Puede ser cliente, proveedor, empleado, familiar, etc.
@@ -102,6 +106,13 @@ class MovimientoCaja(Base):
     tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
     monto_en_moneda_base = Column(Numeric(15, 2), nullable=True)
     transferencia_id = Column(BigInteger, nullable=True, index=True)
+    # Solo en transferencias entre cuentas: unidades de la moneda DESTINO que
+    # recibe la operación por 1 unidad de la moneda ORIGEN. Se guarda la tasa
+    # realmente usada (la digita el usuario o se deriva de las TRM registradas).
+    tasa_conversion = Column(Numeric(18, 6), nullable=True)
+    # Solo en transferencias: interés aplicado a la pata de entrada, en la
+    # moneda DESTINO. Positivo = suma a lo que llega; negativo = resta.
+    interes = Column(Numeric(15, 2), nullable=True)
     referencia = Column(String(150), nullable=True)
     persona_entidad = Column(String(150), nullable=True)
     concepto = Column(Text, nullable=True)
