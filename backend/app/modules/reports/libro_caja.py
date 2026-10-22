@@ -19,6 +19,9 @@ Reglas de la importación:
   Gasto con su clasificación explícita (Gasto Deducible, de Casa, Personal,
   Familiar o de Inversión). El campo es opcional: las filas sin código se
   importan solo como movimiento de caja.
+- El libro va en la MONEDA de la cuenta elegida (no solo COP): cada
+  movimiento y gasto queda con la tasa del día hacia la moneda base
+  (obtener_tasa_moneda_a_cop; 1.0 para COP o cuando nunca se registró tasa).
 """
 from __future__ import annotations
 
@@ -42,6 +45,10 @@ from app.modules.gastos import schemas as gastos_schemas
 from app.modules.gastos import service as gastos_service
 from app.modules.gastos.model import Gasto
 from app.modules.reports.model import MetodoCaja, MovimientoCaja
+from app.modules.tasas_cambio.service import (
+    obtener_tasa_moneda_a_cop,
+    obtener_ultima_tasa,
+)
 from app.modules.users.model import Usuario
 
 # Código del libro → clave canónica del gasto.
@@ -496,6 +503,32 @@ def _moneda_cop(db: Session) -> Moneda:
     return moneda
 
 
+def _tasa_para(db: Session, moneda: Moneda, fecha: date) -> Decimal:
+    """Tasa de la moneda del libro hacia la base (COP), a la fecha de la fila.
+
+    Para COP es 1.0; para otras monedas usa la tasa registrada del día (o la
+    más reciente anterior). Si nunca se registró una tasa queda en 1.0 y el
+    preview avisa.
+    """
+    if moneda.codigo == "COP":
+        return Decimal("1.0")
+    return Decimal(str(obtener_tasa_moneda_a_cop(db, moneda.id, fecha)))
+
+
+def _aviso_sin_tasa(db: Session, moneda: Optional[Moneda]) -> Optional[str]:
+    """Aviso si la cuenta no es COP y nunca se registró una tasa de cambio."""
+    if moneda is None or moneda.codigo == "COP":
+        return None
+    if obtener_ultima_tasa(db, moneda.id, 1) is not None:
+        return None
+    return (
+        f"La cuenta está en {moneda.codigo} y no hay una tasa {moneda.codigo} "
+        f"→ COP registrada: los movimientos se guardan con tasa 1.0 hacia la "
+        f"moneda base. Registra la tasa del período para que el equivalente "
+        f"en la base sea correcto."
+    )
+
+
 def _saldo_cuenta_hasta(
     db: Session, metodo_caja_id: int, hasta: date
 ) -> Decimal:
@@ -625,13 +658,14 @@ def _resumen(
     saldo_previo: Optional[Decimal],
     ya_importado: bool,
     con_detalle: bool = True,
+    advertencias_extra: Optional[list[str]] = None,
 ) -> dict:
     periodo = parsed.periodo or ""
     diferencia = None
     if saldo_previo is not None and parsed.saldo_inicial is not None:
         # Positivo = el libro arranca con más saldo del que tiene la cuenta.
         diferencia = parsed.saldo_inicial - saldo_previo
-    advertencias = list(parsed.advertencias)
+    advertencias = list(advertencias_extra or []) + list(parsed.advertencias)
     if diferencia is not None and abs(diferencia) > Decimal("0.50"):
         advertencias.append(
             f"El saldo de la cuenta antes del período es {saldo_previo:,.2f} "
@@ -694,6 +728,7 @@ def previsualizar_libro(
 ) -> dict:
     parsed = parsear_libro(texto)
     cuenta = _cuenta(db, metodo_caja_id)
+    aviso = _aviso_sin_tasa(db, cuenta.moneda)
     _marcar_duplicados(db, cuenta, parsed.filas)
     fechas = [f.fecha for f in parsed.filas if not f.es_saldo_inicial]
     saldo_previo = None
@@ -701,7 +736,8 @@ def previsualizar_libro(
         saldo_previo = _saldo_cuenta_hasta(db, cuenta.id, min(fechas) - timedelta(days=1))
     etiqueta = _etiqueta(cuenta, parsed.periodo or "")
     return _resumen(
-        parsed, cuenta, saldo_previo, _ya_importado(db, etiqueta), con_detalle=True
+        parsed, cuenta, saldo_previo, _ya_importado(db, etiqueta),
+        con_detalle=True, advertencias_extra=[aviso] if aviso else [],
     )
 
 
@@ -725,10 +761,9 @@ def importar_libro(
 
     cuenta = _cuenta(db, metodo_caja_id)
     moneda = cuenta.moneda or _moneda_cop(db)
-    if moneda.codigo != "COP":
-        raise ValueError(
-            "Este libro está en pesos colombianos (COP). Elige una cuenta en COP."
-        )
+    aviso_sin_tasa = _aviso_sin_tasa(db, moneda)
+    if aviso_sin_tasa:
+        parsed.advertencias.append(aviso_sin_tasa)
 
     etiqueta = _etiqueta(cuenta, parsed.periodo)
     if _ya_importado(db, etiqueta):
@@ -774,7 +809,7 @@ def importar_libro(
                     tipo="APERTURA" if ajuste > 0 else "SALIDA",
                     monto=float(abs(ajuste)),
                     moneda_id=moneda.id,
-                    tasa_cambio=1.0,
+                    tasa_cambio=float(_tasa_para(db, moneda, min(fechas))),
                     fecha=min(fechas),
                     referencia=etiqueta,
                     concepto=(
@@ -804,7 +839,7 @@ def importar_libro(
                     fecha=fila.fecha,
                     descripcion=fila.descripcion or "Gasto importado del libro",
                     monto=fila.egreso,
-                    tasa_cambio=Decimal("1.0"),
+                    tasa_cambio=None,
                     clasificacion=fila.clasificacion,
                     metodo_caja_id=cuenta.id,
                     observaciones=(
@@ -836,7 +871,7 @@ def importar_libro(
                     tipo="ENTRADA" if fila.ingreso > 0 else "SALIDA",
                     monto=float(abs(fila.delta)),
                     moneda_id=moneda.id,
-                    tasa_cambio=1.0,
+                    tasa_cambio=float(_tasa_para(db, moneda, fila.fecha)),
                     fecha=fila.fecha,
                     referencia=etiqueta,
                     concepto=(

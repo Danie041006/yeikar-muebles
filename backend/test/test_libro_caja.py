@@ -354,3 +354,78 @@ def test_clasificacion_invalida_se_rechaza(client, cleaner):
     }, headers=ADMIN_HEADERS)
     assert r.status_code == 400, r.text
     assert "clasificación inválida" in r.json()["detail"].lower()
+
+
+def test_libro_en_la_moneda_de_la_cuenta_usd(client, cleaner, db):
+    """El libro se importa en la moneda de la cuenta (no solo COP).
+
+    Caso real: el libro de "Efectivo en Dólares" (USD). Cada movimiento y
+    gasto queda en la moneda de la cuenta con la tasa del día hacia COP
+    (1.0 si nunca se registró tasa para esa moneda).
+    """
+    from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+
+    r = client.post("/api/v1/cuenta/", json={
+        "nombre": "Cuenta USD de prueba libro",
+        "codigo": f"TEST_LIBRO_USD_{uuid.uuid4().hex[:6].upper()}",
+        "moneda_id": 2,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    cuenta = r.json()
+    cleaner.registrar("metodo_caja", cuenta["id"])
+    db.query(MovimientoCaja).filter(
+        MovimientoCaja.metodo_caja_id == cuenta["id"],
+        MovimientoCaja.referencia == "Saldo inicial por defecto",
+    ).delete(synchronize_session=False)
+    db.commit()
+
+    # Preview: misma aritmética que en COP, pero para la cuenta en USD.
+    r = client.post("/api/v1/cuenta/libro/preview", json=_payload(cuenta["id"]), headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    prev = r.json()
+    assert prev["periodo"] == "2026-10"
+    assert prev["filas"] == 7
+    assert Decimal(str(prev["saldo_final"])) == Decimal("3163600")
+
+    r = client.post(
+        "/api/v1/cuenta/libro/importar",
+        json=_payload(cuenta["id"], cuadrar_saldo_inicial=True),
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 201, r.text
+
+    db.expire_all()
+    movs = db.query(MovimientoCaja).filter(
+        MovimientoCaja.metodo_caja_id == cuenta["id"]
+    ).all()
+    for mov in movs:
+        cleaner.registrar("movimiento_caja", mov.id)
+    tag = f"Libro {cuenta['codigo']} 2026-10"
+    gastos = db.query(Gasto).filter(Gasto.observaciones.like(f"[{tag}]%")).all()
+    for gasto in gastos:
+        cleaner.registrar("gasto", gasto.id)
+
+    assert len(movs) == 7
+    assert all(m.moneda_id == 2 for m in movs), "los movimientos quedan en USD"
+    for m in movs:
+        esperada = obtener_tasa_moneda_a_cop(db, 2, m.fecha)
+        assert Decimal(str(m.tasa_cambio)) == esperada
+        assert Decimal(str(m.monto_en_moneda_base)) == (
+            Decimal(str(m.monto)) * esperada
+        )
+
+    assert len(gastos) == 4
+    assert all(g.moneda_id == 2 for g in gastos), "los gastos quedan en USD"
+    for g in gastos:
+        esperada = obtener_tasa_moneda_a_cop(db, 2, g.fecha)
+        assert Decimal(str(g.tasa_cambio)) == esperada
+        assert Decimal(str(g.monto_en_moneda_base)) == (
+            Decimal(str(g.monto)) * esperada
+        )
+
+    # El saldo de la cuenta queda exactamente al del libro.
+    saldo = sum(
+        (-Decimal(str(m.monto)) if m.tipo == "SALIDA" else Decimal(str(m.monto)))
+        for m in movs
+    )
+    assert saldo == Decimal("3163600"), f"saldo final {saldo}"
