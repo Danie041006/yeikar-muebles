@@ -1102,6 +1102,7 @@ def obtener_libro_caja(
             "id": mov.id,
             "fecha": mov.fecha,
             "tipo": tipo,
+            "tipo_movimiento": mov.tipo,
             "concepto": concepto,
             "ingreso": ingreso,
             "egreso": egreso,

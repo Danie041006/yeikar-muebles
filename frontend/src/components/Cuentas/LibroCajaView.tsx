@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   cuentasService, type LibroCajaVista, type LibroCajaVistaFila,
   type ResumenCuenta,
-} from '../../services/cuentasService';import {
+} from '../../services/cuentasService';
+import {
   CLASIFICACIONES_GASTO, nombreClasificacion,
 } from '../../services/gastoService';
 import {
-  Badge, Button, Card, EmptyState, Input, SearchSelect, Spinner, StatCard,
-  ResponsiveDataTable, type DataColumn,
+  Badge, Button, Card, EmptyState, Field, Input, Modal, SearchSelect,
+  Select, Spinner, StatCard, Textarea, ResponsiveDataTable, type DataColumn,
 } from '../ui';
 import { fmtMoneda } from '../../utils/format';
+import { formatMontoInput, parseMontoInput } from '../../utils/monto';
+import { useToast } from '../../context/ToastContext';
 
 const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -28,6 +31,15 @@ const ultimoDiaMes = () => {
 const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral'> =
   Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
 
+function FilaDetalle({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[140px_1fr] gap-3 items-baseline">
+      <dt className="font-mono text-[10px] uppercase tracking-wider text-yeikar-neutral/40">{label}</dt>
+      <dd className="break-words whitespace-pre-line text-sm text-yeikar-neutral/90">{children}</dd>
+    </div>
+  );
+}
+
 interface Props {
   cuentas: ResumenCuenta[];
 }
@@ -43,6 +55,21 @@ export default function LibroCajaView({ cuentas }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [pagina, setPagina] = useState(1);
+  const toast = useToast();
+
+  // Detalle / edición de una fila del libro. No hay iconos: se abre al
+  // hacer clic en la fila.
+  const [detalle, setDetalle] = useState<LibroCajaVistaFila | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [errorMov, setErrorMov] = useState('');
+  const [editForm, setEditForm] = useState({
+    fecha: '',
+    tipo: 'ENTRADA' as LibroCajaVistaFila['tipo_movimiento'],
+    monto: '',
+    persona_entidad: '',
+    concepto: '',
+  });
 
   // Si las cuentas llegan después del primer render, se elige la de COP.
   useEffect(() => {
@@ -75,6 +102,64 @@ export default function LibroCajaView({ cuentas }: Props) {
   useEffect(() => {
     cargar();
   }, [cargar]);
+
+  const abrirDetalle = (fila: LibroCajaVistaFila) => {
+    const monto = Number(fila.ingreso) > 0 ? Number(fila.ingreso) : Number(fila.egreso);
+    setDetalle(fila);
+    setEditando(false);
+    setErrorMov('');
+    setEditForm({
+      fecha: fila.fecha,
+      tipo: fila.tipo_movimiento,
+      monto: formatMontoInput(String(monto)),
+      persona_entidad: fila.persona_entidad ?? '',
+      concepto: fila.concepto ?? '',
+    });
+  };
+
+  const cerrarDetalle = () => {
+    setDetalle(null);
+    setEditando(false);
+    setErrorMov('');
+  };
+
+  const guardarEdicion = async () => {
+    if (!detalle) return;
+    const monto = parseMontoInput(editForm.monto);
+    if (!editForm.fecha) {
+      setErrorMov('La fecha es obligatoria.');
+      return;
+    }
+    if (!Number.isFinite(monto) || monto <= 0) {
+      setErrorMov('El monto debe ser mayor a 0.');
+      return;
+    }
+    setGuardando(true);
+    setErrorMov('');
+    try {
+      await cuentasService.actualizarMovimiento(detalle.id, {
+        fecha: editForm.fecha,
+        tipo: editForm.tipo,
+        monto,
+        persona_entidad: editForm.persona_entidad.trim() || null,
+        concepto: editForm.concepto.trim() || null,
+      });
+      toast.success('Movimiento corregido');
+      cerrarDetalle();
+      await cargar();
+    } catch (e: any) {
+      setErrorMov(e?.response?.data?.detail ?? 'No se pudo corregir el movimiento.');
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const movimientoEditable = !!detalle
+    && detalle.origen !== 'VENTA'
+    && detalle.origen !== 'TRANSFERENCIA';
+  const puedeCambiarTipo = !!detalle
+    && detalle.origen !== 'GASTO'
+    && (detalle.tipo_movimiento === 'ENTRADA' || detalle.tipo_movimiento === 'SALIDA');
 
   const moneda = data?.moneda_codigo || 'COP';
   const fmt = (v: string | number) => fmtMoneda(Number(v || 0), moneda);
@@ -267,6 +352,7 @@ export default function LibroCajaView({ cuentas }: Props) {
               columns={columns}
               rows={filasPagina}
               rowKey={(f) => f.id}
+              onRowClick={(f) => abrirDetalle(f)}
               empty={
                 <div className="p-8">
                   <EmptyState
@@ -308,6 +394,132 @@ export default function LibroCajaView({ cuentas }: Props) {
           </Card>
         </>
       ) : null}
+
+      <Modal
+        open={detalle !== null}
+        onClose={cerrarDetalle}
+        title={editando ? 'Editar movimiento' : 'Detalle del movimiento'}
+        subtitle={detalle ? new Date(`${detalle.fecha}T00:00:00`).toLocaleDateString('es-CO') : undefined}
+        size="md"
+        footer={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {!editando && detalle && !movimientoEditable && (
+              <span className="mr-auto self-center text-xs text-yeikar-neutral/45">
+                Se corrige desde {detalle.origen === 'VENTA' ? 'la venta' : 'la transferencia'} de origen.
+              </span>
+            )}
+            {editando ? (
+              <>
+                <Button variant="outline" onClick={() => { setEditando(false); setErrorMov(''); }}>
+                  Cancelar
+                </Button>
+                <Button onClick={guardarEdicion} disabled={guardando}>
+                  {guardando ? 'Guardando...' : 'Guardar cambios'}
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={cerrarDetalle}>Cerrar</Button>
+                {detalle && movimientoEditable && (
+                  <Button onClick={() => setEditando(true)}>Editar</Button>
+                )}
+              </>
+            )}
+          </div>
+        }
+      >
+        {detalle && !editando && (
+          <dl className="space-y-3">
+            <FilaDetalle label="Fecha">
+              {new Date(`${detalle.fecha}T00:00:00`).toLocaleDateString('es-CO')}
+            </FilaDetalle>
+            <FilaDetalle label="Persona o entidad">
+              {detalle.persona_entidad || '—'}
+            </FilaDetalle>
+            <FilaDetalle label="Concepto">
+              {detalle.concepto || '—'}
+            </FilaDetalle>
+            <FilaDetalle label="Clasificación">
+              {detalle.clasificacion ? (
+                <Badge tone={TONE[detalle.clasificacion] ?? 'neutral'} size="sm">
+                  {nombreClasificacion(detalle.clasificacion)}
+                </Badge>
+              ) : '—'}
+            </FilaDetalle>
+            <FilaDetalle label="Ingreso">
+              {Number(detalle.ingreso) > 0 ? fmt(detalle.ingreso) : '—'}
+            </FilaDetalle>
+            <FilaDetalle label="Egreso">
+              {Number(detalle.egreso) > 0 ? fmt(detalle.egreso) : '—'}
+            </FilaDetalle>
+            <FilaDetalle label="Saldo">
+              {fmt(detalle.saldo)}
+            </FilaDetalle>
+          </dl>
+        )}
+
+        {detalle && editando && (
+          <div className="space-y-4">
+            <Field label="Fecha" required>
+              <Input
+                type="date"
+                value={editForm.fecha}
+                onChange={(e) => setEditForm({ ...editForm, fecha: e.target.value })}
+              />
+            </Field>
+            <Field label="Tipo">
+              {puedeCambiarTipo ? (
+                <Select
+                  value={editForm.tipo}
+                  onChange={(e) => setEditForm({
+                    ...editForm,
+                    tipo: e.target.value as LibroCajaVistaFila['tipo_movimiento'],
+                  })}
+                >
+                  <option value="ENTRADA">Entrada</option>
+                  <option value="SALIDA">Salida</option>
+                </Select>
+              ) : (
+                <div className="rounded-lg border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 px-3 py-2 text-sm text-yeikar-neutral/70">
+                  {detalle.tipo}
+                </div>
+              )}
+            </Field>
+            <Field label="Monto" required hint="Puedes corregir el monto sin borrar el movimiento.">
+              <Input
+                type="text"
+                inputMode="decimal"
+                value={editForm.monto}
+                onChange={(e) => setEditForm({ ...editForm, monto: formatMontoInput(e.target.value) })}
+                placeholder="0"
+              />
+            </Field>
+            <Field label="Persona o entidad">
+              <Input
+                value={editForm.persona_entidad}
+                onChange={(e) => setEditForm({ ...editForm, persona_entidad: e.target.value })}
+                placeholder="Cliente, proveedor, empleado..."
+              />
+            </Field>
+            <Field label="Concepto">
+              <Textarea
+                rows={3}
+                value={editForm.concepto}
+                onChange={(e) => setEditForm({ ...editForm, concepto: e.target.value })}
+                placeholder="Motivo del movimiento..."
+              />
+            </Field>
+            {detalle.clasificacion && (
+              <p className="text-xs text-yeikar-neutral/45">
+                La clasificación ({nombreClasificacion(detalle.clasificacion)}) se corrige desde Gastos.
+              </p>
+            )}
+            {errorMov && (
+              <p className="text-sm font-medium text-red-600">{errorMov}</p>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

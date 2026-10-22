@@ -615,6 +615,7 @@ class LibroCajaVistaFila(BaseModel):
     id: int
     fecha: date
     tipo: str = ""
+    tipo_movimiento: str = "ENTRADA"
     concepto: str = ""
     ingreso: Decimal = Decimal("0.0")
     egreso: Decimal = Decimal("0.0")

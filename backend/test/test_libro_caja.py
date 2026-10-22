@@ -138,6 +138,7 @@ def test_preview_e_importacion_del_libro(client, cleaner, db):
     assert segunda["tipo"] == "DOÑA ROSA G C"
     assert segunda["concepto"] == "PAGO DE MERCADO"
     assert segunda["clasificacion"] == "GASTO_CASA"
+    assert segunda["tipo_movimiento"] == "SALIDA"
     assert Decimal(str(segunda["saldo"])) == Decimal("3563600")
 
     # 3. No se puede importar dos veces el mismo período.

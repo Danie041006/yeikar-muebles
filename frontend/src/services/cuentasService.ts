@@ -189,6 +189,7 @@ export interface LibroCajaVistaFila {
   id: number;
   fecha: string;
   tipo: string;
+  tipo_movimiento: 'APERTURA' | 'ENTRADA' | 'SALIDA' | 'AJUSTE';
   concepto: string;
   ingreso: string | number;
   egreso: string | number;
