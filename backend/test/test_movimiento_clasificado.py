@@ -165,3 +165,49 @@ def test_salida_sin_clasificacion_no_crea_gasto(client, cleaner, db):
 
     db.expire_all()
     assert db.query(Gasto).filter(Gasto.descripcion == descripcion).first() is None
+
+
+def test_editar_movimiento_clasificado_sincroniza_gasto(client, cleaner, db):
+    """Corregir el movimiento espejo también corrige el Gasto y los reportes."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+    descripcion = f"Pago de luz para corregir {uuid.uuid4().hex[:6]}"
+
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-20",
+        "tipo": "SALIDA",
+        "monto": 100000,
+        "moneda_id": 1,
+        "persona_entidad": "CAMARA DE COMERCIO",
+        "concepto": descripcion,
+        "clasificacion": "G C",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+
+    db.expire_all()
+    gasto = db.query(Gasto).filter(Gasto.descripcion == descripcion).first()
+    assert gasto is not None
+    cleaner.registrar("gasto", gasto.id)
+    cleaner.registrar_caja_ref(mov["referencia"])
+
+    r = client.put(
+        f"/api/v1/cuenta/movimiento/{mov['id']}",
+        json={
+            "monto": 80000,
+            "fecha": "2026-10-21",
+            "concepto": "Pago de luz corregido",
+            "persona_entidad": "CAMARA DE COMERCIO",
+        },
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+
+    db.expire_all()
+    gasto = db.query(Gasto).filter(Gasto.id == gasto.id).first()
+    assert Decimal(str(gasto.monto)) == Decimal("80000")
+    assert gasto.fecha.isoformat() == "2026-10-21"
+    assert gasto.descripcion == "Pago de luz corregido"
+    assert Decimal(str(gasto.monto_en_moneda_base)) == Decimal("80000")
+    assert gasto.observaciones == "Persona/entidad: CAMARA DE COMERCIO"
+    assert _saldo(db, cuenta["id"]) == Decimal("-80000")

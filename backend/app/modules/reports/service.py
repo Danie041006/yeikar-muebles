@@ -1300,10 +1300,43 @@ def actualizar_movimiento_caja(
         return None
     _bloquear_movimiento_ligado(obj, usuario)
     datos = esquema.model_dump(exclude_unset=True)
+
+    # Movimiento espejo de un gasto (referencia "Gasto #N"): corregir el
+    # movimiento también debe corregir el gasto, o la caja y los reportes
+    # quedan descuadrados. Cambiar el tipo (salida↔entrada) no tiene sentido
+    # para un gasto: se rechaza y se corrige desde Gastos.
+    gasto_espejo = None
+    if (obj.referencia or "").startswith("Gasto #"):
+        try:
+            gasto_id = int(obj.referencia.split("#", 1)[1].split(" ")[0])
+        except (ValueError, IndexError):
+            gasto_id = None
+        if gasto_id:
+            gasto_espejo = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+    if gasto_espejo is not None and "tipo" in datos and datos["tipo"] != obj.tipo:
+        raise ValueError(
+            "No se puede cambiar el tipo de un movimiento clasificado como gasto. "
+            "Corrígelo desde Gastos o elimínalo y créalo de nuevo."
+        )
+
     for campo, valor in datos.items():
         setattr(obj, campo, valor)
     if "monto" in datos or "tasa_cambio" in datos:
         obj.monto_en_moneda_base = round(Decimal(str(obj.monto)) * Decimal(str(obj.tasa_cambio or 1.0)), 2)
+
+    if gasto_espejo is not None:
+        if "monto" in datos:
+            gasto_espejo.monto = obj.monto
+        if "fecha" in datos:
+            gasto_espejo.fecha = obj.fecha
+        if "concepto" in datos:
+            gasto_espejo.descripcion = obj.concepto
+        if "persona_entidad" in datos:
+            gasto_espejo.observaciones = (
+                f"Persona/entidad: {obj.persona_entidad}" if obj.persona_entidad else None
+            )
+        gasto_espejo.monto_en_moneda_base = obj.monto_en_moneda_base
+
     db.commit()
     db.refresh(obj)
     return obj
