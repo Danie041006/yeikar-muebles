@@ -1265,7 +1265,27 @@ export default function Cuentas() {
         title="Detalle del Movimiento"
         subtitle={detalleMov ? `${detalleMov.metodo_caja?.nombre ?? '-'} · ${detalleMov.fecha.slice(0, 10)}` : undefined}
         size="md"
-        footer={<Button variant="outline" onClick={() => setDetalleMov(null)}>Cerrar</Button>}
+        footer={
+          <div className="flex flex-wrap justify-end gap-2">
+            {detalleMov && (detalleMov.pago_id || detalleMov.transferencia_id) && (
+              <span className="mr-auto self-center text-xs text-yeikar-neutral/45">
+                Se genera desde {detalleMov.pago_id ? 'un pago' : 'una transferencia'}; corrígelo desde su origen.
+              </span>
+            )}
+            <Button variant="outline" onClick={() => setDetalleMov(null)}>Cerrar</Button>
+            {detalleMov && !detalleMov.pago_id && !detalleMov.transferencia_id && (
+              <Button
+                onClick={() => {
+                  const mov = detalleMov;
+                  setDetalleMov(null);
+                  abrirMovimiento(mov.metodo_caja_id, mov);
+                }}
+              >
+                Editar movimiento
+              </Button>
+            )}
+          </div>
+        }
       >
         {detalleMov && (
           <div className="space-y-5">

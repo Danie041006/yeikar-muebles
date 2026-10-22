@@ -79,10 +79,14 @@ export default function LibroCajaView({ cuentas }: Props) {
   const moneda = data?.moneda_codigo || 'COP';
   const fmt = (v: string | number) => fmtMoneda(Number(v || 0), moneda);
 
-  const totalPaginas = Math.max(1, Math.ceil((data?.filas.length ?? 0) / POR_PAGINA));
+  // El libro se calcula de viejo a nuevo para el saldo corrido, pero se
+  // muestra de lo más reciente a lo más viejo.
+  const filasOrdenadas = [...(data?.filas ?? [])].reverse();
+  const totalFilas = filasOrdenadas.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalFilas / POR_PAGINA));
   const paginaActual = Math.min(pagina, totalPaginas);
   const inicioPagina = (paginaActual - 1) * POR_PAGINA;
-  const filasPagina = (data?.filas ?? []).slice(inicioPagina, inicioPagina + POR_PAGINA);
+  const filasPagina = filasOrdenadas.slice(inicioPagina, inicioPagina + POR_PAGINA);
 
   const columns: DataColumn<LibroCajaVistaFila>[] = [
     {
@@ -273,10 +277,10 @@ export default function LibroCajaView({ cuentas }: Props) {
                 </div>
               }
             />
-            {data.filas.length > POR_PAGINA && (
+            {totalFilas > POR_PAGINA && (
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-yeikar-secondary-light/10 px-4 py-3">
                 <span className="text-[11px] font-mono text-yeikar-neutral/45">
-                  Mostrando {inicioPagina + 1}–{Math.min(inicioPagina + POR_PAGINA, data.filas.length)} de {data.filas.length}
+                  Mostrando {inicioPagina + 1}–{Math.min(inicioPagina + POR_PAGINA, totalFilas)} de {totalFilas}
                 </span>
                 <div className="flex items-center gap-2">
                   <Button
@@ -285,7 +289,7 @@ export default function LibroCajaView({ cuentas }: Props) {
                     disabled={paginaActual <= 1}
                     onClick={() => setPagina((p) => Math.max(1, p - 1))}
                   >
-                    Anterior
+                    Más recientes
                   </Button>
                   <span className="text-xs font-bold text-yeikar-neutral/60">
                     Página {paginaActual} de {totalPaginas}
@@ -296,7 +300,7 @@ export default function LibroCajaView({ cuentas }: Props) {
                     disabled={paginaActual >= totalPaginas}
                     onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
                   >
-                    Siguiente
+                    Más antiguos
                   </Button>
                 </div>
               </div>

@@ -21,12 +21,18 @@ import {
 const CATEGORIAS = [
   { key: '', label: 'Todos' },
   { key: 'OPERATIVO', label: 'Operativos' },
+  { key: 'ADMINISTRATIVO', label: 'Administrativos' },
+  { key: 'FINANCIERO', label: 'Financieros' },
+  { key: 'IMPUESTO', label: 'Impuestos' },
   { key: 'PASIVO', label: 'Pasivos' },
   { key: 'PRODUCCION', label: 'Producción' },
 ];
 
 const CAT_TONE: Record<string, 'blue' | 'red' | 'green' | 'neutral'> = {
   OPERATIVO: 'blue',
+  ADMINISTRATIVO: 'neutral',
+  FINANCIERO: 'green',
+  IMPUESTO: 'red',
   PASIVO: 'red',
   PRODUCCION: 'green',
 };
@@ -865,7 +871,7 @@ export default function Gastos() {
       )}
 
       <div className="flex flex-wrap gap-3 items-center">
-        <div className="flex items-center gap-1 bg-white border border-yeikar-secondary-light/10 rounded-xl p-1 shadow-card">
+        <div className="flex flex-wrap items-center gap-1 bg-white border border-yeikar-secondary-light/10 rounded-xl p-1 shadow-card">
           {CATEGORIAS.map((cat) => (
             <button
               key={cat.key}
