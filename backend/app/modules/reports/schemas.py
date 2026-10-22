@@ -145,6 +145,9 @@ class MovimientoCajaBase(BaseModel):
     # (salida). Opcional; no es el usuario que registra.
     persona_entidad: Optional[str] = None
     concepto: Optional[str] = None
+    # Solo en SALIDA: clasificación del egreso (G D/C/P/F/I o PRESTAMO).
+    # Si viene, la salida se registra además como Gasto clasificado.
+    clasificacion: Optional[str] = None
 
 class MovimientoCajaCreate(MovimientoCajaBase):
     pass

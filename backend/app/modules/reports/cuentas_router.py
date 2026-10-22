@@ -87,7 +87,10 @@ def post_movimiento_cuenta(
 ):
     if esquema.metodo_caja_id != metodo_id:
         raise HTTPException(status_code=400, detail="El método de caja de la URL no coincide con el del cuerpo")
-    return service.crear_movimiento_caja(db, esquema, usuario_id=current_user.id)
+    try:
+        return service.crear_movimiento_caja(db, esquema, usuario_id=current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ------------------------------------------------------------

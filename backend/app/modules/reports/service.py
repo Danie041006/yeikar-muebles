@@ -1209,9 +1209,66 @@ def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, us
     for campo in ("persona_entidad", "concepto", "referencia"):
         if datos.get(campo) is not None:
             datos[campo] = str(datos[campo]).strip() or None
+
+    # Clasificación opcional SOLO para salidas: la salida queda además como
+    # Gasto clasificado (G D/C/P/F/I o Préstamo), que es lo que la dueña
+    # marca en su libro. En entradas no aplica.
+    from app.modules.gastos import service as gastos_service
+
+    clasificacion = datos.pop("clasificacion", None)
+    if clasificacion is not None:
+        clasificacion = gastos_service.normalizar_clasificacion(clasificacion)
+    if clasificacion is not None and datos["tipo"] != "SALIDA":
+        raise ValueError(
+            "Solo las salidas de caja se pueden clasificar como gasto o préstamo."
+        )
+
     datos["usuario_id"] = usuario_id
-    obj = model.MovimientoCaja(**datos)
-    db.add(obj)
+
+    if clasificacion is None:
+        obj = model.MovimientoCaja(**datos)
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        return obj
+
+    # Salida clasificada: se crea el Gasto (con su tipo del catálogo) y el
+    # gasto genera el movimiento de caja. Así aparece en Gastos y en reportes,
+    # sin duplicar el egreso.
+    from app.modules.gastos import schemas as gastos_schemas
+
+    cuenta = (
+        db.query(model.MetodoCaja)
+        .filter(model.MetodoCaja.id == datos["metodo_caja_id"])
+        .first()
+    )
+    concepto = datos.get("concepto") or (
+        f"Salida de caja · {cuenta.nombre}" if cuenta else "Salida de caja"
+    )
+    persona = datos.get("persona_entidad")
+    tipo_gasto = gastos_service.tipo_gasto_para_clasificacion(db, clasificacion)
+    gasto_in = gastos_schemas.GastoCreate(
+        tipo_gasto_id=tipo_gasto.id,
+        moneda_id=datos["moneda_id"],
+        fecha=datos["fecha"],
+        descripcion=concepto,
+        monto=monto,
+        tasa_cambio=tasa,
+        clasificacion=clasificacion,
+        metodo_caja_id=datos["metodo_caja_id"],
+        observaciones=(f"Persona/entidad: {persona}" if persona else None),
+    )
+    usuario = db.get(Usuario, usuario_id) if usuario_id else None
+    gasto = gastos_service.crear_gasto(db, gasto_in, usuario, commit=False)
+    obj = (
+        db.query(model.MovimientoCaja)
+        .filter(model.MovimientoCaja.referencia == f"Gasto #{gasto.id}")
+        .first()
+    )
+    if obj is None:
+        raise ValueError("No se pudo crear el movimiento de la salida clasificada.")
+    if persona:
+        obj.persona_entidad = persona
     db.commit()
     db.refresh(obj)
     return obj

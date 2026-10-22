@@ -25,7 +25,7 @@ const ultimoDiaMes = () => {
   return iso(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0));
 };
 
-const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold'> =
+const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral'> =
   Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
 
 interface Props {

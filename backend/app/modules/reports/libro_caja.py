@@ -17,8 +17,9 @@ Reglas de la importación:
   corrida o el monto esté tecleado distinto; esas diferencias se avisan.
 - Si el TIPO trae G D / G C / G P / G F / G I, el egreso se crea además como
   Gasto con su clasificación explícita (Gasto Deducible, de Casa, Personal,
-  Familiar o de Inversión). El campo es opcional: las filas sin código se
-  importan solo como movimiento de caja.
+  Fábrica o de Inversión). El campo es opcional: las filas sin código se
+  importan solo como movimiento de caja. La clasificación "Préstamo" existe
+  además para las salidas registradas a mano desde Cuentas.
 - El libro va en la MONEDA de la cuenta elegida (no solo COP): cada
   movimiento y gasto queda con la tasa del día hacia la moneda base
   (obtener_tasa_moneda_a_cop; 1.0 para COP o cuando nunca se registró tasa).
@@ -638,18 +639,8 @@ def _ya_importado(db: Session, etiqueta: str) -> bool:
 
 
 def _tipo_gasto(db: Session, clasificacion: str) -> TipoGasto:
-    nombre = gastos_service.CLASIFICACIONES_GASTO[clasificacion]
-    existente = (
-        db.query(TipoGasto)
-        .filter(func.lower(TipoGasto.nombre) == nombre.lower())
-        .first()
-    )
-    if existente:
-        return existente
-    tipo = TipoGasto(nombre=nombre, categoria="OPERATIVO")
-    db.add(tipo)
-    db.flush()
-    return tipo
+    """TipoGasto del catálogo para la clasificación (compartido con Gastos)."""
+    return gastos_service.tipo_gasto_para_clasificacion(db, clasificacion)
 
 
 def _resumen(

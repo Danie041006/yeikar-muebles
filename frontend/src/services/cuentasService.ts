@@ -71,6 +71,9 @@ export interface MovimientoCreate {
   referencia?: string | null;
   persona_entidad?: string | null;
   concepto?: string | null;
+  // Solo en SALIDA: clasificación del egreso (G D/C/P/F/I o Préstamo).
+  // Si viene, la salida se registra también como Gasto clasificado.
+  clasificacion?: string | null;
 }
 
 export interface TransferenciaPayload {

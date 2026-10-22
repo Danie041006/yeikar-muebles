@@ -1,3 +1,4 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from typing import List, Optional
 from datetime import date
@@ -18,8 +19,11 @@ CLASIFICACIONES_GASTO = {
     "GASTO_DEDUCIBLE": "Gasto Deducible",
     "GASTO_CASA": "Gasto de Casa",
     "GASTO_PERSONAL": "Gasto Personal",
-    "GASTO_FAMILIAR": "Gasto Familiar",
+    # La dueña usa la F para la fábrica (Cámara de Comercio, liquidaciones,
+    # insumos). La clave interna conserva el nombre histórico.
+    "GASTO_FAMILIAR": "Gasto Fábrica",
     "GASTO_INVERSION": "Gasto de Inversión",
+    "PRESTAMO": "Préstamo",
 }
 CLASIFICACIONES_VALIDAS = set(CLASIFICACIONES_GASTO)
 
@@ -44,18 +48,42 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
         "C": "GASTO_CASA", "CASA": "GASTO_CASA", "GASTOCASA": "GASTO_CASA",
         "P": "GASTO_PERSONAL", "PERSONAL": "GASTO_PERSONAL",
         "GASTOPERSONAL": "GASTO_PERSONAL",
-        "F": "GASTO_FAMILIAR", "FAMILIAR": "GASTO_FAMILIAR",
+        "F": "GASTO_FAMILIAR", "FABRICA": "GASTO_FAMILIAR",
+        "GASTOFABRICA": "GASTO_FAMILIAR", "FAMILIAR": "GASTO_FAMILIAR",
         "FAMILIA": "GASTO_FAMILIAR", "GASTOFAMILIAR": "GASTO_FAMILIAR",
         "I": "GASTO_INVERSION", "INVERSION": "GASTO_INVERSION",
         "GASTOINVERSION": "GASTO_INVERSION",
+        "PRESTAMO": "PRESTAMO", "PRESTAMOS": "PRESTAMO",
+        "GASTOPRESTAMO": "PRESTAMO",
     }
     clave = equivalencias.get(compacto)
     if clave is None:
         raise ValueError(
             "Clasificación inválida. Usa Gasto Deducible, Gasto de Casa, "
-            "Gasto Personal, Gasto Familiar o Gasto de Inversión."
+            "Gasto Personal, Gasto Fábrica, Gasto de Inversión o Préstamo."
         )
     return clave
+
+
+def tipo_gasto_para_clasificacion(db: Session, clasificacion: str) -> TipoGasto:
+    """Devuelve (o crea) el TipoGasto canónico de una clasificación.
+
+    Se usa al registrar un egreso clasificado desde la caja y al importar el
+    libro: el catálogo queda con un tipo por clasificación ("Gasto Fábrica",
+    "Préstamo"...), sin duplicados.
+    """
+    nombre = CLASIFICACIONES_GASTO[clasificacion]
+    existente = (
+        db.query(TipoGasto)
+        .filter(func.lower(TipoGasto.nombre) == nombre.lower())
+        .first()
+    )
+    if existente:
+        return existente
+    tipo = TipoGasto(nombre=nombre, categoria="OPERATIVO")
+    db.add(tipo)
+    db.flush()
+    return tipo
 
 
 

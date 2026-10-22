@@ -29,9 +29,52 @@ const emptyMovForm = (metodoId = 0, monedaCopId = 1) => ({
   moneda_id: monedaCopId,
   persona_entidad: '',
   concepto: '',
+  // Solo para salidas: clasificación opcional del egreso.
+  clasificacion: '',
 });
 
 const fmt = (n: number) => (Number.isFinite(n) ? n.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '0');
+
+/** "2.000.000,50" → 2000000.5 (puntos = miles, coma = decimal). */
+const parseMontoInput = (value: string): number => {
+  const limpio = String(value ?? '').trim().replace(/\./g, '').replace(',', '.');
+  const n = Number(limpio);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** Formatea mientras se escribe: 2.000.000 y decimales con coma. */
+const formatMontoInput = (value: string): string => {
+  const s = String(value ?? '').replace(/[^\d.,]/g, '');
+  if (!s) return '';
+
+  let entero = s;
+  let decimal = '';
+  const coma = s.indexOf(',');
+  if (coma >= 0) {
+    entero = s.slice(0, coma);
+    decimal = s.slice(coma + 1).replace(/[.,]/g, '');
+  } else {
+    // Sin coma: un único punto con 1-2 dígitos al final se toma como decimal
+    // (teclado numérico); si no, el punto es separador de miles.
+    const puntos = [...s.matchAll(/\./g)];
+    if (puntos.length === 1) {
+      const idx = puntos[0].index ?? -1;
+      const despues = s.slice(idx + 1);
+      if (idx >= 0 && despues.length > 0 && despues.length <= 2 && /^\d+$/.test(despues)) {
+        entero = s.slice(0, idx);
+        decimal = despues;
+      }
+    }
+  }
+
+  entero = entero.replace(/[.,]/g, '').replace(/^0+(?=\d)/, '');
+  decimal = decimal.slice(0, 2);
+  const enteroFmt = entero
+    ? Number(entero).toLocaleString('es-CO', { maximumFractionDigits: 0 })
+    : '0';
+  return (coma >= 0 || decimal) ? `${enteroFmt},${decimal}` : enteroFmt;
+};
+
 const fmtTasa = (n: number) => (
   Number.isFinite(n) && n > 0
     ? n.toLocaleString('es-CO', { maximumFractionDigits: 6 })
@@ -200,10 +243,11 @@ export default function Cuentas() {
         metodo_caja_id: mov.metodo_caja_id,
         fecha: mov.fecha.slice(0, 10),
         tipo: mov.tipo,
-        monto: String(mov.monto),
+        monto: formatMontoInput(String(mov.monto)),
         moneda_id: mov.moneda_id,
         persona_entidad: mov.persona_entidad ?? '',
         concepto: mov.concepto ?? '',
+        clasificacion: '',
       });
     } else {
       // Movimiento nuevo: la moneda arranca en la moneda propia de la cuenta.
@@ -215,7 +259,7 @@ export default function Cuentas() {
   };
 
   const guardarMovimiento = async () => {
-    const monto = Number(movForm.monto);
+    const monto = parseMontoInput(movForm.monto);
     if (!movForm.metodo_caja_id || !Number.isFinite(monto) || monto <= 0) {
       setError('Cuenta y monto son obligatorios (mayor a 0).');
       return;
@@ -227,6 +271,11 @@ export default function Cuentas() {
       moneda_id: movForm.moneda_id,
       persona_entidad: movForm.persona_entidad.trim() || null,
       concepto: movForm.concepto.trim() || null,
+      // La clasificación solo aplica a salidas nuevas: el alta crea además el
+      // Gasto clasificado. En edición se cambia desde el módulo Gastos.
+      ...(!editMov && movForm.tipo === 'SALIDA' && movForm.clasificacion
+        ? { clasificacion: movForm.clasificacion }
+        : {}),
     };
     try {
       if (editMov) {
@@ -897,7 +946,15 @@ export default function Cuentas() {
             <Field label="Tipo" required>
               <Select
                 value={movForm.tipo}
-                onChange={(e) => setMovForm({ ...movForm, tipo: e.target.value as MovimientoCreate['tipo'] })}
+                onChange={(e) => {
+                  const tipo = e.target.value as MovimientoCreate['tipo'];
+                  setMovForm((prev) => ({
+                    ...prev,
+                    tipo,
+                    // La clasificación es solo para salidas.
+                    clasificacion: tipo === 'SALIDA' ? prev.clasificacion : '',
+                  }));
+                }}
               >
                 <option value="APERTURA">Apertura</option>
                 <option value="ENTRADA">Entrada (entró dinero)</option>
@@ -913,13 +970,28 @@ export default function Cuentas() {
               />
             </Field>
           </div>
+          {!editMov && movForm.tipo === 'SALIDA' && (
+            <Field
+              label="Tipo de gasto (opcional)"
+              hint="Si lo eliges, la salida queda registrada también como Gasto clasificado (aparece en Gastos y reportes)."
+            >
+              <Select
+                value={movForm.clasificacion}
+                onChange={(e) => setMovForm({ ...movForm, clasificacion: e.target.value })}
+              >
+                <option value="">Sin clasificar</option>
+                {CLASIFICACIONES_GASTO.map((c) => (
+                  <option key={c.value} value={c.value}>{c.label}</option>
+                ))}
+              </Select>
+            </Field>
+          )}
           <Field label="Monto" required>
             <Input
-              type="number"
-              step="0.01"
-              min="0"
+              type="text"
+              inputMode="decimal"
               value={movForm.monto}
-              onChange={(e) => setMovForm({ ...movForm, monto: e.target.value })}
+              onChange={(e) => setMovForm({ ...movForm, monto: formatMontoInput(e.target.value) })}
               placeholder="0"
             />
           </Field>
