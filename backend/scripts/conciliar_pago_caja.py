@@ -54,7 +54,12 @@ def main() -> None:
     ap.add_argument("--moneda", type=int, required=True, help="id de moneda (1=COP, 2=USD, ...)")
     ap.add_argument("--metodo", required=True, help="codigo de metodo_caja (EFECTIVO_USD, NEQUI...)")
     ap.add_argument("--fecha", type=_fecha, required=True, help="YYYY-MM-DD del cobro real")
-    ap.add_argument("--movimiento", type=int, required=True, help="id de movimiento_caja ENTRADA")
+    ap.add_argument("--movimiento", type=int, default=None, help="id de movimiento_caja ENTRADA (caja ya registrada)")
+    ap.add_argument(
+        "--sin-movimiento",
+        action="store_true",
+        help="crea el pago SIN tocar caja (cobros anteriores al libro, ya incluidos en su saldo de apertura)",
+    )
     ap.add_argument("--tasa", type=float, default=None, help="tasa del pago cuando la moneda difiere de la venta")
     ap.add_argument("--obs", default=None, help="observaciones del pago")
     ap.add_argument("--usuario", type=int, default=4, help="usuario que queda en auditoria")
@@ -97,29 +102,36 @@ def main() -> None:
                 f"saldo pendiente ({saldo:,.2f})."
             )
 
-        mov = (
-            db.query(MovimientoCaja)
-            .filter(MovimientoCaja.id == args.movimiento)
-            .with_for_update()
-            .first()
-        )
-        if mov is None:
-            raise ValueError(f"El movimiento {args.movimiento} no existe.")
-        if mov.tipo != "ENTRADA":
-            raise ValueError(f"El movimiento {mov.id} es {mov.tipo}; debe ser ENTRADA.")
-        if mov.pago_id is not None:
-            raise ValueError(f"El movimiento {mov.id} ya está ligado al pago #{mov.pago_id}.")
-        if mov.metodo_caja_id != cuenta.id:
-            raise ValueError(
-                f"El movimiento {mov.id} es de la cuenta {mov.metodo_caja_id}, "
-                f"no de {cuenta.nombre} ({cuenta.id})."
+        mov = None
+        if args.sin_movimiento:
+            if args.movimiento:
+                raise ValueError("Usa --movimiento o --sin-movimiento, no ambos.")
+        else:
+            if not args.movimiento:
+                raise ValueError("Indica --movimiento (caja existente) o --sin-movimiento.")
+            mov = (
+                db.query(MovimientoCaja)
+                .filter(MovimientoCaja.id == args.movimiento)
+                .with_for_update()
+                .first()
             )
-        if int(mov.moneda_id or 0) != args.moneda:
-            raise ValueError(f"El movimiento {mov.id} está en moneda {mov.moneda_id}, no {args.moneda}.")
-        if abs(float(mov.monto) - args.monto) > 0.01:
-            raise ValueError(f"El movimiento {mov.id} es de {mov.monto}, no de {args.monto}.")
-        if mov.fecha != args.fecha:
-            raise ValueError(f"El movimiento {mov.id} es del {mov.fecha}, no del {args.fecha}.")
+            if mov is None:
+                raise ValueError(f"El movimiento {args.movimiento} no existe.")
+            if mov.tipo != "ENTRADA":
+                raise ValueError(f"El movimiento {mov.id} es {mov.tipo}; debe ser ENTRADA.")
+            if mov.pago_id is not None:
+                raise ValueError(f"El movimiento {mov.id} ya está ligado al pago #{mov.pago_id}.")
+            if mov.metodo_caja_id != cuenta.id:
+                raise ValueError(
+                    f"El movimiento {mov.id} es de la cuenta {mov.metodo_caja_id}, "
+                    f"no de {cuenta.nombre} ({cuenta.id})."
+                )
+            if int(mov.moneda_id or 0) != args.moneda:
+                raise ValueError(f"El movimiento {mov.id} está en moneda {mov.moneda_id}, no {args.moneda}.")
+            if abs(float(mov.monto) - args.monto) > 0.01:
+                raise ValueError(f"El movimiento {mov.id} es de {mov.monto}, no de {args.monto}.")
+            if mov.fecha != args.fecha:
+                raise ValueError(f"El movimiento {mov.id} es del {mov.fecha}, no del {args.fecha}.")
 
         usuario = db.get(Usuario, args.usuario) if args.usuario else None
 
@@ -136,7 +148,8 @@ def main() -> None:
         )
         db.add(pago)
         db.flush()
-        mov.pago_id = pago.id
+        if mov is not None:
+            mov.pago_id = pago.id
         _recalcular_estado_venta(db, venta, margen)
 
         record_event(
@@ -152,7 +165,7 @@ def main() -> None:
                 "metodo_pago": cuenta.codigo,
                 "fecha": args.fecha.isoformat(),
                 "monto_en_moneda_base": monto_base,
-                "conciliado_con_movimiento": mov.id,
+                "conciliado_con_movimiento": mov.id if mov is not None else None,
             },
         )
 
@@ -160,7 +173,8 @@ def main() -> None:
             f"{'APLICADO' if args.aplicar else 'DRY-RUN'} · pago #{pago.id} "
             f"venta #{venta.id} · {args.monto:,.2f} moneda {args.moneda} "
             f"({monto_base:,.2f} en moneda de la venta) · {cuenta.nombre} · "
-            f"mov {mov.id} enlazado · venta queda {venta.estado}"
+            f"{'mov ' + str(mov.id) + ' enlazado' if mov is not None else 'sin movimiento de caja'} · "
+            f"venta queda {venta.estado}"
         )
         print(f"venta total {venta.total} · saldo nuevo {_saldo_pendiente(db, venta):,.2f}")
 
