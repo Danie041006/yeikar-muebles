@@ -112,7 +112,7 @@ def actualizar_pago(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    """Corrige la fecha/referencia/observaciones de un cobro ya registrado."""
+    """Corrige fecha, monto, referencia y observaciones de un cobro ya registrado."""
     try:
         db_pago = service.actualizar_pago(db, id, esquema, usuario=usuario_actual)
     except ValueError as e:

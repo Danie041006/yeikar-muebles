@@ -19,6 +19,7 @@ import {
   cargarMetodosPago,
   labelMetodoPago,
   type PagoCreate,
+  type PagoUpdate,
   type DescuentoCreate,
   type MetodoPagoOption,
 } from '../services/ventaService';
@@ -534,9 +535,11 @@ function ModalDetalle({
   // Fecha del cobro: a veces el abono ocurrió ANTES y se registra después.
   // Por defecto hoy (VE); si el usuario la vacía, el servidor guarda hoy.
   const [fechaPago, setFechaPago] = useState(hoyVE());
-  // ── Corrección de un cobro ya registrado (solo fecha/ref/observaciones) ──
+  // ── Corrección de un cobro ya registrado (monto, fecha, ref, observaciones) ──
   const [pagoEditando, setPagoEditando] = useState<Pago | null>(null);
   const [editFecha, setEditFecha] = useState(hoyVE());
+  const [editMonto, setEditMonto] = useState('');
+  const [editMotivo, setEditMotivo] = useState('');
   const [editReferencia, setEditReferencia] = useState('');
   const [editObservaciones, setEditObservaciones] = useState('');
   const [editSubmitting, setEditSubmitting] = useState(false);
@@ -705,6 +708,8 @@ function ModalDetalle({
   const abrirEdicionPago = (p: Pago) => {
     setPagoEditando(p);
     setEditFecha(p.fecha ? String(p.fecha).slice(0, 10) : hoyVE());
+    setEditMonto(String(Number(p.monto)));
+    setEditMotivo('');
     setEditReferencia(p.referencia ?? '');
     setEditObservaciones(p.observaciones ?? '');
     setEditError('');
@@ -722,13 +727,25 @@ function ModalDetalle({
       setEditError('La fecha del pago no puede ser futura.');
       return;
     }
+    const montoEditado = parseFloat(editMonto);
+    if (!editMonto || isNaN(montoEditado) || montoEditado <= 0) {
+      setEditError('Ingresa un monto válido mayor a 0.');
+      return;
+    }
     try {
       setEditSubmitting(true);
-      await pagoService.actualizar(pagoEditando.id, {
+      const payload: PagoUpdate = {
         fecha: `${editFecha}T12:00:00`,
         referencia: editReferencia.trim() || null,
         observaciones: editObservaciones.trim() || null,
-      });
+      };
+      // Solo se envía el monto si cambió: así una simple corrección de fecha
+      // o referencia no queda marcada como "monto corregido".
+      if (Math.abs(montoEditado - Number(pagoEditando.monto)) > 0.0001) {
+        payload.monto = montoEditado;
+        if (editMotivo.trim()) payload.motivo_correccion = editMotivo.trim();
+      }
+      await pagoService.actualizar(pagoEditando.id, payload);
       setPagoEditando(null);
       await cargar();
       onPagoRegistrado();
@@ -1167,6 +1184,26 @@ function ModalDetalle({
                                   registrado {diasTardio} día{diasTardio !== 1 ? 's' : ''} después
                                 </span>
                               )}
+                              {/* Correcciones de monto: SOLO en Ventas y Cobros.
+                                  La cotización muestra el monto vigente, sin esta nota. */}
+                              {p.correcciones && p.correcciones.length > 0 && (
+                                <span className="mt-1.5 block rounded-lg border border-amber-200 bg-amber-50/80 px-2 py-1 font-sans text-[10px] leading-snug text-amber-900">
+                                  <span className="font-black uppercase tracking-wide">Monto corregido</span>
+                                  {p.correcciones.map((c) => (
+                                    <span key={c.id} className="mt-0.5 block">
+                                      <span className="font-mono font-bold">
+                                        {p.moneda?.simbolo ?? ''}{Number(c.monto_anterior).toLocaleString('es-ES')}
+                                        {' → '}
+                                        {p.moneda?.simbolo ?? ''}{Number(c.monto_nuevo).toLocaleString('es-ES')}
+                                      </span>
+                                      <span className="block text-amber-800/70">
+                                        {c.usuario_nombre || 'Sistema'} · {fmtFechaHoraVE(c.created_at)}
+                                        {c.motivo ? ` · ${c.motivo}` : ''}
+                                      </span>
+                                    </span>
+                                  ))}
+                                </span>
+                              )}
                               {/* Recibos del cobro (comprobantes digitales) */}
                               {p.recibos && p.recibos.length > 0 && (
                                 <span className="mt-1.5 flex gap-1.5">
@@ -1200,7 +1237,7 @@ function ModalDetalle({
                                 type="button"
                                 onClick={() => abrirEdicionPago(p)}
                                 className="mt-2 inline-flex items-center gap-1 rounded-lg px-1.5 py-1 font-mono text-[10px] font-bold text-yeikar-neutral/40 transition-colors hover:bg-amber-100 hover:text-amber-800"
-                                title="Corregir la fecha o la referencia de este cobro"
+                                title="Corregir el monto, la fecha o la referencia de este cobro"
                                 aria-label="Corregir este cobro"
                               >
                                 <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1214,6 +1251,44 @@ function ModalDetalle({
                           {pagoEditando?.id === p.id && (
                             <div className="border-t border-amber-200 bg-amber-50/70 px-3.5 py-3">
                               <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
+                                <div>
+                                  <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                                    Monto del abono ({p.moneda?.codigo ?? 'moneda del pago'})
+                                  </label>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    min="0.01"
+                                    step="0.01"
+                                    value={editMonto}
+                                    onChange={(e) => setEditMonto(e.target.value)}
+                                    className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white font-mono"
+                                  />
+                                  <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+                                    Actual: {p.moneda?.simbolo ?? ''}{Number(p.monto).toLocaleString('es-ES')}
+                                    {Number(p.monto_en_moneda_base) !== Number(p.monto) && detalle.moneda?.codigo && (
+                                      <> · equivale a {fmtMoneda(Number(p.monto_en_moneda_base), detalle.moneda.codigo)}</>
+                                    )}
+                                    . El saldo y la caja se ajustan solos.
+                                  </p>
+                                </div>
+                                <div>
+                                  <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                                    Motivo de la corrección (opcional)
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={editMotivo}
+                                    onChange={(e) => setEditMotivo(e.target.value)}
+                                    placeholder="Ej: se digitó 100 en vez de 10"
+                                    className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
+                                  />
+                                  <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+                                    Queda visible en el historial de abonos de Ventas y Cobros.
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="mt-3 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                                 <div>
                                   <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
                                     Fecha en que se hizo el pago

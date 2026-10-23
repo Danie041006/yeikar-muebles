@@ -157,6 +157,12 @@ class Pago(Base):
     venta = relationship("Venta", back_populates="pagos")
     moneda = relationship("Moneda")
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
+    correcciones = relationship(
+        "PagoCorreccion",
+        back_populates="pago",
+        cascade="all, delete-orphan",
+        order_by="PagoCorreccion.id",
+    )
 
     @property
     def creador_nombre(self):
@@ -171,3 +177,47 @@ class Pago(Base):
         if s is None:
             return []
         return adjuntos_info(s, "PAGO", self.id)
+
+
+class PagoCorreccion(Base):
+    """Historial de correcciones del MONTO de un abono.
+
+    Un cobro digitado mal se corrige sin borrarlo ni crear otro pago: se
+    ajusta `Pago.monto` / `Pago.monto_en_moneda_base`, se actualiza su
+    movimiento de caja y se deja aquí la huella de antes y después. La
+    cotización y los documentos imprimibles muestran el monto vigente, pero
+    NO este historial: la trazabilidad vive en Ventas y Cobros y en la
+    auditoría del sistema.
+    """
+
+    __tablename__ = "pago_correccion"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    pago_id = Column(
+        BigInteger,
+        ForeignKey("pago.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    usuario_id = Column(
+        BigInteger,
+        ForeignKey("usuario.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    monto_anterior = Column(Numeric(15, 2), nullable=False)
+    monto_nuevo = Column(Numeric(15, 2), nullable=False)
+    # Equivalente en la moneda de la venta antes y después de la corrección.
+    monto_base_anterior = Column(Numeric(15, 2), nullable=False)
+    monto_base_nuevo = Column(Numeric(15, 2), nullable=False)
+    motivo = Column(Text, nullable=True)
+    # Momento de la corrección (hora Venezuela). `Pago.created_at` conserva
+    # intacto el momento en que se digitó el cobro original.
+    created_at = Column(DateTime, nullable=False, server_default=func.now())
+
+    pago = relationship("Pago", back_populates="correcciones")
+    usuario = relationship("Usuario", foreign_keys=[usuario_id])
+
+    @property
+    def usuario_nombre(self):
+        return (self.usuario.nombre or self.usuario.nombre_usuario) if self.usuario else None

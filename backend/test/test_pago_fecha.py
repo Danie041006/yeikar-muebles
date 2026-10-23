@@ -7,8 +7,10 @@ Caso real: el cliente abona y a veces el cobro se registra días después
   - `POST /pago/` con `fecha` → se respeta tal cual.
   - `POST /pago/` SIN `fecha` → el servidor guarda HOY (hora Venezuela).
   - `POST /pago/` guarda `created_at` (registro, hora VE) y `creado_por_id`.
-  - `PUT /pago/{id}` corrige solo fecha/referencia/observaciones y arrastra
-    el movimiento de caja; nunca cambia `created_at` ni el monto.
+  - `PUT /pago/{id}` corrige fecha/referencia/observaciones (y opcionalmente el
+    monto, con su historial de corrección); arrastra el movimiento de caja y
+    nunca cambia `created_at`. En este test el monto no se envía, así que se
+    conserva intacto.
   - Abono inicial (conversión cotización → pedido): `fecha_adelanto` fija la
     fecha del primer pago de la factura; sin ella → hoy.
   - Fechas futuras se rechazan.

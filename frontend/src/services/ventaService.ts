@@ -45,6 +45,19 @@ export interface DetalleVenta {
   material?: { id: number; nombre: string; costo_base: number; unidad_medida?: { abreviatura: string } };
 }
 
+export interface PagoCorreccion {
+  id: number;
+  pago_id: number;
+  usuario_id?: number | null;
+  usuario_nombre?: string | null;
+  monto_anterior: number;
+  monto_nuevo: number;
+  monto_base_anterior: number;
+  monto_base_nuevo: number;
+  motivo?: string | null;
+  created_at?: string | null;
+}
+
 export interface Pago {
   id: number;
   venta_id: number;
@@ -63,6 +76,8 @@ export interface Pago {
   moneda?: MonedaInfo;
   /** Comprobantes digitales del pago (recibos). */
   recibos?: AdjuntoInfo[];
+  /** Correcciones de monto (solo se muestran en Ventas y Cobros). */
+  correcciones?: PagoCorreccion[];
 }
 
 export interface Venta {
@@ -175,9 +190,13 @@ export interface PagoCreate {
   tasa_cambio?: number;
 }
 
-/** Corrección de un cobro ya registrado: solo fecha, referencia y observaciones. */
+/** Corrección de un cobro ya registrado: fecha, monto, referencia y observaciones. */
 export interface PagoUpdate {
   fecha?: string;
+  /** Nuevo monto del abono (en la moneda del pago). */
+  monto?: number;
+  /** Motivo opcional de la corrección (queda en el historial). */
+  motivo_correccion?: string | null;
   referencia?: string | null;
   observaciones?: string | null;
 }

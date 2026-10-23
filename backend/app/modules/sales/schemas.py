@@ -91,12 +91,34 @@ class PagoCreate(PagoBase):
 class PagoUpdate(BaseModel):
     """Corrección de un cobro ya registrado.
 
-    Solo se permite mover la fecha del pago (y ajustar referencia/observaciones):
-    monto, moneda, método y tasa mueven caja y saldo, así que no se editan aquí.
+    La fecha, la referencia y las observaciones siempre se pueden ajustar.
+    El MONTO también se corrige aquí (con su motivo opcional): el servicio
+    recalcula el equivalente en moneda de la venta, actualiza el movimiento
+    de caja y deja el antes/después en el historial de correcciones.
+    Moneda, método y tasa no se cambian desde este endpoint.
     """
     fecha: Optional[datetime] = None
+    monto: Optional[float] = Field(None, gt=0)
+    motivo_correccion: Optional[str] = Field(None, max_length=500)
     referencia: Optional[str] = None
     observaciones: Optional[str] = None
+
+
+class PagoCorreccionResponse(BaseModel):
+    """Cambio de monto de un abono, visible en Ventas y Cobros."""
+    id: int
+    pago_id: int
+    usuario_id: Optional[int] = None
+    usuario_nombre: Optional[str] = None
+    monto_anterior: float
+    monto_nuevo: float
+    monto_base_anterior: float
+    monto_base_nuevo: float
+    motivo: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
 
 
 class PagoResponse(PagoBase):
@@ -112,6 +134,9 @@ class PagoResponse(PagoBase):
     moneda: Optional[MonedaResponse] = None
     # Comprobantes digitales del pago (adjuntos tipo PAGO)
     recibos: List[AdjuntoInfo] = []
+    # Correcciones de monto (más reciente al final). Solo se muestran en
+    # Ventas y Cobros; la cotización ignora esta lista.
+    correcciones: List[PagoCorreccionResponse] = []
 
     class Config:
         from_attributes = True

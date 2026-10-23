@@ -9,7 +9,7 @@ import re
 import unicodedata
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
 from app.core.hora_ve import ahora_ve, hoy_ve
-from app.modules.sales.model import Venta, DetalleVenta, Pago, DescuentoVenta
+from app.modules.sales.model import Venta, DetalleVenta, Pago, PagoCorreccion, DescuentoVenta
 from app.modules.sales.schemas import VentaCreate, VentaUpdate, PagoCreate, PagoUpdate, DescuentoCreate, DetalleVentaResponse
 from app.modules.orders.model import Pedido, DetallePedido
 from app.modules.clients.model import Client
@@ -344,24 +344,25 @@ def _redondear_a_entero_cobro(valor: float) -> float:
     return float(entero)
 
 
-def _convertir_a_moneda_venta(
-    db: Session, moneda_id: int, monto: float, tasa_cambio: float | None, venta: Venta
-) -> tuple[float, float, float]:
-    """Convierte un monto (pago o descuento) a la moneda de la venta.
+def _monto_base_para_cobro(
+    venta: Venta, moneda_id: int, monto: float, tasa_cambio: float | None
+) -> tuple[float, float]:
+    """Calcula el equivalente en la moneda de la venta y el margen de saldo.
 
-    Misma regla que los cobros: misma moneda → tasa 1:1; moneda distinta →
-    tasa obligatoria con validaciones anti-TRM-inventada y redondeo al millar
-    cuando la factura es en COP. Devuelve (tasa, monto_en_moneda_base, margen).
+    Se usa al crear un cobro/descuento y también al corregir el monto de un
+    cobro existente. Si la moneda coincide con la de la venta, es 1:1. Si no,
+    aplica la misma regla que los cobros: redondeo al millar cuando la factura
+    es en COP y equivalente entero (decimal < 0.9 baja; >= 0.9 sube).
     """
-    misma_moneda = moneda_id == venta.moneda_id
-    if misma_moneda:
-        return 1.0, float(monto), 0.01
-    if not tasa_cambio or float(tasa_cambio) <= 0:
+    if moneda_id == venta.moneda_id:
+        return float(monto), 0.01
+
+    tasa = float(tasa_cambio or 0)
+    if tasa <= 0:
         raise ValueError(
             "La moneda difiere de la moneda de la factura. "
             "Debes proporcionar la tasa de cambio para realizar la conversión."
         )
-    tasa = float(tasa_cambio)
     monto_base = round(float(monto) * tasa, 2)
     margen_saldo = 0.01
     # Solo cuando la FACTURA es en COP el libro base queda al millar (la
@@ -383,6 +384,25 @@ def _convertir_a_moneda_venta(
     # entero (así lo manejaron en el taller): decimal < 0.9 → baja al entero
     # actual; decimal >= 0.9 → sube al siguiente entero. Nunca decimales.
     monto_base = _redondear_a_entero_cobro(monto_base)
+    return monto_base, margen_saldo
+
+
+def _convertir_a_moneda_venta(
+    db: Session, moneda_id: int, monto: float, tasa_cambio: float | None, venta: Venta
+) -> tuple[float, float, float]:
+    """Convierte un monto (pago o descuento) a la moneda de la venta.
+
+    Misma regla que los cobros: misma moneda → tasa 1:1; moneda distinta →
+    tasa obligatoria con validaciones anti-TRM-inventada y redondeo al millar
+    cuando la factura es en COP. Devuelve (tasa, monto_en_moneda_base, margen).
+    """
+    misma_moneda = moneda_id == venta.moneda_id
+    if misma_moneda:
+        return 1.0, float(monto), 0.01
+    tasa = float(tasa_cambio or 0)
+    monto_base, margen_saldo = _monto_base_para_cobro(
+        venta, moneda_id, monto, tasa
+    )
 
     # Tasa de cambio: validar que no sea absurda. El piso 0.0001 permite
     # tasas invertidas legítimas (COP→USD ≈ 1/3900 = 0.0002564); lo que se
@@ -415,15 +435,31 @@ def _convertir_a_moneda_venta(
     return tasa, monto_base, margen_saldo
 
 
-def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, usuario_id: int | None = None) -> None:
-    """Registra el cobro en la cuenta de caja del método de pago (tipo ENTRADA).
+def _monto_movimiento_caja_pago(db_pago: Pago, venta: Venta) -> tuple[float, float]:
+    """Tasa y equivalente en COP del movimiento de caja de un cobro.
 
     La tasa del movimiento expresa COP por 1 unidad de la moneda del pago:
       - pago en la moneda de la venta → venta.tasa_cambio (1 × TRM de la venta)
       - pago en otra moneda          → pago.tasa_cambio × venta.tasa_cambio
         (p. ej. COP sobre factura USD → (1/TRM) × TRM = 1.0)
-    Si la cuenta no existe en el catálogo se crea automáticamente para no
-    perder cobros. El movimiento se commitea con el pago (transacción atómica).
+    Si el pago es en moneda extranjera sobre una factura COP, la caja registra
+    el mismo valor en COP que descuenta del saldo (ya redondeado al millar).
+    """
+    tasa_caja = round(
+        float(db_pago.tasa_cambio or 1.0) * float(venta.tasa_cambio or 1.0), 6
+    )
+    if db_pago.moneda_id != venta.moneda_id and venta.moneda_id == 1:
+        monto_cop = float(db_pago.monto_en_moneda_base)
+    else:
+        monto_cop = round(float(db_pago.monto) * tasa_caja, 2)
+    return tasa_caja, monto_cop
+
+
+def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, usuario_id: int | None = None) -> None:
+    """Registra el cobro en la cuenta de caja del método de pago (tipo ENTRADA).
+
+    Si la cuenta no existe en el catálogo se rechaza para no perder cobros.
+    El movimiento se commitea con el pago (transacción atómica).
     `usuario_id` queda registrado como responsable del cobro (reporte diario).
     """
     if not db_pago.metodo_pago:
@@ -440,13 +476,7 @@ def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, us
             detail=f"El método de pago '{db_pago.metodo_pago}' no corresponde a ninguna cuenta. "
             "Verifica las cuentas en Cuentas y Medios de Pago.",
         )
-    tasa_caja = round(float(db_pago.tasa_cambio or 1.0) * float(venta.tasa_cambio or 1.0), 6)
-    if db_pago.moneda_id != venta.moneda_id and venta.moneda_id == 1:
-        # Pago en moneda extranjera sobre factura COP: la caja registra el mismo
-        # valor en COP que descuenta del saldo (ya redondeado al millar).
-        monto_cop = float(db_pago.monto_en_moneda_base)
-    else:
-        monto_cop = round(float(db_pago.monto) * tasa_caja, 2)
+    tasa_caja, monto_cop = _monto_movimiento_caja_pago(db_pago, venta)
     db.add(MovimientoCaja(
         metodo_caja_id=cuenta.id,
         usuario_id=usuario_id,
@@ -592,31 +622,160 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
     return db_pago
 
 
+def _base_monto_corregido(
+    db: Session, db_pago: Pago, venta: Venta, nuevo_monto: float
+) -> tuple[float, float]:
+    """Valida el nuevo monto y devuelve (base nueva, base anterior).
+
+    El saldo disponible se calcula SIN este pago, para que corregir hacia
+    arriba o hacia abajo no choque con el propio cobro. Un exceso de saldo
+    lanza ValueError y la transacción no deja rastro.
+    """
+    monto_base_anterior = float(db_pago.monto_en_moneda_base)
+    monto_base_nuevo, margen_saldo = _monto_base_para_cobro(
+        venta, db_pago.moneda_id, nuevo_monto, db_pago.tasa_cambio
+    )
+    if round(monto_base_nuevo, 2) <= 0:
+        raise ValueError(
+            "El monto en moneda base queda en 0 con la tasa del pago. "
+            "Revisa el monto."
+        )
+    total_pagado, total_descontado = _totales_cobro(db, venta.id)
+    saldo_sin_actual = (
+        float(venta.total)
+        - (total_pagado - monto_base_anterior)
+        - total_descontado
+    )
+    if monto_base_nuevo > saldo_sin_actual + margen_saldo:
+        raise ValueError(
+            f"El monto corregido ({monto_base_nuevo:,.2f} en moneda base) "
+            f"excede el saldo disponible de la factura "
+            f"({saldo_sin_actual:,.2f}). Revisa el monto."
+        )
+    return monto_base_nuevo, monto_base_anterior
+
+
+def _aplicar_correccion_monto(
+    db: Session,
+    db_pago: Pago,
+    venta: Venta,
+    nuevo_monto: float,
+    motivo: str | None,
+    usuario_id: int | None,
+) -> None:
+    """Aplica el nuevo monto y deja la huella en `pago_correccion`."""
+    if nuevo_monto <= 0:
+        raise ValueError("El monto del pago debe ser mayor a 0.")
+    monto_anterior = float(db_pago.monto)
+    if abs(nuevo_monto - monto_anterior) <= 0.0001:
+        return  # mismo monto: no es una corrección
+    monto_base_nuevo, monto_base_anterior = _base_monto_corregido(
+        db, db_pago, venta, nuevo_monto
+    )
+    db_pago.monto = nuevo_monto
+    db_pago.monto_en_moneda_base = monto_base_nuevo
+    db.add(PagoCorreccion(
+        pago_id=db_pago.id,
+        usuario_id=usuario_id,
+        monto_anterior=monto_anterior,
+        monto_nuevo=nuevo_monto,
+        monto_base_anterior=monto_base_anterior,
+        monto_base_nuevo=monto_base_nuevo,
+        motivo=motivo,
+        created_at=ahora_ve(),
+    ))
+
+
+def _sincronizar_movimiento_caja_pago(
+    db: Session, db_pago: Pago, venta: Venta
+) -> None:
+    """Actualiza EN SITIO la entrada de caja del cobro (sin duplicarla)."""
+    from app.modules.reports.model import MovimientoCaja
+    movimientos = (
+        db.query(MovimientoCaja)
+        .filter(MovimientoCaja.pago_id == db_pago.id)
+        .all()
+    )
+    if not movimientos:
+        return  # cobro conciliado sin movimiento (el dinero ya estaba en caja)
+    tasa_caja, monto_cop = _monto_movimiento_caja_pago(db_pago, venta)
+    for mov in movimientos:
+        if db_pago.fecha is not None:
+            mov.fecha = db_pago.fecha.date()
+        mov.monto = db_pago.monto
+        mov.moneda_id = db_pago.moneda_id
+        mov.tasa_cambio = tasa_caja
+        mov.monto_en_moneda_base = monto_cop
+        mov.referencia = f"Pago #{db_pago.id}" + (
+            f" · {db_pago.referencia}" if db_pago.referencia else ""
+        )
+
+
 def actualizar_pago(
     db: Session,
     id_pago: int,
     esquema: PagoUpdate,
     usuario: Usuario | None = None,
 ):
-    """Corrige la fecha/referencia/observaciones de un cobro ya registrado.
+    """Corrige un cobro ya registrado: fecha, monto, referencia y observaciones.
 
-    No toca monto, moneda, método ni tasa: esos campos mueven caja y saldo.
-    Si cambia la fecha, arrastra el movimiento de caja para que los reportes
-    y el arqueo sigan cuadrando con la fecha real del pago. La fecha de
-    registro (`created_at`) NUNCA se modifica: es la huella de auditoría.
+    El monto es la corrección sensible: se recalcula su equivalente en la
+    moneda de la venta con la tasa ya congelada del cobro, se valida contra
+    el saldo disponible (sin contar el propio pago) y se actualiza el
+    movimiento de caja vinculado para que la entrada, los arriendos, los
+    reportes y el saldo de la factura sigan cuadrando. Cada cambio de monto
+    deja una fila en `pago_correccion` con el antes/después y el motivo.
+    No se tocan moneda, método ni tasa, y `created_at` (la huella del
+    registro original) NUNCA se modifica.
     """
+    # Bloquear primero la venta (mismo orden que `crear_pago`) para que una
+    # corrección y un cobro simultáneos no validen el saldo al mismo tiempo.
+    db_pago = db.query(Pago).filter(Pago.id == id_pago).first()
+    if not db_pago:
+        return None
+    venta = (
+        db.query(Venta)
+        .filter(Venta.id == db_pago.venta_id)
+        .with_for_update()
+        .first()
+    )
+    if not venta:
+        raise ValueError("La venta del pago no existe.")
     db_pago = db.query(Pago).filter(Pago.id == id_pago).with_for_update().first()
     if not db_pago:
         return None
 
     datos = esquema.model_dump(exclude_unset=True)
+    motivo_correccion = (datos.pop("motivo_correccion", None) or "").strip() or None
+    # Un motivo sin ningún campo que corregir no hace nada (no ensucia la
+    # auditoría con un evento vacío).
     if not datos:
         return db_pago
+
+    if venta.estado == "CANCELADA":
+        raise ValueError("No se puede corregir un cobro de una venta cancelada.")
+
     antes = {
         "fecha": db_pago.fecha.isoformat() if db_pago.fecha else None,
+        "monto": float(db_pago.monto),
+        "monto_en_moneda_base": float(db_pago.monto_en_moneda_base),
+        "moneda_id": db_pago.moneda_id,
+        "tasa_cambio": float(db_pago.tasa_cambio or 1.0),
+        "metodo_pago": db_pago.metodo_pago,
         "referencia": db_pago.referencia,
         "observaciones": db_pago.observaciones,
     }
+
+    monto_solicitado = datos.get("monto")
+    if monto_solicitado is not None:
+        _aplicar_correccion_monto(
+            db,
+            db_pago,
+            venta,
+            float(monto_solicitado),
+            motivo_correccion,
+            usuario.id if usuario is not None else None,
+        )
 
     if datos.get("fecha") is not None:
         db_pago.fecha = _normalizar_fecha_pago(datos["fecha"])
@@ -625,24 +784,15 @@ def actualizar_pago(
     if "observaciones" in datos:
         db_pago.observaciones = datos["observaciones"]
 
-    # Mantener el movimiento de caja alineado con la fecha y la referencia.
-    from app.modules.reports.model import MovimientoCaja
-    movimientos = (
-        db.query(MovimientoCaja)
-        .filter(MovimientoCaja.pago_id == db_pago.id)
-        .all()
-    )
-    for mov in movimientos:
-        if db_pago.fecha is not None:
-            mov.fecha = db_pago.fecha.date()
-        mov.referencia = f"Pago #{db_pago.id}" + (
-            f" · {db_pago.referencia}" if db_pago.referencia else ""
-        )
+    _sincronizar_movimiento_caja_pago(db, db_pago, venta)
+
+    # El estado de la venta depende del total pagado: bajar un abono puede
+    # devolverla de PAGADA a ABONADA; subirlo puede cerrarla.
+    db.flush()
+    _recalcular_estado_venta(db, venta)
 
     if usuario is not None:
-        venta = db.query(Venta).filter(Venta.id == db_pago.venta_id).first()
-        if venta is not None:
-            venta.actualizado_por_id = usuario.id
+        venta.actualizado_por_id = usuario.id
 
     record_event(
         db,
@@ -653,6 +803,11 @@ def actualizar_pago(
         before=antes,
         after={
             "fecha": db_pago.fecha.isoformat() if db_pago.fecha else None,
+            "monto": float(db_pago.monto),
+            "monto_en_moneda_base": float(db_pago.monto_en_moneda_base),
+            "moneda_id": db_pago.moneda_id,
+            "tasa_cambio": float(db_pago.tasa_cambio or 1.0),
+            "metodo_pago": db_pago.metodo_pago,
             "referencia": db_pago.referencia,
             "observaciones": db_pago.observaciones,
         },
