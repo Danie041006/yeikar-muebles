@@ -572,6 +572,9 @@ class CrudoMovimientoCreate(BaseModel):
     tipo: str = Field(pattern="^(ENTRADA|SALIDA|AJUSTE|DAÑO|DANO|DEVOLUCION)$")
     cantidad: float = Field(gt=0)
     observaciones: Optional[str] = None
+    # Fecha real del movimiento (entrada de un día anterior). Opcional: sin
+    # ella se usa HOY en hora VE. No admite fechas futuras.
+    fecha: Optional[date] = None
 
 
 class CrudoMovimientoResponse(BaseModel):

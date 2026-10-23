@@ -78,6 +78,8 @@ export interface MovimientoCreate {
   fiar?: boolean;
   /** % de descuento aplicado (el neto ya viaja en costo_unitario); queda en el libro. */
   descuento_porcentaje?: number;
+  /** Fecha real del movimiento (YYYY-MM-DD). Sin ella: hoy. No admite futuras. */
+  fecha?: string;
 }
 
 export interface MovimientoResponse {
@@ -153,6 +155,8 @@ export interface MovimientoProductoCreate {
   fiar?: boolean;
   /** % de descuento aplicado (el neto ya viaja en costo_unitario); queda en el libro. */
   descuento_porcentaje?: number;
+  /** Fecha real del movimiento (YYYY-MM-DD). Sin ella: hoy. No admite futuras. */
+  fecha?: string;
 }
 
 export interface MovimientoProductoResponse {

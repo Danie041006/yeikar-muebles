@@ -10,6 +10,7 @@ import { useToast } from '../context/ToastContext';
 import { motion } from 'framer-motion';
 import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
 import AdjuntoImagen from '../components/AdjuntoImagen';
+import { hoyVE } from '../utils/fechas';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
 
 interface Ubicacion {
@@ -146,6 +147,7 @@ export default function Inventario() {
   // Formulario de movimiento de MATERIAL (dentro del panel)
   const [movMaterial, setMovMaterial] = useState({
     tipo: 'ENTRADA',
+    fecha: hoyVE(), // fecha real del movimiento (por defecto hoy; admite días anteriores)
     cantidad: '',
     costo_unitario: '',
     descuento_porcentaje: '',
@@ -196,6 +198,7 @@ export default function Inventario() {
   const [movProducto, setMovProducto] = useState({
     ubicacion_id: '',
     tipo: 'ENTRADA',
+    fecha: hoyVE(), // fecha real del movimiento (por defecto hoy; admite días anteriores)
     cantidad: '',
     costo_unitario: '',
     descuento_porcentaje: '',
@@ -218,7 +221,7 @@ export default function Inventario() {
   const [selectedCrudoId, setSelectedCrudoId] = useState<number | null>(null);
   const [kardexCrudo, setKardexCrudo] = useState<CrudoMovimiento[]>([]);
   const [loadingKardexCrudo, setLoadingKardexCrudo] = useState(false);
-  const [movCrudo, setMovCrudo] = useState({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
+  const [movCrudo, setMovCrudo] = useState({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', observaciones: '' });
   const [savingMovCrudo, setSavingMovCrudo] = useState(false);
   // Tab del modal de crudo (movimiento / editar / historial).
   const [detalleTabCrudo, setDetalleTabCrudo] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
@@ -325,6 +328,7 @@ export default function Inventario() {
     descuento_porcentaje: '',   // % Descuento por pronto pago / al mayor (opcional)
     stock_minimo: '8',
     cantidad_inicial: '1',
+    fecha: hoyVE(),     // fecha real de la entrada inicial (por defecto hoy; admite días anteriores)
     cuenta_pago_id: '', // key "cuentaId:monedaId" — de qué caja salió el dinero (opcional)
     tasa_pago: '',      // 1 [moneda_pago] = X COP (manual, obligatoria si aplica)
     moneda_id: '', // string para SearchSelect; default USD cuando cargan las monedas
@@ -656,6 +660,7 @@ export default function Inventario() {
         descuento_porcentaje: '',
         stock_minimo: '8',
         cantidad_inicial: '1',
+        fecha: hoyVE(),
         cuenta_pago_id: '',
         tasa_pago: '',
         moneda_id: idMonedaPorDefecto(),
@@ -673,6 +678,7 @@ export default function Inventario() {
             ubicacion_id: ubi.id,
             tipo: 'ENTRADA',
             cantidad: cantInicial,
+            fecha: newProducto.fecha || hoyVE(),
             costo_unitario: costoNeto,
             pagado_desde_metodo_caja_id: pagoModal.cuentaId ?? undefined,
             moneda_pago_id: pagoModal.monedaId ?? undefined,
@@ -704,7 +710,7 @@ export default function Inventario() {
   const handleOpenCrudo = (c: Crudo) => {
     setSelectedCrudoId(c.id);
     setDetalleTabCrudo('movimiento');
-    setMovCrudo({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
+    setMovCrudo({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', observaciones: '' });
     setEditCrudo({ nombre: c.nombre ?? '', ubicacion_id: c.ubicacion_id != null ? String(c.ubicacion_id) : '', activo: c.activo !== false });
     setFotoEditCrudo(null);
     if (fotoEditCrudoPreview) URL.revokeObjectURL(fotoEditCrudoPreview);
@@ -769,9 +775,10 @@ export default function Inventario() {
       await crudoService.registrarMovimiento(selectedCrudoId, {
         tipo: movCrudo.tipo,
         cantidad: parseFloat(movCrudo.cantidad),
+        fecha: movCrudo.fecha || hoyVE(),
         observaciones: movCrudo.observaciones || undefined,
       });
-      setMovCrudo({ tipo: 'ENTRADA', cantidad: '', observaciones: '' });
+      setMovCrudo({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', observaciones: '' });
       await Promise.all([fetchCrudo(), refrescarKardexCrudo(selectedCrudoId)]);
       toast.success('Movimiento de crudo registrado.');
     } catch (error: any) {
@@ -805,7 +812,7 @@ export default function Inventario() {
           : { nombre: u.nombre, valor: String(f), invertida: true };
       }),
     );
-    setMovMaterial({ tipo: 'ENTRADA', cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
+    setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
     try {
       setLoadingKardex(true);
       const data = await inventarioService.getKardex(mat.id);
@@ -918,6 +925,7 @@ export default function Inventario() {
         // ya no pide almacén — la organización es por departamentos).
         tipo: movMaterial.tipo as any,
         cantidad: parseFloat(movMaterial.cantidad),
+        fecha: movMaterial.fecha || hoyVE(),
         costo_unitario: costoNeto,
         pagado_desde_metodo_caja_id: esEntrada && pago.cuentaId ? pago.cuentaId : undefined,
         moneda_pago_id: esEntrada && pago.cuentaId ? pago.monedaId ?? undefined : undefined,
@@ -934,7 +942,7 @@ export default function Inventario() {
         observaciones: [movMaterial.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovMaterial({ tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
+      setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -973,7 +981,7 @@ export default function Inventario() {
     });
     // En exhibición, el movimiento típico es ENTRADA a la ubicación de exhibición.
     const ubiExh = tab === 'exhibicion' ? ubicaciones.find(u => esNombreExhibicion(u.nombre)) : undefined;
-    setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+    setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
     refrescarKardexProducto(p.id);
   };
 
@@ -1054,6 +1062,7 @@ export default function Inventario() {
         ubicacion_id: parseInt(movProducto.ubicacion_id),
         tipo: movProducto.tipo as any,
         cantidad: parseFloat(movProducto.cantidad),
+        fecha: movProducto.fecha || hoyVE(),
         costo_unitario: costoNeto,
         pagado_desde_metodo_caja_id:
           movProducto.tipo === 'ENTRADA' && pago.cuentaId ? pago.cuentaId : undefined,
@@ -1070,7 +1079,7 @@ export default function Inventario() {
         observaciones: [movProducto.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
       fetchProductos();
       refrescarKardexProducto(selectedProductoId);
     } catch (error: any) {
@@ -2224,6 +2233,25 @@ export default function Inventario() {
                         <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movMaterial.tipo]}</p>
                       </div>
 
+                      {/* Fecha real del movimiento: por defecto HOY; admite un día anterior */}
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          Fecha <span className="text-yeikar-neutral/40 font-normal">(por defecto hoy · cámbiala si el movimiento fue otro día)</span>
+                        </label>
+                        <input
+                          type="date"
+                          max={hoyVE()}
+                          value={movMaterial.fecha}
+                          onChange={(e) => setMovMaterial((p) => ({ ...p, fecha: e.target.value }))}
+                          className={inputCls}
+                        />
+                        {movMaterial.fecha && movMaterial.fecha !== hoyVE() && (
+                          <p className="text-[11px] text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                            Se registrará con fecha anterior. El historial y el libro de entradas usarán ese día.
+                          </p>
+                        )}
+                      </div>
+
                       {/* Cantidad */}
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">
@@ -2988,6 +3016,26 @@ export default function Inventario() {
                   </div>
                   <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movProducto.tipo]}</p>
                 </div>
+
+                {/* Fecha real del movimiento: por defecto HOY; admite un día anterior */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">
+                    Fecha <span className="text-yeikar-neutral/40 font-normal">(por defecto hoy · cámbiala si el movimiento fue otro día)</span>
+                  </label>
+                  <input
+                    type="date"
+                    max={hoyVE()}
+                    value={movProducto.fecha}
+                    onChange={(e) => setMovProducto(p => ({ ...p, fecha: e.target.value }))}
+                    className={inputCls}
+                  />
+                  {movProducto.fecha && movProducto.fecha !== hoyVE() && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      Se registrará con fecha anterior. El historial y el libro de entradas usarán ese día.
+                    </p>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Ubicación / Almacén</label>
@@ -3394,6 +3442,26 @@ export default function Inventario() {
                   </div>
                   <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movCrudo.tipo]}</p>
                 </div>
+
+                {/* Fecha real del movimiento: por defecto HOY; admite un día anterior */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">
+                    Fecha <span className="text-yeikar-neutral/40 font-normal">(por defecto hoy · cámbiala si el movimiento fue otro día)</span>
+                  </label>
+                  <input
+                    type="date"
+                    max={hoyVE()}
+                    value={movCrudo.fecha}
+                    onChange={(e) => setMovCrudo(p => ({ ...p, fecha: e.target.value }))}
+                    className={inputCls}
+                  />
+                  {movCrudo.fecha && movCrudo.fecha !== hoyVE() && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      Se registrará con fecha anterior. El historial y el libro de entradas usarán ese día.
+                    </p>
+                  )}
+                </div>
+
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
                   <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movCrudo.cantidad} onChange={(e) => setMovCrudo(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
@@ -3686,6 +3754,17 @@ export default function Inventario() {
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad que Entra</label>
                   <input type="number" min="0" step="1" placeholder="1" value={newProducto.cantidad_inicial} onChange={(e) => setNewProducto(prev => ({ ...prev, cantidad_inicial: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                  Fecha de la entrada <span className="text-yeikar-neutral/40 font-normal">(por defecto hoy · cámbiala si la compra fue otro día)</span>
+                </label>
+                <input type="date" max={hoyVE()} value={newProducto.fecha} onChange={(e) => setNewProducto(prev => ({ ...prev, fecha: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                {newProducto.fecha && newProducto.fecha !== hoyVE() && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg px-2.5 py-1.5 mt-1">
+                    La entrada inicial quedará con fecha anterior.
+                  </p>
+                )}
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>

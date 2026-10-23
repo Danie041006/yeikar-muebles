@@ -43,6 +43,24 @@ def _resolver_proveedor_cliente(
     return proveedor_id, proveedor_nombre, cliente_id, cliente_nombre
 
 
+def _fecha_movimiento(fecha: Optional[date]) -> datetime:
+    """Fecha/hora que se guarda en el kardex.
+
+    - Sin fecha (formulario por defecto): AHORA en hora VE, como siempre.
+    - Fecha de hoy: también AHORA (conserva la hora real de captura).
+    - Fecha anterior: se ancla al mediodía, igual que los pagos, para que el
+      día no se corra por zona horaria.
+    - Fechas futuras: se rechazan (el inventario no se registra por adelantado).
+    """
+    if fecha is None:
+        return ahora_ve()
+    if fecha > hoy_ve():
+        raise ValueError("La fecha del movimiento no puede ser futura.")
+    if fecha == hoy_ve():
+        return ahora_ve()
+    return datetime.combine(fecha, time(12, 0))
+
+
 def _gasto_compra_contado(
     db: Session,
     *,
@@ -53,6 +71,7 @@ def _gasto_compra_contado(
     metodo_caja_id: int,
     moneda_pago_id: Optional[int] = None,
     tasa_pago: Optional[Decimal] = None,
+    fecha: Optional[date] = None,
     usuario=None,
 ):
     """Compra de contado: registra el gasto + la SALIDA de caja correspondiente.
@@ -139,7 +158,7 @@ def _gasto_compra_contado(
         GastoCreate(
             tipo_gasto_id=tipo_gasto.id,
             moneda_id=gasto_moneda,
-            fecha=hoy_ve(),
+            fecha=fecha or hoy_ve(),
             descripcion=descripcion,
             monto=monto.quantize(Decimal("0.01")),
             tasa_cambio=tasa,
@@ -232,6 +251,10 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     if movimiento.tipo == "DAÑO":
         movimiento.tipo = "DANO"
 
+    # Fecha real del movimiento: por defecto hoy; admite un día anterior
+    # (compras registradas tarde). Rige también el gasto/deuda generados.
+    fecha_mov = _fecha_movimiento(getattr(movimiento, "fecha", None))
+
     # El formulario de insumos ya no pide almacén (la organización es por
     # departamentos): sin ubicación, el movimiento va al depósito principal.
     if movimiento.ubicacion_id is None:
@@ -317,7 +340,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
-        fecha=ahora_ve()
+        fecha=fecha_mov
     )
     db.add(db_mov)
     # IMPORTANTE: flush, NO commit. Un commit aquí rompería la transacción del
@@ -346,6 +369,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
+            fecha=fecha_mov.date(),
         )
 
     # ── "La llevada" (flete/aduana): gasto aparte, misma cuenta ────────────
@@ -368,6 +392,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
+            fecha=fecha_mov.date(),
 )
     # ── "Fiar": ENTRADA sin pagar → cuenta por pagar (compra + pasada) ─────
     # El usuario se lleva el insumo hoy y queda debiendo al proveedor. La
@@ -398,7 +423,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             cantidad=movimiento.cantidad,
             costo_unitario=movimiento.costo_unitario or Decimal("0.0"),
             llevada=llevada or Decimal("0.0"),
-            fecha=ahora_ve().date(),
+            fecha=fecha_mov.date(),
             movimiento_id=db_mov.id,
             cliente_id=cliente_id,
             cliente_nombre=cliente_nombre,
@@ -589,6 +614,10 @@ def registrar_movimiento_producto(
     if movimiento.cantidad <= 0:
         raise ValueError("La cantidad debe ser positiva")
 
+    # Fecha real del movimiento: por defecto hoy; admite un día anterior.
+    # Rige también el gasto/deuda generados por la compra.
+    fecha_mov = _fecha_movimiento(getattr(movimiento, "fecha", None))
+
     producto = db.query(Producto).filter(Producto.id == movimiento.producto_id).first()
     if not producto:
         raise ValueError(f"El producto con id {movimiento.producto_id} no existe.")
@@ -671,7 +700,7 @@ def registrar_movimiento_producto(
         referencia_tipo=movimiento.referencia_tipo,
         referencia_id=movimiento.referencia_id,
         observaciones=movimiento.observaciones,
-        fecha=ahora_ve(),
+        fecha=fecha_mov,
     )
     db.add(db_mov)
 
@@ -697,6 +726,7 @@ def registrar_movimiento_producto(
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
+            fecha=fecha_mov.date(),
             usuario=usuario,
         )
 
@@ -718,6 +748,7 @@ def registrar_movimiento_producto(
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
+            fecha=fecha_mov.date(),
             usuario=usuario,
         )
 
@@ -758,7 +789,7 @@ def _fiar_entrada_producto(db, db_mov, producto, movimiento, proveedor_id, prove
         cantidad=movimiento.cantidad,
         costo_unitario=Decimal(str(movimiento.costo_unitario)),
         llevada=Decimal(str(llevada)) if llevada else Decimal("0.0"),
-        fecha=ahora_ve().date(),
+        fecha=db_mov.fecha.date(),
         movimiento_id=db_mov.id,
         cliente_id=cliente_id,
         cliente_nombre=cliente_nombre,

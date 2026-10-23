@@ -865,7 +865,7 @@ export const crudoService = {
   /** Registrar movimiento manual (ENTRADA/SALIDA/AJUSTE/DAÑO/DEVOLUCION). */
   registrarMovimiento: async (
     id: number,
-    payload: { tipo: string; cantidad: number; observaciones?: string },
+    payload: { tipo: string; cantidad: number; observaciones?: string; fecha?: string },
   ): Promise<CrudoMovimiento> => {
     const response = await api.post<CrudoMovimiento>(`/produccion/crudo/${id}/movimiento`, payload);
     return response.data;

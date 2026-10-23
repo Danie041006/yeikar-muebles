@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session, joinedload, object_session
 from sqlalchemy import or_, exists
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import datetime, date
+from datetime import datetime, date, time
 from typing import Optional
 import logging
 
@@ -3521,6 +3521,15 @@ def registrar_movimiento_crudo(db: Session, crudo_id: int, esquema, usuario: Usu
     cantidad = Decimal(str(esquema.cantidad))
     if cantidad <= 0:
         raise ValueError("La cantidad debe ser mayor que cero.")
+    # Fecha real del movimiento: por defecto hoy; admite un día anterior.
+    fecha_sel = getattr(esquema, "fecha", None)
+    if fecha_sel is not None and fecha_sel > hoy_ve():
+        raise ValueError("La fecha del movimiento no puede ser futura.")
+    fecha_mov = (
+        ahora_ve()
+        if fecha_sel is None or fecha_sel == hoy_ve()
+        else datetime.combine(fecha_sel, time(12, 0))
+    )
     if tipo in ("ENTRADA", "DEVOLUCION"):
         crudo.cantidad = Decimal(str(crudo.cantidad)) + cantidad
         crudo.activo = True
@@ -3543,6 +3552,7 @@ def registrar_movimiento_crudo(db: Session, crudo_id: int, esquema, usuario: Usu
         cantidad=cantidad,
         observaciones=getattr(esquema, "observaciones", None),
         creado_por_id=usuario.id if usuario else None,
+        fecha=fecha_mov,
     )
     db.add(db_mov)
     db.add(crudo)

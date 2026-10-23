@@ -80,6 +80,11 @@ class MovimientoCreate(BaseModel):
     # % de descuento aplicado (el NETO ya viaja en costo_unitario); queda
     # guardado para mostrarlo en el libro de entradas.
     descuento_porcentaje: Optional[Decimal] = Field(None, ge=0, le=100)
+    # Fecha real del movimiento (compra/entrada de un día anterior). Opcional:
+    # sin ella se usa HOY en hora VE. No admite fechas futuras. Cuando es hoy
+    # se conserva la hora real; cuando es anterior se ancla al mediodía para
+    # que el día no se corra por zona horaria.
+    fecha: Optional[date] = None
 
     @field_validator("departamento")
     @classmethod
@@ -192,6 +197,9 @@ class MovimientoProductoCreate(BaseModel):
     # % de descuento aplicado (el NETO ya viaja en costo_unitario); queda
     # guardado para mostrarlo en el libro de entradas.
     descuento_porcentaje: Optional[Decimal] = Field(None, ge=0, le=100)
+    # Fecha real del movimiento (entrada de un día anterior). Opcional: sin
+    # ella se usa HOY en hora VE. No admite fechas futuras.
+    fecha: Optional[date] = None
 
 
 class MovimientoProductoResponse(BaseModel):
