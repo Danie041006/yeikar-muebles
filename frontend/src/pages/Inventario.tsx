@@ -8,10 +8,10 @@ import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { motion } from 'framer-motion';
-import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
+import { SearchSelect, ResponsiveDataTable, MontoInput, type DataColumn } from '../components/ui';
 import AdjuntoImagen from '../components/AdjuntoImagen';
+import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage, fmtNumero } from '../utils/format';
 import { hoyVE } from '../utils/fechas';
-import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage } from '../utils/format';
 
 interface Ubicacion {
   id: number;
@@ -95,6 +95,7 @@ const DEPARTAMENTOS: { valor: string; label: string }[] = [
   { valor: 'TAPICERIA', label: 'Tapicería' },
   { valor: 'VIDRIERIA', label: 'Vidriería' },
   { valor: 'TERMINACION', label: 'Terminación' },
+  { valor: 'OFICINA', label: 'Oficina' },
 ];
 const labelDepartamento = (d: string | null | undefined) =>
   DEPARTAMENTOS.find((x) => x.valor === d)?.label ?? (d || null);
@@ -150,6 +151,8 @@ export default function Inventario() {
     fecha: hoyVE(), // fecha real del movimiento (por defecto hoy; admite días anteriores)
     cantidad: '',
     costo_unitario: '',
+    precio_moneda: '', // precio unitario en `moneda_precio_id` (ej. USD); calcula el COP
+    moneda_precio_id: MONEDA_BASE_ID, // moneda en la que se digita el precio (1 = COP)
     descuento_porcentaje: '',
     observaciones: '',
     pago_key: '',   // "cuentaId:monedaId" — vacío = a crédito
@@ -620,7 +623,7 @@ export default function Inventario() {
       : (costoBruto > 0 ? costoBruto : undefined);
     const precioVenta = parseFloat(newProducto.precio_venta || '0') || 0;
     const detalleDesc = costoBruto > 0 && pctDesc > 0
-      ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${simboloPrecio}${costoBruto.toFixed(2)} → Neto: ${simboloPrecio}${costoNeto?.toFixed(2)})`
+      ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${simboloPrecio}${fmtNumero(costoBruto, 2)} → Neto: ${simboloPrecio}${fmtNumero(costoNeto, 2)})`
       : '';
 
     try {
@@ -775,8 +778,8 @@ export default function Inventario() {
       await crudoService.registrarMovimiento(selectedCrudoId, {
         tipo: movCrudo.tipo,
         cantidad: parseFloat(movCrudo.cantidad),
-        fecha: movCrudo.fecha || hoyVE(),
         observaciones: movCrudo.observaciones || undefined,
+        fecha: movCrudo.fecha || hoyVE(),
       });
       setMovCrudo({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', observaciones: '' });
       await Promise.all([fetchCrudo(), refrescarKardexCrudo(selectedCrudoId)]);
@@ -812,7 +815,7 @@ export default function Inventario() {
           : { nombre: u.nombre, valor: String(f), invertida: true };
       }),
     );
-    setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
+    setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
     try {
       setLoadingKardex(true);
       const data = await inventarioService.getKardex(mat.id);
@@ -901,7 +904,12 @@ export default function Inventario() {
       return;
     }
 
-    const costoBruto = esEntrada && movMaterial.costo_unitario && parseFloat(movMaterial.costo_unitario) > 0 ? parseFloat(movMaterial.costo_unitario) : undefined;
+    // El precio puede venir digitado en la moneda de la cuenta (ej. USD):
+    // en ese caso el COP se calcula con la tasa y es el que se guarda.
+    const precioEnMoneda = esEntrada ? parseFloat(movMaterial.precio_moneda || '0') || 0 : 0;
+    const costoBruto = esEntrada && precioEnMoneda > 0 && tasaNum > 0
+      ? parseFloat((precioEnMoneda * tasaNum).toFixed(2))
+      : (esEntrada && movMaterial.costo_unitario && parseFloat(movMaterial.costo_unitario) > 0 ? parseFloat(movMaterial.costo_unitario) : undefined);
     const pctDesc = esEntrada && movMaterial.descuento_porcentaje ? parseFloat(movMaterial.descuento_porcentaje) : 0;
     const costoNeto = costoBruto !== undefined && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
@@ -942,7 +950,7 @@ export default function Inventario() {
         observaciones: [movMaterial.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
+      setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -1759,7 +1767,14 @@ export default function Inventario() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => navigate('/inventario/oficina')}
+            className="bg-white border border-yeikar-secondary-light/20 hover:border-yeikar-primary/40 text-yeikar-secondary px-4 py-2.5 rounded-xl font-bold font-headline text-sm transition-colors flex items-center gap-2"
+            title="Papelería, cafetería y aseo de oficina"
+          >
+            Inventario de Oficina
+          </button>
           {tab === 'insumos' && (
             <button
               onClick={() => setShowMaterialModal(true)}
@@ -2267,17 +2282,76 @@ export default function Inventario() {
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
                               <label className="text-xs font-bold text-yeikar-secondary">
-                                Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(actualiza el costo)</span>
+                                Precio unitario ({codMonedaDe(movMaterial.moneda_precio_id)}) <span className="text-yeikar-neutral/40 font-normal">(actualiza el costo)</span>
                               </label>
-                              <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.costo_unitario} onChange={(e) => setMovMaterial((p) => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
+                              <div className="flex gap-2">
+                                <MontoInput
+                                  min="0"
+                                  placeholder="0.00"
+                                  value={movMaterial.moneda_precio_id === MONEDA_BASE_ID ? movMaterial.costo_unitario : movMaterial.precio_moneda}
+                                  onChange={(v) => {
+                                    if (movMaterial.moneda_precio_id === MONEDA_BASE_ID) {
+                                      setMovMaterial((p) => ({ ...p, costo_unitario: v, precio_moneda: '' }));
+                                    } else {
+                                      const num = parseFloat(v) || 0;
+                                      const t = parseFloat(movMaterial.tasa_pago || '0') || 0;
+                                      setMovMaterial((p) => ({
+                                        ...p,
+                                        precio_moneda: v,
+                                        costo_unitario: num > 0 && t > 0 ? (num * t).toFixed(2) : '',
+                                      }));
+                                    }
+                                  }}
+                                  className={inputCls}
+                                />
+                                <select
+                                  value={movMaterial.moneda_precio_id}
+                                  onChange={(e) => {
+                                    const mid = Number(e.target.value) || MONEDA_BASE_ID;
+                                    setMovMaterial((p) => ({ ...p, moneda_precio_id: mid, precio_moneda: '', costo_unitario: '' }));
+                                  }}
+                                  className="w-20 rounded-lg border border-yeikar-secondary-light/20 bg-white px-2 text-xs font-mono"
+                                  title="Moneda en la que se digita el precio"
+                                >
+                                  {monedas.filter((m) => m.activo !== false).map((m) => (
+                                    <option key={m.id} value={m.id}>{m.codigo}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              {movMaterial.moneda_precio_id !== MONEDA_BASE_ID && (
+                                <div className="flex items-center gap-2 pt-1">
+                                  <input
+                                    type="number"
+                                    step="any"
+                                    min="0"
+                                    placeholder={`1 ${codMonedaDe(movMaterial.moneda_precio_id)} = ? COP`}
+                                    value={movMaterial.tasa_pago}
+                                    onChange={(e) => {
+                                      const t = e.target.value;
+                                      const tnum = parseFloat(t) || 0;
+                                      const enMoneda = parseFloat(movMaterial.precio_moneda || '0') || 0;
+                                      setMovMaterial((p) => ({
+                                        ...p,
+                                        tasa_pago: t,
+                                        costo_unitario: enMoneda > 0 && tnum > 0 ? (enMoneda * tnum).toFixed(2) : p.costo_unitario,
+                                      }));
+                                    }}
+                                    className={inputCls}
+                                  />
+                                  <span className="text-[10px] font-mono text-yeikar-neutral/60 whitespace-nowrap">
+                                    = ${(Number(movMaterial.costo_unitario || 0)).toLocaleString('es-CO', { maximumFractionDigits: 2 })} COP
+                                  </span>
+                                </div>
+                              )}
                             </div>
                             <div className="space-y-1">
                               <label className="text-xs font-bold text-yeikar-secondary">
                                 La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete por unidad — genera gasto)</span>
                               </label>
-                              <input type="number" step="0.01" min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(e) => setMovMaterial((p) => ({ ...p, llevada: e.target.value }))} className={inputCls} />
+                              <MontoInput min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(v) => setMovMaterial((p) => ({ ...p, llevada: v }))} className={inputCls} />
                             </div>
                           </div>
+
                           <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1">
                               <label className="text-xs font-bold text-yeikar-secondary">
@@ -2464,7 +2538,7 @@ export default function Inventario() {
                               </label>
                               <SearchSelect
                                 value={movMaterial.pago_key}
-                                onChange={(v) => setMovMaterial((p) => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago }))}
+                                onChange={(v) => setMovMaterial((p) => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago, precio_moneda: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.precio_moneda }))}
                                 options={[
                                   { value: '', label: 'Fiar (registrar deuda)' },
                                   ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
@@ -2490,7 +2564,17 @@ export default function Inventario() {
                                 <label className="text-xs font-bold text-yeikar-secondary">
                                   Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
                                 </label>
-                                <input type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) => setMovMaterial((p) => ({ ...p, tasa_pago: e.target.value }))} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
+                                <input type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) => {
+                                  const t = e.target.value;
+                                  const tnum = parseFloat(t) || 0;
+                                  const enMoneda = parseFloat(movMaterial.precio_moneda || '0') || 0;
+                                  setMovMaterial((p) => ({
+                                    ...p,
+                                    tasa_pago: t,
+                                    // Si el precio se digitó en USD, recalcula el COP.
+                                    costo_unitario: enMoneda > 0 && tnum > 0 ? (enMoneda * tnum).toFixed(2) : p.costo_unitario,
+                                  }));
+                                }} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
                               </div>
                             )}
                             {!!cuentaId && parseFloat(movMaterial.cantidad || '0') > 0 && (
@@ -2545,7 +2629,7 @@ export default function Inventario() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-yeikar-secondary">Precio Unitario</label>
-                          <input type="number" min="0" step="0.01" value={editMaterial.costo_base} onChange={(e) => setEditMaterial((p) => ({ ...p, costo_base: e.target.value }))} className={inputCls} />
+                          <MontoInput min="0" value={editMaterial.costo_base} onChange={(v) => setEditMaterial((p) => ({ ...p, costo_base: v }))} className={inputCls} />
                         </div>
                         <div className="space-y-1">
                           <label className="text-xs font-bold text-yeikar-secondary">Stock Mínimo</label>
@@ -2742,11 +2826,13 @@ export default function Inventario() {
                                       Llevada (flete): <span className="font-mono font-semibold text-amber-700">${Number(mov.llevada).toLocaleString('es-ES')}</span>
                                     </p>
                                   )}
-                                  {(mov.departamento || mov.recibido_por) && (
+                                  {(mov.departamento || mov.recibido_por || mov.consumido_por) && (
                                     <p className="text-[11px] text-yeikar-neutral/50 mt-0.5">
                                       {mov.departamento && <>Zona: <span className="font-semibold text-yeikar-secondary">{labelDepartamento(mov.departamento)}</span></>}
-                                      {mov.departamento && mov.recibido_por && ' · '}
+                                      {mov.departamento && (mov.recibido_por || mov.consumido_por) && ' · '}
                                       {mov.recibido_por && <>Trajo: <span className="font-semibold text-yeikar-secondary">{mov.recibido_por}</span></>}
+                                      {mov.recibido_por && mov.consumido_por && ' · '}
+                                      {mov.consumido_por && <>Consumió: <span className="font-semibold text-yeikar-secondary">{mov.consumido_por}</span></>}
                                     </p>
                                   )}
                                   {mov.tipo === 'ENTRADA' && mov.costo_unitario != null && (() => {
@@ -3061,7 +3147,7 @@ export default function Inventario() {
                           ? <>Precio Unitario (Lista) <span className="text-yeikar-neutral/40 font-normal">(en {productoSeleccionado?.moneda?.codigo ?? 'COP'} · actualiza el precio al instante)</span></>
                           : <>Costo Unitario <span className="text-yeikar-neutral/40 font-normal">(valoriza el stock; no toca el costo del catálogo)</span></>}
                       </label>
-                      <input type="number" step="0.01" min="0" placeholder="0.00" value={movProducto.costo_unitario} onChange={(e) => setMovProducto(p => ({ ...p, costo_unitario: e.target.value }))} className={inputCls} />
+                      <MontoInput min="0" placeholder="0.00" value={movProducto.costo_unitario} onChange={(v) => setMovProducto(p => ({ ...p, costo_unitario: v }))} className={inputCls} />
                     </div>
 
                     {/* "La llevada": flete/aduana */}
@@ -3069,7 +3155,7 @@ export default function Inventario() {
                       <label className="text-xs font-bold text-yeikar-secondary">
                         La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete — genera gasto)</span>
                       </label>
-                      <input type="number" step="0.01" min="0" placeholder="0.00" value={movProducto.llevada} onChange={(e) => setMovProducto(p => ({ ...p, llevada: e.target.value }))} className={inputCls} />
+                      <MontoInput min="0" placeholder="0.00" value={movProducto.llevada} onChange={(v) => setMovProducto(p => ({ ...p, llevada: v }))} className={inputCls} />
                     </div>
                     </div>
 
@@ -3243,11 +3329,11 @@ export default function Inventario() {
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">Precio venta ({monCod})</label>
-                      <input type="number" min="0" step="0.01" value={editProducto.precio_venta_base} onChange={(e) => setEditProducto((p) => ({ ...p, precio_venta_base: e.target.value }))} className={inputCls} />
+                      <MontoInput min="0" value={editProducto.precio_venta_base} onChange={(v) => setEditProducto((p) => ({ ...p, precio_venta_base: v }))} className={inputCls} />
                     </div>
                     <div className="space-y-1">
                       <label className="text-xs font-bold text-yeikar-secondary">Costo ({monCod})</label>
-                      <input type="number" min="0" step="0.01" value={editProducto.precio_costo_base} onChange={(e) => setEditProducto((p) => ({ ...p, precio_costo_base: e.target.value }))} className={inputCls} />
+                      <MontoInput min="0" value={editProducto.precio_costo_base} onChange={(v) => setEditProducto((p) => ({ ...p, precio_costo_base: v }))} className={inputCls} />
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -3646,7 +3732,7 @@ export default function Inventario() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio Unitario <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span></label>
-                  <input type="number" min="0" step="0.01" placeholder="0.00" value={newMaterial.costo_base} onChange={(e) => setNewMaterial(prev => ({ ...prev, costo_base: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <MontoInput min="0" placeholder="0.00" value={newMaterial.costo_base} onChange={(v) => setNewMaterial(prev => ({ ...prev, costo_base: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Stock Mínimo <span className="text-yeikar-neutral/40 font-normal">(Alerta)</span></label>
@@ -3796,13 +3882,11 @@ export default function Inventario() {
                     </label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-yeikar-neutral/40">{simboloPrecio}</span>
-                      <input
-                        type="number"
+                      <MontoInput
                         min="0"
-                        step="0.01"
                         placeholder="0.00"
                         value={newProducto.costo_base}
-                        onChange={(e) => setNewProducto(prev => ({ ...prev, costo_base: e.target.value }))}
+                        onChange={(v) => setNewProducto(prev => ({ ...prev, costo_base: v }))}
                         className="w-full pl-8 pr-3 py-2.5 bg-white border border-yeikar-secondary-light/15 rounded-xl text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
                       />
                     </div>
@@ -3834,13 +3918,11 @@ export default function Inventario() {
                   </label>
                   <div className="relative">
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-yeikar-neutral/40">{simboloPrecio}</span>
-                    <input
-                      type="number"
+                    <MontoInput
                       min="0"
-                      step="0.01"
                       placeholder="0.00"
                       value={newProducto.precio_venta}
-                      onChange={(e) => setNewProducto(prev => ({ ...prev, precio_venta: e.target.value }))}
+                      onChange={(v) => setNewProducto(prev => ({ ...prev, precio_venta: v }))}
                       className="w-full pl-8 pr-3 py-2.5 bg-white border border-yeikar-secondary-light/15 rounded-xl text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono"
                     />
                   </div>
@@ -3859,15 +3941,15 @@ export default function Inventario() {
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs space-y-1 text-emerald-900">
                       <div className="flex justify-between">
                         <span className="text-emerald-700">Precio lista de compra:</span>
-                        <span className="font-mono">{simboloPrecio}{bruto.toFixed(2)}</span>
+                        <span className="font-mono">{simboloPrecio}{fmtNumero(bruto, 2)}</span>
                       </div>
                       <div className="flex justify-between text-emerald-700 font-semibold">
                         <span>Descuento aplicado ({desc}%):</span>
-                        <span className="font-mono">-{simboloPrecio}{montoDesc.toFixed(2)}</span>
+                        <span className="font-mono">-{simboloPrecio}{fmtNumero(montoDesc, 2)}</span>
                       </div>
                       <div className="flex justify-between font-bold border-t border-emerald-200 pt-1 text-emerald-950">
                         <span>Costo neto real de inventario:</span>
-                        <span className="font-mono">{simboloPrecio}{neto.toFixed(2)}</span>
+                        <span className="font-mono">{simboloPrecio}{fmtNumero(neto, 2)}</span>
                       </div>
                     </div>
                   );
@@ -3884,7 +3966,7 @@ export default function Inventario() {
                   if (venta <= 0) {
                     return (
                       <p className="text-[10px] text-yeikar-neutral/50 bg-white border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
-                        Con costo neto de {simboloPrecio}{neto.toFixed(2)}, un <b>60% de ganancia</b> daría un precio de venta de ≈ {simboloPrecio}{(neto * 1.6).toFixed(2)}.
+                        Con costo neto de {simboloPrecio}{fmtNumero(neto, 2)}, un <b>60% de ganancia</b> daría un precio de venta de ≈ {simboloPrecio}{fmtNumero(neto * 1.6, 2)}.
                       </p>
                     );
                   }
@@ -3894,12 +3976,12 @@ export default function Inventario() {
                     <div className={`rounded-xl p-2.5 text-xs space-y-1 border ${ganancia >= 0 ? 'bg-teal-50 border-teal-200 text-teal-900' : 'bg-red-50 border-red-200 text-red-900'}`}>
                       <div className="flex justify-between font-bold">
                         <span>Ganancia por unidad:</span>
-                        <span className="font-mono">{simboloPrecio}{ganancia.toFixed(2)} ({pct.toFixed(1)}%)</span>
+                        <span className="font-mono">{simboloPrecio}{fmtNumero(ganancia, 2)} ({pct.toFixed(1)}%)</span>
                       </div>
                       {cant > 0 && (
                         <div className="flex justify-between text-[11px]">
                           <span>Total de la compra ({cant} × neto):</span>
-                          <span className="font-mono">{simboloPrecio}{(neto * cant).toFixed(2)}</span>
+                          <span className="font-mono">{simboloPrecio}{fmtNumero(neto * cant, 2)}</span>
                         </div>
                       )}
                     </div>
@@ -3997,7 +4079,7 @@ export default function Inventario() {
               })()}
               {parseFloat(newProducto.cantidad_inicial || '0') > 0 && (
                 <p className="text-[11px] text-yeikar-neutral/50 italic bg-yeikar-tertiary/30 border border-yeikar-secondary-light/5 rounded-lg px-3 py-2">
-                  Se registrará una entrada inicial de {newProducto.cantidad_inicial || 1} unidad(es) en {ubicaciones[0]?.nombre || 'Depósito Principal'}{parseFloat(newProducto.costo_base || '0') > 0 ? ` con ese costo (${simboloPrecio}${newProducto.costo_base} c/u)` : ''}.
+                  Se registrará una entrada inicial de {newProducto.cantidad_inicial || 1} unidad(es) en {ubicaciones[0]?.nombre || 'Depósito Principal'}{parseFloat(newProducto.costo_base || '0') > 0 ? ` con ese costo (${simboloPrecio}${fmtNumero(parseFloat(newProducto.costo_base), 2)} c/u)` : ''}.
                 </p>
               )}
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
@@ -4041,11 +4123,11 @@ export default function Inventario() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo c/u (COP)</label>
-                  <input
-                    type="number" min="0" step="any"
+                  <MontoInput
+                    min="0"
                     placeholder="Opcional"
                     value={newCrudo.costo}
-                    onChange={(e) => setNewCrudo(prev => ({ ...prev, costo: e.target.value }))}
+                    onChange={(v) => setNewCrudo(prev => ({ ...prev, costo: v }))}
                     className={inputCls}
                   />
                 </div>
@@ -4146,11 +4228,11 @@ export default function Inventario() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio venta (USD) *</label>
-                  <input type="number" min="0" step="0.01" required placeholder="Ej. 1500" value={newPieza.precio_usd} onChange={(e) => setNewPieza(prev => ({ ...prev, precio_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <MontoInput min="0" required placeholder="Ej. 1500" value={newPieza.precio_usd} onChange={(v) => setNewPieza(prev => ({ ...prev, precio_usd: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo de producir (USD) *</label>
-                  <input type="number" min="0" step="0.01" required placeholder="Ej. 900" value={newPieza.costo_usd} onChange={(e) => setNewPieza(prev => ({ ...prev, costo_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <MontoInput min="0" required placeholder="Ej. 900" value={newPieza.costo_usd} onChange={(v) => setNewPieza(prev => ({ ...prev, costo_usd: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
               </div>
               {parseFloat(newPieza.precio_usd || '0') > 0 && parseFloat(newPieza.costo_usd || '0') > 0 && (() => {
@@ -4234,11 +4316,11 @@ export default function Inventario() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio venta (USD) *</label>
-                  <input type="number" min="0" step="0.01" required placeholder="Ej. 1500" value={epForm.precio_usd} onChange={(e) => setEpForm(prev => ({ ...prev, precio_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <MontoInput min="0" required placeholder="Ej. 1500" value={epForm.precio_usd} onChange={(v) => setEpForm(prev => ({ ...prev, precio_usd: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Costo de producir (USD)</label>
-                  <input type="number" min="0" step="0.01" placeholder="Ej. 900" value={epForm.costo_usd} onChange={(e) => setEpForm(prev => ({ ...prev, costo_usd: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <MontoInput min="0" placeholder="Ej. 900" value={epForm.costo_usd} onChange={(v) => setEpForm(prev => ({ ...prev, costo_usd: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
               </div>
               {parseFloat(epForm.precio_usd || '0') > 0 && parseFloat(epForm.costo_usd || '0') > 0 && (() => {

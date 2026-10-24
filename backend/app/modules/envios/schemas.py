@@ -21,8 +21,20 @@ class EnvioBase(BaseModel):
     moneda_flete_id: Optional[int] = None
     tasa_cambio_flete: Optional[float] = Field(None, gt=0)
     costo_flete_en_moneda_base: Optional[float] = None
+class EnvioDetalleCreate(BaseModel):
+    """Ítem que se entrega en este despacho (renglón o pieza)."""
+
+    detalle_pedido_id: int
+    orden_produccion_id: Optional[int] = None
+    cantidad: float = Field(gt=0)
+
+
 class EnvioCreate(EnvioBase):
-    pass
+    # Si se omite, se despacha todo lo pendiente que ya esté listo (compatibilidad
+    # con el envío automático y con los envíos de pedidos sin producción).
+    detalles: List[EnvioDetalleCreate] = []
+
+
 class EnvioUpdate(BaseModel):
     empleado_id: Optional[int] = None
     fecha_salida: Optional[datetime] = None
@@ -35,6 +47,20 @@ class EnvioUpdate(BaseModel):
     moneda_flete_id: Optional[int] = None
     tasa_cambio_flete: Optional[float] = Field(None, gt=0)
     costo_flete_en_moneda_base: Optional[float] = None
+class EnvioDetalleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    detalle_pedido_id: int
+    orden_produccion_id: Optional[int] = None
+    cantidad: float
+    descripcion: Optional[str] = None
+    pieza_nombre: Optional[str] = None
+    tipo_item: Optional[str] = None
+    producto_id: Optional[int] = None
+    material_id: Optional[int] = None
+
+
 class EnvioResponse(EnvioBase):
     id: int
     created_at: Optional[datetime] = None
@@ -47,6 +73,7 @@ class EnvioResponse(EnvioBase):
     pedido: Optional[PedidoResponse] = None
     empleado: Optional[EmpleadoResponse] = None
     moneda_flete: Optional[MonedaResponse] = None
+    detalles: List[EnvioDetalleResponse] = []
     class Config:
         from_attributes = True
 
@@ -120,6 +147,30 @@ class EnvioRepartoResponse(BaseModel):
     guia_despacho: Optional[str] = None
     observaciones: Optional[str] = None
     pedido: Optional[PedidoRepartoResponse] = None
+    detalles: List[EnvioDetalleResponse] = []
+
+
+class PendienteEntregaItem(BaseModel):
+    """Lo que falta por entregar de un renglón o pieza, y cuánto está listo."""
+
+    detalle_pedido_id: int
+    orden_produccion_id: Optional[int] = None
+    pieza_nombre: Optional[str] = None
+    descripcion: str
+    tipo_item: Optional[str] = None
+    cantidad_total: float
+    cantidad_entregada: float
+    cantidad_reservada: float
+    cantidad_pendiente: float
+    # Parte que ya salió de producción (o reventa/insumo) y se puede despachar.
+    cantidad_lista: float
+    estado_produccion: Optional[str] = None
+
+
+class PendienteEntregaResponse(BaseModel):
+    pedido_id: int
+    estado: str
+    items: List[PendienteEntregaItem] = []
 
 
 class EnvioUbicacionCreate(BaseModel):

@@ -66,6 +66,43 @@ class DetalleCotizacion(Base):
     producto = relationship("Producto")
     material = relationship("Material")
     materiales = relationship("CotizacionDetalleMaterial", back_populates="detalle_cotizacion", cascade="all, delete-orphan")
+    # Piezas que componen un juego (mesa, sillas, sillones…). El renglón sigue
+    # siendo UNO con precio global; las piezas solo abren la producción y el
+    # costo por dentro. Se copian al pedido al convertir la cotización.
+    piezas = relationship(
+        "DetalleCotizacionPieza",
+        back_populates="detalle",
+        cascade="all, delete-orphan",
+        order_by="DetalleCotizacionPieza.orden",
+    )
+
+
+class DetalleCotizacionPieza(Base):
+    """Pieza declarada de un renglón-juego (sin precio propio).
+
+    `cantidad` es por UNIDAD del renglón (por juego). Al crear las órdenes de
+    producción se multiplica por la cantidad de juegos del detalle del pedido.
+    """
+
+    __tablename__ = "detalle_cotizacion_pieza"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    detalle_cotizacion_id = Column(
+        BigInteger,
+        ForeignKey("detalle_cotizacion.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    nombre = Column(String(150), nullable=False)
+    cantidad = Column(Numeric(10, 2), nullable=False, server_default="1", default=1)
+    notas = Column(Text, nullable=True)
+    # Orden de aparición en el renglón (Mesa, Sillas, Sillones…).
+    orden = Column(BigInteger, nullable=False, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    detalle = relationship("DetalleCotizacion", back_populates="piezas")
+
 
 class CotizacionAnalisisIA(Base):
     __tablename__ = "cotizacion_analisis_ia"

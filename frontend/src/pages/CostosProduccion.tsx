@@ -6,7 +6,7 @@ import {
 } from '../services/costosProduccionService';
 import {
   Button, Card, Badge, Spinner, EmptyState, StatCard, PageHeader,
-  Field, Input, Tabs, Modal, ConfirmDialog, SearchSelect,
+  Field, Input, Tabs, Modal, ConfirmDialog, SearchSelect, MontoInput,
   ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
 
@@ -61,7 +61,6 @@ export default function CostosProduccion() {
   }, [cargarItems]);
 
   const areaNombre = areas.find((a) => String(a.id) === areaActiva)?.nombre || '';
-  const totalArea = items.reduce((s, it) => s + Number(it.precio), 0);
 
   const handleCrear = async () => {
     if (!areaActiva || !form.descripcion.trim() || !form.precio || form.precio <= 0) return;
@@ -76,7 +75,7 @@ export default function CostosProduccion() {
   };
 
   const guardarMonto = async (item: PrecioProduccion, valor: string) => {
-    const monto = Number(valor);
+    const monto = parseFloat(valor);
     if (isNaN(monto) || monto < 0) {
       setEditandoId(null);
       return;
@@ -200,14 +199,12 @@ export default function CostosProduccion() {
       render: (it) => (
         <>
           {editandoId === it.id ? (
-            <Input
-              type="number"
+            <MontoInput
               min="0"
-              step="1000"
               autoFocus
               className="w-36 ml-auto text-right font-mono"
               value={montoEditando}
-              onChange={(e) => setMontoEditando(e.target.value)}
+              onChange={(v) => setMontoEditando(v)}
               onBlur={() => guardarMonto(it, montoEditando)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') guardarMonto(it, montoEditando);
@@ -260,16 +257,11 @@ export default function CostosProduccion() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
         <StatCard
           label={`Ítems de ${areaNombre}`}
           value={`${items.length}`}
           accent="from-yeikar-primary to-yeikar-primary-light"
-        />
-        <StatCard
-          label="Total del área (COP)"
-          value={`$${totalArea.toLocaleString('es-CO')}`}
-          accent="from-yeikar-secondary to-yeikar-secondary-light"
         />
         <StatCard
           label="Áreas configuradas"
@@ -331,13 +323,6 @@ export default function CostosProduccion() {
             }
           />
         )}
-        {items.length > 0 && (
-          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-yeikar-secondary-light/10">
-            <span className="text-sm text-yeikar-neutral/50">
-              Total {areaNombre}: <b className="font-mono text-yeikar-secondary">$ {totalArea.toLocaleString('es-CO')}</b>
-            </span>
-          </div>
-        )}
       </Card>
 
       <Modal
@@ -370,12 +355,10 @@ export default function CostosProduccion() {
             />
           </Field>
           <Field label="Precio (COP)" required>
-            <Input
-              type="number"
+            <MontoInput
               min="0"
-              step="1000"
-              value={form.precio}
-              onChange={(e) => setForm({ ...form, precio: Number(e.target.value) })}
+              value={form.precio || ''}
+              onChange={(v) => setForm({ ...form, precio: parseFloat(v) || 0 })}
             />
           </Field>
         </div>
@@ -413,12 +396,10 @@ export default function CostosProduccion() {
             />
           </Field>
           <Field label="Precio (COP)" required>
-            <Input
-              type="number"
+            <MontoInput
               min="0"
-              step="1000"
-              value={form.precio}
-              onChange={(e) => setForm({ ...form, precio: Number(e.target.value) })}
+              value={form.precio || ''}
+              onChange={(v) => setForm({ ...form, precio: parseFloat(v) || 0 })}
             />
           </Field>
         </div>

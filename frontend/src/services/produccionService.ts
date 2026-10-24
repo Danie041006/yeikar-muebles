@@ -173,6 +173,11 @@ export interface PiezaOrden {
 export interface OrdenProduccion {
   id: number;
   detalle_pedido_id: number | null;
+  /** Pieza interna del juego (Mesa, Sillas…); null en un mueble suelto. */
+  detalle_pieza_id?: number | null;
+  pieza_nombre?: string | null;
+  /** Unidades físicas de esta orden (pieza × juegos del renglón). */
+  cantidad?: number | null;
   producto_id?: number | null;
   detalle_pedido?:DetallePedidoBasico;
   producto?: ProductoBasico;
@@ -277,6 +282,9 @@ export interface ReferenciaReceta {
   /** None en muebles a la medida (sin producto de catálogo). */
   producto_id: number | null;
   producto_nombre: string;
+  /** En una orden de pieza: nombre de la pieza y del juego padre. */
+  pieza_nombre?: string | null;
+  juego_nombre?: string | null;
   dimensiones: { ancho: number | null; largo: number | null };
   seccion_actual?: string | null;
   materiales: MaterialReferencia[];
@@ -949,6 +957,9 @@ export interface CostosEnVivoOrden {
   estado: string;
   producto_id: number | null;
   producto_nombre: string | null;
+  /** En una orden de pieza: nombre de la pieza y del juego padre. */
+  pieza_nombre?: string | null;
+  juego_nombre?: string | null;
   dimensiones: { ancho: number | null; largo: number | null } | null;
   unidades: number;
   estimado: number | null;

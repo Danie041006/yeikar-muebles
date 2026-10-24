@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect } from '../components/ui';
 import DocumentoHojaTrabajo from '../components/Expediente/DocumentoHojaTrabajo';
 import EtapaModal from '../components/Produccion/EtapaModal';
-import { TRANSICIONES_ETAPA, esOrdenExhibicion, esOrdenRetrabajo, etiquetaOrden, type Empleado, type Material } from '../components/Produccion/tipos';
+import { TRANSICIONES_ETAPA, esOrdenExhibicion, esOrdenRetrabajo, etiquetaOrden, nombreOrden, type Empleado, type Material } from '../components/Produccion/tipos';
 import { useToast } from '../context/ToastContext';
 
 // (Empleado, Material, TRANSICIONES_ETAPA, fmt y esOrdenExhibicion viven en
@@ -173,16 +173,22 @@ function KanbanCard({ stage, pedidoInfo, onClick, onStatusChange, onPassToArea, 
         )}
 
         <h4 className="font-headline font-bold text-yeikar-secondary text-sm group-hover:text-yeikar-primary transition-colors leading-tight">
-          {stage.orden?.detalle_pedido?.producto?.nombre 
-            ? stage.orden.detalle_pedido.producto.nombre 
-            : stage.orden?.producto?.nombre
-            ? stage.orden.producto.nombre 
-            : stage.orden?.detalle_pedido?.descripcion_especifica
-            ? stage.orden.detalle_pedido.descripcion_especifica
-            : stage.orden_produccion_id 
-            ? `Orden de Producción #${stage.orden_produccion_id}` 
-            : 'Producto en Fabricación'}
+          {nombreOrden(stage.orden)
+            || (stage.orden_produccion_id
+              ? `Orden de Producción #${stage.orden_produccion_id}`
+              : 'Producto en Fabricación')}
         </h4>
+
+        {stage.orden?.pieza_nombre && (
+          <p className="text-[10px] text-yeikar-neutral/50 line-clamp-1" title="Juego al que pertenece esta pieza">
+            {(stage.orden.detalle_pedido?.producto?.nombre
+              || stage.orden.detalle_pedido?.descripcion_especifica
+              || 'Juego completo')}
+            {stage.orden.cantidad && Number(stage.orden.cantidad) > 1
+              ? ` · ${Number(stage.orden.cantidad).toLocaleString('es-CO')} und`
+              : ''}
+          </p>
+        )}
 
         {(stage.orden?.detalle_pedido?.ancho && stage.orden?.detalle_pedido?.largo) || (stage.orden?.ancho && stage.orden?.largo) ? (
           <p className="text-[10px] font-mono text-yeikar-neutral/50">
@@ -674,7 +680,8 @@ export default function ProduccionKanban() {
     // de la línea del pedido, así que es lo único que hay contra el que buscar.
     const descMatch =
       stage.orden?.detalle_pedido?.descripcion_especifica?.toLowerCase().includes(term) || false;
-    return idMatch || pedidoMatch || obsMatch || empMatch || clientMatch || prodMatch || descMatch;
+    const piezaMatch = stage.orden?.pieza_nombre?.toLowerCase().includes(term) || false;
+    return idMatch || pedidoMatch || obsMatch || empMatch || clientMatch || prodMatch || descMatch || piezaMatch;
   });
 
   return (

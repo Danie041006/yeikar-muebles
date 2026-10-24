@@ -79,6 +79,7 @@ DEPARTAMENTOS_VALIDOS = {
     "TAPICERIA",
     "VIDRIERIA",
     "TERMINACION",
+    "OFICINA",
 }
 
 class MaterialBase(BaseModel):

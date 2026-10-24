@@ -344,6 +344,8 @@ class OrdenProduccionBase(BaseModel):
 class OrdenProduccionCreate(OrdenProduccionBase):
     # Opcional: si es_stock=True, no hace falta detalle de pedido.
     detalle_pedido_id: Optional[int] = None
+    # Si la línea es un juego, esta orden puede crearse para UNA pieza concreta.
+    detalle_pieza_id: Optional[int] = None
     es_stock: Optional[bool] = False
     # Solo para órdenes de stock: qué mueble se fabrica.
     producto_id: Optional[int] = None
@@ -407,6 +409,11 @@ class OrdenProduccionMinima(BaseModel):
     detalle_pedido_id: Optional[int] = None
     detalle_pedido: Optional[DetalleDePedidoBasico] = None
     producto: Optional[ProductoResponse] = None
+    # Juego interno: la orden ES una pieza (Mesa, Sillas…). La venta sigue
+    # siendo un solo renglón con precio global.
+    detalle_pieza_id: Optional[int] = None
+    pieza_nombre: Optional[str] = None
+    cantidad: Optional[float] = None
     es_stock: bool = False
     # Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK | RETRABAJO.
     tipo: str = "PEDIDO"
@@ -431,6 +438,10 @@ class OrdenProduccionResponse(OrdenProduccionBase):
     detalle_pedido_id: Optional[int] = None
     detalle_pedido: Optional[DetalleDePedidoBasico] = None
     producto: Optional[ProductoResponse] = None
+    # Juego interno: la orden ES una pieza (Mesa, Sillas…).
+    detalle_pieza_id: Optional[int] = None
+    pieza_nombre: Optional[str] = None
+    cantidad: Optional[float] = None
     es_stock: bool = False
     # Destino de lo fabricado: PEDIDO | EXHIBICION | STOCK | RETRABAJO.
     tipo: str = "PEDIDO"
@@ -488,6 +499,9 @@ class ReferenciaRecetaResponse(BaseModel):
     # Hoja de Trabajo se arman con la descripción del renglón y las piezas.
     producto_id: Optional[int] = None
     producto_nombre: str
+    # Juego interno: nombre de la pieza y del renglón padre para la Hoja.
+    pieza_nombre: Optional[str] = None
+    juego_nombre: Optional[str] = None
     dimensiones: dict
     seccion_actual: Optional[str] = None
     materiales: List[MaterialReferencia]

@@ -1,5 +1,5 @@
 from datetime import date
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import or_
 from app.modules.orders import model, schemas
 from app.modules.quotes.model import Cotizacion
@@ -8,6 +8,7 @@ from app.modules.catalogos.model import Moneda
 from app.modules.sales import service as venta_service
 from app.modules.sales.schemas import VentaCreate, PagoCreate
 from app.modules.auditoria.service import record_event
+from app.modules.envios.model import Envio
 from app.modules.users.deps import filtrar_registros_propios, tiene_alcance_total
 from app.modules.users.model import Usuario
 from app.core.state_machine import (
@@ -22,6 +23,51 @@ from app.core.hora_ve import hoy_ve
 # del cliente); SERVICIO (flete/instalación) NO se fabrica.
 def _es_producible(tipo_item) -> bool:
     return (tipo_item or "FABRICADO") in ("FABRICADO", "REPARACION")
+
+
+def _datos_pieza(pieza) -> dict:
+    """Normaliza una pieza de dict (payload), Pydantic (request) o modelo SQLAlchemy."""
+    if isinstance(pieza, dict):
+        return pieza
+    if hasattr(pieza, "model_dump"):
+        return pieza.model_dump()
+    return {
+        "nombre": getattr(pieza, "nombre", ""),
+        "cantidad": getattr(pieza, "cantidad", 1),
+        "notas": getattr(pieza, "notas", None),
+    }
+
+
+def _piezas_desde_payload(detalle_dict: dict, cotizado) -> list:
+    """Piezas del juego para el detalle del pedido.
+
+    Prioriza lo que envió la conversión; si no vino, copia las piezas de la
+    cotización emparejada. Devuelve dicts homogéneos (nombre/cantidad/notas).
+    """
+    piezas = detalle_dict.pop("piezas", None)
+    if piezas is None and cotizado is not None:
+        # No las enviaron (cliente viejo / conversión simple): copiar del renglón
+        # cotizado. Un [] explícito SÍ se respeta (permite dividir el juego).
+        piezas = getattr(cotizado, "piezas", None) or []
+    normalizadas = []
+    for pieza in piezas or []:
+        datos = _datos_pieza(pieza)
+        normalizadas.append({
+            "nombre": (datos.get("nombre") or "").strip(),
+            "cantidad": datos.get("cantidad") or 1,
+            "notas": (datos.get("notas") or "").strip() or None,
+        })
+    return normalizadas
+
+
+def _agregar_piezas_pedido(db_detalle, piezas: list | None) -> None:
+    for orden, pieza in enumerate(piezas or []):
+        db_detalle.piezas.append(model.DetallePedidoPieza(
+            nombre=pieza["nombre"],
+            cantidad=pieza["cantidad"],
+            notas=pieza["notas"],
+            orden=orden,
+        ))
 
 
 def _auto_agregar_obsequios(db: Session, db_pedido: model.Pedido, detalles_dicts: list):
@@ -121,11 +167,24 @@ def _auto_agregar_obsequios(db: Session, db_pedido: model.Pedido, detalles_dicts
         ))
 
 
+def _con_piezas(query):
+    """Eager-load de piezas, órdenes de producción y despachos del pedido.
+
+    `entrega_resumen` (modelo) recorre estas relaciones; sin el eager-load la
+    lista de pedidos haría N+1 consultas.
+    """
+    return query.options(
+        selectinload(model.Pedido.detalles).selectinload(model.DetallePedido.piezas),
+        selectinload(model.Pedido.detalles).selectinload(model.DetallePedido.ordenes),
+        selectinload(model.Pedido.envios).selectinload(Envio.detalles),
+    )
+
+
 def obtener_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
     query = db.query(model.Pedido).filter(model.Pedido.id == id_pedido)
     if usuario is not None:
         query = filtrar_registros_propios(query, model.Pedido.creado_por_id, usuario)
-    return query.first()
+    return _con_piezas(query).first()
 
 def obtener_pedidos(
     db: Session,
@@ -186,7 +245,7 @@ def obtener_pedidos(
 
     query = query.order_by(model.Pedido.fecha.desc(), model.Pedido.id.desc())
 
-    return query.offset(salto).limit(limite).all()
+    return _con_piezas(query).offset(salto).limit(limite).all()
 
 def crear_pedido(db: Session, esquema: schemas.PedidoCreate, usuario: Usuario | None = None):
     # Crear cabecera de pedido
@@ -201,12 +260,15 @@ def crear_pedido(db: Session, esquema: schemas.PedidoCreate, usuario: Usuario | 
     # Crear detalles
     detalles_creados = []
     for detalle_esquema in esquema.detalles:
+        datos_detalle = detalle_esquema.model_dump()
+        piezas = datos_detalle.pop("piezas", None) or []
         db_detalle = model.DetallePedido(
             pedido_id=db_pedido.id,
-            **detalle_esquema.model_dump()
+            **datos_detalle
         )
         db.add(db_detalle)
-        detalles_creados.append(detalle_esquema.model_dump())
+        _agregar_piezas_pedido(db_detalle, piezas)
+        detalles_creados.append(datos_detalle)
 
     db.flush()
     _auto_agregar_obsequios(db, db_pedido, detalles_creados)
@@ -264,28 +326,47 @@ def actualizar_pedido(
         # entran a producción (se venden del inventario), así que no deben
         # bloquear el cierre del pedido.
         if estado_anterior == "PRODUCCION" and nuevo_estado == "TERMINADO":
-            from app.modules.production.model import OrdenProduccion
-            detalles_fabricables = [d for d in db_pedido.detalles if _es_producible(d.tipo_item)]
-            n_ordenes_finalizadas = db.query(OrdenProduccion).join(
-                model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id
-            ).filter(
-                model.DetallePedido.pedido_id == db_pedido.id,
-                OrdenProduccion.estado == "FINALIZADA",
-            ).count()
-            if not detalles_fabricables:
-                pass
-            elif n_ordenes_finalizadas < len(detalles_fabricables):
+            from app.modules.production.service import pedido_produccion_finalizada
+
+            if not pedido_produccion_finalizada(db, db_pedido.id):
                 raise ValueError(
-                    "No se puede marcar el pedido como TERMINADO: todas las líneas a fabricar "
-                    "del pedido deben tener su orden de producción FINALIZADA."
+                    "No se puede marcar el pedido como TERMINADO: todas las piezas de "
+                    "las líneas a fabricar deben tener su orden de producción FINALIZADA."
+                )
+        # ENTREGADO es la suma de las entregas, no un botón: solo se permite si
+        # ya salió todo. El camino normal es "Registrar entrega" (envíos).
+        if nuevo_estado == "ENTREGADO" and estado_anterior != "ENTREGADO":
+            from app.modules.envios.service import pedido_entregado_completo
+
+            if not pedido_entregado_completo(db, db_pedido):
+                raise ValueError(
+                    "No se puede marcar el pedido como ENTREGADO: todavía hay ítems "
+                    "sin entregar. Registra la entrega de los ítems pendientes."
+                )
+        # Cancelar un pedido con entregas físicas dejaría mercancía en la calle
+        # sin documento. Primero se resuelven los despachos (fallido/eliminado).
+        if nuevo_estado == "CANCELADO" and estado_anterior != "CANCELADO":
+            envios_vivos = db.query(Envio).filter(
+                Envio.pedido_id == db_pedido.id,
+                Envio.estado != "FALLIDO",
+            ).all()
+            if any(envio.estado == "ENTREGADO" for envio in envios_vivos):
+                raise ValueError(
+                    "No se puede cancelar el pedido: ya tiene entregas registradas. "
+                    "Si hubo una devolución, regístrala antes de cancelar."
+                )
+            if envios_vivos:
+                raise ValueError(
+                    "No se puede cancelar el pedido: tiene despachos activos. "
+                    "Márcalos FALLIDO o elimínalos antes de cancelar."
                 )
     
     for campo, valor in datos.items():
         setattr(db_pedido, campo, valor)
     
     # Envío automático al TERMINADO (cualquier ruta: manual, atajo sin
-    # producción o producción finalizada). crear_envio_automatico es
-    # idempotente (si ya existe el envío, no duplica).
+    # producción o producción finalizada). Solo incluye lo que aún no está
+    # reservado/entregado, así que repetirlo no duplica tandas.
     if nuevo_estado == "TERMINADO" and estado_anterior != "TERMINADO":
         from app.modules.envios.service import crear_envio_automatico
         crear_envio_automatico(db, db_pedido.id, usuario)
@@ -293,23 +374,19 @@ def actualizar_pedido(
     # If transitioning to PRODUCCION, generate production orders and stages
     # Solo los ítems FABRICADO generan orden; REVENTA e INSUMO no se fabrican.
     if estado_anterior != "PRODUCCION" and nuevo_estado == "PRODUCCION":
-        from app.modules.production.model import OrdenProduccion
-        from datetime import date
+        from app.modules.production.service import crear_ordenes_desde_detalle_pedido
 
         for detalle in db_pedido.detalles:
             if not _es_producible(detalle.tipo_item):
                 continue
-            existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
-            if not existente:
-                db_orden = OrdenProduccion(
-                    detalle_pedido_id=detalle.id,
-                    estado="EN_PRODUCCION",
-                    fecha_inicio=hoy_ve(),
-                    fecha_fin=None,
-                    creado_por_id=usuario.id if usuario is not None else None,
-                    actualizado_por_id=usuario.id if usuario is not None else None,
-                )
-                db.add(db_orden)
+            crear_ordenes_desde_detalle_pedido(
+                db,
+                detalle,
+                usuario,
+                estado="EN_PRODUCCION",
+                fecha_inicio=hoy_ve(),
+                commit=False,
+            )
 
     # Cancelar el pedido detiene sus derivados vivos: la producción no puede
     # seguir trabajándose/finalizándose y la venta no sigue cobrable/facturable.
@@ -577,12 +654,28 @@ def convertir_cotizacion_a_pedido(
     db.add(db_pedido)
     db.flush()
 
+    piezas_copiadas_de_cotizacion: set[int] = set()
     for idx, detalle in enumerate(detalles):
         detalle_dict = dict(detalle) if isinstance(detalle, dict) else detalle.model_dump()
         tipo = detalle_dict.get("tipo_item", "FABRICADO")
         # Renglón cotizado exacto que le corresponde (emparejado en orden en la
         # validación de arriba: soporta duplicados y muebles a la medida).
         dc_cot = dcs_match[idx]
+        # Piezas del juego: del payload de conversión o, si no vienen, de la
+        # cotización original. Se sacan del dict para no pasarlas al modelo.
+        piezas_explicitas = detalle_dict.get("piezas")
+        if (
+            piezas_explicitas is None
+            and dc_cot is not None
+            and dc_cot.id in piezas_copiadas_de_cotizacion
+        ):
+            raise ValueError(
+                "El renglón con piezas no se puede dividir en varias líneas del "
+                "pedido sin indicar las piezas de cada una."
+            )
+        if piezas_explicitas is None and dc_cot is not None and (dc_cot.piezas or []):
+            piezas_copiadas_de_cotizacion.add(dc_cot.id)
+        piezas_del_juego = _piezas_desde_payload(detalle_dict, dc_cot)
         # Validar que el producto o material exista (REPARACION/SERVICIO no
         # referencian producto ni material: la pieza es del cliente o es un
         # cobro de flete/instalación; FABRICADO sin producto es un mueble a
@@ -662,6 +755,7 @@ def convertir_cotizacion_a_pedido(
             **detalle_dict
         )
         db.add(db_detalle)
+        _agregar_piezas_pedido(db_detalle, piezas_del_juego)
     db.flush()
 
     # Promo obsequio: si la cotización no trajo el plástico de regalo, se
@@ -675,26 +769,17 @@ def convertir_cotizacion_a_pedido(
     # Mismo criterio que actualizar_pedido al pasar a PRODUCCION, pero sin paso
     # intermedio. Las órdenes de REPARACION quedan SIN producto (pieza del cliente).
     if estado_pedido == "PRODUCCION":
-        from app.modules.production.model import OrdenProduccion
-        for detalle in db_pedido.detalles:
-            if not _es_producible(detalle.tipo_item):
-                continue
-            existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle.id).first()
-            if not existente:
-                nueva_orden = OrdenProduccion(
-                    detalle_pedido_id=detalle.id,
-                    estado="PENDIENTE",
-                    fecha_inicio=None,
-                    fecha_fin=None,
-                    creado_por_id=usuario.id if usuario is not None else None,
-                    actualizado_por_id=usuario.id if usuario is not None else None,
-                )
-                db.add(nueva_orden)
-                db.flush()
-                # Checklist de piezas auto-detectado de la descripción
-                # (p. ej. "SOFA DE 3 PUESTOS ... Y 2 POLTRONAS").
-                from app.modules.production.piezas import sembrar_piezas_orden
-                sembrar_piezas_orden(db, nueva_orden, detalle=detalle)
+        from app.modules.production.service import crear_ordenes_desde_detalle_pedido
+
+        detalles_db = (
+            db.query(model.DetallePedido)
+            .filter(model.DetallePedido.pedido_id == db_pedido.id)
+            .order_by(model.DetallePedido.id)
+            .all()
+        )
+        for detalle in detalles_db:
+            if _es_producible(detalle.tipo_item):
+                crear_ordenes_desde_detalle_pedido(db, detalle, usuario, commit=False)
 
     # ── Factura automática en la moneda de la cotización ──────────────────
     db_venta = venta_service.crear_venta_desde_pedido(
@@ -750,6 +835,26 @@ def convertir_cotizacion_a_pedido(
     return db_pedido
 
 
+def _rentabilidad_de_orden(orden, costo_total: float) -> schemas.RentabilidadPieza:
+    """Fila de costo real de una orden interna (pieza de juego o mueble suelto)."""
+    detalle = orden.detalle_pedido
+    nombre = (
+        orden.pieza_nombre
+        or (detalle.producto.nombre if detalle and detalle.producto else None)
+        or (detalle.descripcion_especifica if detalle else None)
+        or f"Orden #{orden.id}"
+    )
+    return schemas.RentabilidadPieza(
+        orden_id=orden.id,
+        detalle_pedido_id=orden.detalle_pedido_id,
+        pieza_nombre=orden.pieza_nombre,
+        producto_nombre=nombre,
+        cantidad=float(orden.cantidad) if orden.cantidad is not None else None,
+        estado=orden.estado,
+        costo_real=round(costo_total, 2),
+    )
+
+
 def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
     """Costo real vs estimado de un pedido para conocer el margen real.
 
@@ -791,10 +896,12 @@ def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | 
     # Costo real de producción: sumar los costos finalizados de las órdenes.
     costo_real = 0.0
     n_ordenes = 0
+    por_pieza = []
     ordenes = (
         db.query(OrdenProduccion)
         .join(model.DetallePedido, model.DetallePedido.id == OrdenProduccion.detalle_pedido_id)
         .filter(model.DetallePedido.pedido_id == id_pedido)
+        .order_by(OrdenProduccion.id)
         .all()
     )
     for orden in ordenes:
@@ -802,11 +909,20 @@ def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | 
         costo = db.query(CostoProduccion).filter(
             CostoProduccion.orden_produccion_id == orden.id
         ).first()
-        if costo and costo.costo_total is not None:
-            costo_real += float(costo.costo_total)
+        costo_orden = float(costo.costo_total) if costo and costo.costo_total is not None else 0.0
+        costo_real += costo_orden
+        por_pieza.append(_rentabilidad_de_orden(orden, costo_orden))
 
-    envio = db.query(Envio).filter(Envio.pedido_id == id_pedido).first()
-    flete_real_base = float(envio.costo_flete_en_moneda_base) if envio and envio.costo_flete_en_moneda_base else 0.0
+    # Flete real: con entregas parciales hay varios despachos; se suman todos
+    # los que no fallaron (un FALLIDO no incurrió en el costo del viaje).
+    fletes = (
+        db.query(Envio.costo_flete_en_moneda_base)
+        .filter(Envio.pedido_id == id_pedido, Envio.estado != "FALLIDO")
+        .all()
+    )
+    flete_real_base = sum(
+        float(fila[0]) for fila in fletes if fila[0] is not None
+    )
 
     total_cobrado_base = total_cobrado * trm
     margen_estimado = total_cobrado_base - costo_estimado
@@ -845,4 +961,5 @@ def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | 
         margen_real_moneda=round(margen_real_moneda, 2),
         diferencia_costo_moneda=round(diferencia_costo_moneda, 2),
         tiene_produccion=n_ordenes > 0,
+        por_pieza=por_pieza,
     )

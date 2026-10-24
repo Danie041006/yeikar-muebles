@@ -147,7 +147,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
             <div>
               <div className="flex items-center justify-between">
                 <span className="text-[7.5px] font-mono font-bold uppercase tracking-widest text-stone-400">
-                  Producto a Fabricar
+                  {hoja.pieza_nombre ? 'Pieza a Fabricar' : 'Producto a Fabricar'}
                 </span>
                 <span className="text-[8px] font-mono font-black px-2 py-0.5 rounded-full bg-[#2D1B10] text-[#F9F7F2]">
                   {fmt(hoja.cantidad ?? 1)} {(hoja.cantidad ?? 1) === 1 ? 'UNIDAD' : 'UNIDADES'}
@@ -156,6 +156,11 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
               <h3 className="font-headline font-black text-stone-900 text-[15px] leading-tight mt-1">
                 {hoja.producto_nombre}
               </h3>
+              {hoja.juego_nombre && (
+                <p className="text-[8.5px] font-mono text-stone-500 mt-0.5" title="Juego al que pertenece esta pieza">
+                  Juego completo: {hoja.juego_nombre}
+                </p>
+              )}
 
               {/* Dimensiones de Fabricación — Números grandes y nítidos para taller */}
               <div className="bg-white border-2 border-stone-800 rounded-lg p-2.5 my-2.5 shadow-xs">

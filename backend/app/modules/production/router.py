@@ -35,8 +35,6 @@ def crear_orden_desde_pedido(
         return service.crear_orden_desde_detalle_pedido(db, detalle_pedido_id, usuario_actual)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except IntegrityError:
-        raise HTTPException(status_code=409, detail="Ya existe una orden de producción para este detalle de pedido")
 
 @router.get("/orden/", response_model=List[schemas.OrdenProduccionResponse])
 def listar_ordenes(

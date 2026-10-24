@@ -73,6 +73,9 @@ def eliminar_gasto(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
-    if not service.eliminar_gasto(db, gasto_id, current_user):
-        raise HTTPException(status_code=404, detail="Gasto no encontrado")
+    try:
+        if not service.eliminar_gasto(db, gasto_id, current_user):
+            raise HTTPException(status_code=404, detail="Gasto no encontrado")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return None

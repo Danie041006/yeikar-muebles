@@ -40,6 +40,7 @@ const ZONAS = [
   { valor: 'TAPICERIA', label: 'Tapicería' },
   { valor: 'VIDRIERIA', label: 'Vidriería' },
   { valor: 'TERMINACION', label: 'Terminación' },
+  { valor: 'OFICINA', label: 'Oficina' },
   { valor: 'GENERAL', label: 'General (sin zona)' },
 ];
 
@@ -210,7 +211,7 @@ function ContenidoInventario({
   // quién trajo, descuento, cuenta de pago, fiar y observaciones). En el libro
   // de salidas solo aplican zona, origen, observaciones y costo.
   const esEntradas = lado === 'ENTRADAS';
-  const numColumnas = esEntradas ? 16 : 8;
+  const numColumnas = esEntradas ? 16 : 9;
   if (libro.resumen.movimientos === 0) {
     return (
       <EmptyState
@@ -254,13 +255,15 @@ function ContenidoInventario({
                 </>
               )}
               <th className="py-2 pr-1.5 font-bold">Zona</th>
-              {esEntradas && (
+              {esEntradas ? (
                 <>
                   <th className="py-2 pr-1.5 font-bold">Recibió</th>
                   <th className="py-2 pr-1.5 font-bold text-right">Desc. %</th>
                   <th className="py-2 pr-1.5 font-bold">Pagó</th>
                   <th className="py-2 pr-1.5 font-bold">Fiar</th>
                 </>
+              ) : (
+                <th className="py-2 pr-1.5 font-bold">Consumió</th>
               )}
               <th className="py-2 pr-1.5 font-bold">Origen</th>
               <th className="py-2 pr-1.5 font-bold">Obs.</th>
@@ -324,6 +327,9 @@ function ContenidoInventario({
                         <td className="py-1.5 pr-1.5"><CeldaTexto valor={fila.pagado_desde} ancho={68} /></td>
                         <td className="py-1.5 pr-1.5"><EtiquetaFiar fila={fila} /></td>
                       </>
+                    )}
+                    {!esEntradas && (
+                      <td className="py-1.5 pr-1.5"><CeldaTexto valor={fila.consumido_por} ancho={68} /></td>
                     )}
                     <td className="py-1.5 pr-1.5"><CeldaTexto valor={fila.origen} ancho={52} /></td>
                     <td className="py-1.5 pr-1.5">

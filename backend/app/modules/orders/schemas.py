@@ -3,7 +3,21 @@ from datetime import date, datetime
 from typing import List, Optional
 from app.modules.clients.schemas import ClientResponse
 from app.modules.productos.schemas import ProductoResponse, MaterialResponse
-from app.modules.quotes.schemas import CotizacionResponse
+from app.modules.quotes.schemas import (
+    CotizacionResponse,
+    PiezaJuegoBase,
+    PiezaJuegoCreate,
+    validar_piezas_juego,
+)
+
+
+class DetallePedidoPiezaResponse(PiezaJuegoBase):
+    id: int
+    detalle_pedido_id: int
+    orden: int
+
+    class Config:
+        from_attributes = True
 
 class DetallePedidoBase(BaseModel):
     producto_id: Optional[int] = None
@@ -28,8 +42,14 @@ class DetallePedidoBase(BaseModel):
     es_obsequio: bool = False
 
 class DetallePedidoCreate(DetallePedidoBase):
+    # Piezas del juego (opcional). Se copian de la cotización o se envían en la
+    # conversión; cada una genera su propia orden de producción. None = no se
+    # enviaron; [] = explícitamente sin piezas (permite dividir un juego).
+    piezas: Optional[List[PiezaJuegoCreate]] = None
+
     @model_validator(mode="after")
     def _validate_item(self):
+        validar_piezas_juego(self.piezas or [], self.tipo_item)
         # La validación de integridad vive SOLO en el Create: el Response
         # también debe poder serializar pedidos 100% personalizados
         # (producto_id NULL, p. ej. notas de entrega históricas o muebles a
@@ -65,6 +85,7 @@ class DetallePedidoResponse(DetallePedidoBase):
     updated_at: Optional[datetime] = None
     producto: Optional[ProductoResponse] = None
     material: Optional[MaterialResponse] = None
+    piezas: List[DetallePedidoPiezaResponse] = []
 
     class Config:
         from_attributes = True
@@ -104,6 +125,23 @@ class PedidoResponse(PedidoBase):
     class Config:
         from_attributes = True
 
+
+class EntregaResumen(BaseModel):
+    """Progreso de entrega de un pedido (unidades físicas/piezas)."""
+
+    total: float = 0
+    entregado: float = 0
+    pendiente: float = 0
+    estado: str = "PENDIENTE"  # PENDIENTE | PARCIAL | COMPLETO
+    envios: int = 0
+    ultima_entrega: Optional[datetime] = None
+
+
+class PedidoConEntregasResponse(PedidoResponse):
+    """Pedido con el resumen de entregas (lista y detalle de Pedidos)."""
+
+    entrega_resumen: Optional[EntregaResumen] = None
+
 class ConvertirCotizacionBody(BaseModel):
     detalles: List[DetallePedidoCreate]
     fecha_entrega_estimada: Optional[str] = None
@@ -120,6 +158,23 @@ class ConvertirCotizacionBody(BaseModel):
     # Fecha del abono inicial (YYYY-MM-DD): a veces el cliente abonó ANTES de
     # convertir. Si se omite, se usa HOY en hora Venezuela.
     fecha_adelanto: Optional[date] = None
+
+
+class RentabilidadPieza(BaseModel):
+    """Costo real de UNA orden interna (pieza de un juego o mueble suelto).
+
+    Sin precio propio: el precio es del renglón completo, así que aquí solo
+    se publica el costo para que el negocio vea en qué se fue el dinero.
+    """
+
+    orden_id: int
+    detalle_pedido_id: Optional[int] = None
+    pieza_nombre: Optional[str] = None
+    producto_nombre: Optional[str] = None
+    cantidad: Optional[float] = None
+    estado: str
+    # Costo real en COP (misma base interna que el resto del costo real).
+    costo_real: float = 0.0
 
 
 class RentabilidadPedidoResponse(BaseModel):
@@ -156,3 +211,5 @@ class RentabilidadPedidoResponse(BaseModel):
     margen_real_moneda: float = 0.0
     diferencia_costo_moneda: float = 0.0
     tiene_produccion: bool = False
+    # Desglose interno por pieza/orden (juegos con precio global).
+    por_pieza: List[RentabilidadPieza] = []

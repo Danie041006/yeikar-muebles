@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Truck } from 'lucide-react';
 import {
   Button,
   Card,
@@ -15,13 +15,18 @@ import {
   type DataColumn,
 } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { pedidoService, Order, RentabilidadPedido } from '../services/pedidoService';
+import { envioService, Envio } from '../services/envioService';
+import EntregaParcialModal from '../components/Pedidos/EntregaParcialModal';
 import { formatCurrency } from '../utils/format';
 
 export default function Pedidos() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const toast = useToast();
+  const { hasModulo, esAdmin } = useAuth();
+  const puedeEntregar = esAdmin && hasModulo('envios');
   const [orders, setOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
@@ -95,6 +100,23 @@ export default function Pedidos() {
   }, [search, soloMesActual, selectedMonth, selectedYear]);
 
   const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+  const [entregaPedido, setEntregaPedido] = useState<Order | null>(null);
+  const [entregas, setEntregas] = useState<Envio[]>([]);
+  const [entregasLoading, setEntregasLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selectedOrder || !puedeEntregar) {
+      setEntregas([]);
+      return;
+    }
+    let activo = true;
+    setEntregasLoading(true);
+    envioService.getAll({ pedido_id: selectedOrder.id, limite: 200 })
+      .then((res) => { if (activo) setEntregas(res.items); })
+      .catch(() => { if (activo) setEntregas([]); })
+      .finally(() => { if (activo) setEntregasLoading(false); });
+    return () => { activo = false; };
+  }, [selectedOrder, puedeEntregar]);
 
   const handleUpdateStatus = async (orderId: number, currentObs: string | undefined, newStatus: string) => {
     if (statusUpdatingId !== null) return; // evita PUTs concurrentes del estado
@@ -111,9 +133,9 @@ export default function Pedidos() {
         const updated = await pedidoService.getById(orderId);
         setSelectedOrder(updated);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      toast.error('Error al actualizar el estado del pedido.');
+      toast.error(err.response?.data?.detail || 'Error al actualizar el estado del pedido.');
     } finally {
       setStatusUpdatingId(null);
     }
@@ -176,6 +198,14 @@ export default function Pedidos() {
       siguientes = siguientes.map((v) =>
         v.value === 'TERMINADO' ? { ...v, label: 'Terminado (listo para despacho)' } : v,
       );
+    }
+    // ENTREGADO no se elige a mano: se cierra cuando la última entrega sale.
+    if (order?.entrega_resumen && order.entrega_resumen.pendiente > 0) {
+      siguientes = siguientes.filter((v) => v.value !== 'ENTREGADO');
+    }
+    // Con entregas físicas ya hechas, cancelar dejaría mercancía sin documento.
+    if (order?.entrega_resumen && order.entrega_resumen.entregado > 0) {
+      siguientes = siguientes.filter((v) => v.value !== 'CANCELADO');
     }
     return [actual, ...siguientes];
   };
@@ -257,6 +287,17 @@ export default function Pedidos() {
       >
         Ver detalles
       </button>
+      {puedeEntregar && order.entrega_resumen && order.entrega_resumen.pendiente > 0
+        && ['APROBADO', 'PRODUCCION', 'PAUSADO', 'TERMINADO'].includes(order.estado) && (
+        <button
+          onClick={() => setEntregaPedido(order)}
+          className="btn px-3 py-2 rounded-lg text-xs bg-green-600 text-white hover:bg-green-700 flex items-center gap-1"
+          title="Registrar una entrega parcial de lo que ya está listo"
+        >
+          <Truck className="h-4 w-4" />
+          <span>Entregar</span>
+        </button>
+      )}
       {['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(order.estado) && (
         <button
           onClick={() => navigate('/ventas')}
@@ -309,6 +350,36 @@ export default function Pedidos() {
       header: 'Estado',
       render: (o) => <EstadoSelect order={o} />,
       mobileHidden: true,
+    },
+    {
+      key: 'entregas',
+      header: 'Entregas',
+      render: (o) => {
+        const resumen = o.entrega_resumen;
+        if (!resumen || resumen.total <= 0) {
+          return <span className="text-[11px] text-yeikar-neutral/35">—</span>;
+        }
+        const porcentaje = Math.min(100, Math.round((resumen.entregado / resumen.total) * 100));
+        const tono = resumen.estado === 'COMPLETO'
+          ? 'bg-green-100 text-green-700 border-green-200'
+          : resumen.estado === 'PARCIAL'
+            ? 'bg-amber-100 text-amber-800 border-amber-200'
+            : 'bg-stone-100 text-stone-600 border-stone-200';
+        return (
+          <div className="space-y-1 min-w-[96px]">
+            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-black ${tono}`}>
+              {resumen.entregado} / {resumen.total}
+            </span>
+            <div className="h-1.5 w-24 overflow-hidden rounded-full bg-yeikar-secondary-light/15">
+              <div
+                className="h-full rounded-full bg-yeikar-primary transition-all"
+                style={{ width: `${porcentaje}%` }}
+              />
+            </div>
+          </div>
+        );
+      },
+      mobileLabel: 'Entregas',
     },
   ];
 
@@ -435,6 +506,15 @@ export default function Pedidos() {
             {selectedOrder && (
               <Button variant="outline" onClick={() => navigate(`/historial?tipo=pedidos&id=${selectedOrder.id}`)}>
                 Ver información del Pedido
+              </Button>
+            )}
+            {puedeEntregar && selectedOrder?.entrega_resumen && selectedOrder.entrega_resumen.pendiente > 0
+              && ['APROBADO', 'PRODUCCION', 'PAUSADO', 'TERMINADO'].includes(selectedOrder.estado) && (
+              <Button
+                onClick={() => setEntregaPedido(selectedOrder)}
+                icon={<Truck className="h-4 w-4" />}
+              >
+                Registrar entrega
               </Button>
             )}
             {selectedOrder && ['APROBADO', 'PRODUCCION', 'TERMINADO', 'ENTREGADO'].includes(selectedOrder.estado) && (
@@ -565,6 +645,25 @@ export default function Pedidos() {
                           </div>
                         </div>
                       )}
+                      {(det.piezas?.length ?? 0) > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-yeikar-neutral/45">
+                            Piezas:
+                          </span>
+                          {det.piezas!.map((pieza) => (
+                            <span
+                              key={pieza.id ?? pieza.nombre}
+                              className="rounded-md border border-yeikar-secondary-light/20 bg-white px-1.5 py-0.5 text-[10px] font-bold text-yeikar-secondary"
+                              title="Se produce y costea por separado"
+                            >
+                              {pieza.nombre}
+                              {Number(pieza.cantidad) > 1
+                                ? ` × ${Number(pieza.cantidad).toLocaleString('es-CO')}`
+                                : ''}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       {det.observaciones && (
                         <p className="text-xs text-yeikar-neutral/60 italic mt-1 border-t border-yeikar-secondary-light/5 pt-1">
                           {det.observaciones}
@@ -576,6 +675,91 @@ export default function Pedidos() {
                   <p className="text-sm text-yeikar-neutral/50">Este pedido no tiene recetas cargadas.</p>
                 )}
               </div>
+            </div>
+
+            <div>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h4 className="font-headline font-bold text-sm text-yeikar-secondary uppercase tracking-wider">
+                  Entregas
+                </h4>
+                {selectedOrder.entrega_resumen && selectedOrder.entrega_resumen.total > 0 && (
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black ${
+                    selectedOrder.entrega_resumen.estado === 'COMPLETO'
+                      ? 'bg-green-100 text-green-700 border-green-200'
+                      : selectedOrder.entrega_resumen.estado === 'PARCIAL'
+                        ? 'bg-amber-100 text-amber-800 border-amber-200'
+                        : 'bg-stone-100 text-stone-600 border-stone-200'
+                  }`}>
+                    {selectedOrder.entrega_resumen.entregado} / {selectedOrder.entrega_resumen.total} entregado
+                    {selectedOrder.entrega_resumen.pendiente > 0
+                      ? ` · faltan ${selectedOrder.entrega_resumen.pendiente}`
+                      : ''}
+                  </span>
+                )}
+              </div>
+
+              {!puedeEntregar ? (
+                <p className="text-sm text-yeikar-neutral/50">
+                  No tienes acceso al módulo de despachos para consultar las entregas.
+                </p>
+              ) : entregasLoading ? (
+                <Spinner label="Cargando entregas..." />
+              ) : entregas.length === 0 ? (
+                <p className="text-sm text-yeikar-neutral/50">
+                  Todavía no hay entregas registradas. Usa “Registrar entrega” para llevar lo que ya está listo.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {entregas.map((envio) => (
+                    <div key={envio.id} className="rounded-xl border border-yeikar-secondary-light/15 bg-white p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-mono text-xs font-bold text-yeikar-secondary">
+                          Despacho #{envio.id}
+                        </span>
+                        <span className={`rounded-full border px-2 py-0.5 text-[9px] font-black uppercase ${
+                          envio.estado === 'ENTREGADO'
+                            ? 'bg-green-50 text-green-700 border-green-200'
+                            : envio.estado === 'FALLIDO'
+                              ? 'bg-red-50 text-red-700 border-red-200'
+                              : 'bg-amber-50 text-amber-800 border-amber-200'
+                        }`}>
+                          {envio.estado === 'EN_TRANSITO' ? 'En tránsito' : envio.estado.toLowerCase()}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-[11px] font-mono text-yeikar-neutral/55">
+                        {envio.fecha_entrega
+                          ? `Entregado: ${new Date(envio.fecha_entrega).toLocaleString('es-VE')}`
+                          : envio.fecha_salida
+                            ? `Salió: ${new Date(envio.fecha_salida).toLocaleString('es-VE')}`
+                            : 'Sin salida registrada'}
+                        {envio.guia_despacho ? ` · Guía ${envio.guia_despacho}` : ''}
+                      </div>
+                      {envio.detalles && envio.detalles.length > 0 && (
+                        <ul className="mt-2 space-y-0.5 text-xs text-yeikar-secondary/80">
+                          {envio.detalles.map((item) => (
+                            <li key={item.id} className="flex justify-between gap-3">
+                              <span>• {item.descripcion || `Ítem #${item.detalle_pedido_id}`}</span>
+                              <span className="font-mono font-bold">×{item.cantidad}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {puedeEntregar && selectedOrder.entrega_resumen && selectedOrder.entrega_resumen.pendiente > 0
+                && ['APROBADO', 'PRODUCCION', 'PAUSADO', 'TERMINADO'].includes(selectedOrder.estado) && (
+                <Button
+                  className="mt-3"
+                  size="sm"
+                  onClick={() => setEntregaPedido(selectedOrder)}
+                  icon={<Truck className="h-4 w-4" />}
+                >
+                  Registrar entrega parcial
+                </Button>
+              )}
             </div>
 
             {rentabilidad && (
@@ -626,6 +810,36 @@ export default function Pedidos() {
                     Cifras en {monedaPedido} a la tasa congelada del pedido.
                   </p>
                 )}
+                {(rentabilidad.por_pieza ?? []).some((p) => p.pieza_nombre) && (
+                  <details className="rounded-xl border border-yeikar-secondary-light/15 bg-white/60 px-3 py-2">
+                    <summary className="cursor-pointer select-none text-[10px] font-bold uppercase tracking-wider text-yeikar-neutral/55">
+                      Costo por pieza del juego
+                    </summary>
+                    <div className="mt-2 space-y-1">
+                      {(rentabilidad.por_pieza ?? [])
+                        .filter((p) => p.pieza_nombre)
+                        .map((p) => (
+                          <div key={p.orden_id} className="flex items-center justify-between gap-2 text-[11px] font-mono">
+                            <span className="min-w-0 truncate text-yeikar-secondary" title={p.producto_nombre || ''}>
+                              {p.pieza_nombre}
+                              {p.cantidad && p.cantidad > 1
+                                ? ` × ${p.cantidad.toLocaleString('es-CO')}`
+                                : ''}
+                              <span className="ml-1 text-[9px] font-sans uppercase text-yeikar-neutral/40">
+                                {p.estado.replace('_', ' ')}
+                              </span>
+                            </span>
+                            <b className="shrink-0 text-right text-yeikar-primary-dark">
+                              {fmtPedido(p.costo_real / (rentabilidad.tasa_cambio || 1))}
+                            </b>
+                          </div>
+                        ))}
+                    </div>
+                    <p className="mt-1.5 text-[10px] text-yeikar-neutral/45">
+                      El precio de venta es del renglón completo; aquí solo se reparte el costo real.
+                    </p>
+                  </details>
+                )}
                 {rentabilidad.diferencia_costo_moneda !== 0 && (
                   <p className={`text-[11px] ${rentabilidad.diferencia_costo_moneda > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
                     El costo real difiere del estimado en{' '}
@@ -641,6 +855,20 @@ export default function Pedidos() {
           </div>
         )}
       </Modal>
+
+      <EntregaParcialModal
+        open={entregaPedido !== null}
+        pedido={entregaPedido}
+        onClose={() => setEntregaPedido(null)}
+        onCreated={() => {
+          fetchOrders(search);
+          if (selectedOrder) {
+            pedidoService.getById(selectedOrder.id)
+              .then(setSelectedOrder)
+              .catch(() => {});
+          }
+        }}
+      />
 
       {/* Confirm Delete */}
       <ConfirmDialog

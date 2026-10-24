@@ -10,6 +10,7 @@ import {
   CalendarDays,
   ChevronRight,
   CircleDollarSign,
+  ClipboardList,
   CreditCard,
   FileCheck2,
   FileText,
@@ -74,6 +75,7 @@ const groups: { label: string; items: MenuItem[] }[] = [
     label: 'Almacén',
     items: [
       { name: 'Inventario', path: '/inventario', module: 'inventario', icon: Package },
+      { name: 'Oficina', path: '/inventario/oficina', module: 'inventario', icon: ClipboardList },
       { name: 'Productos', path: '/productos', module: 'productos', icon: Box },
     ],
   },

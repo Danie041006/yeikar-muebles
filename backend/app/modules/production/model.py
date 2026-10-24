@@ -10,7 +10,7 @@ from app.db.base import Base
 # define la clase ya fue importado por otra ruta.
 from app.modules.catalogos.model import Area
 from app.modules.empleados.model import Empleado
-from app.modules.orders.model import DetallePedido
+from app.modules.orders.model import DetallePedido, DetallePedidoPieza
 
 # Tipo de orden de producción: define el DESTINO de lo fabricado.
 # PEDIDO → línea de pedido (al finalizar dispara pedido TERMINADO + envío).
@@ -33,9 +33,25 @@ class OrdenProduccion(Base):
     __tablename__ = "orden_produccion"
 
     id = Column(BigInteger, primary_key=True, index=True)
-    # nullable=True: una orden puede ser de tipo STOCK/EXHIBICION (sin pedido
-    # de por medio). Postgres permite varios NULLs pese al UNIQUE.
-    detalle_pedido_id = Column(BigInteger, ForeignKey("detalle_pedido.id"), unique=True, nullable=True)
+    # Una orden por línea del pedido, o VARIAS cuando la línea es un juego:
+    # cada pieza declarada genera su propia orden interna con su costo. Por eso
+    # la columna ya NO es única; `detalle_pieza_id` dice qué pieza es.
+    detalle_pedido_id = Column(BigInteger, ForeignKey("detalle_pedido.id"), nullable=True)
+    # Pieza del juego a la que corresponde esta orden (NULL = orden normal de
+    # una sola pieza / mueble suelto).
+    detalle_pieza_id = Column(
+        BigInteger,
+        ForeignKey("detalle_pedido_pieza.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    # Snapshot del nombre de la pieza: el Kanban y la Hoja de Trabajo lo muestran
+    # aunque luego se edite/borre la lista de piezas del pedido.
+    pieza_nombre = Column(String(150), nullable=True)
+    # Unidades físicas de ESTA orden. En una orden de pieza = cantidad de la
+    # pieza × cantidad de juegos del renglón (6 sillas × 2 juegos = 12).
+    # NULL en órdenes históricas: los servicios caen a detalle.cantidad.
+    cantidad = Column(Numeric(14, 4), nullable=True)
     # producto_id solo se usa en órdenes sin pedido (tipo STOCK/EXHIBICION):
     # dice qué mueble se está fabricando sin depender de un detalle de pedido.
     producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -77,7 +93,8 @@ class OrdenProduccion(Base):
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    detalle_pedido = relationship("DetallePedido")
+    detalle_pedido = relationship("DetallePedido", back_populates="ordenes")
+    detalle_pieza = relationship("DetallePedidoPieza")
     producto = relationship("Producto", foreign_keys=[producto_id])
     # Fila de inventario de la pieza retrabajada (solo tipo RETRABAJO).
     producto_inventario = relationship("ProductoInventario")

@@ -12,6 +12,7 @@ DEPARTAMENTOS_VALIDOS = {
     "TAPICERIA",
     "VIDRIERIA",
     "TERMINACION",
+    "OFICINA",
 }
 
 # Stock actual (Inventario)
@@ -43,7 +44,8 @@ class MovimientoCreate(BaseModel):
     # del taller es por departamentos).
     ubicacion_id: Optional[int] = None
     tipo: str = Field(..., pattern="^(ENTRADA|SALIDA|AJUSTE|DAÑO|DANO|DEVOLUCION)$")
-    cantidad: Decimal = Field(..., gt=0)
+    # 0 solo es válido en un AJUSTE (conteo físico de oficina que queda en 0).
+    cantidad: Decimal = Field(..., ge=0)
     costo_unitario: Optional[Decimal] = Field(None, gt=0)
     referencia_tipo: Optional[str] = None
     referencia_id: Optional[int] = None
@@ -74,6 +76,8 @@ class MovimientoCreate(BaseModel):
     departamento: Optional[str] = None
     # Quién trajo/entregó la compra (texto libre, solo entradas).
     recibido_por: Optional[str] = Field(None, max_length=150)
+    # Quién recibió/consumió el ítem (texto libre, solo salidas de oficina).
+    consumido_por: Optional[str] = Field(None, max_length=150)
     # "Fiar": ENTRADA sin pagar de una cuenta → se registra automáticamente una
     # cuenta por pagar (compra + pasada) con el proveedor indicado.
     fiar: Optional[bool] = False
@@ -117,12 +121,14 @@ class MovimientoResponse(BaseModel):
     pagado_desde_metodo_caja_id: Optional[int] = None
     moneda_pago_id: Optional[int] = None
     tasa_pago: Optional[Decimal] = None
+    gasto_id: Optional[int] = None
     proveedor_id: Optional[int] = None
     cliente_id: Optional[int] = None
     proveedor_nombre: Optional[str] = None
     cliente_nombre: Optional[str] = None
     departamento: Optional[str] = None
     recibido_por: Optional[str] = None
+    consumido_por: Optional[str] = None
     fiar: Optional[bool] = False
     fecha: Optional[datetime] = None
     created_at: datetime
@@ -265,6 +271,7 @@ class LibroFilaResponse(BaseModel):
     proveedor: Optional[str] = None
     cliente: Optional[str] = None
     recibido_por: Optional[str] = None
+    consumido_por: Optional[str] = None
     observaciones: Optional[str] = None
     # Registro de la compra (solo insumos)
     descuento: Optional[float] = None

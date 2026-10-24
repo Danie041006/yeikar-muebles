@@ -114,6 +114,32 @@ export default function MisDespachos() {
 
   const tabs: Tab[] = ['en_ruta', 'pendientes', 'historicos'];
 
+  // Cada despacho parcial lleva solo sus ítems; los envíos históricos
+  // (sin detalle) siguen mostrando el pedido completo.
+  const lineasDespacho = (envio: EnvioReparto) => {
+    if (envio.detalles?.length) {
+      return envio.detalles.map((item) => {
+        const det = envio.pedido?.detalles?.find((d) => d.id === item.detalle_pedido_id);
+        return {
+          key: `ed-${item.id}`,
+          nombre: item.descripcion || 'Ítem del pedido',
+          cantidad: item.cantidad,
+          det,
+        };
+      });
+    }
+    return (envio.pedido?.detalles ?? []).map((det) => ({
+      key: `dp-${det.id}`,
+      nombre: (det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+        ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+        : det.tipo_item === 'INSUMO'
+          ? det.material?.nombre || 'Insumo'
+          : det.producto?.nombre || 'Producto',
+      cantidad: det.cantidad,
+      det,
+    }));
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -213,24 +239,20 @@ export default function MisDespachos() {
                     Muebles a Entregar
                   </span>
                   <div className="space-y-1.5">
-                    {envio.pedido?.detalles?.map((det) => (
-                      <div key={det.id} className="text-xs text-yeikar-secondary/85">
+                    {lineasDespacho(envio).map(({ key, nombre, cantidad, det }) => (
+                      <div key={key} className="text-xs text-yeikar-secondary/85">
                         <div className="flex justify-between">
-                          <span className="font-medium">• {(det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
-                          ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
-                          : det.tipo_item === 'INSUMO'
-                            ? det.material?.nombre || 'Insumo'
-                            : det.producto?.nombre || 'Producto'}</span>
-                          <span className="font-mono font-bold">x{det.cantidad}</span>
+                          <span className="font-medium">• {nombre}</span>
+                          <span className="font-mono font-bold">x{cantidad}</span>
                         </div>
-                        {det.tipo_item !== 'INSUMO' && (det.ancho || det.largo) && (
+                        {det && det.tipo_item !== 'INSUMO' && (det.ancho || det.largo) && (
                           <p className="pl-3 text-[11px] text-yeikar-neutral/50 font-mono">
                             {det.ancho && det.largo ? `${det.ancho}×${det.largo}m` : det.ancho ? `Ancho ${det.ancho}m` : `Largo ${det.largo}m`}
                             {det.color ? ` · ${det.color}` : ''}
                             {det.acabado ? ` · ${det.acabado}` : ''}
                           </p>
                         )}
-                        {det.observaciones && (
+                        {det?.observaciones && (
                           <p className="pl-3 text-[11px] text-yeikar-neutral/45 italic">{det.observaciones}</p>
                         )}
                       </div>

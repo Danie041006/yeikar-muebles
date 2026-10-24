@@ -27,11 +27,12 @@ import { productosService, type Material, type PromocionObsequio } from '../serv
 import { inventarioService } from '../services/inventarioService';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { SearchSelect, ResponsiveDataTable, type DataColumn } from '../components/ui';
+import { SearchSelect, ResponsiveDataTable, MontoInput, type DataColumn } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
+import PiezasJuegoEditor, { validarPiezasJuego, type PiezaJuegoForm } from '../components/Cotizaciones/PiezasJuegoEditor';
 import { Package, Sparkles, Plus, Loader2, Wrench, Truck } from 'lucide-react';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { produccionService } from '../services/produccionService';
@@ -62,6 +63,17 @@ interface CotizacionItemForm {
   materialDimension?: Dimensionalidad;
   /** Promo obsequio: renglón del plástico de regalo (precio 0, ligado al colchón). */
   es_obsequio?: boolean;
+  /** Piezas del juego (opcional): se producen y costean por separado. */
+  piezas?: PiezaJuegoForm[];
+}
+
+/** Piezas del juego listas para la API (el precio NO viaja: es del renglón). */
+function piezasParaPayload(item: CotizacionItemForm) {
+  return (item.piezas ?? []).map((p) => ({
+    nombre: p.nombre.trim(),
+    cantidad: p.cantidad,
+    notas: p.notas.trim() || null,
+  }));
 }
 
 /** Convierte los detalles de una cotización guardada al estado del formulario
@@ -129,10 +141,41 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
       calcResult,
       calcLoading: false,
       receta_personalizada: d.receta_personalizada || null,
+      piezas: (d.piezas || []).map((p) => ({
+        nombre: p.nombre,
+        cantidad: Number(p.cantidad) || 1,
+        notas: p.notas || '',
+      })),
       es_obsequio: d.es_obsequio || false,
     };
   });
 }
+
+// ── Clasificaciones permitidas al crear un producto desde la cotización ──
+// Son solo estas tres: el resto del catálogo (Cama, Comedor, PIEZA ÚNICA...)
+// sigue existiendo para los productos ya creados, pero no se ofrece al alta
+// rápida desde una cotización.
+const normalizarClasificacion = (nombre: string): string =>
+  nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+
+const esClasificacionNuevoProducto = (nombre: string): boolean => {
+  const n = normalizarClasificacion(nombre);
+  return n === 'FABRICADO' || n === 'REVENDIDO' || n.startsWith('PLASTIC');
+};
+
+/** Revendido y Plástico se manejan como stock (no pasan por producción). */
+const esClasificacionStock = (nombre: string | undefined): boolean => {
+  const n = normalizarClasificacion(nombre ?? '');
+  return n === 'REVENDIDO' || n.startsWith('PLASTIC');
+};
+
+const etiquetaClasificacion = (nombre: string): string => {
+  const n = normalizarClasificacion(nombre);
+  if (n === 'FABRICADO') return 'FABRICADO';
+  if (n === 'REVENDIDO') return 'REVENDIDO';
+  if (n.startsWith('PLASTIC')) return 'PLÁSTICO';
+  return nombre.toUpperCase();
+};
 
 // Ordena productos por tipo (id del catálogo) y nombre dentro de cada tipo,
 // para que el selector agrupado muestre Fabricado → Revendido → Cama → ...
@@ -424,7 +467,7 @@ export default function Cotizaciones() {
   // ── "Producto nuevo" desde la cotización (nombre + tipo + foto + precio) ──
   const [showNuevoProductoModal, setShowNuevoProductoModal] = useState(false);
   const [tiposProducto, setTiposProducto] = useState<{ id: number; nombre: string }[]>([]);
-  const [npForm, setNpForm] = useState({ nombre: '', tipo_producto_id: '', ancho: '', largo: '', precio: '', moneda_id: '1' });
+  const [npForm, setNpForm] = useState({ nombre: '', tipo_producto_id: '', precio: '', moneda_id: '1' });
   // Varias fotos a la vez: la PRIMERA que se elija es la portada (sale en la
   // cotización; las demás como vistas adicionales en la Hoja de Trabajo).
   const [fotosNp, setFotosNp] = useState<{ file: File; url: string }[]>([]);
@@ -684,6 +727,7 @@ export default function Cotizaciones() {
           newItems[index].largo = String(selectedProd.largo_base ?? 1);
         }
         newItems[index].receta_personalizada = null;
+        newItems[index].piezas = [];
         // Promo obsequio: si el nuevo producto es un colchón con promo, se
         // agrega el renglón del plástico; si dejó de serlo, se ajusta/quita.
         const promo = promosPorColchon.get(Number(value));
@@ -693,6 +737,9 @@ export default function Cotizaciones() {
 
       // Cambió la cantidad del colchón (o el tipo): el regalo la sigue.
       if (field === 'cantidad' || field === 'tipo_item') {
+        if (field === 'tipo_item' && value !== 'FABRICADO') {
+          newItems[index].piezas = [];
+        }
         return sincronizarCantidadesObsequio(newItems, promosPorColchon);
       }
 
@@ -759,7 +806,10 @@ export default function Cotizaciones() {
   const handleUpdateInsumoField = (seccionIndex: number, elementoIndex: number, field: string, value: string) => {
     setPersonalizarSecciones(prev => {
       const newSecs = [...prev];
-      newSecs[seccionIndex].elementos[elementoIndex][field] = value ? parseFloat(value) : 0;
+      newSecs[seccionIndex].elementos[elementoIndex][field] =
+        field === 'precio_unitario'
+          ? (parseFloat(value) || 0)
+          : (value ? parseFloat(value) : 0);
       return newSecs;
     });
   };
@@ -1260,10 +1310,10 @@ export default function Cotizaciones() {
   const abrirNuevoProducto = () => {
     if (!tiposProducto.length) {
       api.get<{ id: number; nombre: string }[]>('/catalogos/tipo-producto/')
-        .then(({ data }) => setTiposProducto(data))
+        .then(({ data }) => setTiposProducto(data.filter((t) => esClasificacionNuevoProducto(t.nombre))))
         .catch(() => setTiposProducto([]));
     }
-    setNpForm({ nombre: '', tipo_producto_id: '', ancho: '', largo: '', precio: '', moneda_id: '1' });
+    setNpForm({ nombre: '', tipo_producto_id: '', precio: '', moneda_id: '1' });
     limpiarNpFotos();
     setErrorForm('');
     setShowNuevoProductoModal(true);
@@ -1298,7 +1348,7 @@ export default function Cotizaciones() {
     e.preventDefault();
     setErrorForm('');
     if (!npForm.nombre.trim() || !npForm.tipo_producto_id) {
-      setErrorForm('Indica el nombre y el tipo del producto.');
+      setErrorForm('Indica el nombre y la clasificación del producto.');
       return;
     }
     const precio = parseFloat(npForm.precio || '0');
@@ -1306,6 +1356,7 @@ export default function Cotizaciones() {
       setErrorForm('Indica el precio estimado de venta (lo cotizas tal cual).');
       return;
     }
+    const tipoSeleccionado = tiposProducto.find((t) => t.id === Number(npForm.tipo_producto_id));
     setSavingNp(true);
     try {
       const creado = await productosService.crearProducto({
@@ -1313,10 +1364,9 @@ export default function Cotizaciones() {
         tipo_producto_id: Number(npForm.tipo_producto_id),
         descripcion: 'Creado desde la cotización',
         activo: true,
-        ancho_base: npForm.ancho ? parseFloat(npForm.ancho) : null,
-        largo_base: npForm.largo ? parseFloat(npForm.largo) : null,
         stock_minimo: 8,
-        es_reventa: false,
+        // Revendido y Plástico viven del stock: no pasan por producción.
+        es_reventa: esClasificacionStock(tipoSeleccionado?.nombre),
         moneda_id: Number(npForm.moneda_id) || 1,
         // Solo precio de venta: el motor lo cotiza TAL CUAL (no le suma margen).
         precio_costo_base: undefined,
@@ -1410,6 +1460,16 @@ export default function Cotizaciones() {
       return;
     }
 
+    // Piezas de un juego: nombres únicos, cantidades > 0 y solo FABRICADO.
+    const errorPieza = items
+      .filter((item) => item.tipo_item === 'FABRICADO')
+      .map((item) => validarPiezasJuego(item.piezas ?? []))
+      .find((mensaje) => mensaje !== null);
+    if (errorPieza) {
+      setErrorForm(errorPieza);
+      return;
+    }
+
     // No permitir guardar cotizaciones sin precio real: si falta la tasa del
     // día de un producto en moneda extranjera, el precio convertido es inválido.
     // Aplica también a insumos (el precio tecleado no puede ser 0).
@@ -1463,6 +1523,7 @@ export default function Cotizaciones() {
           descripcion_especifica: item.descripcion_especifica?.trim() || null,
           observaciones: item.observaciones || null,
           costo_total: costoEstimado > 0 ? costoEstimado * item.cantidad : null,
+          piezas: piezasParaPayload(item),
         };
       }
       if (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') {
@@ -1539,6 +1600,7 @@ export default function Cotizaciones() {
         costo_gastos: esObsequio ? null : conv(r?.costo_gastos_indirectos || 0.0) * item.cantidad,
         costo_total: esObsequio ? null : conv(r?.costo_total || 0.0) * item.cantidad,
         receta_personalizada: item.receta_personalizada || null,
+        piezas: item.tipo_item === 'FABRICADO' ? piezasParaPayload(item) : undefined,
       };
     });
 
@@ -1766,6 +1828,11 @@ export default function Cotizaciones() {
           descripcion_especifica: det.descripcion_especifica ?? det.observaciones ?? undefined,
           observaciones: det.observaciones ?? undefined,
           es_obsequio: det.es_obsequio || undefined,
+          piezas: det.piezas?.map((p) => ({
+            nombre: p.nombre,
+            cantidad: Number(p.cantidad) || 1,
+            notas: p.notas || null,
+          })),
         }));
       } else {
         const match = selectedQuoteForConvert.observaciones?.match(/Producto: (.*) \((.*)x(.*)m\)/);
@@ -2547,7 +2614,7 @@ export default function Cotizaciones() {
                                     .filter((m) => m.activo !== false)
                                     .map((m) => ({
                                       value: m.id,
-                                      label: `${m.nombre} (${m.unidad_medida?.abreviatura || 'und'}) — COP ${m.costo_base?.toLocaleString()}`,
+                                      label: `${m.nombre} (${m.unidad_medida?.abreviatura || 'und'}) — COP ${m.costo_base?.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`,
                                     }))
                                 }
                                 minChars={1}
@@ -2589,9 +2656,9 @@ export default function Cotizaciones() {
                             </div>
                             <div className="sm:col-span-3">
                               <label className="block text-[10px] uppercase tracking-wider font-bold text-yeikar-neutral/60 font-headline mb-1">Precio de Venta (COP / {unidadVenta}) *</label>
-                              <input type="number" step="0.01" min="0" value={precioUnitCop > 0 ? precioUnitCop : ''} placeholder="Escribe el precio de venta"
-                                onChange={(e) => {
-                                  const precio = parseFloat(e.target.value) || 0;
+                              <MontoInput min="0" value={precioUnitCop > 0 ? String(precioUnitCop) : ''} placeholder="Escribe el precio de venta"
+                                onChange={(v) => {
+                                  const precio = parseFloat(v) || 0;
                                   // El costo NO se pisa con el precio: la utilidad
                                   // se calcula contra el costo real (compra+pasada)
                                   // expresado en la MISMA unidad de venta.
@@ -2696,15 +2763,15 @@ export default function Cotizaciones() {
                             </div>
                             <div>
                               <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Precio de venta *</label>
-                              <input type="number" step="0.01" min="0" value={precioManual > 0 ? precioManual : ''} placeholder={`${currencyCode}`}
-                                onChange={(e) => aplicarLibre(parseFloat(e.target.value) || 0, Number(item.calcResult?.costo_total) || 0)}
+                              <MontoInput min="0" value={precioManual > 0 ? String(precioManual) : ''} placeholder={`${currencyCode}`}
+                                onChange={(v) => aplicarLibre(parseFloat(v) || 0, Number(item.calcResult?.costo_total) || 0)}
                                 className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
                             </div>
                             <div>
                               <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Costo estimado (COP)</label>
-                              <input type="number" step="0.01" min="0" value={(item.calcResult?.costo_total && item.calcResult.costo_total > 0) ? Number(item.calcResult.costo_total) : ''}
+                              <MontoInput min="0" value={(item.calcResult?.costo_total && item.calcResult.costo_total > 0) ? String(Number(item.calcResult.costo_total)) : ''}
                                 placeholder="Opcional"
-                                onChange={(e) => aplicarLibre(precioManual, parseFloat(e.target.value) || 0)}
+                                onChange={(v) => aplicarLibre(precioManual, parseFloat(v) || 0)}
                                 className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono" />
                             </div>
                             <div className="text-right">
@@ -2773,15 +2840,15 @@ export default function Cotizaciones() {
                             </div>
                             <div>
                               <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Precio de venta *</label>
-                              <input type="number" step="0.01" min="0" value={precioManual > 0 ? precioManual : ''} placeholder={`${currencyCode}`}
-                                onChange={(e) => aplicarLibre(parseFloat(e.target.value) || 0, Number(item.calcResult?.costo_total) || 0)}
+                              <MontoInput min="0" value={precioManual > 0 ? String(precioManual) : ''} placeholder={`${currencyCode}`}
+                                onChange={(v) => aplicarLibre(parseFloat(v) || 0, Number(item.calcResult?.costo_total) || 0)}
                                 className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
                             </div>
                             <div>
                               <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Costo estimado (COP)</label>
-                              <input type="number" step="0.01" min="0" value={(item.calcResult?.costo_total && item.calcResult.costo_total > 0) ? Number(item.calcResult.costo_total) : ''}
+                              <MontoInput min="0" value={(item.calcResult?.costo_total && item.calcResult.costo_total > 0) ? String(Number(item.calcResult.costo_total)) : ''}
                                 placeholder="Opcional"
-                                onChange={(e) => aplicarLibre(precioManual, parseFloat(e.target.value) || 0)}
+                                onChange={(v) => aplicarLibre(precioManual, parseFloat(v) || 0)}
                                 className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono" />
                             </div>
                             <div className="text-right">
@@ -2789,8 +2856,14 @@ export default function Cotizaciones() {
                               <div className="text-sm font-bold font-mono text-yeikar-secondary">{formatCurrency(subtotal, currencyCode)}</div>
                             </div>
                           </div>
+                          <PiezasJuegoEditor
+                            piezas={item.piezas ?? []}
+                            onChange={(piezas) => updateItemField(index, 'piezas', piezas)}
+                          />
                           <p className="text-[11px] text-sky-900/80 bg-sky-50/60 border border-sky-100 rounded-lg px-3 py-1.5">
-                            Se fabrica a medida: al pasar a producción, el taller verá las piezas del mueble (sofá, poltronas…) detectadas de la descripción, y registrará los materiales y la mano de obra reales.
+                            Se fabrica a medida. Si agregas las piezas del juego, cada una se produce y
+                            costea por separado; si no, el taller verá las piezas detectadas de la
+                            descripción y registrará los materiales y la mano de obra reales.
                           </p>
                         </div>
                       );
@@ -3073,6 +3146,12 @@ export default function Cotizaciones() {
                             )}
                           </div>
                         </div>
+                        {item.tipo_item === 'FABRICADO' && (
+                          <PiezasJuegoEditor
+                            piezas={item.piezas ?? []}
+                            onChange={(piezas) => updateItemField(index, 'piezas', piezas)}
+                          />
+                        )}
                       </div>
                     );
                   })}
@@ -3365,12 +3444,11 @@ export default function Cotizaciones() {
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-yeikar-neutral/40 font-bold">%</span>
                       </>
                     ) : (
-                      <input
-                        type="number"
+                      <MontoInput
                         min="0"
                         placeholder={`Monto en ${monedaAdelantoSel?.codigo ?? '...'}`}
                         value={adelantoMonto}
-                        onChange={(e) => setAdelantoMonto(e.target.value)}
+                        onChange={(v) => setAdelantoMonto(v)}
                         className="w-full p-2 border border-yeikar-secondary-light/20 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-yeikar-tertiary/20 font-mono text-sm"
                       />
                     )}
@@ -3803,7 +3881,7 @@ export default function Cotizaciones() {
                                   <span className="font-semibold text-amber-900">{cp.nombre}</span>
                                   <div className="flex items-center gap-2">
                                     <span className="font-mono text-amber-800 bg-amber-100/60 px-1.5 py-0.5 rounded text-[10px]">
-                                      ${Number(cp.costo_base).toLocaleString()} {cp.porcentaje ? `(+${cp.porcentaje}%)` : ''}
+                                      ${Number(cp.costo_base).toLocaleString('es-CO', { maximumFractionDigits: 2 })} {cp.porcentaje ? `(+${cp.porcentaje}%)` : ''}
                                     </span>
                                     <button
                                       type="button"
@@ -3863,11 +3941,10 @@ export default function Cotizaciones() {
                                     </div>
                                     <div>
                                       <label className="block text-[8px] font-semibold text-stone-400 mb-0.5">PRECIO UNITARIO ($)</label>
-                                      <input
-                                        type="number"
+                                      <MontoInput
                                         min="0"
-                                        value={el.precio_unitario ?? 0}
-                                        onChange={(e) => handleUpdateInsumoField(secIdx, elIdx, 'precio_unitario', e.target.value)}
+                                        value={el.precio_unitario ?? ''}
+                                        onChange={(v) => handleUpdateInsumoField(secIdx, elIdx, 'precio_unitario', v)}
                                         className="w-full p-1 border border-stone-200 bg-white rounded text-xs font-mono"
                                       />
                                     </div>
@@ -3976,7 +4053,7 @@ export default function Cotizaciones() {
                   >
                     <span className="font-semibold text-stone-900">{m.nombre}</span>
                     <span className="font-mono text-stone-500 bg-stone-100 px-2 py-0.5 rounded text-[10px]">
-                      ${Number(m.costo_base).toLocaleString()}
+                      ${Number(m.costo_base).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
                     </span>
                   </button>
                 ))}
@@ -4012,13 +4089,12 @@ export default function Cotizaciones() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-stone-500 mb-1">Costo Base ($) *</label>
-                  <input
-                    type="number"
+                  <MontoInput
                     min="0"
                     required
                     placeholder="0.00"
                     value={addCostForm.costo_base}
-                    onChange={(e) => setAddCostForm({ ...addCostForm, costo_base: e.target.value })}
+                    onChange={(v) => setAddCostForm({ ...addCostForm, costo_base: v })}
                     className="w-full p-2 border border-stone-200 rounded-lg text-xs font-mono"
                   />
                 </div>
@@ -4103,28 +4179,18 @@ export default function Cotizaciones() {
                 <input type="text" required placeholder="Ej. MESA DE COMEDOR 6 PUESTOS" value={npForm.nombre} onChange={(e) => setNpForm((f) => ({ ...f, nombre: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary uppercase" />
               </div>
               <div>
-                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Tipo de producto *</label>
+                <label className="block text-xs font-bold text-yeikar-secondary mb-1">Clasificación *</label>
                 <SearchSelect
                   value={npForm.tipo_producto_id}
                   onChange={(v) => setNpForm((f) => ({ ...f, tipo_producto_id: String(v) }))}
-                  options={tiposProducto.map((t) => ({ value: t.id, label: t.nombre }))}
-                  placeholder="Seleccionar tipo..."
+                  options={tiposProducto.map((t) => ({ value: t.id, label: etiquetaClasificacion(t.nombre) }))}
+                  placeholder="Seleccionar clasificación..."
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Ancho base (m) <span className="text-yeikar-neutral/40 font-normal">opcional</span></label>
-                  <input type="number" step="0.01" min="0" placeholder="1.60" value={npForm.ancho} onChange={(e) => setNpForm((f) => ({ ...f, ancho: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Largo base (m) <span className="text-yeikar-neutral/40 font-normal">opcional</span></label>
-                  <input type="number" step="0.01" min="0" placeholder="1.90" value={npForm.largo} onChange={(e) => setNpForm((f) => ({ ...f, largo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio estimado de venta *</label>
-                  <input type="number" min="0" step="0.01" required placeholder="Ej. 950000" value={npForm.precio} onChange={(e) => setNpForm((f) => ({ ...f, precio: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <MontoInput min="0" required placeholder="Ej. 950000" value={npForm.precio} onChange={(v) => setNpForm((f) => ({ ...f, precio: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda del precio</label>
@@ -4329,7 +4395,7 @@ export default function Cotizaciones() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio estimado de venta *</label>
-                  <input type="number" min="0" step="0.01" required value={dpPrecio} onChange={(e) => setDpPrecio(e.target.value)} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <MontoInput min="0" required value={dpPrecio} onChange={(v) => setDpPrecio(v)} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda</label>

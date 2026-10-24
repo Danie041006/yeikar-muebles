@@ -1,8 +1,11 @@
 const CURRENCY_CONFIG: Record<string, { locale: string; currency: string }> = {
+  // Formato contable COLOMBIA en TODA la app: punto para miles y coma para
+  // decimales (1.234.567,89), sin importar la moneda. Antes USD usaba en-US
+  // y mostraba "1,234.56", que rompía la lectura del resto del ERP.
   COP: { locale: 'es-CO', currency: 'COP' },
-  USD: { locale: 'en-US', currency: 'USD' },
-  VES: { locale: 'es-VE', currency: 'VES' },
-  EUR: { locale: 'de-DE', currency: 'EUR' },
+  USD: { locale: 'es-CO', currency: 'USD' },
+  VES: { locale: 'es-CO', currency: 'VES' },
+  EUR: { locale: 'es-CO', currency: 'EUR' },
 };
 
 const FALLBACK: typeof CURRENCY_CONFIG[string] = { locale: 'es-CO', currency: 'COP' };
@@ -19,6 +22,25 @@ const MONEDA_NOMBRE: Record<string, string> = {
 export function nombreMoneda(currencyCode?: string | null): string {
   if (!currencyCode) return 'Pesos';
   return MONEDA_NOMBRE[currencyCode.toUpperCase()] ?? currencyCode.toUpperCase();
+}
+
+/**
+ * Número con separador de miles SIEMPRE en formato colombiano (1.234.567).
+ * Úsalo para cualquier cifra de dinero que no lleve símbolo de moneda.
+ * Sin `decimales` muestra hasta 2; con `decimales` fija esa cantidad exacta.
+ */
+export function fmtNumero(
+  amount: number | string | null | undefined,
+  decimales?: number,
+): string {
+  const n = Number(amount) || 0;
+  if (decimales === undefined) {
+    return n.toLocaleString('es-CO', { maximumFractionDigits: 2 });
+  }
+  return n.toLocaleString('es-CO', {
+    minimumFractionDigits: decimales,
+    maximumFractionDigits: decimales,
+  });
 }
 
 /** Formatea un monto seguido del nombre claro de la moneda (sin símbolo). */

@@ -20,7 +20,6 @@ from app.modules.production.schemas import (
     ProduccionCrudoManoObraCreate, ProduccionCrudoManoObraUpdate,
     PiezaOrdenCreate, PiezaOrdenUpdate,
 )
-from app.modules.orders.model import DetallePedido
 from app.modules.orders.model import DetallePedido, Pedido
 from app.modules.productos.model import Material, Producto, ProductoMaterial, ReglaGastoSeccion, MaterialUnidadUso
 from app.modules.empleados.model import Empleado
@@ -106,6 +105,9 @@ def _scope_mano_obras(query, usuario: Usuario | None):
 def _snapshot_orden(orden: OrdenProduccion) -> dict:
     return {
         "detalle_pedido_id": orden.detalle_pedido_id,
+        "detalle_pieza_id": orden.detalle_pieza_id,
+        "pieza_nombre": orden.pieza_nombre,
+        "cantidad": float(orden.cantidad) if orden.cantidad is not None else None,
         "producto_id": orden.producto_id,
         "producto_inventario_id": orden.producto_inventario_id,
         "tipo": orden.tipo,
@@ -240,8 +242,37 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
             "Su venta descuenta stock del inventario al facturar."
         )
 
+    # Renglón-juego: la orden debe ser de UNA pieza concreta. Para crear todas
+    # de golpe se usa /produccion/orden/desde-pedido/{detalle_id}.
+    if _detalle.piezas:
+        if not esquema.detalle_pieza_id:
+            raise ValueError(
+                "Este renglón es un juego con piezas: indica detalle_pieza_id "
+                "o usa /produccion/orden/desde-pedido para crear todas las piezas."
+            )
+        pieza = next((p for p in _detalle.piezas if p.id == esquema.detalle_pieza_id), None)
+        if not pieza:
+            raise ValueError("La pieza indicada no pertenece a este renglón del pedido.")
+        db_orden = _crear_orden_desde_pieza(
+            db,
+            _detalle,
+            pieza=pieza,
+            usuario=usuario,
+            estado=esquema.estado,
+            fecha_inicio=esquema.fecha_inicio,
+        )
+        db.flush()
+        record_event(db, actor=usuario, action="CREATE", entity_type="orden_produccion", entity_id=db_orden.id, after=_snapshot_orden(db_orden))
+        db.commit()
+        db.refresh(db_orden)
+        return db_orden
+
+    if esquema.detalle_pieza_id:
+        raise ValueError("La pieza indicada no pertenece a este renglón del pedido.")
+
     db_orden = OrdenProduccion(
         detalle_pedido_id=esquema.detalle_pedido_id,
+        cantidad=_detalle.cantidad,
         estado=esquema.estado,
         fecha_inicio=esquema.fecha_inicio,
         fecha_fin=esquema.fecha_fin,
@@ -258,10 +289,154 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
     db.commit()
     db.refresh(db_orden)
     return db_orden
+
+
+def _crear_orden_desde_pieza(
+    db: Session,
+    detalle: DetallePedido,
+    *,
+    pieza=None,
+    usuario: Usuario | None = None,
+    estado: str = "PENDIENTE",
+    fecha_inicio=None,
+) -> OrdenProduccion:
+    """Crea UNA orden interna. Con `pieza` queda ligada a esa pieza del juego."""
+    cantidad = Decimal(str(detalle.cantidad or 1))
+    if pieza is not None:
+        cantidad *= Decimal(str(pieza.cantidad or 1))
+    orden = OrdenProduccion(
+        detalle_pedido_id=detalle.id,
+        detalle_pieza_id=pieza.id if pieza is not None else None,
+        pieza_nombre=pieza.nombre if pieza is not None else None,
+        cantidad=cantidad,
+        estado=estado,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=None,
+        es_stock=False,
+        tipo=TIPO_PEDIDO,
+        creado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
+        actualizado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
+    )
+    db.add(orden)
+    return orden
+
+
+def _crear_ordenes_de_piezas(
+    db: Session,
+    detalle: DetallePedido,
+    existentes: list[OrdenProduccion],
+    usuario: Usuario | None,
+    estado: str,
+    fecha_inicio,
+) -> list[OrdenProduccion]:
+    """Crea solo las órdenes de las piezas que aún no tienen la suya."""
+    ya_por_pieza = {o.detalle_pieza_id for o in existentes if o.detalle_pieza_id}
+    creadas = []
+    for pieza in detalle.piezas or []:
+        if pieza.id in ya_por_pieza:
+            continue
+        creadas.append(_crear_orden_desde_pieza(
+            db, detalle, pieza=pieza, usuario=usuario, estado=estado, fecha_inicio=fecha_inicio
+        ))
+    db.flush()
+    return creadas
+
+
+def crear_ordenes_desde_detalle_pedido(
+    db: Session,
+    detalle: DetallePedido,
+    usuario: Usuario | None = None,
+    *,
+    estado: str = "PENDIENTE",
+    fecha_inicio=None,
+    commit: bool = True,
+) -> list[OrdenProduccion]:
+    """Crea las órdenes internas de un renglón del pedido (idempotente).
+
+    - Sin piezas declaradas: UNA orden como siempre (mueble suelto).
+    - Con piezas: UNA orden por pieza, con su nombre y cantidad total
+      (pieza × juegos del renglón). La venta sigue siendo un solo renglón.
+    - Si ya hay órdenes, solo crea las que faltan; una orden histórica sin
+      `detalle_pieza_id` se respeta y no se duplica.
+
+    `commit=False` permite reutilizarla dentro de una transacción mayor
+    (conversión de cotización o cambio de estado del pedido).
+    """
+    if detalle.producto is not None and (detalle.producto.es_reventa or detalle.producto.es_exhibicion):
+        raise ValueError(
+            f"El producto '{detalle.producto.nombre}' no entra a producción desde un pedido. "
+            "Su venta descuenta stock del inventario al facturar."
+        )
+    existentes = (
+        db.query(OrdenProduccion)
+        .filter(OrdenProduccion.detalle_pedido_id == detalle.id)
+        .order_by(OrdenProduccion.id)
+        .all()
+    )
+    # Orden histórica "general" (sin pieza): cubre todo el renglón.
+    if any(orden.detalle_pieza_id is None for orden in existentes):
+        return existentes
+
+    piezas = list(detalle.piezas or [])
+    if piezas:
+        creadas = _crear_ordenes_de_piezas(db, detalle, existentes, usuario, estado, fecha_inicio)
+    elif existentes:
+        return existentes
+    else:
+        orden = _crear_orden_desde_pieza(
+            db, detalle, usuario=usuario, estado=estado, fecha_inicio=fecha_inicio
+        )
+        db.flush()
+        from app.modules.production.piezas import sembrar_piezas_orden
+        sembrar_piezas_orden(db, orden, detalle=detalle)
+        creadas = [orden]
+
+    if commit:
+        db.commit()
+        for orden in creadas:
+            db.refresh(orden)
+    return existentes + creadas
+
+
+def _detalle_fabricable_finalizado(db: Session, detalle: DetallePedido) -> bool:
+    """True si el renglón tiene órdenes y TODAS están FINALIZADA."""
+    ordenes = (
+        db.query(OrdenProduccion)
+        .filter(
+            OrdenProduccion.detalle_pedido_id == detalle.id,
+            OrdenProduccion.tipo != TIPO_RETRABAJO,
+        )
+        .all()
+    )
+    return bool(ordenes) and all(orden.estado == "FINALIZADA" for orden in ordenes)
+
+
+def pedido_produccion_finalizada(db: Session, pedido_id: int) -> bool:
+    """True si TODAS las piezas/órdenes de las líneas fabricables terminaron.
+
+    Reemplaza el conteo histórico "n_ordenes_finalizadas == n_detalles", que
+    asumía una orden por renglón. Con juegos puede haber N órdenes por renglón:
+    se exige que cada renglón tenga órdenes y que TODAS estén FINALIZADA.
+    """
+    detalles = (
+        db.query(DetallePedido)
+        .filter(
+            DetallePedido.pedido_id == pedido_id,
+            or_(
+                DetallePedido.tipo_item == "FABRICADO",
+                DetallePedido.tipo_item == "REPARACION",
+                DetallePedido.tipo_item.is_(None),
+            ),
+        )
+        .all()
+    )
+    return all(_detalle_fabricable_finalizado(db, detalle) for detalle in detalles)
+
+
 def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuario: Usuario | None = None):
     # Verificar que el detalle del pedido exista.
     # FOR UPDATE sobre el detalle: dos requests simultáneos para el mismo detalle
-    # se serializan y solo el primero crea la orden (evita IntegrityError 500).
+    # se serializan y solo el primero crea las órdenes (evita duplicados).
     detalle_query = db.query(DetallePedido).join(Pedido, Pedido.id == DetallePedido.pedido_id).filter(DetallePedido.id == detalle_pedido_id)
     if not _ver_toda_la_produccion(usuario):
         detalle_query = detalle_query.filter(Pedido.creado_por_id == usuario.id)
@@ -281,30 +456,12 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuari
     # SERVICIO (flete/instalación) no se fabrica: nunca genera orden de producción.
     if (detalle.tipo_item or "FABRICADO") == "SERVICIO":
         raise ValueError("Una línea SERVICIO no entra a producción.")
-    # REPARACION: la pieza ya existe (es del cliente), así que la orden va SIN
-    # producto. El taller registra materiales y mano de obra libres en las etapas.
 
-    # Verificar si ya existe una orden de producción para este detalle
-    existente = db.query(OrdenProduccion).filter(OrdenProduccion.detalle_pedido_id == detalle_pedido_id).first()
-    if existente:
-        return existente
-        
-    db_orden = OrdenProduccion(
-        detalle_pedido_id=detalle_pedido_id,
-        estado="PENDIENTE",
-        fecha_inicio=None,
-        fecha_fin=None,
-        tipo=TIPO_PEDIDO,
-        creado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
-        actualizado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
-    )
-    db.add(db_orden)
-    db.flush()
-    from app.modules.production.piezas import sembrar_piezas_orden
-    sembrar_piezas_orden(db, db_orden, detalle=detalle)
-    db.commit()
-    db.refresh(db_orden)
-    return db_orden
+    # Sin piezas: una orden (comportamiento histórico). Con piezas: una orden
+    # por pieza. El endpoint devuelve la primera; el tablero recarga y muestra
+    # todas las cards del juego.
+    ordenes = crear_ordenes_desde_detalle_pedido(db, detalle, usuario, commit=True)
+    return ordenes[0] if ordenes else None
 # ------------------------------------------------------------
 # Retrabajo de piezas de exhibición (tipo RETRABAJO)
 # ------------------------------------------------------------
@@ -705,30 +862,10 @@ def cambiar_estado_orden_produccion(db: Session, id_orden: int, nuevo_estado: st
         if detalle:
             pedido = db.query(Pedido).filter(Pedido.id == detalle.pedido_id).with_for_update().first()
             if pedido:
-                # C3: TODAS las líneas FABRICABLES del pedido deben tener su orden
-                # FINALIZADA. Las de REVENTA/INSUMO/SERVICIO/EXHIBICIÓN no entran
-                # a producción (se venden/despachan del inventario), así que no
-                # bloquean el cierre: igual que la ruta manual de actualizar_pedido.
-                # (Antes contaba TODAS las líneas: un pedido mixto nunca terminaba.)
-                n_detalles = db.query(DetallePedido).filter(
-                    DetallePedido.pedido_id == pedido.id,
-                    or_(
-                        DetallePedido.tipo_item == "FABRICADO",
-                        DetallePedido.tipo_item == "REPARACION",
-                        DetallePedido.tipo_item.is_(None),
-                    ),
-                ).count()
-                n_ordenes_finalizadas = db.query(OrdenProduccion).join(
-                    DetallePedido, DetallePedido.id == OrdenProduccion.detalle_pedido_id
-                ).filter(
-                    DetallePedido.pedido_id == pedido.id,
-                    OrdenProduccion.estado == "FINALIZADA",
-                ).count()
-                todas_finalizadas = n_detalles > 0 and n_ordenes_finalizadas == n_detalles
-
-                # Solo desde un estado legal hacia TERMINADO: antes, un pedido
-                # CANCELADO "resucitaba" a TERMINADO y generaba envío.
-                if todas_finalizadas and "TERMINADO" in TRANSICIONES_PEDIDO.get(pedido.estado, set()):
+                # Todas las piezas/órdenes de las líneas fabricables deben estar
+                # FINALIZADA. Las de REVENTA/INSUMO/SERVICIO no entran a
+                # producción y no bloquean el cierre.
+                if pedido_produccion_finalizada(db, pedido.id) and "TERMINADO" in TRANSICIONES_PEDIDO.get(pedido.estado, set()):
                     pedido.estado = "TERMINADO"
                     # Generar envío automático
                     from app.modules.envios.service import crear_envio_automatico
@@ -1801,7 +1938,13 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
     orden = etapa.orden
     detalle = orden.detalle_pedido
     pedido = detalle.pedido if detalle else None
-    producto = detalle.producto if detalle else orden.producto
+    # En una orden de pieza el producto del detalle es el JUEGO padre, no la
+    # pieza: se usa para fotos/medidas/contexto, pero NUNCA para cargar la
+    # receta completa del juego en cada pieza.
+    producto_contexto = detalle.producto if detalle else orden.producto
+    es_pieza_de_juego = bool(orden.detalle_pieza_id or orden.pieza_nombre)
+    producto_receta = None if es_pieza_de_juego else producto_contexto
+    producto = producto_contexto
 
     # Mueble a la medida (sin producto de catálogo): no hay receta que escalar.
     # Se usan las medidas del renglón (o de la orden) tal cual; la ficha y la
@@ -1824,18 +1967,21 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         nuevo_ancho = Decimal(str(detalle.ancho)) if (detalle and detalle.ancho) else None
         nuevo_largo = Decimal(str(detalle.largo)) if (detalle and detalle.largo) else None
 
-    # N.º de piezas de la línea (2 poltronas, 3 sillas...). La receta se define
-    # por UNIDAD; aquí se calcula además el TOTAL del lote (`cantidad_total`)
-    # para que el operario pida el material de todas las piezas sin multiplicar
-    # a mano. `cantidad_esperada` se mantiene POR UNIDAD: es el costo individual.
-    piezas = Decimal(str(detalle.cantidad)) if (detalle and detalle.cantidad) else Decimal("1")
+    # N.º de piezas/unidades de la orden. En un juego, la orden de la pieza
+    # guarda su cantidad total (6 sillas × 2 juegos = 12); en órdenes históricas
+    # se cae a la cantidad de la línea.
+    piezas = (
+        Decimal(str(orden.cantidad))
+        if orden.cantidad is not None
+        else Decimal(str(detalle.cantidad)) if (detalle and detalle.cantidad) else Decimal("1")
+    )
 
     receta = (
         db.query(ProductoMaterial)
         .options(joinedload(ProductoMaterial.material).joinedload(MatModel.unidad_medida))
-        .filter(ProductoMaterial.producto_id == producto.id)
+        .filter(ProductoMaterial.producto_id == producto_receta.id)
         .all()
-    ) if producto else []
+    ) if producto_receta else []
 
     materiales = []
     from app.modules.inventory import laminas as laminas_motor
@@ -1882,8 +2028,9 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
     fotos = [f for f in fotos if f["url"]]
     cliente = pedido.cliente if pedido else None
 
-    # Checklist del mueble: guía de armado/entrega (sofá, poltronas…).
-    piezas_mueble = [
+    # Checklist del mueble: guía de armado/entrega (sofá, poltronas…). En una
+    # orden de pieza el checklist es la propia orden, no otra lista interna.
+    piezas_mueble = [] if es_pieza_de_juego else [
         {
             "id": p.id,
             "orden_produccion_id": p.orden_produccion_id,
@@ -1900,16 +2047,27 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         for p in (orden.piezas or [])
     ]
 
-    nombre_mueble = (
-        producto.nombre
-        if producto
+    juego_nombre = (
+        producto_contexto.nombre
+        if producto_contexto
         else (detalle.descripcion_especifica if detalle and detalle.descripcion_especifica else None)
-        or f"Orden de producción #{orden.id}"
+    )
+    nombre_mueble = (
+        orden.pieza_nombre
+        if es_pieza_de_juego and orden.pieza_nombre
+        else juego_nombre or f"Orden de producción #{orden.id}"
+    )
+    cantidad_hoja = (
+        float(orden.cantidad)
+        if orden.cantidad is not None
+        else float(detalle.cantidad) if detalle else 1.0
     )
 
     return {
-        "producto_id": producto.id if producto else None,
+        "producto_id": None if es_pieza_de_juego else (producto_contexto.id if producto_contexto else None),
         "producto_nombre": nombre_mueble,
+        "pieza_nombre": orden.pieza_nombre if es_pieza_de_juego else None,
+        "juego_nombre": juego_nombre if es_pieza_de_juego else None,
         "dimensiones": {
             "ancho": float(nuevo_ancho) if nuevo_ancho is not None else None,
             "largo": float(nuevo_largo) if nuevo_largo is not None else None,
@@ -1930,7 +2088,7 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         "cliente_nombre": cliente.nombre if cliente else None,
         "cliente_telefono": cliente.telefono if cliente else None,
         "fecha_entrega_estimada": str(pedido.fecha_entrega_estimada) if pedido and pedido.fecha_entrega_estimada else None,
-        "cantidad": float(detalle.cantidad) if detalle else 1.0,
+        "cantidad": cantidad_hoja,
         # N.º de piezas idénticas de la línea (1 en órdenes sin pedido).
         "piezas": float(piezas),
         "piezas_mueble": piezas_mueble,
@@ -2188,16 +2346,20 @@ def obtener_costo_por_orden(db: Session, orden_id: int, usuario: Usuario | None 
 def _costo_estimado_orden(db: Session, orden: OrdenProduccion) -> Optional[Decimal]:
     """Estimado del costo de la orden: precio_costo_base del producto (costo
     de producción del Excel) × unidades del detalle. None si el producto no
-    tiene costo base (no hay estimado que comparar)."""
+    tiene costo base (no hay estimado que comparar) o si la orden es una pieza
+    de un juego (el precio/estimado es del renglón completo, no de la pieza)."""
+    if orden.detalle_pieza_id or orden.pieza_nombre:
+        return None
     producto = None
-    unidades = Decimal("1")
+    unidades = Decimal(str(orden.cantidad)) if orden.cantidad is not None else Decimal("1")
     if orden.es_stock:
         producto = db.query(Producto).filter(Producto.id == orden.producto_id).first()
     elif orden.detalle_pedido_id:
         detalle = db.query(DetallePedido).filter(DetallePedido.id == orden.detalle_pedido_id).first()
         if detalle:
             producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
-            unidades = Decimal(str(detalle.cantidad or 1))
+            if orden.cantidad is None:
+                unidades = Decimal(str(detalle.cantidad or 1))
     if not producto or producto.precio_costo_base is None:
         return None
     return Decimal(str(producto.precio_costo_base)) * unidades
@@ -2417,8 +2579,13 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
         detalle = db.query(DetallePedido).filter(DetallePedido.id == orden.detalle_pedido_id).first()
         if detalle:
             producto = db.query(Producto).filter(Producto.id == detalle.producto_id).first()
-            unidades = Decimal(str(detalle.cantidad or 1))
+            unidades = (
+                Decimal(str(orden.cantidad))
+                if orden.cantidad is not None
+                else Decimal(str(detalle.cantidad or 1))
+            )
             dims = (detalle.ancho, detalle.largo)
+    es_pieza_de_juego = bool(orden.detalle_pieza_id or orden.pieza_nombre)
 
     etapas = (
         db.query(EtapaProduccion)
@@ -2594,8 +2761,10 @@ def costos_en_vivo_orden(db: Session, orden_id: int, usuario: Usuario | None = N
     return {
         "orden_id": orden_id,
         "estado": orden.estado,
-        "producto_id": producto.id if producto else None,
-        "producto_nombre": producto.nombre if producto else None,
+        "producto_id": None if es_pieza_de_juego else (producto.id if producto else None),
+        "producto_nombre": orden.pieza_nombre if es_pieza_de_juego else (producto.nombre if producto else None),
+        "pieza_nombre": orden.pieza_nombre if es_pieza_de_juego else None,
+        "juego_nombre": producto.nombre if (es_pieza_de_juego and producto) else None,
         "dimensiones": {"ancho": float(dims[0]) if dims[0] else None, "largo": float(dims[1]) if dims[1] else None},
         "unidades": float(unidades),
         "estimado": float(estimado) if estimado is not None else None,

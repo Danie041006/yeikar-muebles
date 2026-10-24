@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { productosService, Product, ProductoMaterial, TipoProducto, SeccionProducto, ElementoSeccion, GrupoDuplicados } from '../services/productosService';
 import api from '../services/api';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { SearchSelect, Modal } from '../components/ui';
+import { SearchSelect, Modal, MontoInput } from '../components/ui';
 import { Package, Search, Plus, Copy, Pencil, Trash2, X, FileSpreadsheet, MoreHorizontal, Loader2 } from 'lucide-react';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useToast } from '../context/ToastContext';
@@ -1887,13 +1887,11 @@ export default function Productos() {
                       <label className="block text-xs font-bold text-yeikar-secondary mb-1">
                         Precio de venta estimado <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
                       </label>
-                      <input
-                        type="number"
+                      <MontoInput
                         min="0"
-                        step="1000"
                         placeholder="Ej: 2.500.000"
                         value={productForm.precio_venta_base}
-                        onChange={(e) => setProductForm({ ...productForm, precio_venta_base: e.target.value })}
+                        onChange={(v) => setProductForm({ ...productForm, precio_venta_base: v })}
                         className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
                       />
                     </div>
@@ -1901,13 +1899,11 @@ export default function Productos() {
                       <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">
                         Costo estimado <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
                       </label>
-                      <input
-                        type="number"
+                      <MontoInput
                         min="0"
-                        step="1000"
                         placeholder="Si lo conoces a él en vez del precio"
                         value={productForm.precio_costo_base}
-                        onChange={(e) => setProductForm({ ...productForm, precio_costo_base: e.target.value })}
+                        onChange={(v) => setProductForm({ ...productForm, precio_costo_base: v })}
                         className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
                       />
                     </div>
@@ -2490,13 +2486,11 @@ export default function Productos() {
                       {elementForm.precio_unitario ? fmt(elementForm.precio_unitario) : '—'}
                     </div>
                   ) : (
-                    <input
-                      type="number"
-                      step="0.01"
+                    <MontoInput
                       min="0"
                       placeholder="0.00"
                       value={elementForm.precio_unitario ?? ''}
-                      onChange={(e) => setElementForm({ ...elementForm, precio_unitario: e.target.value ? parseFloat(e.target.value) : null })}
+                      onChange={(v) => setElementForm({ ...elementForm, precio_unitario: v ? Number(v) : null })}
                       className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
                     />
                   )}
@@ -2572,13 +2566,11 @@ export default function Productos() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">$ Costo Fabricación</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <MontoInput
                     min="0"
                     placeholder="0.00"
                     value={politicaForm.costo_fabricacion}
-                    onChange={(e) => setPoliticaForm({ ...politicaForm, costo_fabricacion: e.target.value })}
+                    onChange={(v) => setPoliticaForm({ ...politicaForm, costo_fabricacion: v })}
                     className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
                   />
                 </div>
@@ -2630,14 +2622,12 @@ export default function Productos() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-neutral/55 mb-1">$ Costo Base *</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <MontoInput
                     min="0"
                     required
                     placeholder="0.00"
                     value={costoProduccionForm.costo_base}
-                    onChange={(e) => setCostoProduccionForm({ ...costoProduccionForm, costo_base: e.target.value })}
+                    onChange={(v) => setCostoProduccionForm({ ...costoProduccionForm, costo_base: v })}
                     className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono focus:outline-none focus:border-yeikar-primary"
                   />
                 </div>

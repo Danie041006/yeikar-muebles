@@ -16,11 +16,11 @@ import { getEmpleados } from '../../services/empleadosService';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import api from '../../services/api';
 import ConfirmDialog from '../ui/ConfirmDialog';
-import { SearchSelect } from '../ui';
+import { SearchSelect, MontoInput } from '../ui';
 import CostosOrdenEnVivo from '../CostosOrdenEnVivo';
 import { useToast } from '../../context/ToastContext';
 import { fmtFechaVE } from '../../utils/fechas';
-import { esOrdenExhibicion, esOrdenRetrabajo, fmt, type Empleado, type Material } from './tipos';
+import { esOrdenExhibicion, esOrdenRetrabajo, fmt, nombreOrden, type Empleado, type Material } from './tipos';
 import {
   dimensionalidad,
   volumenPieza,
@@ -679,10 +679,12 @@ export default function EtapaModal({
 
   // ── Datos derivados del header ──
   const productoNombre =
-    stage.orden?.detalle_pedido?.producto?.nombre ||
-    stage.orden?.producto?.nombre ||
-    stage.orden?.detalle_pedido?.descripcion_especifica ||
-    `Orden de Producción #${stage.orden_produccion_id}`;
+    nombreOrden(stage.orden) || `Orden de Producción #${stage.orden_produccion_id}`;
+  const juegoNombre = stage.orden?.pieza_nombre
+    ? (stage.orden?.detalle_pedido?.producto?.nombre
+      || stage.orden?.detalle_pedido?.descripcion_especifica
+      || null)
+    : null;
   const detalle = stage.orden?.detalle_pedido;
   const medidas = detalle?.ancho && detalle?.largo
     ? `${detalle.ancho}m × ${detalle.largo}m`
@@ -787,6 +789,14 @@ export default function EtapaModal({
             <h2 className="text-xl sm:text-2xl font-black font-headline text-yeikar-secondary tracking-tight truncate">
               {productoNombre}
             </h2>
+            {juegoNombre && (
+              <p className="text-[11px] text-yeikar-neutral/50 truncate" title="Juego al que pertenece esta pieza">
+                Juego: {juegoNombre}
+                {stage.orden?.cantidad && Number(stage.orden.cantidad) > 1
+                  ? ` · ${Number(stage.orden.cantidad).toLocaleString('es-CO')} und`
+                  : ''}
+              </p>
+            )}
 
             {/* Fila 2 — solo lo esencial: a quién pertenece y qué es */}
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -1949,13 +1959,11 @@ export default function EtapaModal({
                     </div>
                     <div className="sm:col-span-3">
                       <label className="block text-[10px] font-headline font-bold uppercase tracking-wider text-yeikar-secondary/70 mb-1">Monto</label>
-                      <input
-                        type="number"
+                      <MontoInput
                         min="0"
-                        step="1000"
                         placeholder="$"
                         value={newManoObra.monto}
-                        onChange={(e) => setNewManoObra(prev => ({ ...prev, monto: e.target.value }))}
+                        onChange={(v) => setNewManoObra(prev => ({ ...prev, monto: v }))}
                         required
                         className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
                       />
@@ -1974,12 +1982,10 @@ export default function EtapaModal({
                         />
                       </div>
                       <div className="sm:col-span-2">
-                        <input
-                          type="number"
+                        <MontoInput
                           min="0"
-                          step="1000"
                           value={nuevoCosto.precio}
-                          onChange={(e) => setNuevoCosto(prev => ({ ...prev, precio: e.target.value }))}
+                          onChange={(v) => setNuevoCosto(prev => ({ ...prev, precio: v }))}
                           placeholder="Precio ($)"
                           className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
                         />

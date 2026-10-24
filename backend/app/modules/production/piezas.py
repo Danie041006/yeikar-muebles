@@ -137,6 +137,9 @@ def sembrar_piezas_orden(db, orden, detalle=None) -> list:
     """
     from app.modules.production.model import PiezaOrden
 
+    # La orden ES la pieza: no lleva otro checklist interno.
+    if getattr(orden, "detalle_pieza_id", None) or getattr(orden, "pieza_nombre", None):
+        return []
     if orden.piezas:
         return []
     if detalle is None:

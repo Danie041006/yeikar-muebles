@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react';
 import api from '../services/api';
-import { SearchInput, SearchSelect, ResponsiveDataTable, Button as UiButton, EmptyState, type DataColumn } from '../components/ui';
+import { SearchInput, SearchSelect, ResponsiveDataTable, Button as UiButton, EmptyState, MontoInput, type DataColumn } from '../components/ui';
 import {
   ventaService,
   pagoService,
@@ -1255,13 +1255,10 @@ function ModalDetalle({
                                   <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
                                     Monto del abono ({p.moneda?.codigo ?? 'moneda del pago'})
                                   </label>
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
+                                  <MontoInput
                                     min="0.01"
-                                    step="0.01"
                                     value={editMonto}
-                                    onChange={(e) => setEditMonto(e.target.value)}
+                                    onChange={(v) => setEditMonto(v)}
                                     className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white font-mono"
                                   />
                                   <p className="mt-1 text-[10px] text-yeikar-neutral/45">
@@ -1522,14 +1519,11 @@ function ModalDetalle({
                               Pagar restante
                             </button>
                           </div>
-                          <input
-                            type="number"
+                          <MontoInput
                             min="0"
-                            step="0.0001"
-                            inputMode="decimal"
                             autoFocus
                             value={monto}
-                            onChange={(e) => setMonto(e.target.value)}
+                            onChange={(v) => setMonto(v)}
                             placeholder="0.00"
                             className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
                           />
@@ -1749,14 +1743,11 @@ function ModalDetalle({
                               Descontar restante
                             </button>
                           </div>
-                          <input
-                            type="number"
+                          <MontoInput
                             min="0"
-                            step="0.0001"
-                            inputMode="decimal"
                             autoFocus
                             value={descMonto}
-                            onChange={(e) => setDescMonto(e.target.value)}
+                            onChange={(v) => setDescMonto(v)}
                             placeholder="0.00"
                             className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-white"
                           />

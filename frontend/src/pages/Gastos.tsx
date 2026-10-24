@@ -8,13 +8,13 @@ import { cuentasService, ResumenCuenta } from '../services/cuentasService';
 import {
   cuentasPorPagarService, CuentaPorPagar, ResumenCuentasPorPagar, Abono, DetalleCuentaPorPagar, DetalleCuentaPorPagarCreate,
 } from '../services/cuentasPorPagarService';
-import { nombreMoneda, fmtMoneda } from '../utils/format';
+import { nombreMoneda, fmtMoneda, fmtNumero } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import { useToast } from '../context/ToastContext';
 import {
   Button, Card, Badge, Spinner, EmptyState, StatCard, Modal, PageHeader,
-  Field, Input, Select, Textarea, ConfirmDialog, SearchSelect,
+  Field, Input, Select, Textarea, ConfirmDialog, SearchSelect, MontoInput,
   ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
 
@@ -217,7 +217,7 @@ export default function Gastos() {
       .reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.precio_unitario) || 0), 0);
     const hayDetalles = deudaForm.detalles.length > 0;
     if (hayDetalles && Math.abs(sumaDetalles - Number(deudaForm.monto)) > 0.05) {
-      toast.error(`El monto (${deudaForm.monto}) no cuadra con los renglones (suman ${Math.round(sumaDetalles * 100) / 100}).`);
+      toast.error(`El monto (${fmtNumero(deudaForm.monto)}) no cuadra con los renglones (suman ${fmtNumero(Math.round(sumaDetalles * 100) / 100)}).`);
       return;
     }
     try {
@@ -436,7 +436,7 @@ export default function Gastos() {
     {
       key: 'monto',
       header: 'Debía',
-      render: (d) => <span className="font-mono font-bold">{d.moneda?.simbolo} {Number(d.monto).toLocaleString()}</span>,
+      render: (d) => <span className="font-mono font-bold">{d.moneda?.simbolo} {Number(d.monto).toLocaleString('es-CO', { maximumFractionDigits: 2 })}</span>,
       mobileLabel: 'Debía',
       align: 'right',
     },
@@ -462,7 +462,7 @@ export default function Gastos() {
       header: 'Saldo',
       render: (d) => (
         <span className={`font-mono font-bold ${Number(d.saldo) > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-          {d.moneda?.simbolo} {Number(d.saldo).toLocaleString()}
+          {d.moneda?.simbolo} {Number(d.saldo).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
         </span>
       ),
       mobileLabel: 'Saldo',
@@ -576,7 +576,7 @@ export default function Gastos() {
       header: 'Monto',
       render: (g) => (
         <span className="font-mono font-bold text-yeikar-secondary">
-          {g.moneda?.simbolo} {Number(g.monto).toLocaleString()}
+          {g.moneda?.simbolo} {Number(g.monto).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
         </span>
       ),
       mobileLabel: 'Monto',
@@ -638,7 +638,7 @@ export default function Gastos() {
             <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md ${
               vista === 'por-pagar' ? 'bg-white/20 text-white' : 'bg-red-100 text-red-700'
             }`}>
-              ${Number(resumen.total_pendiente).toLocaleString()}
+              ${Number(resumen.total_pendiente).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
             </span>
           )}
         </button>
@@ -650,7 +650,7 @@ export default function Gastos() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
             <StatCard
               label="Por pagar"
-              value={`$${(resumen?.total_pendiente ?? 0).toLocaleString()}`}
+              value={`$${(resumen?.total_pendiente ?? 0).toLocaleString('es-CO', { maximumFractionDigits: 2 })}`}
               accent="from-red-500 to-red-400"
               iconBg="bg-red-50"
               iconText="text-red-600"
@@ -664,7 +664,7 @@ export default function Gastos() {
             />
             <StatCard
               label="Ya abonado"
-              value={`$${(resumen?.total_pagado ?? 0).toLocaleString()}`}
+              value={`$${(resumen?.total_pagado ?? 0).toLocaleString('es-CO', { maximumFractionDigits: 2 })}`}
               accent="from-emerald-500 to-emerald-400"
               iconBg="bg-emerald-50"
               iconText="text-emerald-600"
@@ -704,7 +704,7 @@ export default function Gastos() {
                       </span>
                     </div>
                     <p className="font-mono text-2xl font-black text-red-700">
-                      ${Number(p.saldo).toLocaleString()}
+                      ${Number(p.saldo).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
                     </p>
                     <p className="text-[10px] font-mono text-red-400/70 group-hover:hidden">pendiente por abonar</p>
                     <p className="hidden text-[10px] font-mono text-emerald-600/80 group-hover:block">clic para abonar</p>
@@ -752,26 +752,26 @@ export default function Gastos() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <StatCard
           label="Total Egresos"
-          value={`$${totales.total.toLocaleString()}`}
+          value={`$${totales.total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`}
           accent="from-yeikar-primary to-yeikar-primary-light"
         />
         <StatCard
           label="Operativos"
-          value={`$${totales.operativos.toLocaleString()}`}
+          value={`$${totales.operativos.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`}
           accent="from-blue-500 to-blue-400"
           iconBg="bg-blue-50"
           iconText="text-blue-600"
         />
         <StatCard
           label="Pasivos"
-          value={`$${totales.pasivos.toLocaleString()}`}
+          value={`$${totales.pasivos.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`}
           accent="from-red-500 to-red-400"
           iconBg="bg-red-50"
           iconText="text-red-600"
         />
         <StatCard
           label="Producción"
-          value={`$${totales.produccion.toLocaleString()}`}
+          value={`$${totales.produccion.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`}
           accent="from-green-500 to-green-400"
           iconBg="bg-green-50"
           iconText="text-green-600"
@@ -806,7 +806,7 @@ export default function Gastos() {
                   <span className="text-[10px] font-mono text-yeikar-neutral/40">{c.count}</span>
                 </div>
                 <p className="mt-2 font-mono text-lg font-black text-yeikar-secondary">
-                  ${c.total.toLocaleString()}
+                  ${c.total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}
                 </p>
               </button>
             ))}
@@ -817,7 +817,7 @@ export default function Gastos() {
                 Sin clasificar: {sinClasificar.length} gasto{sinClasificar.length === 1 ? '' : 's'}
               </span>
               <span className="font-mono text-sm font-bold text-yeikar-neutral/70">
-                ${totalSinClasificar.toLocaleString()}
+                ${totalSinClasificar.toLocaleString('es-CO', { maximumFractionDigits: 2 })}
               </span>
             </div>
           )}
@@ -1042,21 +1042,17 @@ export default function Gastos() {
           </Field>
           {esCOP ? (
             <Field label="Monto (COP)">
-              <Input
-                type="number"
-                step="0.01"
-                value={form.monto}
-                onChange={(e) => setForm({ ...form, monto: Number(e.target.value) })}
+              <MontoInput
+                value={form.monto || ''}
+                onChange={(v) => setForm({ ...form, monto: Number(v) || 0 })}
               />
             </Field>
           ) : (
             <>
               <Field label="Monto" required>
-                <Input
-                  type="number"
-                  step="0.01"
+                <MontoInput
                   value={form.monto}
-                  onChange={(e) => setForm({ ...form, monto: Number(e.target.value) })}
+                  onChange={(v) => setForm({ ...form, monto: Number(v) || 0 })}
                 />
               </Field>
               <Field label={`Tasa (${monedaSeleccionada?.codigo} → COP)`}>
@@ -1079,7 +1075,7 @@ export default function Gastos() {
               </p>
               {!esCOP && (
                 <p className="mt-0.5 text-xs text-yeikar-secondary">
-                  {fmtMoneda(Number(form.monto), monedaSeleccionada?.codigo)} × tasa {Number(form.tasa_cambio).toLocaleString()}
+                  {fmtMoneda(Number(form.monto), monedaSeleccionada?.codigo)} × tasa {Number(form.tasa_cambio).toLocaleString('es-CO', { maximumFractionDigits: 6 })}
                 </p>
               )}
             </div>
@@ -1241,12 +1237,10 @@ export default function Gastos() {
             />
           </Field>
           <Field label="Monto de la deuda (COP)" required>
-            <Input
-              type="number"
-              step="0.01"
+            <MontoInput
               min="0"
-              value={deudaForm.monto}
-              onChange={(e) => setDeudaForm((prev) => ({ ...prev, monto: Number(e.target.value) }))}
+              value={deudaForm.monto || ''}
+              onChange={(v) => setDeudaForm((prev) => ({ ...prev, monto: Number(v) || 0 }))}
             />
           </Field>
           <div className="col-span-2">
@@ -1293,12 +1287,10 @@ export default function Gastos() {
                       />
                     </Field>
                     <Field label={idx === 0 ? 'P. unit' : ''}>
-                      <Input
-                        type="number"
+                      <MontoInput
                         min="0"
-                        step="0.01"
-                        value={d.precio_unitario}
-                        onChange={(e) => actualizarDetalle(idx, 'precio_unitario', Number(e.target.value))}
+                        value={d.precio_unitario || ''}
+                        onChange={(v) => actualizarDetalle(idx, 'precio_unitario', Number(v) || 0)}
                       />
                     </Field>
                     <Field label={idx === 0 ? 'Cliente / obra' : ''}>
@@ -1352,12 +1344,10 @@ export default function Gastos() {
       >
         <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
           <Field label="¿Cuánto abonas?" required>
-            <Input
-              type="number"
-              step="0.01"
+            <MontoInput
               min="0"
-              value={abonoForm.monto}
-              onChange={(e) => setAbonoForm((prev) => ({ ...prev, monto: Number(e.target.value) }))}
+              value={abonoForm.monto || ''}
+              onChange={(v) => setAbonoForm((prev) => ({ ...prev, monto: Number(v) || 0 }))}
             />
           </Field>
           <div className="flex items-end pb-1">

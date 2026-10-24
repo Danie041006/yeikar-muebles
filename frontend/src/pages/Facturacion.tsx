@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import FacturaFiscalPDF from '../components/FacturaFiscalPDF';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
+import MontoInput from '../components/ui/MontoInput';
 import { esperarImagenesCargadas } from '../utils/pdfImagenes';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -46,7 +47,7 @@ function Spinner() {
 const fmtBs = (n: number) =>
   n.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const fmtEs = (n: number) => n.toLocaleString('es-ES');
+const fmtEs = (n: number) => n.toLocaleString('es-CO', { maximumFractionDigits: 2 });
 
 // ─── Generación de PDF (reutilizada en ambos modales) ─────────────────────────
 async function generarPdfFactura(idFactura: number) {
@@ -253,17 +254,15 @@ function ModalEmitirFactura({
                   </div>
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-mono font-bold text-yeikar-neutral/40">$</span>
-                    <input
-                      type="number"
+                    <MontoInput
                       min="0"
-                      step="0.01"
                       value={l.precio_usd}
-                      onChange={(e) => handlePrecio(l.detalle_pedido_id, e.target.value)}
+                      onChange={(v) => handlePrecio(l.detalle_pedido_id, v)}
                       placeholder="0.00"
                       className="w-28 px-2 py-1.5 text-sm text-right border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white font-mono"
                     />
                     <span className="text-[10px] font-bold text-yeikar-neutral/40 w-10 text-right">
-                      {((parseFloat(l.precio_usd) || 0) * l.cantidad).toFixed(2)}
+                      {fmtEs((parseFloat(l.precio_usd) || 0) * l.cantidad)}
                     </span>
                   </div>
                 </div>
@@ -275,7 +274,7 @@ function ModalEmitirFactura({
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-1 font-mono text-sm">
             <div className="flex justify-between text-amber-900">
               <span>Total en USD</span>
-              <span className="font-bold">${totalUsd.toFixed(2)}</span>
+              <span className="font-bold">${fmtEs(totalUsd)}</span>
             </div>
             <div className="flex justify-between text-amber-900">
               <span>Base imponible (Bs.)</span>
@@ -457,7 +456,7 @@ function ModalDetalleFactura({
                 </div>
                 <div className="bg-green-50 rounded-xl p-3 text-center border border-green-100">
                   <p className="text-xs text-green-600 font-mono mb-1">Tasa (1 USD → Bs.)</p>
-                  <p className="font-headline font-bold text-green-700">Bs. {fmtEs(Number(factura.tasa_usd_ves))}</p>
+                  <p className="font-headline font-bold text-green-700">Bs. {Number(factura.tasa_usd_ves).toLocaleString('es-CO', { maximumFractionDigits: 4 })}</p>
                 </div>
                 <div className="bg-amber-50 rounded-xl p-3 text-center border border-amber-100">
                   <p className="text-xs text-amber-600 font-mono mb-1">Total a pagar</p>

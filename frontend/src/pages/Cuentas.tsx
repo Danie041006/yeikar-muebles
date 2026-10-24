@@ -6,7 +6,7 @@ import {
 import { CLASIFICACIONES_GASTO } from '../services/gastoService';
 import {
   Button, Card, Badge, Spinner, EmptyState, StatCard, Modal, PageHeader,
-  Field, Input, Select, Textarea, ConfirmDialog, SearchSelect,
+  Field, Input, Select, Textarea, ConfirmDialog, SearchSelect, MontoInput,
   ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
 import { nombreMoneda, fmtMoneda } from '../utils/format';
@@ -1045,12 +1045,10 @@ export default function Cuentas() {
 
           <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
             <Field label="Monto" required>
-              <Input
-                type="number"
-                step="0.01"
+              <MontoInput
                 min="0"
                 value={transferForm.monto || ''}
-                onChange={(e) => setTransferForm({ ...transferForm, monto: Number(e.target.value) })}
+                onChange={(v) => setTransferForm({ ...transferForm, monto: Number(v) || 0 })}
               />
             </Field>
             <Field label="Fecha" required>
@@ -1122,12 +1120,10 @@ export default function Cuentas() {
               label={`Interés (opcional, en ${transferForm.cuenta_destino_id > 0 ? transferCodigoDestino : 'la moneda destino'})`}
               hint="Se aplica a lo que entra a la cuenta destino; puede sumar o restar."
             >
-              <Input
-                type="number"
-                step="0.01"
+              <MontoInput
                 min="0"
                 value={transferForm.interes}
-                onChange={(e) => setTransferForm({ ...transferForm, interes: e.target.value })}
+                onChange={(v) => setTransferForm({ ...transferForm, interes: v })}
                 placeholder="0"
               />
             </Field>

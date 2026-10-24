@@ -32,6 +32,8 @@ export interface DetalleDocumento {
   /** Fotos del producto EN ORDEN DE SUBIDA (la primera es la portada). El
    * documento muestra hasta 2; las demás solo salen en la Hoja de Trabajo. */
   fotos?: string[] | null;
+  /** Piezas del juego (sin precio): se listan como "Incluye: …". */
+  piezas?: { nombre: string; cantidad: number }[] | null;
 }
 
 /**
@@ -213,10 +215,16 @@ export default function DocumentoCotizacion({
                       && det.unidad_medida
                       ? `${Number(det.cantidad_base).toLocaleString('es-CO', { maximumFractionDigits: 4 })} ${det.unidad_medida}`
                       : null;
+                    const piezasTxt = (det.piezas?.length ?? 0) > 0
+                      ? `Incluye: ${det.piezas!
+                          .map((p) => `${p.nombre}${Number(p.cantidad) > 1 ? ` × ${Number(p.cantidad).toLocaleString('es-CO')}` : ''}`)
+                          .join(', ')}`
+                      : null;
                     const desc = [
                       dims,
                       det.observaciones,
                       equivalencia ? `Equivale a ${equivalencia}` : null,
+                      piezasTxt,
                     ].filter(Boolean).join(' — ');
                     const rowTotal = Number(det.precio) * Number(det.cantidad);
                     const cantidadTxt = Number.isFinite(Number(det.cantidad))

@@ -35,7 +35,10 @@ def crear_envio(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except IntegrityError:
-        raise HTTPException(status_code=409, detail="Ya existe un envío registrado para este pedido")
+        raise HTTPException(
+            status_code=409,
+            detail="El despacho tiene ítems repetidos o inválidos. Revisa las cantidades.",
+        )
 
 
 @router.get("/mis-asignaciones", response_model=List[schemas.EnvioRepartoResponse])
@@ -58,6 +61,7 @@ def listar_envios(
     buscar: Optional[str] = Query(None, description="Buscar por cliente, guia, direccion u observaciones"),
     estado: Optional[str] = Query(None, description="PREPARADO, EN_TRANSITO, ENTREGADO, FALLIDO"),
     estados: Optional[str] = Query(None, description="Varios estados separados por coma (p. ej. PREPARADO,EN_TRANSITO)"),
+    pedido_id: Optional[int] = Query(None, description="Filtrar los despachos de un pedido"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
@@ -69,13 +73,33 @@ def listar_envios(
         buscar=buscar,
         estado=estado,
         estados=lista_estados,
+        pedido_id=pedido_id,
         usuario=usuario_actual,
     )
     total = service.contar_envios(
-        db, buscar=buscar, estado=estado, estados=lista_estados, usuario=usuario_actual
+        db, buscar=buscar, estado=estado, estados=lista_estados,
+        pedido_id=pedido_id, usuario=usuario_actual
     )
     response.headers["X-Total-Count"] = str(total)
     return [_serialize_envio(envio, usuario_actual) for envio in envios]
+
+
+@router.get("/pendientes/{pedido_id}", response_model=schemas.PendienteEntregaResponse)
+def pendientes_entrega(
+    pedido_id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user),
+):
+    """Lo que falta por entregar de un pedido y qué está listo para despachar."""
+    if not tiene_alcance_total(usuario_actual):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo un supervisor puede preparar despachos.",
+        )
+    data = service.obtener_pendientes_entrega(db, pedido_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Pedido no encontrado")
+    return data
 
 
 @router.post("/{id}/ubicaciones", response_model=schemas.EnvioUbicacionResponse, status_code=status.HTTP_201_CREATED)

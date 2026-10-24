@@ -12,7 +12,7 @@ import {
 import { ventaService, Venta } from '../services/ventaService';
 import { getMonedas, Moneda } from '../services/gastoService';
 import { buildInformePrintHtml } from '../utils/informePrintHtml';
-import { SearchSelect } from './ui';
+import { SearchSelect, MontoInput } from './ui';
 
 const fmtCop = (n: number | null | undefined): string =>
   `$${Math.round(Number(n) || 0).toLocaleString('es-CO')}`;
@@ -180,8 +180,8 @@ export default function InformeMensual() {
           return {
             mes,
             concepto_id: c.id,
-            valor_inicial: Number(e.inicial) || 0,
-            valor_final: Number(e.final) || 0,
+            valor_inicial: parseFloat(e.inicial) || 0,
+            valor_final: parseFloat(e.final) || 0,
             moneda_id: monedaCop?.id ?? 1,
           };
         });
@@ -235,7 +235,7 @@ export default function InformeMensual() {
 
   // ---- Movimientos de caja ----
   const registrarMovimiento = async () => {
-    const monto = Number(cajaForm.monto);
+    const monto = parseFloat(cajaForm.monto);
     if (!cajaForm.metodo_caja_id || !monto || monto <= 0) {
       setError('Selecciona el método de caja y escribe un monto válido.');
       return;
@@ -273,7 +273,7 @@ export default function InformeMensual() {
 
   // ---- Devoluciones ----
   const registrarDevolucion = async () => {
-    const monto = Number(devForm.monto_devuelto);
+    const monto = parseFloat(devForm.monto_devuelto);
     if (!devForm.venta_id || !monto || monto <= 0) {
       setError('Selecciona la venta y escribe el monto devuelto.');
       return;
@@ -673,27 +673,23 @@ export default function InformeMensual() {
                             <tr key={c.id}>
                               <td className="p-2 text-yeikar-neutral/80 font-medium">{c.nombre}</td>
                               <td className="p-2">
-                                <input
-                                  type="number"
+                                <MontoInput
                                   min="0"
-                                  step="0.01"
                                   value={edicionValores[c.id]?.inicial ?? ''}
                                   placeholder="0"
-                                  onChange={(e) =>
-                                    setEdicionValores((prev) => ({ ...prev, [c.id]: { ...(prev[c.id] ?? { inicial: '', final: '' }), inicial: e.target.value } }))
+                                  onChange={(v) =>
+                                    setEdicionValores((prev) => ({ ...prev, [c.id]: { ...(prev[c.id] ?? { inicial: '', final: '' }), inicial: v } }))
                                   }
                                   className={inputCls}
                                 />
                               </td>
                               <td className="p-2">
-                                <input
-                                  type="number"
+                                <MontoInput
                                   min="0"
-                                  step="0.01"
                                   value={edicionValores[c.id]?.final ?? ''}
                                   placeholder="0"
-                                  onChange={(e) =>
-                                    setEdicionValores((prev) => ({ ...prev, [c.id]: { ...(prev[c.id] ?? { inicial: '', final: '' }), final: e.target.value } }))
+                                  onChange={(v) =>
+                                    setEdicionValores((prev) => ({ ...prev, [c.id]: { ...(prev[c.id] ?? { inicial: '', final: '' }), final: v } }))
                                   }
                                   className={inputCls}
                                 />
@@ -779,7 +775,7 @@ export default function InformeMensual() {
                         <option value="APERTURA">Apertura</option>
                         <option value="AJUSTE">Ajuste</option>
                       </select>
-                      <input type="number" min="0" step="0.01" value={cajaForm.monto} onChange={(e) => setCajaForm((f) => ({ ...f, monto: e.target.value }))} placeholder="Monto" className={inputCls} />
+                      <MontoInput min="0" value={cajaForm.monto} onChange={(v) => setCajaForm((f) => ({ ...f, monto: v }))} placeholder="Monto" className={inputCls} />
                       <input value={cajaForm.persona_entidad} onChange={(e) => setCajaForm((f) => ({ ...f, persona_entidad: e.target.value }))} placeholder="Persona o entidad" className={inputCls} />
                       <input value={cajaForm.concepto} onChange={(e) => setCajaForm((f) => ({ ...f, concepto: e.target.value }))} placeholder="Concepto" className={inputCls} />
                       <button onClick={registrarMovimiento} disabled={guardando} className="bg-yeikar-primary text-yeikar-neutral font-bold text-sm rounded-lg hover:bg-yeikar-secondary transition-colors disabled:opacity-50 py-2">
@@ -855,7 +851,7 @@ export default function InformeMensual() {
                       />
                       <input type="date" value={devForm.fecha} onChange={(e) => setDevForm((f) => ({ ...f, fecha: e.target.value }))} className={inputCls} />
                       <input type="number" min="1" step="1" value={devForm.cantidad} onChange={(e) => setDevForm((f) => ({ ...f, cantidad: e.target.value }))} placeholder="Cantidad" className={inputCls} />
-                      <input type="number" min="0" step="0.01" value={devForm.monto_devuelto} onChange={(e) => setDevForm((f) => ({ ...f, monto_devuelto: e.target.value }))} placeholder="Monto devuelto" className={inputCls} />
+                      <MontoInput min="0" value={devForm.monto_devuelto} onChange={(v) => setDevForm((f) => ({ ...f, monto_devuelto: v }))} placeholder="Monto devuelto" className={inputCls} />
                       <SearchSelect
                         value={devForm.moneda_id}
                         onChange={(v) => setDevForm((f) => ({ ...f, moneda_id: Number(v) }))}

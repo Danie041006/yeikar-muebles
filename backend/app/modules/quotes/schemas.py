@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
 from typing import Optional, List, Any
+import unicodedata
 from app.modules.clients.schemas import ClientResponse
 from app.modules.catalogos.schemas import MonedaResponse
 from app.modules.productos.schemas import MaterialResponse
@@ -32,6 +33,69 @@ class ClienteRapidoResponse(BaseModel):
 
 TIPOS_ITEM = ("FABRICADO", "REVENTA", "INSUMO", "REPARACION", "SERVICIO")
 
+
+# ------------------------------------------------------------
+# Piezas de un renglón-juego
+# ------------------------------------------------------------
+MAX_PIEZAS_JUEGO = 50
+
+
+def clave_pieza(nombre: str) -> str:
+    """Clave para comparar nombres sin acentos ni mayúsculas ("Sillón" = "SILLON")."""
+    plano = unicodedata.normalize("NFD", (nombre or "").strip().upper())
+    return "".join(c for c in plano if unicodedata.category(c) != "Mn")
+
+
+def validar_piezas_juego(piezas: "list[PiezaJuegoBase]", tipo_item: str) -> None:
+    """Reglas compartidas por cotización y pedido.
+
+    Las piezas no llevan precio: son la apertura interna de producción/costos
+    de un renglón con precio global. Solo tienen sentido en FABRICADO y sus
+    nombres deben ser únicos (sin duplicar por mayúsculas/acentos).
+    """
+    if not piezas:
+        return
+    if tipo_item != "FABRICADO":
+        raise ValueError("Las piezas del juego solo aplican a renglones FABRICADO.")
+    if len(piezas) > MAX_PIEZAS_JUEGO:
+        raise ValueError(f"Un renglón no puede tener más de {MAX_PIEZAS_JUEGO} piezas.")
+    vistas: set[str] = set()
+    for pieza in piezas:
+        nombre = (pieza.nombre or "").strip()
+        if not nombre:
+            raise ValueError("Cada pieza del juego debe tener un nombre.")
+        clave = clave_pieza(nombre)
+        if clave in vistas:
+            raise ValueError(f"La pieza '{nombre}' está repetida en el juego.")
+        vistas.add(clave)
+
+
+class PiezaJuegoBase(BaseModel):
+    nombre: str = Field(min_length=1, max_length=150)
+    # Cantidad por UNIDAD del renglón (por juego): 6 sillas por comedor.
+    cantidad: float = Field(gt=0, le=1000)
+    notas: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _normalizar(self):
+        self.nombre = self.nombre.strip()
+        self.notas = (self.notas or "").strip() or None
+        return self
+
+
+class PiezaJuegoCreate(PiezaJuegoBase):
+    pass
+
+
+class DetalleCotizacionPiezaResponse(PiezaJuegoBase):
+    id: int
+    detalle_cotizacion_id: int
+    orden: int
+
+    class Config:
+        from_attributes = True
+
+
 class DetalleCotizacionBase(BaseModel):
     producto_id: Optional[int] = None
     material_id: Optional[int] = None
@@ -57,8 +121,14 @@ class DetalleCotizacionBase(BaseModel):
     receta_personalizada: Optional[Any] = None
 
 class DetalleCotizacionCreate(DetalleCotizacionBase):
+    # Piezas del juego (opcional). Si vienen, al convertir se crea una orden de
+    # producción por pieza; el renglón conserva su precio global. None = no se
+    # enviaron (no confundir con [] explícito: "este renglón no es un juego").
+    piezas: Optional[List[PiezaJuegoCreate]] = None
+
     @model_validator(mode="after")
     def _validate_item(self):
+        validar_piezas_juego(self.piezas or [], self.tipo_item)
         # La validación de integridad vive SOLO en el Create: el Response
         # también debe poder serializar cotizaciones 100% personalizadas
         # (producto_id NULL, p. ej. guardadas desde el Cotizador IA sin
@@ -93,6 +163,7 @@ class DetalleCotizacionResponse(DetalleCotizacionBase):
     id: int
     cotizacion_id: int
     material: Optional[MaterialResponse] = None
+    piezas: List[DetalleCotizacionPiezaResponse] = []
 
     class Config:
         from_attributes = True

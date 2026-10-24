@@ -15,6 +15,7 @@ const pageMeta: Record<string, { title: string; category: string }> = {
   '/produccion-crudo': { title: 'Producción de Productos en Crudo', category: 'Producción' },
   '/empleados': { title: 'Empleados', category: 'Administración' },
   '/inventario': { title: 'Inventario', category: 'Almacén' },
+  '/inventario/oficina': { title: 'Inventario de Oficina', category: 'Almacén' },
   '/productos': { title: 'Productos', category: 'Almacén' },
   '/envios': { title: 'Despachos', category: 'Comercial' },
   '/mis-despachos': { title: 'Mis Despachos', category: 'Comercial' },

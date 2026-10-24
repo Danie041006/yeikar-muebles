@@ -8,9 +8,10 @@ import { cuentasService, ResumenCuenta } from '../services/cuentasService';
 import { useToast } from '../context/ToastContext';
 import {
   Button, Card, Badge, Spinner, EmptyState, StatCard, PageHeader,
-  Field, Input, Modal, ConfirmDialog, SearchSelect,
+  Field, Input, Modal, ConfirmDialog, SearchSelect, MontoInput,
   ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
+import { parseMontoInput } from '../utils/monto';
 import DocumentoNomina from '../components/Expediente/DocumentoNomina';
 
 function fmt(d: Date): string {
@@ -207,12 +208,12 @@ export default function Nomina() {
 
   const agregarLinea = async (d: NominaDetalle) => {
     const f = lineaForm[d.id];
-    if (!f || !f.descripcion.trim() || !Number(f.cantidad) || !Number(f.precio)) return;
+    if (!f || !f.descripcion.trim() || !Number(f.cantidad) || !parseFloat(f.precio)) return;
     try {
       await nominaService.agregarLinea(d.id, {
         descripcion: f.descripcion.trim(),
         cantidad: Number(f.cantidad),
-        precio_unitario: Number(f.precio),
+        precio_unitario: parseFloat(f.precio),
       });
       refrescarDetalle();
     } catch (err: any) {
@@ -230,11 +231,12 @@ export default function Nomina() {
   };
 
   const agregarVario = async () => {
-    if (!detalle || !varioForm.descripcion.trim() || !Number(varioForm.monto)) return;
+    const montoVario = parseFloat(varioForm.monto) || 0;
+    if (!detalle || !varioForm.descripcion.trim() || !montoVario) return;
     try {
       await nominaService.agregarConceptoVario(detalle.id, {
         descripcion: varioForm.descripcion.trim(),
-        monto: Number(varioForm.monto),
+        monto: montoVario,
       });
       refrescarDetalle();
     } catch (err: any) {
@@ -841,12 +843,11 @@ export default function Nomina() {
                         value={lineaForm[d.id]?.descripcion || ''}
                         onChange={(e) => setLineaForm((p) => ({ ...p, [d.id]: { descripcion: e.target.value, cantidad: p[d.id]?.cantidad || '', precio: p[d.id]?.precio || '' } }))}
                       />
-                      <Input
-                        type="number"
+                      <MontoInput
                         className="w-32 font-mono"
                         placeholder="Precio"
                         value={lineaForm[d.id]?.precio || ''}
-                        onChange={(e) => setLineaForm((p) => ({ ...p, [d.id]: { descripcion: p[d.id]?.descripcion || '', cantidad: p[d.id]?.cantidad || '', precio: e.target.value } }))}
+                        onChange={(v) => setLineaForm((p) => ({ ...p, [d.id]: { descripcion: p[d.id]?.descripcion || '', cantidad: p[d.id]?.cantidad || '', precio: v } }))}
                       />
                       <Button size="sm" variant="outline" onClick={() => agregarLinea(d)}>+</Button>
                     </div>
@@ -865,13 +866,13 @@ export default function Nomina() {
                   <div className="text-right">
                     <p className="text-[10px] font-bold uppercase tracking-wider text-yeikar-neutral/40">Monto a pagar</p>
                     {detalle.estado === 'BORRADOR' ? (
-                      <Input
-                        type="number"
+                      <MontoInput
                         className="w-40 font-mono font-bold text-right"
-                        defaultValue={d.monto_a_pagar}
-                        onBlur={(e) => guardarMonto(d, Number(e.target.value))}
+                        value={d.monto_a_pagar || ''}
+                        onChange={() => {}}
+                        onBlur={(e) => guardarMonto(d, parseMontoInput(e.target.value) || 0)}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') guardarMonto(d, Number((e.target as HTMLInputElement).value));
+                          if (e.key === 'Enter') guardarMonto(d, parseMontoInput((e.target as HTMLInputElement).value) || 0);
                         }}
                       />
                     ) : (
@@ -905,12 +906,11 @@ export default function Nomina() {
                     value={varioForm.descripcion}
                     onChange={(e) => setVarioForm((p) => ({ ...p, descripcion: e.target.value }))}
                   />
-                  <Input
-                    type="number"
+                  <MontoInput
                     className="w-36 font-mono"
                     placeholder="Monto"
                     value={varioForm.monto}
-                    onChange={(e) => setVarioForm((p) => ({ ...p, monto: e.target.value }))}
+                    onChange={(v) => setVarioForm((p) => ({ ...p, monto: v }))}
                   />
                   <Button size="sm" variant="outline" onClick={agregarVario}>Agregar</Button>
                 </div>

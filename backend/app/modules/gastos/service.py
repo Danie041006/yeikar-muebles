@@ -343,6 +343,20 @@ def eliminar_gasto(db: Session, gasto_id: int, usuario: Usuario | None = None) -
     db_gasto = obtener_gasto(db, gasto_id, usuario)
     if not db_gasto:
         return False
+    # Un gasto generado por una entrada de inventario no se puede borrar solo:
+    # la entrada quedaría con stock y costo, pero sin pago ni salida de caja
+    # (y con la cuenta marcada). Hay que corregir/eliminar la entrada.
+    from app.modules.inventory.model import MovimientoInventario
+    mov_inv = (
+        db.query(MovimientoInventario)
+        .filter(MovimientoInventario.gasto_id == db_gasto.id)
+        .first()
+    )
+    if mov_inv is not None:
+        raise ValueError(
+            f"Este gasto lo generó la entrada de inventario #{mov_inv.id}. "
+            "No se puede borrar por separado: corrige o elimina esa entrada de inventario."
+        )
     # Al eliminar un gasto con salida de caja, se revierte su movimiento para
     # que el saldo de la cuenta no quede con un egreso que ya no existe.
     from app.modules.reports.model import MovimientoCaja

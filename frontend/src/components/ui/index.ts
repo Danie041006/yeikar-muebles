@@ -12,3 +12,4 @@ export { default as ConfirmDialog } from './ConfirmDialog';
 export { default as SearchSelect } from './SearchSelect';
 export { default as ResponsiveDataTable, type DataColumn } from './ResponsiveDataTable';
 export { Field, Input, Select, Textarea, Label } from './Field';
+export { default as MontoInput } from './MontoInput';

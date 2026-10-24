@@ -9,6 +9,9 @@ services:
       POSTGRES_USER: ${DB_USER:-yeikar}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-yeikar123}
       POSTGRES_DB: ${DB_NAME:-yeikar_db}
+      # Hora de Venezuela: `func.now()` (created_at/updated_at) debe guardar la
+      # misma hora pared que el resto de los timestamps de negocio (naive VE).
+      TZ: America/Caracas
     volumes:
       # PG18+: la imagen monta el volumen en /var/lib/postgresql (padre) y
       # guarda los datos en una subcarpeta con la versión (pg_ctlcluster).
@@ -35,6 +38,7 @@ services:
       DATABASE_URL: postgresql://${DB_USER:-yeikar}:${DB_PASSWORD:-yeikar123}@db:5432/${DB_NAME:-yeikar_db}
       SECRET_KEY: ${SECRET_KEY}
       DEBUG: ${DEBUG:-false}
+      TZ: America/Caracas
       RATE_LIMIT_REQUESTS_PER_MINUTE: ${RATE_LIMIT_REQUESTS_PER_MINUTE:-1200}
       LOGIN_MAX_INTENTOS: ${LOGIN_MAX_INTENTOS:-5}
       LOGIN_VENTANA_MINUTOS: ${LOGIN_VENTANA_MINUTOS:-15}

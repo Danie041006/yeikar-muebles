@@ -43,6 +43,15 @@ export interface Product {
   fotos?: AdjuntoInfo[];
 }
 
+export interface PiezaJuego {
+  id?: number;
+  nombre: string;
+  /** Cantidad por unidad del renglón (por juego). */
+  cantidad: number;
+  notas?: string | null;
+  orden?: number;
+}
+
 export interface QuoteDetail {
   id?: number;
   cotizacion_id?: number;
@@ -67,6 +76,8 @@ export interface QuoteDetail {
   costo_gastos?: number | null;
   costo_total?: number | null;
   receta_personalizada?: any;
+  /** Piezas del juego: el renglón conserva un precio global. */
+  piezas?: PiezaJuego[];
   /** Renglón de regalo de promoción (colchón → plástico), precio 0. */
   es_obsequio?: boolean;
 }

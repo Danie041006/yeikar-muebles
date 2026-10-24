@@ -22,7 +22,7 @@ def crear_pedido(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/", response_model=List[schemas.PedidoResponse])
+@router.get("/", response_model=List[schemas.PedidoConEntregasResponse])
 def listar_pedidos(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),
@@ -49,7 +49,7 @@ def rentabilidad_pedido(
         raise HTTPException(status_code=404, detail="Pedido no encontrado")
     return db_obj
 
-@router.get("/{id_pedido}", response_model=schemas.PedidoResponse)
+@router.get("/{id_pedido}", response_model=schemas.PedidoConEntregasResponse)
 def ver_pedido(
     id_pedido: int,
     db: Session = Depends(get_db),

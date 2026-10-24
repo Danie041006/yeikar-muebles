@@ -88,12 +88,26 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 
 ## Production order flow
 
-1. Quote converted → `Pedido` nace DIRECTAMENTE en `PRODUCCION` (sin paso intermedio COTIZADO/APROBADO) y se auto-crea la orden por cada línea FABRICADO (`OrdenProduccion` estado=PENDIENTE)
-2. `POST /produccion/orden/desde-pedido/{detalle_id}` devuelve la orden existente (idempotente)
+1. Quote converted → `Pedido` nace DIRECTAMENTE en `PRODUCCION` (sin paso intermedio COTIZADO/APROBADO) y se auto-crean las órdenes de cada línea FABRICADO (`OrdenProduccion` estado=PENDIENTE). Si la línea declara PIEZAS del juego, se crea UNA orden interna por pieza; si no, una sola orden como siempre.
+2. `POST /produccion/orden/desde-pedido/{detalle_id}` crea las órdenes que falten y devuelve la primera (idempotente)
 3. First etapa changes orden to EN_PRODUCCION
 4. Etapas are tracked per area (Ebanistería → Tapicería → Pintura → etc.)
 5. Completing all etapas: supervisor presses "Finalizar" which sets estado=FINALIZADA, auto-calculates costs
-6. When all órdenes for a pedido are FINALIZADA, pedido → TERMINADO and envio auto-created
+6. When ALL internal orders/pieces for a pedido are FINALIZADA, pedido → TERMINADO and envio auto-created (helper `pedido_produccion_finalizada`)
+
+### Entregas parciales (varios despachos por pedido)
+
+- **Modelo**: `envio.pedido_id` ya NO es único. Cada despacho lleva `envio_detalle` (`detalle_pedido_id`, `orden_produccion_id` opcional para piezas, `cantidad`). Un pedido puede tener N envíos; la guía imprime solo los ítems de ese envío.
+- **Regla**: se puede entregar un ítem cuando SU orden está `FINALIZADA` (o es `REVENTA`/`INSUMO`/`SERVICIO`), aunque el resto del pedido siga en producción. No se puede exceder lo pendiente ni duplicar un ítem reservado por otro despacho `PREPARADO`/`EN_TRANSITO`.
+- **Estados**: el pedido sigue en `PRODUCCION`/`TERMINADO` mientras falte algo. `entrega_resumen` (en `GET /pedido/` y `GET /pedido/{id}`) expone `total`, `entregado`, `pendiente`, `estado` (PENDIENTE/PARCIAL/COMPLETO) y `envios`. La última entrega pone el pedido en `ENTREGADO`. `PUT /pedido/{id} {estado:'ENTREGADO'}` se rechaza si quedan ítems.
+- **Flete**: `GET /pedido/{id}/rentabilidad` suma el `costo_flete_en_moneda_base` de todos los despachos no `FALLIDO` (varios viajes).
+- **Cancelación**: no se puede cancelar un pedido con envíos vivos (`PREPARADO`/`EN_TRANSITO`) ni con entregas `ENTREGADO`; primero se marca `FALLIDO`/se elimina el despacho.
+- **Despachos**: un `PREPARADO` se puede eliminar (libera sus ítems) para dividir la entrega; un `FALLIDO` se puede reprogramar creando un nuevo despacho con los mismos ítems (el fallido queda en el historial).
+- **API**: `GET /api/v1/envio/pendientes/{pedido_id}` (solo Dueño/Admin) devuelve los ítems con `cantidad_lista`; `POST /api/v1/envio/` acepta `detalles: [{detalle_pedido_id, orden_produccion_id?, cantidad}]`; `GET /api/v1/envio/?pedido_id=N` lista los despachos. Sin `detalles` se despacha todo lo pendiente que ya esté listo (compatibilidad/auto).
+- **UI**: Pedidos → botón **Entregar** (modal `EntregaParcialModal`), columna de progreso `x/y`, historial de entregas en el detalle. Despachos → asignar chofer/guía; la guía PDF usa `envio.detalles` y el total de la tanda. MisDespachos muestra solo los ítems del despacho.
+- **Facturación**: sigue siendo UNA factura por pedido con todas sus líneas; NO hay facturación parcial por entrega (decisión pendiente si se necesita).
+- **Migración**: `f3a1b2c4d5e6_entregas_parciales` depende de `f8840b56521c` (piezas del juego): desplegar ambas juntas y correr `alembic upgrade head`.
+- Tests: `pytest test/test_entregas_parciales.py -v`.
 
 ### Pedidos de material y captura flexible de madera
 
@@ -112,12 +126,32 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 - **Checklist de piezas** (`orden_pieza`): al crear la orden se auto-detecta desde la descripción con `production/piezas.py` («SOFA DE 3 PUESTOS Y 2 POLTRONAS» → Sofá ×1 + Poltrona ×2); sin conjunto claro no genera nada (cero ruido). Endpoints: `POST /produccion/orden/{id}/piezas`, `PUT/DELETE /produccion/pieza/{id}` (marcar = `PUT {completada: true}`). Se muestra en el modal (tab La etapa), en la tarjeta y en la Hoja de Trabajo. NO toca precio, receta, stock ni costos; finalizar AVISA si faltan piezas (no bloquea). Backfill de órdenes viejas: `venv/bin/python scripts/sembrar_piezas_ordenes.py --aplicar`.
 - **Ficha/Hoja de Trabajo sin producto**: `GET /produccion/etapa/{id}/referencia-receta` devuelve `producto_id: null`, `materiales: []`, la descripción y `piezas_mueble` (antes 404).
 
+### Juegos con precio global → órdenes internas por pieza
+
+- **Caso real**: la dueña cotiza UN juego completo (mesa, sillas, sillones…) con un solo precio porque fue gusto del cliente y no dio precios por separado. El cliente ve UN renglón; el taller necesita producir y costear cada pieza aparte.
+- **Declaración**: `DetalleCotizacion`/`DetallePedido` aceptan `piezas: [{nombre, cantidad, notas?}]` (tablas `detalle_cotizacion_pieza` / `detalle_pedido_pieza`). `cantidad` es **por unidad del renglón** (por juego). Solo aplica a `tipo_item=FABRICADO`; nombres únicos (sin distinguir mayúsculas/acentos) y cantidad > 0 (validado en Pydantic `validar_piezas_juego`). La UI de Cotizaciones tiene el editor compacto `PiezasJuegoEditor` en los renglones FABRICADO; el precio sigue siendo el del renglón.
+- **Conversión**: las piezas se copian de la cotización o se aceptan en el body de conversión. Al crear las órdenes, `crear_ordenes_desde_detalle_pedido()` genera UNA `OrdenProduccion` por pieza con `detalle_pieza_id`, `pieza_nombre` (snapshot) y `cantidad = pieza.cantidad × juegos`; `producto_id=NULL` (la pieza no hereda la receta del juego padre). Sin piezas, se crea una sola orden como siempre. `orden_produccion.detalle_pedido_id` ya NO es único: ahora es 1 renglón → N órdenes.
+- **Costos**: cada orden-pieza registra sus materiales/MO/etapas con las pantallas de siempre (no hay etiquetas por renglón). El costo real del renglón es la suma de sus órdenes; `GET /pedido/{id}/rentabilidad` agrega `por_pieza` (cada orden con su costo) y el margen se calcula contra el precio global del renglón. `ReferenciaReceta` de una orden-pieza trae `pieza_nombre`/`juego_nombre` y `materiales: []`.
+- **Estructura de costes**: el generador desde producción se SALTA las órdenes-pieza (`detalle_pieza_id`/`pieza_nombre`) para no generar la estructura del juego padre con datos de una sola pieza. La estructura estándar se mantiene manual o por importación.
+- **Cierre**: `pedido_produccion_finalizada()` exige que TODAS las órdenes de TODAS las líneas fabricables estén FINALIZADA; el pedido pasa a TERMINADO y se crea UN envío. La venta/factura del renglón no cambia (una línea con precio global).
+- **Offline**: las mutaciones de piezas viajan en cotización/pedido; las tablas nuevas tienen `trg_sync_cambio`. La creación de órdenes internas es online (ocurre al convertir o al pasar a PRODUCCION).
+- Tests: `pytest test/test_juegos_piezas_produccion.py -v`
+
 ### Piezas de exhibición (showroom)
 
 - `OrdenProduccion.tipo` (PEDIDO | EXHIBICION | STOCK | RETRABAJO) define el DESTINO de lo fabricado; `es_stock` queda como alias heredado de "sin pedido". El servicio deriva el tipo y rechaza un `tipo` explícito que contradiga el destino
 - Las órdenes EXHIBICION usan el MISMO Kanban/etapas que las de pedido; al finalizar NO generan envío: hacen ENTRADA automática en la ubicación EXHIBICIÓN con el costo real, convertido a la moneda del producto (`costo_promedio` siempre vive en la moneda del producto)
 - Se venden de stock como si fueran REVENTA (línea tipo_item=REVENTA, pedido nace APROBADO sin producción); al facturar `DetalleVenta.costo_unitario` se sobrescribe con el costo real del inventario (no el estimado de la cotización)
 - **Retrabajo de una pieza** (recolor, retapizado, ajustes para venderla; el caso real: la clienta quiso el mueble del showroom en otro color): `POST /produccion/orden/retrabajo` con `{producto_id, motivo?, cliente_nombre?}` → crea `OrdenProduccion.tipo=RETRABAJO` ligada a la fila de `producto_inventario` (`producto_inventario_id`) y registra la **SALIDA** de la pieza (queda apartada: stock 0, imposible de vender). El taller trabaja igual que cualquier orden (etapas, consumos, MO pagada). Al finalizar, el sistema **NO crea stock nuevo**: la pieza vuelve con su costo **X + Y** (Y = materiales + MO + gastos de sección del retoque) vía ENTRADA con `referencia_tipo=PRODUCCION_RETRABAJO`. El retrabajo **se salta la generación de estructura de costes** (la pieza es única: no redefine receta ni precios del catálogo). Cancelar/eliminar (sin etapas) devuelve la pieza con su costo original. Un solo retrabajo abierto por pieza. `GET /produccion/orden/retrabajos-abiertos` marca las piezas "EN RETRABAJO" (Inventario→Exhibición y selector "+ Exhibición" de Cotizaciones). El precio de venta NO se toca por defecto (pérdida aceptada del dueño); cobrar el retoque es manual (renglón de servicio al pedido). Tests: `pytest test/test_retrabajo_exhibicion.py -v`
+
+## Libro de caja y clasificación de gastos (G D/C/P/F/I)
+
+- **Campo `gasto.clasificacion`** (opcional): `GASTO_DEDUCIBLE`, `GASTO_CASA`, `GASTO_PERSONAL`, `GASTO_FAMILIAR`, `GASTO_INVERSION`. Se muestra con nombre completo (nunca "G F"); `G F` = **Gasto Familiar**. Es independiente de `tipo_gasto.categoria` (OPERATIVO/PASIVO/PRODUCCION).
+- **Movimientos de caja**: `movimiento_caja.persona_entidad` es la otra parte del movimiento (quien entrega en una entrada, quien recibe en una salida: cliente, proveedor, empleado...). No es el usuario que registra. Es opcional. `movimiento_caja.concepto` reemplaza a `observaciones` (la columna se renombró). `referencia` queda interna (links a pago/gasto/importación) y ya no se pide en el formulario. La `tasa_cambio` del movimiento también es interna: se resuelve sola con la TRM del día (1 para COP) y no se pide en caja.
+- **Transferencias entre cuentas**: `POST /api/v1/cuenta/transferencia` acepta `tasa_conversion` (unidades de moneda destino por 1 de origen; editable y prellenada por `GET /api/v1/cuenta/tasa-transferencia`), `interes` (en moneda destino, con `interes_signo` SUMA/RESTA) y `persona_entidad` (tercero: banco, prestamista...). La tasa manual conserva el guardia de ±50% contra la TRM registrada; si no hay TRM registrada para el par, se permite digitarla. La tasa y el interés quedan en las dos patas (`movimiento_caja.tasa_conversion` / `interes`); el interés ajusta el saldo de la cuenta destino y **no** genera un gasto/ingreso separado (es un dato de la transferencia para reportes). Tests: `pytest test/test_transferencias_caja.py -v`.
+- **Importación**: `POST /api/v1/cuenta/libro/preview` analiza el texto pegado sin escribir; `POST /api/v1/cuenta/libro/importar` crea los movimientos y los gastos. `GET /api/v1/cuenta/libro?metodo_caja_id=&fecha_desde=&fecha_hasta=` devuelve la vista con saldo corrido. `DELETE /api/v1/cuenta/libro/{periodo}?metodo_caja_id=` deshace una importación. Lógica en `backend/app/modules/reports/libro_caja.py`; UI en **Cuentas → Libro de caja**.
+- El parser infiere D/M vs M/D por el mes dominante, usa el **cambio de saldo** como signo (el libro a veces trae el ingreso/egreso en la columna contraria), omite filas de notas sin montos y marca **posibles duplicados** comparando sentido + importe + nombre contra los movimientos ya existentes. La importación puede omitirlos (`omitir_duplicados`, default true) y **cuadrar el saldo inicial** contra lo que ya tiene la cuenta (`cuadrar_saldo_inicial`, registra un ajuste por la diferencia, no una apertura duplicada).
+- Tests: `cd backend && venv/bin/python -m pytest test/test_libro_caja.py -v`.
 
 ## Testing
 

@@ -75,3 +75,6 @@ videos/
 frontend/e2e/screenshots/
 frontend/e2e/test-results/
 .vercel/
+
+# Media local (no forma parte de la app)
+video_iglesia/

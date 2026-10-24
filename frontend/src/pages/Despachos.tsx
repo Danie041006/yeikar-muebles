@@ -5,14 +5,16 @@ import { OrderDetail } from '../services/pedidoService';
 import { getEmpleados } from '../services/empleadosService';
 import LocationTracker from '../components/LocationTracker';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { SearchSelect } from '../components/ui';
+import { SearchSelect, MontoInput } from '../components/ui';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const PAGE_SIZE = 12;
 
 export default function Despachos() {
   const toast = useToast();
+  const { esAdmin, hasModulo } = useAuth();
   const navigate = useNavigate();
   const [envios, setEnvios] = useState<Envio[]>([]);
   const [loading, setLoading] = useState(true);
@@ -46,6 +48,7 @@ export default function Despachos() {
   const [loadingVenta, setLoadingVenta] = useState(false);
   const [entregandoId, setEntregandoId] = useState<number | null>(null);
   const [confirmEntregaId, setConfirmEntregaId] = useState<number | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [confirmReprogramarId, setConfirmReprogramarId] = useState<number | null>(null);
 
   const handleOpenGuiaModal = async (envio: Envio) => {
@@ -129,6 +132,27 @@ export default function Despachos() {
     fetchEnvios();
   }, [activeTab, searchDeb, page]);
   const totalPaginas = Math.max(1, Math.ceil(total / PAGE_SIZE));
+
+  // Cada despacho parcial muestra solo sus ítems; los históricos sin detalle
+  // siguen mostrando el pedido completo.
+  const lineasDespacho = (envio: Envio) => {
+    if (envio.detalles?.length) {
+      return envio.detalles.map((item) => ({
+        key: `ed-${item.id}`,
+        nombre: item.descripcion || 'Ítem del pedido',
+        cantidad: item.cantidad,
+      }));
+    }
+    return (envio.pedido?.detalles ?? []).map((det: OrderDetail) => ({
+      key: `dp-${det.id}`,
+      nombre: (det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+        ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+        : det.tipo_item === 'INSUMO'
+          ? det.material?.nombre || 'Insumo'
+          : det.producto?.nombre || 'Producto',
+      cantidad: det.cantidad,
+    }));
+  };
   const handleOpenAssign = (envio: Envio) => {
     setAssigningEnvio(envio);
     setSelectedEmpleadoId(envio.empleado_id ? envio.empleado_id.toString() : '');
@@ -209,16 +233,38 @@ export default function Despachos() {
     if (envioId === null) return;
     setConfirmReprogramarId(null);
     try {
-      await envioService.update(envioId, {
+      const original = await envioService.getById(envioId);
+      const detalles = (original.detalles ?? []).map((item) => ({
+        detalle_pedido_id: item.detalle_pedido_id,
+        orden_produccion_id: item.orden_produccion_id ?? null,
+        cantidad: item.cantidad,
+      }));
+      await envioService.create({
+        pedido_id: original.pedido_id,
         estado: 'PREPARADO',
-        fecha_salida: null,
-        fecha_entrega: null
+        direccion_entrega: original.direccion_entrega,
+        guia_despacho: null,
+        observaciones: `Reprogramado del despacho #${envioId}`,
+        ...(detalles.length > 0 ? { detalles } : {}),
       });
-      toast.success('Envío re-programado con éxito.');
+      toast.success('Nuevo despacho preparado con los mismos ítems.');
       fetchEnvios();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error reprogramming shipment:', error);
-      toast.error('Error al re-programar.');
+      toast.error(error.response?.data?.detail || 'Error al re-programar.');
+    }
+  };
+  const ejecutarEliminarEnvio = async () => {
+    const envioId = confirmDeleteId;
+    if (envioId === null) return;
+    setConfirmDeleteId(null);
+    try {
+      await envioService.delete(envioId);
+      toast.success('Despacho eliminado. Sus ítems quedan disponibles para otra entrega.');
+      fetchEnvios();
+    } catch (error: any) {
+      console.error('Error deleting shipment:', error);
+      toast.error(error.response?.data?.detail || 'No se pudo eliminar el despacho.');
     }
   };
   const getStatusBadgeClass = (status: string) => {
@@ -243,14 +289,25 @@ export default function Despachos() {
           </p>
         </div>
         {/* Search */}
-        <div className="relative w-full md:w-80">
-          <input
-            type="text"
-            placeholder="Buscar por cliente, guía o dirección..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-white border border-yeikar-secondary-light/10 rounded-xl pl-10 pr-4 py-2.5 text-sm text-yeikar-neutral placeholder-yeikar-neutral/40 focus:outline-none focus:border-yeikar-primary shadow-sm"
-          />
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
+          {esAdmin && hasModulo('envios') && (
+            <button
+              onClick={() => navigate('/pedidos')}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-yeikar-primary/30 bg-yeikar-primary/10 px-4 py-2.5 text-xs font-bold text-yeikar-primary-dark shadow-sm transition-colors hover:bg-yeikar-primary/20"
+              title="Crear una entrega parcial desde Pedidos"
+            >
+              + Registrar entrega
+            </button>
+          )}
+          <div className="relative w-full md:w-80">
+            <input
+              type="text"
+              placeholder="Buscar por cliente, guía o dirección..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full bg-white border border-yeikar-secondary-light/10 rounded-xl pl-10 pr-4 py-2.5 text-sm text-yeikar-neutral placeholder-yeikar-neutral/40 focus:outline-none focus:border-yeikar-primary shadow-sm"
+            />
+          </div>
         </div>
       </div>
       {/* Tabs bar */}
@@ -321,14 +378,10 @@ export default function Despachos() {
                     Muebles a Entregar
                   </span>
                   <div className="space-y-1">
-                    {envio.pedido?.detalles?.map((det: OrderDetail) => (
-                      <div key={det.id} className="text-xs text-yeikar-secondary/85 flex justify-between">
-                        <span>• {(det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
-                          ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
-                          : det.tipo_item === 'INSUMO'
-                            ? det.material?.nombre || 'Insumo'
-                            : det.producto?.nombre || 'Producto'}</span>
-                        <span className="font-mono font-bold">x{det.cantidad}</span>
+                    {lineasDespacho(envio).map(({ key, nombre, cantidad }) => (
+                      <div key={key} className="text-xs text-yeikar-secondary/85 flex justify-between">
+                        <span>• {nombre}</span>
+                        <span className="font-mono font-bold">x{cantidad}</span>
                       </div>
                     ))}
                   </div>
@@ -359,7 +412,7 @@ export default function Despachos() {
                 )}
                 {envio.costo_flete != null && envio.costo_flete > 0 && (
                   <div className="text-xs text-yeikar-neutral/70 font-mono">
-                    Costo flete: <span className="font-bold text-yeikar-primary-dark">${envio.costo_flete.toLocaleString()} {envio.moneda_flete?.codigo || 'COP'}</span>
+                    Costo flete: <span className="font-bold text-yeikar-primary-dark">${envio.costo_flete.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {envio.moneda_flete?.codigo || 'COP'}</span>
                   </div>
                 )}
                 {/* Fechas */}
@@ -390,12 +443,21 @@ export default function Despachos() {
                 </button>
                 <div className="flex gap-2">
                   {envio.estado === 'PREPARADO' && (
-                    <button
-                      onClick={() => handleOpenAssign(envio)}
-                      className="flex-1 bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral text-xs font-headline font-bold py-2 px-3 rounded-xl shadow-sm transition-colors text-center"
-                    >
-                      Asignar y Enviar
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleOpenAssign(envio)}
+                        className="flex-1 bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral text-xs font-headline font-bold py-2 px-3 rounded-xl shadow-sm transition-colors text-center"
+                      >
+                        Asignar y Enviar
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(envio.id)}
+                        className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-headline font-bold py-2 px-3 rounded-xl border border-red-200 transition-colors"
+                        title="Eliminar este despacho (los ítems quedan disponibles)"
+                      >
+                        Eliminar
+                      </button>
+                    </>
                   )}
                   {envio.estado === 'EN_TRANSITO' && (
                     <>
@@ -415,12 +477,21 @@ export default function Despachos() {
                     </>
                   )}
                   {envio.estado === 'FALLIDO' && (
-                    <button
-                      onClick={() => handleReProgramar(envio.id)}
-                      className="flex-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-headline font-bold py-2 px-3 rounded-xl shadow-sm transition-colors"
-                    >
-                      Re-Programar Despacho
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleReProgramar(envio.id)}
+                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white text-xs font-headline font-bold py-2 px-3 rounded-xl shadow-sm transition-colors"
+                      >
+                        Re-Programar Despacho
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(envio.id)}
+                        className="bg-red-50 hover:bg-red-100 text-red-600 text-xs font-headline font-bold py-2 px-3 rounded-xl border border-red-200 transition-colors"
+                        title="Eliminar este despacho fallido"
+                      >
+                        Eliminar
+                      </button>
+                    </>
                   )}
                 </div>
                 <button
@@ -513,13 +584,11 @@ export default function Despachos() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs font-bold text-yeikar-neutral/60 mb-1">Costo del flete (opcional)</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <MontoInput
                     min="0"
                     placeholder="Lo que costó llevarlo"
                     value={costoFlete}
-                    onChange={(e) => setCostoFlete(e.target.value)}
+                    onChange={(v) => setCostoFlete(v)}
                     className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary font-mono"
                   />
                 </div>
@@ -720,7 +789,54 @@ export default function Despachos() {
       {selectedEnvioForGuia && (() => {
         const tasaBs = parseFloat(tasaBsGuia) || 1;
         const venta = ventaLinkedGuia;
-        const totalBs = venta ? Number(venta.total) * tasaBs : 0;
+        // La guía de un despacho parcial imprime SOLO los ítems de este viaje.
+        // Los envíos históricos (sin detalle) siguen imprimiendo el pedido completo.
+        const lineas = selectedEnvioForGuia.detalles?.length
+          ? selectedEnvioForGuia.detalles
+              .map((item) => {
+                const det = selectedEnvioForGuia.pedido?.detalles?.find(
+                  (d) => d.id === item.detalle_pedido_id,
+                );
+                return det
+                  ? { det, cantidad: Number(item.cantidad), pieza: item.pieza_nombre ?? null, key: `ed-${item.id}` }
+                  : null;
+              })
+              .filter((item): item is { det: OrderDetail; cantidad: number; pieza: string | null; key: string } => item !== null)
+          : (selectedEnvioForGuia.pedido?.detalles ?? []).map((det) => ({
+              det,
+              cantidad: Number(det.cantidad),
+              pieza: null,
+              key: `dp-${det.id}`,
+            }));
+        const precioDe = (det: OrderDetail) => {
+          const detVenta = venta?.detalles?.find((dv) =>
+            det.tipo_item === 'INSUMO'
+              ? dv.material_id != null && dv.material_id === det.material_id
+              : (det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
+                ? dv.descripcion_especifica === det.descripcion_especifica
+                : dv.producto_id != null && dv.producto_id === det.producto_id,
+          );
+          return detVenta ? Number(detVenta.precio) : 0;
+        };
+        const totalGuia = (() => {
+          const vistos = new Set<number>();
+          let total = 0;
+          for (const linea of lineas) {
+            const precio = precioDe(linea.det);
+            if (linea.pieza) {
+              // Un juego tiene UN precio global: se cuenta una sola vez por
+              // despacho, no por cada pieza (evita multiplicar el precio).
+              if (vistos.has(linea.det.id)) continue;
+              vistos.add(linea.det.id);
+              total += precio;
+            } else {
+              total += precio * linea.cantidad;
+            }
+          }
+          return total;
+        })();
+        const lineasConPrecioRender = new Set<number>();
+        const totalBs = totalGuia * tasaBs;
         const baseImponibleBs = totalBs / 1.16;
         const iva16Bs = totalBs - baseImponibleBs;
         const totalVentaBs = totalBs;
@@ -812,19 +928,12 @@ export default function Despachos() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-stone-200">
-                        {selectedEnvioForGuia.pedido?.detalles?.map((det: OrderDetail, i: number) => {
-                          // Buscar precio en la venta: INSUMO se empareja por
-                          // material_id; producto, por producto_id (nunca null==null);
-                          // REPARACION/SERVICIO, por descripción.
-                          const detVenta = venta?.detalles?.find(dv =>
-                            det.tipo_item === 'INSUMO'
-                              ? dv.material_id != null && dv.material_id === det.material_id
-                              : (det.tipo_item === 'REPARACION' || det.tipo_item === 'SERVICIO')
-                                ? dv.descripcion_especifica === det.descripcion_especifica
-                                : dv.producto_id != null && dv.producto_id === det.producto_id
-                          );
-                          const precio = detVenta ? Number(detVenta.precio) : 0;
-                          const monto = precio * det.cantidad;
+                        {lineas.map(({ det, cantidad, pieza, key }, i) => {
+                          const esPieza = Boolean(pieza);
+                          const mostrarPrecio = !esPieza || !lineasConPrecioRender.has(det.id);
+                          if (esPieza) lineasConPrecioRender.add(det.id);
+                          const precio = precioDe(det);
+                          const monto = mostrarPrecio ? (esPieza ? precio : precio * cantidad) : 0;
                           const foto = det.producto?.fotos?.[0]?.url ?? null;
                           const nombreDet = det.tipo_item === 'INSUMO'
                             ? det.material?.nombre || 'Insumo'
@@ -832,8 +941,8 @@ export default function Despachos() {
                               ? (det.descripcion_especifica || det.observaciones || (det.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
                               : det.producto?.nombre || 'Mueble Yeikar';
                           return (
-                            <tr key={det.id || i} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
-                              <td className="px-2 py-1.5 text-center font-mono font-bold border-r border-stone-200">{det.cantidad}</td>
+                            <tr key={key} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
+                              <td className="px-2 py-1.5 text-center font-mono font-bold border-r border-stone-200">{cantidad}</td>
                               <td className="px-2 py-1.5 font-bold border-r border-stone-200">
                                 <div className="flex items-center gap-2">
                                   {foto && (
@@ -845,23 +954,24 @@ export default function Despachos() {
                                   )}
                                   <span>
                                     {nombreDet}
+                                    {pieza ? ` — ${pieza}` : ''}
                                     {det.tipo_item !== 'INSUMO' && det.ancho && det.largo ? <span className="font-normal text-stone-500"> ({det.ancho}×{det.largo}m)</span> : ''}
                                   </span>
                                 </div>
                                 {det.observaciones && <span className="block text-[7.5px] text-stone-400 font-normal italic">{det.observaciones}</span>}
                               </td>
                               <td className="px-2 py-1.5 text-right font-mono border-r border-stone-200">
-                                {venta ? `${venta.moneda?.simbolo || ''}${precio.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
+                                {venta && mostrarPrecio ? `${venta.moneda?.simbolo || ''}${precio.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
                               </td>
                               <td className="px-2 py-1.5 text-right font-mono font-bold">
-                                {venta ? `${venta.moneda?.simbolo || ''}${monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
+                                {venta && mostrarPrecio ? `${venta.moneda?.simbolo || ''}${monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
                               </td>
                             </tr>
                           );
                         })}
                         {/* Filas vacías para dar aspecto de formulario */}
-                        {Array.from({ length: Math.max(0, 5 - (selectedEnvioForGuia.pedido?.detalles?.length || 0)) }).map((_, i) => (
-                          <tr key={`empty-${i}`} className={((selectedEnvioForGuia.pedido?.detalles?.length || 0) + i) % 2 === 0 ? 'bg-white' : 'bg-stone-50/30'}>
+                        {Array.from({ length: Math.max(0, 5 - lineas.length) }).map((_, i) => (
+                          <tr key={`empty-${i}`} className={((lineas.length) + i) % 2 === 0 ? 'bg-white' : 'bg-stone-50/30'}>
                             <td className="px-2 py-2.5 border-r border-stone-200">&nbsp;</td>
                             <td className="px-2 py-2.5 border-r border-stone-200">&nbsp;</td>
                             <td className="px-2 py-2.5 border-r border-stone-200">&nbsp;</td>
@@ -874,7 +984,7 @@ export default function Despachos() {
                         <tr className="bg-stone-100 border-t-2 border-stone-800">
                           <td colSpan={3} className="px-2 py-1.5 text-right font-serif font-black text-stone-900 uppercase tracking-widest text-[8.5px] border-r border-stone-300">TOTAL</td>
                           <td className="px-2 py-1.5 text-right font-mono font-black text-stone-950">
-                            {venta ? `${venta.moneda?.simbolo || ''}${Number(venta.total).toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
+                            {venta ? `${venta.moneda?.simbolo || ''}${totalGuia.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
                           </td>
                         </tr>
                       </tfoot>
@@ -996,11 +1106,20 @@ export default function Despachos() {
       <ConfirmDialog
         open={confirmReprogramarId !== null}
         title="Re-programar despacho"
-        message="¿Desea re-programar este despacho? Volverá al estado PENDIENTE de asignación."
+        message="¿Desea re-programar este despacho? Se creará un nuevo despacho PREPARADO con los mismos ítems; el fallido queda en el historial."
         confirmLabel="Sí, re-programar"
         danger={false}
         onConfirm={ejecutarReProgramar}
         onCancel={() => setConfirmReprogramarId(null)}
+      />
+      <ConfirmDialog
+        open={confirmDeleteId !== null}
+        title="Eliminar despacho"
+        message="¿Eliminar este despacho? Sus ítems quedarán disponibles para registrar otra entrega. No se puede eliminar un envío en tránsito o ya entregado."
+        confirmLabel="Sí, eliminar"
+        danger
+        onConfirm={ejecutarEliminarEnvio}
+        onCancel={() => setConfirmDeleteId(null)}
       />
     </div>
   );

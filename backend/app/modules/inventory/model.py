@@ -80,9 +80,19 @@ class MovimientoInventario(Base):
     departamento = Column(String(30), nullable=True)
     # Quién trajo/entregó la compra (texto libre, solo entradas).
     recibido_por = Column(String(150), nullable=True)
+    # Quién recibió/consumió el ítem (texto libre, solo salidas de oficina).
+    consumido_por = Column(String(150), nullable=True)
     # Registro de la compra para el libro de entradas: cuenta desde la que se
     # pagó (contado), % de descuento aplicado y si quedó fiada al proveedor.
     pagado_desde_metodo_caja_id = Column(BigInteger, ForeignKey("metodo_caja.id", ondelete="SET NULL"), nullable=True)
+    # Moneda y tasa con las que se pagó la compra. Se guardan en el movimiento
+    # (no solo en el gasto generado) para que el dato no se pierda si el gasto
+    # se elimina después. `costo_unitario` sigue viviendo en COP (moneda base).
+    moneda_pago_id = Column(BigInteger, ForeignKey("moneda.id", ondelete="SET NULL"), nullable=True)
+    tasa_pago = Column(Numeric(15, 6), nullable=True)
+    # Gasto generado automáticamente por esta entrada (compra de contado).
+    # Permite bloquear su borrado y saber que la entrada quedó sin pago.
+    gasto_id = Column(BigInteger, ForeignKey("gasto.id", ondelete="SET NULL"), nullable=True)
     descuento_porcentaje = Column(Numeric(5, 2), nullable=True)
     fiar = Column(Boolean, nullable=False, server_default="false")
     fecha = Column(DateTime, server_default=func.now(), index=True)

@@ -240,6 +240,7 @@ def crear_cuenta_desde_entrada(
     llevada: Decimal,
     fecha: date,
     movimiento_id: int,
+    tipo_gasto_id: Optional[int] = None,
     cliente_id: Optional[int] = None,
     cliente_nombre: Optional[str] = None,
     usuario=None,
@@ -248,7 +249,12 @@ def crear_cuenta_desde_entrada(
     es compra + pasada. NO hace commit (el llamador lo hace en su transacción)."""
     if not db.query(Proveedor).filter(Proveedor.id == proveedor_id).first():
         raise ValueError(f"El proveedor con id {proveedor_id} no existe.")
-    tipo_gasto = _resolver_tipo_compra_insumos(db)
+    tipo_gasto = (
+        db.query(TipoGasto).filter(TipoGasto.id == tipo_gasto_id).first()
+        if tipo_gasto_id else _resolver_tipo_compra_insumos(db)
+    )
+    if tipo_gasto is None:
+        tipo_gasto = _resolver_tipo_compra_insumos(db)
     monto = (cantidad * costo_unitario + llevada).quantize(Decimal("0.01"))
     nombre = producto_nombre or material_nombre
 

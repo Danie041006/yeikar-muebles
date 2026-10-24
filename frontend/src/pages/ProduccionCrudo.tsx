@@ -10,6 +10,7 @@ import { getEmpleados, type Empleado } from '../services/empleadosService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import SearchSelect, { type SearchSelectOption } from '../components/ui/SearchSelect';
+import MontoInput from '../components/ui/MontoInput';
 import { Package } from 'lucide-react';
 import { dimensionalidad, volumenPieza, convertirCapturaLineal, etiquetaCaptura, fmtNum, fmtNum4, UnidadCaptura } from '../utils/unidades';
 import { fmtFechaVE } from '../utils/fechas';
@@ -767,11 +768,12 @@ export default function ProduccionCrudo() {
                             </p>
                           </div>
                           <div className="sm:col-span-2">
-                            <input
-                              type="number" min="0" step="1000" required
+                            <MontoInput
+                              min="0"
+                              required
                               placeholder="Monto unit. ($)"
                               value={moForm.monto}
-                              onChange={(e) => setMoForm((p) => ({ ...p, monto: e.target.value }))}
+                              onChange={(v) => setMoForm((p) => ({ ...p, monto: v }))}
                               className={inputClsWhite}
                               title="Monto por cada unidad"
                             />
@@ -794,10 +796,10 @@ export default function ProduccionCrudo() {
                               />
                             </div>
                             <div className="sm:col-span-2">
-                              <input
-                                type="number" min="0" step="1000"
+                              <MontoInput
+                                min="0"
                                 value={nuevoCosto.precio}
-                                onChange={(e) => setNuevoCosto((p) => ({ ...p, precio: e.target.value }))}
+                                onChange={(v) => setNuevoCosto((p) => ({ ...p, precio: v }))}
                                 placeholder="Precio ($)"
                                 className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary font-mono"
                               />

@@ -1,6 +1,6 @@
 import api from './api';
 import { Client } from './clienteService';
-import { Product } from './cotizacionService';
+import { Product, PiezaJuego } from './cotizacionService';
 import { borrarCache, conCache, mutarOEncolar, parchearCache } from '../offline/cache';
 
 export type TipoItem = 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
@@ -26,6 +26,17 @@ export interface OrderDetail {
   es_obsequio?: boolean;
   producto?: Product;
   material?: { id: number; nombre: string; costo_base: number; unidad_medida?: { abreviatura: string } };
+  /** Piezas del juego: el renglón conserva el precio global. */
+  piezas?: PiezaJuego[];
+}
+
+export interface EntregaResumen {
+  total: number;
+  entregado: number;
+  pendiente: number;
+  estado: 'PENDIENTE' | 'PARCIAL' | 'COMPLETO';
+  envios: number;
+  ultima_entrega?: string | null;
 }
 
 export interface Order {
@@ -45,6 +56,8 @@ export interface Order {
     moneda?: { codigo: string; simbolo?: string; nombre?: string };
   } | null;
   detalles: OrderDetail[];
+  /** Progreso de entregas (unidades/piezas). */
+  entrega_resumen?: EntregaResumen | null;
 }
 
 export interface OrderUpdate {
@@ -67,6 +80,18 @@ export interface ConvertDetail {
   descripcion_especifica?: string;
   observaciones?: string;
   es_obsequio?: boolean;
+  piezas?: PiezaJuego[];
+}
+
+export interface RentabilidadPieza {
+  orden_id: number;
+  detalle_pedido_id?: number | null;
+  pieza_nombre?: string | null;
+  producto_nombre?: string | null;
+  cantidad?: number | null;
+  estado: string;
+  /** Costo real en COP (base interna); el frontend lo muestra en la moneda del pedido. */
+  costo_real: number;
 }
 
 export interface RentabilidadPedido {
@@ -93,6 +118,8 @@ export interface RentabilidadPedido {
   margen_real_moneda: number;
   diferencia_costo_moneda: number;
   tiene_produccion: boolean;
+  /** Desglose interno por pieza/orden (juegos con precio global). */
+  por_pieza?: RentabilidadPieza[];
 }
 
 export interface ConvertQuoteBody {

@@ -55,6 +55,7 @@ export interface Material {
   unidad_medida_id: number;
   costo_base: number;
   activo?: boolean;
+  stock_minimo?: number;
   // Dimensiones de la lámina completa en cm (solo materiales laminares)
   largo_cm?: number | null;
   ancho_cm?: number | null;
@@ -262,6 +263,11 @@ export const productosService = {
 
   crearMaterial: async (material: Omit<Material, 'id' | 'unidad_medida'>): Promise<Material> => {
     const response = await api.post<Material>('/material/', material);
+    return response.data;
+  },
+
+  actualizarMaterial: async (id: number, material: Partial<Omit<Material, 'id' | 'unidad_medida'>>): Promise<Material> => {
+    const response = await api.put<Material>(`/material/${id}`, material);
     return response.data;
   },
 

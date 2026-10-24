@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import or_
 from datetime import date
 from decimal import Decimal
@@ -113,10 +113,19 @@ def _anotar_pedido(db: Session, cotizaciones: list):
         cot.pedido_estado = pareja[1] if pareja else None
 
 
+def _con_piezas(query):
+    """Eager-load de las piezas del juego: evita N+1 al serializar cotizaciones."""
+    return query.options(
+        selectinload(model.Cotizacion.detalles).selectinload(model.DetalleCotizacion.piezas)
+    )
+
+
 def obtener_cotizacion(db: Session, id_cotizacion: int):
     # Lectura compartida: cualquier usuario con el módulo ve todas las
     # cotizaciones. La escritura se restringe en actualizar/eliminar/convertir.
-    cotizacion = db.query(model.Cotizacion).filter(model.Cotizacion.id == id_cotizacion).first()
+    cotizacion = _con_piezas(
+        db.query(model.Cotizacion).filter(model.Cotizacion.id == id_cotizacion)
+    ).first()
     if cotizacion:
         _anotar_pedido(db, [cotizacion])
     return cotizacion
@@ -178,7 +187,7 @@ def obtener_cotizaciones(
 
     query = query.order_by(model.Cotizacion.fecha.desc(), model.Cotizacion.id.desc())
 
-    cotizaciones = query.offset(salto).limit(limite).all()
+    cotizaciones = _con_piezas(query).offset(salto).limit(limite).all()
     _anotar_pedido(db, cotizaciones)
     return cotizaciones
 
@@ -311,6 +320,22 @@ def crear_cliente_rapido(
     }
 
 
+def _agregar_piezas_cotizacion(db_detalle, piezas) -> None:
+    """Crea las piezas del juego dentro de un renglón de cotización.
+
+    El schema ya validó nombres/cantidades; aquí solo se normaliza el formato
+    (Create trae modelos y Update trae dicts por model_dump).
+    """
+    for orden, pieza in enumerate(piezas or []):
+        datos = pieza if isinstance(pieza, dict) else pieza.model_dump()
+        db_detalle.piezas.append(model.DetalleCotizacionPieza(
+            nombre=(datos.get("nombre") or "").strip(),
+            cantidad=datos.get("cantidad") or 1,
+            notas=(datos.get("notas") or "").strip() or None,
+            orden=orden,
+        ))
+
+
 def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Usuario | None = None):
     datos = esquema.model_dump(exclude={"detalles"})
     detalles_datos = esquema.detalles
@@ -337,11 +362,14 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
     db.flush()
 
     for det in detalles_datos:
+        det_dict = det.model_dump()
+        piezas = det_dict.pop("piezas", [])
         db_det = model.DetalleCotizacion(
             cotizacion_id=db_obj.id,
-            **_preparar_detalle_captura(db, det.model_dump())
+            **_preparar_detalle_captura(db, det_dict)
         )
         db.add(db_det)
+        _agregar_piezas_cotizacion(db_det, piezas)
 
     record_event(
         db,
@@ -386,10 +414,13 @@ def actualizar_cotizacion(
             model.DetalleCotizacion.cotizacion_id == db_obj.id
         ).delete(synchronize_session=False)
         for detalle in detalles_nuevos:
-            db.add(model.DetalleCotizacion(
+            piezas = detalle.pop("piezas", []) if isinstance(detalle, dict) else []
+            db_det = model.DetalleCotizacion(
                 cotizacion_id=db_obj.id,
                 **_preparar_detalle_captura(db, detalle),
-            ))
+            )
+            db.add(db_det)
+            _agregar_piezas_cotizacion(db_det, piezas)
     # Recalcular total_en_moneda_base si cambió total, moneda o tasa (antes quedaba stale)
     if "total_estimado" in datos or "moneda_id" in datos or "tasa_cambio" in datos:
         if db_obj.moneda_id == MONEDA_BASE_ID:

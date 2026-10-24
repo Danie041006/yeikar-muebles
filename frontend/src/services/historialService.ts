@@ -244,6 +244,13 @@ export interface EnvioExp {
   fecha_entrega?: string | null;
   direccion_entrega?: string | null;
   observaciones?: string | null;
+  detalles?: {
+    detalle_pedido_id: number;
+    orden_produccion_id?: number | null;
+    cantidad: number;
+    descripcion?: string | null;
+    pieza_nombre?: string | null;
+  }[];
   asignaciones?: {
     empleado?: string | null;
     asignado_en?: string | null;

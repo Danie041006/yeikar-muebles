@@ -5,7 +5,7 @@ import {
 } from '../services/empleadosService';
 import {
   Button, Card, Badge, Spinner, EmptyState, PageHeader,
-  Field, Input, Modal, ConfirmDialog, SearchSelect,
+  Field, Input, Modal, ConfirmDialog, SearchSelect, MontoInput,
   ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
 
@@ -89,7 +89,7 @@ export default function Empleados() {
       telefono: form.telefono || undefined,
       en_nomina: form.en_nomina,
       tipo_pago: form.en_nomina ? form.tipo_pago : undefined,
-      sueldo_semanal: form.en_nomina && form.tipo_pago === 'FIJO' && form.sueldo_semanal ? Number(form.sueldo_semanal) : undefined,
+      sueldo_semanal: form.en_nomina && form.tipo_pago === 'FIJO' && form.sueldo_semanal ? parseFloat(form.sueldo_semanal) || undefined : undefined,
       porcentaje_aguinaldo: form.porcentaje_aguinaldo ? Number(form.porcentaje_aguinaldo) : undefined,
     };
     if (editando) {
@@ -304,7 +304,7 @@ export default function Empleados() {
               </Field>
               {form.tipo_pago === 'FIJO' && (
                 <Field label="Sueldo semanal (COP)" required>
-                  <Input type="number" min="0" step="1000" value={form.sueldo_semanal} onChange={(e) => setForm({ ...form, sueldo_semanal: e.target.value })} />
+                  <MontoInput min="0" value={form.sueldo_semanal} onChange={(v) => setForm({ ...form, sueldo_semanal: v })} />
                 </Field>
               )}
               <Field label="% aguinaldo propio (opcional, si no usa el del área)">

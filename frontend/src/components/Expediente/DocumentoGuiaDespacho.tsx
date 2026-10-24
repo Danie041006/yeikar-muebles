@@ -21,7 +21,55 @@ export default function DocumentoGuiaDespacho({
     ? fmtFechaVE(envio.fecha_salida)
     : fmtFechaVE(new Date());
 
-  const totalBs = venta ? Number(venta.total) : 0;
+  // La guía de un despacho parcial imprime SOLO los ítems de este envío.
+  // Los envíos históricos (sin detalle) siguen imprimiendo el pedido completo.
+  const lineas = envio.detalles?.length
+    ? envio.detalles
+        .map((item) => {
+          const det = detalles_pedido.find((d) => d.id === item.detalle_pedido_id);
+          return det
+            ? {
+                det,
+                cantidad: Number(item.cantidad),
+                pieza: item.pieza_nombre ?? null,
+                key: `ed-${item.detalle_pedido_id}-${item.orden_produccion_id ?? 'x'}`,
+              }
+            : null;
+        })
+        .filter(
+          (item): item is {
+            det: DetallePedidoExp;
+            cantidad: number;
+            pieza: string | null;
+            key: string;
+          } => item !== null,
+        )
+    : detalles_pedido.map((det) => ({
+        det,
+        cantidad: Number(det.cantidad),
+        pieza: null,
+        key: `dp-${det.id}`,
+      }));
+
+  const totalGuia = (() => {
+    const vistos = new Set<number>();
+    let total = 0;
+    for (const linea of lineas) {
+      const precio = Number(linea.det.precio);
+      if (linea.pieza) {
+        // Un juego tiene UN precio global: se cuenta una sola vez, no por pieza.
+        if (vistos.has(linea.det.id)) continue;
+        vistos.add(linea.det.id);
+        total += precio;
+      } else {
+        total += precio * linea.cantidad;
+      }
+    }
+    return total;
+  })();
+  const lineasConPrecioRender = new Set<number>();
+
+  const totalBs = totalGuia;
   const baseImponibleBs = totalBs / 1.16;
   const iva16Bs = totalBs - baseImponibleBs;
   const totalVentaBs = totalBs;
@@ -112,39 +160,36 @@ export default function DocumentoGuiaDespacho({
                 </tr>
               </thead>
               <tbody className="divide-y divide-stone-200">
-                {detalles_pedido.map((det, i) => {
-                  // Emparejar el precio con la venta: INSUMO por material_id;
-                  // producto por producto_id (nunca null === null).
-                  const detVenta = venta?.detalles?.find(dv =>
-                    det.tipo_item === 'INSUMO'
-                      ? dv.material_id != null && dv.material_id === det.material_id
-                      : dv.producto_id != null && dv.producto_id === det.producto_id
-                  );
-                  const precio = detVenta ? Number(detVenta.precio) : Number(det.precio);
-                  const monto = precio * Number(det.cantidad);
+                {lineas.map(({ det, cantidad, pieza, key }, i) => {
+                  const esPieza = Boolean(pieza);
+                  const mostrarPrecio = !esPieza || !lineasConPrecioRender.has(det.id);
+                  if (esPieza) lineasConPrecioRender.add(det.id);
+                  const precio = Number(det.precio);
+                  const monto = mostrarPrecio ? (esPieza ? precio : precio * cantidad) : 0;
                   const simbolo = venta?.moneda === 'VES' ? 'Bs' : venta?.moneda === 'EUR' ? '€' : '$';
                   return (
-                    <tr key={det.id || i} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
-                      <td className="px-2 py-1.5 text-center font-mono font-bold border-r border-stone-200">{det.cantidad}</td>
+                    <tr key={key} className={i % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
+                      <td className="px-2 py-1.5 text-center font-mono font-bold border-r border-stone-200">{cantidad}</td>
                       <td className="px-2 py-1.5 font-bold border-r border-stone-200">
                         <span>
                           {det.producto_nombre || (det.material_id ? 'Insumo' : 'Mueble Yeikar')}
+                          {pieza ? ` — ${pieza}` : ''}
                           {det.tipo_item !== 'INSUMO' && det.dimensiones?.ancho ? <span className="font-normal text-stone-500"> ({det.dimensiones.ancho}×{det.dimensiones.largo}m)</span> : ''}
                         </span>
                         {det.descripcion_especifica && <span className="block text-[7.5px] text-stone-400 font-normal italic">{det.descripcion_especifica}</span>}
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono border-r border-stone-200">
-                        {simbolo}{precio.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                        {mostrarPrecio ? `${simbolo}${precio.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono font-bold">
-                        {simbolo}{monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}
+                        {mostrarPrecio ? `${simbolo}${monto.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
                       </td>
                     </tr>
                   );
                 })}
                 {/* Filas vacías para dar aspecto de formulario */}
-                {Array.from({ length: Math.max(0, 5 - detalles_pedido.length) }).map((_, i) => (
-                  <tr key={`empty-${i}`} className={(detalles_pedido.length + i) % 2 === 0 ? 'bg-white' : 'bg-stone-50/30'}>
+                {Array.from({ length: Math.max(0, 5 - lineas.length) }).map((_, i) => (
+                  <tr key={`empty-${i}`} className={(lineas.length + i) % 2 === 0 ? 'bg-white' : 'bg-stone-50/30'}>
                     <td className="px-2 py-2.5 border-r border-stone-200">&nbsp;</td>
                     <td className="px-2 py-2.5 border-r border-stone-200">&nbsp;</td>
                     <td className="px-2 py-2.5 border-r border-stone-200">&nbsp;</td>
@@ -157,7 +202,7 @@ export default function DocumentoGuiaDespacho({
                 <tr className="bg-stone-100 border-t-2 border-stone-800">
                   <td colSpan={3} className="px-2 py-1.5 text-right font-serif font-black text-stone-900 uppercase tracking-widest text-[8.5px] border-r border-stone-300">TOTAL</td>
                   <td className="px-2 py-1.5 text-right font-mono font-black text-stone-950">
-                    {venta ? `${venta.moneda === 'VES' ? 'Bs' : '$'}${Number(venta.total).toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
+                    {venta ? `${venta.moneda === 'VES' ? 'Bs' : '$'}${totalGuia.toLocaleString('es-VE', { minimumFractionDigits: 2 })}` : '—'}
                   </td>
                 </tr>
               </tfoot>

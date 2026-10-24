@@ -153,7 +153,7 @@ def _gasto_compra_contado(
         db.add(tipo_gasto)
         db.flush()
 
-    crear_gasto(
+    return crear_gasto(
         db,
         GastoCreate(
             tipo_gasto_id=tipo_gasto.id,
@@ -242,8 +242,8 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     Registra un movimiento de inventario (entrada, salida, ajuste, etc.)
     y actualiza la cantidad en la tabla inventario.
     """
-    if movimiento.cantidad <= 0:
-        raise ValueError("La cantidad debe ser positiva")
+    if movimiento.cantidad < 0 or (movimiento.cantidad == 0 and movimiento.tipo != "AJUSTE"):
+        raise ValueError("La cantidad debe ser positiva (solo un AJUSTE puede quedar en 0)")
 
     # El CHECK de la BD solo conoce 'DANO' (sin Ñ): normalizamos antes de
     # persistir para que el tipo "DAÑO" de la UI no termine en un 409 falso
@@ -334,7 +334,10 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         cliente_nombre=cliente_nombre,
         departamento=getattr(movimiento, "departamento", None),
         recibido_por=getattr(movimiento, "recibido_por", None),
+        consumido_por=getattr(movimiento, "consumido_por", None),
         pagado_desde_metodo_caja_id=getattr(movimiento, "pagado_desde_metodo_caja_id", None),
+        moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
+        tasa_pago=getattr(movimiento, "tasa_pago", None),
         descuento_porcentaje=getattr(movimiento, "descuento_porcentaje", None),
         fiar=bool(getattr(movimiento, "fiar", False)),
         referencia_tipo=movimiento.referencia_tipo,
@@ -354,15 +357,19 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     # compras y reversas de producción; dispararlo por "es ENTRADA" crearía
     # gastos fantasma. Insumos se referencian en COP → sin tasa salvo que se
     # pague desde una cuenta en otra moneda.
+    # Los insumos de OFICINA se clasifican como PAPELERÍA DE OFICINA
+    # (ADMINISTRATIVO) para que el gasto caiga en la línea correcta del P&L.
+    es_oficina = (getattr(movimiento, "departamento", None) or "").strip().upper() == "OFICINA"
+    tipo_gasto_compra = "PAPELERIA DE OFICINA" if es_oficina else "COMPRA DE INSUMOS"
     if (
         movimiento.tipo == "ENTRADA"
         and getattr(movimiento, "pagado_desde_metodo_caja_id", None)
         and movimiento.costo_unitario is not None
         and Decimal(str(movimiento.costo_unitario)) > 0
     ):
-        _gasto_compra_contado(
+        gasto_compra = _gasto_compra_contado(
             db,
-            tipo_gasto_nombre="COMPRA DE INSUMOS",
+            tipo_gasto_nombre=tipo_gasto_compra,
             descripcion=f"Compra {material.nombre} x{movimiento.cantidad}",
             total_ref=(Decimal(str(movimiento.costo_unitario)) * movimiento.cantidad).quantize(Decimal("0.01")),
             ref_moneda_id=MONEDA_BASE_ID,
@@ -371,6 +378,9 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             tasa_pago=getattr(movimiento, "tasa_pago", None),
             fecha=fecha_mov.date(),
         )
+        if gasto_compra is not None:
+            db_mov.gasto_id = gasto_compra.id
+            db.flush()
 
     # ── "La llevada" (flete/aduana): gasto aparte, misma cuenta ────────────
     # Además del dinero de la compra, pagan el flete para que el insumo pase.
@@ -415,6 +425,8 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         if movimiento.costo_unitario is None or Decimal(str(movimiento.costo_unitario)) <= 0:
             raise ValueError("Para fiar debes indicar el costo unitario del insumo.")
         from app.modules.cuentas_por_pagar.service import crear_cuenta_desde_entrada
+        from app.modules.catalogos.model import TipoGasto
+        tipo_gasto_fiar = db.query(TipoGasto).filter(TipoGasto.nombre == tipo_gasto_compra).first()
         crear_cuenta_desde_entrada(
             db,
             proveedor_id=proveedor_id,
@@ -425,6 +437,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             llevada=llevada or Decimal("0.0"),
             fecha=fecha_mov.date(),
             movimiento_id=db_mov.id,
+            tipo_gasto_id=tipo_gasto_fiar.id if tipo_gasto_fiar else None,
             cliente_id=cliente_id,
             cliente_nombre=cliente_nombre,
             usuario=usuario,
@@ -870,11 +883,12 @@ ZONAS_LIBRO = {
     "TAPICERIA": "Tapicería",
     "VIDRIERIA": "Vidriería",
     "TERMINACION": "Terminación",
+    "OFICINA": "Oficina",
     "GENERAL": "General",
 }
 
 _ORDEN_ZONAS = [
-    "EBANISTERIA", "PREPARACION", "PINTURA", "TAPICERIA", "VIDRIERIA", "TERMINACION", "GENERAL",
+    "EBANISTERIA", "PREPARACION", "PINTURA", "TAPICERIA", "VIDRIERIA", "TERMINACION", "OFICINA", "GENERAL",
 ]
 
 _ORIGEN_LABELS = {
@@ -884,6 +898,9 @@ _ORIGEN_LABELS = {
     "PRODUCCION_EXHIBICION": "Producción (exhibición)",
     "produccion": "Producción",
     "produccion_crudo": "Producción de crudo",
+    "ENTRADA_OFICINA": "Entrada de oficina",
+    "CONSUMO_OFICINA": "Consumo de oficina",
+    "CONTEO_OFICINA": "Conteo de oficina",
     "ASIGNACION": "Asignación a pedido",
     "STOCK_INICIAL": "Carga inicial",
     "CARGA_INICIAL": "Carga inicial",
@@ -1046,6 +1063,7 @@ class _FilaLibro:
     proveedor: Optional[str]
     cliente: Optional[str]
     recibido_por: Optional[str]
+    consumido_por: Optional[str]
     observaciones: Optional[str]
     # Registro de la compra (solo insumos; None/False en productos y crudo)
     descuento: Optional[float | Decimal] = None
@@ -1078,6 +1096,7 @@ class _FilaLibro:
             "proveedor": self.proveedor,
             "cliente": self.cliente,
             "recibido_por": self.recibido_por,
+            "consumido_por": self.consumido_por,
             "observaciones": self.observaciones,
             "descuento": descuento,
             "pagado_desde": self.pagado_desde,
@@ -1193,6 +1212,7 @@ def _filas_materiales(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
             proveedor=mov.proveedor_nombre or (mov.proveedor.nombre if mov.proveedor else None),
             cliente=mov.cliente_nombre or (mov.cliente.nombre if mov.cliente else None),
             recibido_por=mov.recibido_por,
+            consumido_por=mov.consumido_por,
             observaciones=mov.observaciones,
             descuento=mov.descuento_porcentaje,
             pagado_desde=cuenta_pago.get(mov.pagado_desde_metodo_caja_id),
@@ -1259,6 +1279,7 @@ def _filas_productos(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
             proveedor=mov.proveedor_nombre or (mov.proveedor.nombre if mov.proveedor else None),
             cliente=mov.cliente_nombre or (mov.cliente.nombre if mov.cliente else None),
             recibido_por=None,
+            consumido_por=None,
             observaciones=mov.observaciones,
             descuento=mov.descuento_porcentaje,
             pagado_desde=cuenta_pago.get(mov.pagado_desde_metodo_caja_id),
@@ -1303,6 +1324,7 @@ def _filas_crudo(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
             proveedor=None,
             cliente=None,
             recibido_por=None,
+            consumido_por=None,
             observaciones=mov.observaciones,
         ).como_dict()
         for mov, nombre, area_nombre in movimientos

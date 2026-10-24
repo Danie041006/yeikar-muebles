@@ -74,6 +74,8 @@ export interface MovimientoCreate {
   departamento?: string;
   /** Quién trajo/entregó la compra (texto libre) — opcional, solo entradas. */
   recibido_por?: string;
+  /** Quién recibió/consumió el ítem — opcional, solo salidas de oficina. */
+  consumido_por?: string;
   /** "Fiar": ENTRADA sin pagar → se registra automáticamente la deuda (cuenta por pagar). */
   fiar?: boolean;
   /** % de descuento aplicado (el neto ya viaja en costo_unitario); queda en el libro. */
@@ -99,6 +101,7 @@ export interface MovimientoResponse {
   cliente_nombre?: string;
   departamento?: string | null;
   recibido_por?: string | null;
+  consumido_por?: string | null;
   fecha?: string | null;
   created_at: string;
   updated_at: string;
@@ -206,6 +209,7 @@ export interface LibroFila {
   proveedor?: string | null;
   cliente?: string | null;
   recibido_por?: string | null;
+  consumido_por?: string | null;
   observaciones?: string | null;
   /** Registro de la compra (solo insumos): cuenta de pago, descuento y fiar. */
   descuento?: number | null;

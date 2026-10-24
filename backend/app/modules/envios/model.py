@@ -1,11 +1,28 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Index, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
+
+
 class Envio(Base):
     __tablename__ = "envio"
     id = Column(BigInteger, primary_key=True, index=True)
-    pedido_id = Column(BigInteger, ForeignKey("pedido.id", ondelete="CASCADE"), unique=True, nullable=False)
+    # Varios despachos por pedido: el cliente puede llevarse lo que ya está
+    # terminado aunque el resto siga en producción (entrega parcial).
+    pedido_id = Column(BigInteger, ForeignKey("pedido.id", ondelete="CASCADE"), nullable=False, index=True)
     empleado_id = Column(BigInteger, ForeignKey("empleado.id", ondelete="SET NULL"), nullable=True)
     asignado_por_usuario_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
     fecha_salida = Column(DateTime, nullable=True)
@@ -24,12 +41,14 @@ class Envio(Base):
     actualizado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    pedido = relationship("Pedido")
+    pedido = relationship("Pedido", back_populates="envios")
     empleado = relationship("Empleado")
     moneda_flete = relationship("Moneda")
     creador = relationship("Usuario", foreign_keys=[creado_por_id])
     actualizador = relationship("Usuario", foreign_keys=[actualizado_por_id])
     asignado_por = relationship("Usuario", foreign_keys=[asignado_por_usuario_id])
+    # Ítems que van en ESTE despacho (uno o varios renglones/piezas del pedido).
+    detalles = relationship("EnvioDetalle", back_populates="envio", cascade="all, delete-orphan")
     ubicaciones = relationship("EnvioUbicacion", back_populates="envio", cascade="all, delete-orphan")
     asignaciones = relationship("EnvioAsignacion", back_populates="envio", cascade="all, delete-orphan")
 
@@ -40,6 +59,95 @@ class Envio(Base):
     @property
     def asignado_por_nombre(self):
         return (self.asignado_por.nombre or self.asignado_por.nombre_usuario) if self.asignado_por else None
+
+
+class EnvioDetalle(Base):
+    """Ítem (renglón o pieza) que viaja en un despacho.
+
+    `cantidad` es la parte de ese renglón/pieza que se entrega en ESTE envío.
+    Si el renglón se abrió en órdenes por pieza, `orden_produccion_id` dice cuál
+    pieza es; si es un renglón normal (o reventa/insumo), queda NULL.
+    """
+
+    __tablename__ = "envio_detalle"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    envio_id = Column(
+        BigInteger,
+        ForeignKey("envio.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    detalle_pedido_id = Column(
+        BigInteger,
+        ForeignKey("detalle_pedido.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    # Pieza concreta cuando el renglón-juego tiene una orden por pieza.
+    orden_produccion_id = Column(
+        BigInteger,
+        ForeignKey("orden_produccion.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    cantidad = Column(Numeric(14, 4), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    envio = relationship("Envio", back_populates="detalles")
+    detalle_pedido = relationship("DetallePedido")
+    orden = relationship("OrdenProduccion")
+
+    __table_args__ = (
+        # Una misma pieza no puede repetirse dentro del mismo envío.
+        UniqueConstraint(
+            "envio_id",
+            "detalle_pedido_id",
+            "orden_produccion_id",
+            name="uq_envio_detalle_item",
+        ),
+        # El UNIQUE anterior permite varios NULL (renglones sin pieza); este
+        # índice parcial garantiza una sola fila por renglón cuando no hay orden.
+        Index(
+            "uq_envio_detalle_sin_orden",
+            "envio_id",
+            "detalle_pedido_id",
+            unique=True,
+            postgresql_where=text("orden_produccion_id IS NULL"),
+        ),
+        CheckConstraint("cantidad > 0", name="ck_envio_detalle_cantidad_positiva"),
+    )
+
+    @property
+    def pieza_nombre(self):
+        return self.orden.pieza_nombre if self.orden else None
+
+    @property
+    def tipo_item(self):
+        return self.detalle_pedido.tipo_item if self.detalle_pedido else None
+
+    @property
+    def producto_id(self):
+        return self.detalle_pedido.producto_id if self.detalle_pedido else None
+
+    @property
+    def material_id(self):
+        return self.detalle_pedido.material_id if self.detalle_pedido else None
+
+    @property
+    def descripcion(self) -> str:
+        det = self.detalle_pedido
+        if det is None:
+            return "Ítem del pedido"
+        base = None
+        if det.producto is not None:
+            base = det.producto.nombre
+        elif det.material is not None:
+            base = det.material.nombre
+        base = base or det.descripcion_especifica or det.observaciones or "Servicio"
+        if self.orden and self.orden.pieza_nombre:
+            return f"{base} — {self.orden.pieza_nombre}"
+        return base
 
 
 class EnvioAsignacion(Base):

@@ -101,6 +101,10 @@ def _sufijo_componente(componente: str | None) -> str | None:
 
 
 def _producto_de_orden(db: Session, orden: OrdenProduccion) -> Producto | None:
+    # La orden es una pieza de un juego: el producto del detalle es el juego
+    # padre y su receta NO representa a la pieza. No se genera estructura.
+    if orden.detalle_pieza_id or orden.pieza_nombre:
+        return None
     if orden.es_stock:
         return orden.producto
     detalle = db.query(DetallePedido).filter(DetallePedido.id == orden.detalle_pedido_id).first()
@@ -135,6 +139,8 @@ def generar_estructura_desde_orden(db: Session, orden_id: int) -> bool:
     """
     orden = db.query(OrdenProduccion).filter(OrdenProduccion.id == orden_id).first()
     if not orden or orden.estado != "FINALIZADA":
+        return False
+    if orden.detalle_pieza_id or orden.pieza_nombre:
         return False
     producto = _producto_de_orden(db, orden)
     if not producto:

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.modules.adjuntos.service import adjuntos_info
 from app.modules.auditoria.model import AuditEvent
 from app.modules.clients.model import Client
-from app.modules.envios.model import Envio, EnvioAsignacion, EnvioUbicacion
+from app.modules.envios.model import Envio, EnvioAsignacion, EnvioDetalle, EnvioUbicacion
 from app.modules.envios.service import _scope_envios
 from app.modules.facturacion.model import DetalleFactura, Factura
 from app.modules.gastos.model import Gasto
@@ -102,6 +102,12 @@ def cadena_expediente(
     venta = _venta_y_pagos(db, pedido.id)
     facturas = _facturas(db, pedido.id)
     envio = _envio(db, pedido.id)
+    # Un pedido puede tener varios despachos (entregas parciales): la ficha
+    # muestra el último, pero la auditoría debe enlazar TODOS.
+    envios_ids = [
+        fila[0]
+        for fila in db.query(Envio.id).filter(Envio.pedido_id == pedido.id).all()
+    ]
     gastos = _gastos_del_pedido(db, detalles_pedido)
 
     entidades_auditoria = {
@@ -120,7 +126,7 @@ def cadena_expediente(
         ],
         "venta": [venta["id"]] if venta else [],
         "pago": [p["id"] for p in (venta.get("pagos") or [])] if venta else [],
-        "envio": [envio["id"]] if envio else [],
+        "envio": envios_ids,
         "factura": [f["id"] for f in facturas],
     }
     auditoria = _auditoria(db, entidades_auditoria) if incluir_auditoria else []
@@ -457,21 +463,20 @@ def _facturas(db: Session, pedido_id: int) -> list[dict]:
     ]
 
 
-def _envio(db: Session, pedido_id: int) -> dict | None:
-    envio = (
-        db.query(Envio)
-        .options(
-            joinedload(Envio.empleado),
-            joinedload(Envio.creador),
-            joinedload(Envio.asignado_por),
-            joinedload(Envio.ubicaciones),
-            joinedload(Envio.asignaciones).joinedload(EnvioAsignacion.empleado),
-        )
-        .filter(Envio.pedido_id == pedido_id)
-        .first()
+def _envio_query(db: Session):
+    return db.query(Envio).options(
+        joinedload(Envio.empleado),
+        joinedload(Envio.creador),
+        joinedload(Envio.asignado_por),
+        joinedload(Envio.detalles).joinedload(EnvioDetalle.detalle_pedido).joinedload(DetallePedido.producto),
+        joinedload(Envio.detalles).joinedload(EnvioDetalle.detalle_pedido).joinedload(DetallePedido.material),
+        joinedload(Envio.detalles).joinedload(EnvioDetalle.orden),
+        joinedload(Envio.ubicaciones),
+        joinedload(Envio.asignaciones).joinedload(EnvioAsignacion.empleado),
     )
-    if not envio:
-        return None
+
+
+def _envio_dict(envio: Envio) -> dict:
     return {
         "id": envio.id,
         "estado": envio.estado,
@@ -483,6 +488,16 @@ def _envio(db: Session, pedido_id: int) -> dict | None:
         "fecha_entrega": _dt(envio.fecha_entrega),
         "direccion_entrega": envio.direccion_entrega,
         "observaciones": envio.observaciones,
+        "detalles": [
+            {
+                "detalle_pedido_id": d.detalle_pedido_id,
+                "orden_produccion_id": d.orden_produccion_id,
+                "cantidad": _f(d.cantidad),
+                "descripcion": d.descripcion,
+                "pieza_nombre": d.pieza_nombre,
+            }
+            for d in envio.detalles
+        ],
         "asignaciones": [
             {
                 "empleado": a.empleado.nombre if a.empleado else None,
@@ -504,6 +519,16 @@ def _envio(db: Session, pedido_id: int) -> dict | None:
             for u in envio.ubicaciones
         ],
     }
+
+
+def _envio(db: Session, pedido_id: int) -> dict | None:
+    envio = (
+        _envio_query(db)
+        .filter(Envio.pedido_id == pedido_id)
+        .order_by(Envio.id.desc())
+        .first()
+    )
+    return _envio_dict(envio) if envio else None
 
 
 def _auditoria(db: Session, entidades: dict[str, list[int]]) -> list[dict]:
@@ -697,8 +722,7 @@ def expediente_envio(
     usuario: Usuario | None = None,
 ) -> dict | None:
     query = (
-        db.query(Envio)
-        .options(joinedload(Envio.pedido))
+        _envio_query(db)
         .filter(Envio.id == envio_id)
     )
     # Mismo alcance que el módulo envíos (conductor ve solo lo asignado).
@@ -712,6 +736,9 @@ def expediente_envio(
     )
     if ficha is None:
         return None
+    # La ficha general trae el último despacho; al abrir uno concreto se muestra
+    # ESE despacho (varios por pedido en entregas parciales).
+    ficha["envio"] = _envio_dict(envio)
     ficha["envio_entrada"] = {
         "id": envio.id,
         "estado": envio.estado,

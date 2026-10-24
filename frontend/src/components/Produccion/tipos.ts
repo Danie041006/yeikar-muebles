@@ -47,3 +47,12 @@ export const esOrdenRetrabajo = (orden?: OrdenProduccion | null) =>
 /** Etiqueta corta del destino de la orden (tarjetas del Kanban). */
 export const etiquetaOrden = (orden?: OrdenProduccion | null): string =>
   esOrdenRetrabajo(orden) ? 'RETRABAJO' : esOrdenExhibicion(orden) ? 'EXHIBICIÓN' : 'SIN PEDIDO';
+
+/** Nombre visible de la orden: la pieza del juego manda; si no, el producto o
+ *  la descripción del renglón. Null si la orden no tiene ninguno. */
+export const nombreOrden = (orden?: OrdenProduccion | null): string | null =>
+  orden?.pieza_nombre
+  || orden?.detalle_pedido?.producto?.nombre
+  || orden?.producto?.nombre
+  || orden?.detalle_pedido?.descripcion_especifica
+  || null;

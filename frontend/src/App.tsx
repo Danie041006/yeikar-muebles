@@ -9,6 +9,7 @@ import Pedidos from './pages/Pedidos';
 import ProduccionKanban from './pages/ProduccionKanban';
 import ProduccionCrudo from './pages/ProduccionCrudo';
 import Inventario from './pages/Inventario';
+import InventarioOficina from './pages/InventarioOficina';
 import Reportes from './pages/Reportes';
 import Productos from './pages/Productos';
 import Ventas from './pages/Ventas';
@@ -41,6 +42,7 @@ const ROUTE_MODULES: Record<string, string> = {
   '/produccion': 'produccion',
   '/produccion-crudo': 'produccion',
   '/inventario': 'inventario',
+  '/inventario/oficina': 'inventario',
   '/reportes': 'reportes',
   '/reporte-diario': 'reportes',
   '/productos': 'productos',
@@ -141,6 +143,10 @@ const pageMeta: Record<string, { title: string; description: string }> = {
   '/inventario': {
     title: 'Inventario',
     description: 'Control de inventario, existencias y movimientos de materiales.',
+  },
+  '/inventario/oficina': {
+    title: 'Inventario de Oficina',
+    description: 'Papelería, cafetería y aseo de oficina: compras, consumos y conteo físico.',
   },
   '/reportes': {
     title: 'Reportes',
@@ -293,6 +299,16 @@ function App() {
               <PrivateRoute>
                 <DashboardLayout>
                   <><SEO {...pageMeta['/inventario']} /><Inventario /></>
+                </DashboardLayout>
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/inventario/oficina"
+            element={
+              <PrivateRoute>
+                <DashboardLayout>
+                  <><SEO {...pageMeta['/inventario/oficina']} /><InventarioOficina /></>
                 </DashboardLayout>
               </PrivateRoute>
             }
