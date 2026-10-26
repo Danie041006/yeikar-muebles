@@ -198,6 +198,11 @@ export interface LibroCajaVistaFila {
   origen: string;
   referencia?: string | null;
   persona_entidad?: string | null;
+  /** Quién registró/importó el movimiento. */
+  usuario_id?: number | null;
+  usuario_nombre?: string | null;
+  /** Momento del registro (hora Venezuela). */
+  created_at?: string | null;
 }
 
 export interface LibroCajaVistaClasificacion {

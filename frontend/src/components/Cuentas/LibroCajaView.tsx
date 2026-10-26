@@ -11,6 +11,7 @@ import {
   Select, Spinner, StatCard, Textarea, ResponsiveDataTable, type DataColumn,
 } from '../ui';
 import { fmtMoneda } from '../../utils/format';
+import { fmtFechaHoraVE } from '../../utils/fechas';
 import { formatMontoInput, parseMontoInput } from '../../utils/monto';
 import { useToast } from '../../context/ToastContext';
 
@@ -193,6 +194,21 @@ export default function LibroCajaView({ cuentas }: Props) {
         </span>
       ),
       mobileLabel: 'Persona o entidad',
+    },
+    {
+      key: 'registro',
+      header: 'Registrado por',
+      render: (f) => (
+        <span className="block text-xs leading-tight">
+          <span className="font-bold text-yeikar-secondary">
+            {f.usuario_nombre || '—'}
+          </span>
+          <span className="block font-mono text-[10px] text-yeikar-neutral/45">
+            {fmtFechaHoraVE(f.created_at)}
+          </span>
+        </span>
+      ),
+      mobileLabel: 'Registrado por',
     },
     {
       key: 'concepto',
@@ -435,6 +451,12 @@ export default function LibroCajaView({ cuentas }: Props) {
             </FilaDetalle>
             <FilaDetalle label="Persona o entidad">
               {detalle.persona_entidad || '—'}
+            </FilaDetalle>
+            <FilaDetalle label="Registrado por">
+              {detalle.usuario_nombre || '—'}
+            </FilaDetalle>
+            <FilaDetalle label="Hora de registro">
+              {fmtFechaHoraVE(detalle.created_at)}
             </FilaDetalle>
             <FilaDetalle label="Concepto">
               {detalle.concepto || '—'}

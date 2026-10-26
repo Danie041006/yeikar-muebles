@@ -36,7 +36,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.caja import registrar_movimiento_caja
 from app.core.hora_ve import hoy_ve
@@ -1034,6 +1034,12 @@ def obtener_libro_caja(
     )
     movimientos = (
         db.query(MovimientoCaja)
+        .options(
+            joinedload(MovimientoCaja.usuario),
+            # Para los cobros creados desde Ventas, la hora fiable es la del
+            # pago (hora VE); el created_at del movimiento puede venir en UTC.
+            joinedload(MovimientoCaja.pago),
+        )
         .filter(
             MovimientoCaja.metodo_caja_id == cuenta.id,
             MovimientoCaja.fecha >= fecha_desde,
@@ -1098,6 +1104,17 @@ def obtener_libro_caja(
         else:
             origen = "MANUAL"
 
+        usuario = mov.usuario
+        usuario_nombre = (
+            (usuario.nombre or usuario.nombre_usuario) if usuario else None
+        )
+        # Los movimientos de cobro creados por Ventas guardan a veces el
+        # created_at en UTC; el Pago sí tiene la hora VE. Para los importados
+        # o manuales se conserva el created_at del movimiento.
+        created_at = mov.created_at
+        if (mov.referencia or "").startswith("Pago #") and mov.pago is not None:
+            created_at = mov.pago.created_at or mov.created_at
+
         filas.append({
             "id": mov.id,
             "fecha": mov.fecha,
@@ -1111,6 +1128,9 @@ def obtener_libro_caja(
             "origen": origen,
             "referencia": mov.referencia,
             "persona_entidad": mov.persona_entidad,
+            "usuario_id": mov.usuario_id,
+            "usuario_nombre": usuario_nombre,
+            "created_at": created_at,
         })
 
     clasificaciones = []

@@ -624,6 +624,10 @@ class LibroCajaVistaFila(BaseModel):
     origen: str = "MANUAL"
     referencia: Optional[str] = None
     persona_entidad: Optional[str] = None
+    # Quién digitó/importó el movimiento y cuándo (hora Venezuela).
+    usuario_id: Optional[int] = None
+    usuario_nombre: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
 class LibroCajaVistaClasificacion(BaseModel):
