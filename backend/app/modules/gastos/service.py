@@ -60,8 +60,8 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
         "PRESTAMO": "PRESTAMO", "PRESTAMOS": "PRESTAMO",
         "GASTOPRESTAMO": "PRESTAMO",
         "DONACION": "DONACION", "DONACIONES": "DONACION",
-        "GASTODONACION": "DONACION", "DONATIVO": "DONACION",
-        "DONATIVOS": "DONACION",
+        "GASTODONACION": "DONACION", "GDONACION": "DONACION",
+        "DONATIVO": "DONACION", "DONATIVOS": "DONACION", "GDONATIVO": "DONACION",
     }
     clave = equivalencias.get(compacto)
     if clave is None:
