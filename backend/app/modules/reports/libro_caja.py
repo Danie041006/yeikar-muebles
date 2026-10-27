@@ -23,6 +23,10 @@ Reglas de la importación:
 - El libro va en la MONEDA de la cuenta elegida (no solo COP): cada
   movimiento y gasto queda con la tasa del día hacia la moneda base
   (obtener_tasa_moneda_a_cop; 1.0 para COP o cuando nunca se registró tasa).
+- Si se pide "cuadrar saldo inicial", el ajuste por la diferencia se fecha el
+  ÚLTIMO DÍA DEL MES ANTERIOR: es el saldo que venía del período previo, no un
+  ingreso del mes. Así la tarjeta "Saldo inicial (antes del período)" muestra
+  el saldo del libro y el saldo final queda igual.
 """
 from __future__ import annotations
 
@@ -732,6 +736,24 @@ def previsualizar_libro(
     )
 
 
+def _fecha_ajuste_saldo(periodo: Optional[str], primera: date) -> date:
+    """Último día del mes anterior al período importado.
+
+    El ajuste de "cuadrar saldo inicial" representa el saldo que venía del
+    período previo. Si se fecha en el primer día del período aparece como un
+    INGRESO del mes y la tarjeta "Saldo inicial (antes del período)" muestra
+    un saldo menor al del libro (el saldo final sí queda igual).
+    """
+    if periodo:
+        try:
+            inicio = date(int(periodo[:4]), int(periodo[5:7]), 1)
+        except (ValueError, IndexError):
+            inicio = None
+        if inicio is not None:
+            return inicio - timedelta(days=1)
+    return primera - timedelta(days=1)
+
+
 def importar_libro(
     db: Session,
     *,
@@ -790,18 +812,21 @@ def importar_libro(
     try:
         # Cuadrar la cuenta con el saldo inicial del libro: en vez de crear
         # una apertura por el total (que duplicaría lo que ya había), se
-        # registra un ajuste por la DIFERENCIA contra el saldo actual.
+        # registra un ajuste por la DIFERENCIA contra el saldo actual. Va
+        # fechado ANTES del período (último día del mes anterior) para que la
+        # vista lo muestre como saldo inicial y no como ingreso del mes.
         if cuadrar_saldo_inicial and parsed.saldo_inicial is not None and fechas:
             ajuste = parsed.saldo_inicial - saldo_previo
             if ajuste != 0:
+                fecha_ajuste = _fecha_ajuste_saldo(parsed.periodo, min(fechas))
                 registrar_movimiento_caja(
                     db,
                     metodo_caja_id=cuenta.id,
                     tipo="APERTURA" if ajuste > 0 else "SALIDA",
                     monto=float(abs(ajuste)),
                     moneda_id=moneda.id,
-                    tasa_cambio=float(_tasa_para(db, moneda, min(fechas))),
-                    fecha=min(fechas),
+                    tasa_cambio=float(_tasa_para(db, moneda, fecha_ajuste)),
+                    fecha=fecha_ajuste,
                     referencia=etiqueta,
                     concepto=(
                         f"[{etiqueta}] Ajuste para cuadrar con el saldo inicial "
@@ -1045,7 +1070,13 @@ def obtener_libro_caja(
             MovimientoCaja.fecha >= fecha_desde,
             MovimientoCaja.fecha <= fecha_hasta,
         )
-        .order_by(MovimientoCaja.fecha, MovimientoCaja.id)
+        .order_by(
+            MovimientoCaja.fecha,
+            # La hora del movimiento manda cuando existe; las filas sin hora
+            # (NULLS LAST) conservan el orden de registro dentro del día.
+            MovimientoCaja.hora.asc().nulls_last(),
+            MovimientoCaja.id,
+        )
         .all()
     )
 
@@ -1118,6 +1149,7 @@ def obtener_libro_caja(
         filas.append({
             "id": mov.id,
             "fecha": mov.fecha,
+            "hora": mov.hora,
             "tipo": tipo,
             "tipo_movimiento": mov.tipo,
             "concepto": concepto,

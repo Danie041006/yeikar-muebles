@@ -15,6 +15,7 @@ ingreso, egreso, saldo) y marca cada gasto con G D / G C / G P / G F / G I
 Ejecutar:
   cd backend && venv/bin/python -m pytest test/test_libro_caja.py -v
 """
+from datetime import date
 from decimal import Decimal
 import uuid
 
@@ -119,6 +120,9 @@ def test_preview_e_importacion_del_libro(client, cleaner, db):
     assert sum(Decimal(str(g.monto)) for g in gastos) == Decimal("600000")
 
     # 2b. El libro se ve como la hoja: tipo, concepto y saldo corrido.
+    # El ajuste de cuadre se fecha el 30/09 (el saldo que venía de septiembre),
+    # así que la vista de octubre ARRANCA en el saldo del libro y no lo cuenta
+    # como un ingreso del mes.
     r = client.get("/api/v1/cuenta/libro", params={
         "metodo_caja_id": cuenta["id"],
         "fecha_desde": "2026-10-01",
@@ -126,20 +130,27 @@ def test_preview_e_importacion_del_libro(client, cleaner, db):
     }, headers=ADMIN_HEADERS)
     assert r.status_code == 200, r.text
     libro = r.json()
-    assert Decimal(str(libro["saldo_inicial"])) == Decimal("0")
+    assert Decimal(str(libro["saldo_inicial"])) == Decimal("3683600")
     assert Decimal(str(libro["saldo_final"])) == Decimal("3163600")
-    assert len(libro["filas"]) == 7
+    assert len(libro["filas"]) == 6
+    assert all(f["tipo"] != "APERTURA" for f in libro["filas"])
+    ajuste = db.query(MovimientoCaja).filter(
+        MovimientoCaja.metodo_caja_id == cuenta["id"],
+        MovimientoCaja.tipo == "APERTURA",
+        MovimientoCaja.referencia == tag,
+    ).one()
+    assert ajuste.fecha == date(2026, 9, 30), ajuste.fecha
+    assert Decimal(str(ajuste.monto)) == Decimal("3683600")
     primera = libro["filas"][0]
-    assert primera["tipo"] == "APERTURA"
-    assert "Ajuste para cuadrar" in primera["concepto"]
-    assert Decimal(str(primera["saldo"])) == Decimal("3683600")
+    assert primera["persona_entidad"] == "DOÑA ROSA G C"
+    assert primera["tipo"] == "DOÑA ROSA G C"
+    assert primera["concepto"] == "PAGO DE MERCADO"
+    assert primera["clasificacion"] == "GASTO_CASA"
+    assert primera["tipo_movimiento"] == "SALIDA"
+    assert Decimal(str(primera["saldo"])) == Decimal("3563600")
     segunda = libro["filas"][1]
-    assert segunda["persona_entidad"] == "DOÑA ROSA G C"
-    assert segunda["tipo"] == "DOÑA ROSA G C"
-    assert segunda["concepto"] == "PAGO DE MERCADO"
-    assert segunda["clasificacion"] == "GASTO_CASA"
-    assert segunda["tipo_movimiento"] == "SALIDA"
-    assert Decimal(str(segunda["saldo"])) == Decimal("3563600")
+    assert segunda["persona_entidad"] == "CAMARA DE COMERCIO G F"
+    assert Decimal(str(segunda["saldo"])) == Decimal("3163600")
 
     # 3. No se puede importar dos veces el mismo período.
     r = client.post(
@@ -280,6 +291,17 @@ def test_fechas_mezcladas_y_gf_es_gasto_familiar():
     assert [f.clasificacion for f in parsed.filas] == [
         None, "GASTO_FAMILIAR", "GASTO_CASA", "GASTO_PERSONAL",
     ]
+
+
+def test_fecha_del_ajuste_es_el_ultimo_dia_del_mes_anterior():
+    """El ajuste de cuadre es el saldo que venía del mes previo, no un ingreso."""
+    from app.modules.reports.libro_caja import _fecha_ajuste_saldo
+
+    assert _fecha_ajuste_saldo("2026-10", date(2026, 10, 6)) == date(2026, 9, 30)
+    assert _fecha_ajuste_saldo("2026-01", date(2026, 1, 1)) == date(2025, 12, 31)
+    assert _fecha_ajuste_saldo("2026-03", date(2026, 3, 1)) == date(2026, 2, 28)
+    # Sin período reconocible: el día anterior a la primera fila.
+    assert _fecha_ajuste_saldo(None, date(2026, 5, 10)) == date(2026, 5, 9)
 
 
 def test_tipo_solo_sin_concepto_y_tipo_con_concepto():
@@ -430,3 +452,243 @@ def test_libro_en_la_moneda_de_la_cuenta_usd(client, cleaner, db):
         for m in movs
     )
     assert saldo == Decimal("3163600"), f"saldo final {saldo}"
+
+
+def test_eliminar_movimiento_manual_recalcula_el_saldo(client, cleaner, db):
+    """Borrar una fila del libro la saca del saldo corrido, como si no existiera."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-05",
+        "tipo": "ENTRADA",
+        "monto": 100000,
+        "moneda_id": 1,
+        "hora": "14:30",
+        "persona_entidad": "CLIENTE",
+        "concepto": "Ingreso que se conserva",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    entrada = r.json()
+    cleaner.registrar("movimiento_caja", entrada["id"])
+
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-06",
+        "tipo": "SALIDA",
+        "monto": 30000,
+        "moneda_id": 1,
+        "persona_entidad": "PROVEEDOR",
+        "concepto": "Egreso equivocado",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    salida = r.json()
+    cleaner.registrar("movimiento_caja", salida["id"])
+
+    params = {
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-01",
+        "fecha_hasta": "2026-10-31",
+    }
+    r = client.get("/api/v1/cuenta/libro", params=params, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    assert len(libro["filas"]) == 2
+    assert str(libro["filas"][0]["hora"]).startswith("14:30")
+    assert Decimal(str(libro["saldo_final"])) == Decimal("70000")
+
+    # La hora también se corrige y queda en la auditoría (incluye datetime.time).
+    r = client.put(
+        f"/api/v1/cuenta/movimiento/{entrada['id']}",
+        json={"hora": "15:45"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    assert str(r.json()["hora"]).startswith("15:45")
+
+    r = client.delete(
+        f"/api/v1/cuenta/movimiento/{salida['id']}", headers=ADMIN_HEADERS
+    )
+    assert r.status_code == 204, r.text
+
+    db.expire_all()
+    assert db.query(MovimientoCaja).filter(
+        MovimientoCaja.id == salida["id"]
+    ).first() is None
+
+    r = client.get("/api/v1/cuenta/libro", params=params, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    assert len(libro["filas"]) == 1
+    assert libro["filas"][0]["id"] == entrada["id"]
+    assert str(libro["filas"][0]["hora"]).startswith("15:45")
+    assert Decimal(str(libro["total_egresos"])) == Decimal("0")
+    assert Decimal(str(libro["saldo_final"])) == Decimal("100000")
+
+
+def test_eliminar_salida_clasificada_borra_tambien_su_gasto(client, cleaner, db):
+    """El egreso y su Gasto son la misma operación: se revierten juntos."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+    descripcion = f"Salida clasificada para borrar {uuid.uuid4().hex[:6]}"
+
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-20",
+        "tipo": "SALIDA",
+        "monto": 45000,
+        "moneda_id": 1,
+        "persona_entidad": "CAMARA DE COMERCIO",
+        "concepto": descripcion,
+        "clasificacion": "G F",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar_caja_ref(mov["referencia"])
+
+    db.expire_all()
+    gasto = db.query(Gasto).filter(Gasto.descripcion == descripcion).one()
+    gasto_id = gasto.id
+    cleaner.registrar("gasto", gasto_id)
+
+    params = {
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-01",
+        "fecha_hasta": "2026-10-31",
+    }
+    r = client.get("/api/v1/cuenta/libro", params=params, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    assert len(libro["filas"]) == 1
+    assert libro["clasificaciones"][0]["clasificacion"] == "GASTO_FAMILIAR"
+    assert libro["clasificaciones"][0]["count"] == 1
+
+    r = client.delete(
+        f"/api/v1/cuenta/movimiento/{mov['id']}", headers=ADMIN_HEADERS
+    )
+    assert r.status_code == 204, r.text
+
+    db.expunge_all()
+    assert db.get(Gasto, gasto_id) is None
+    assert db.query(MovimientoCaja).filter(
+        MovimientoCaja.referencia == mov["referencia"]
+    ).first() is None
+
+    r = client.get("/api/v1/cuenta/libro", params=params, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    assert libro["filas"] == []
+    assert libro["clasificaciones"] == []
+    assert Decimal(str(libro["total_egresos"])) == Decimal("0")
+    assert Decimal(str(libro["saldo_final"])) == Decimal("0")
+
+
+def test_eliminar_fila_importada_clasificada_borra_su_gasto(client, cleaner, db):
+    """Una fila G del libro también se revierte completa (movimiento + gasto)."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+
+    r = client.post(
+        "/api/v1/cuenta/libro/importar",
+        json=_payload(cuenta["id"], cuadrar_saldo_inicial=True),
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 201, r.text
+
+    db.expire_all()
+    tag = f"Libro {cuenta['codigo']} 2026-10"
+    for mov in db.query(MovimientoCaja).filter(
+        MovimientoCaja.metodo_caja_id == cuenta["id"]
+    ).all():
+        cleaner.registrar("movimiento_caja", mov.id)
+    for gasto in db.query(Gasto).filter(Gasto.observaciones.like(f"[{tag}]%")).all():
+        cleaner.registrar("gasto", gasto.id)
+
+    rosa = db.query(MovimientoCaja).filter(
+        MovimientoCaja.metodo_caja_id == cuenta["id"],
+        MovimientoCaja.persona_entidad == "DOÑA ROSA G C",
+    ).one()
+    gasto_rosa = db.query(Gasto).filter(
+        Gasto.observaciones.like(f"[{tag}]%"),
+        Gasto.descripcion.like("%PAGO DE MERCADO%"),
+    ).one()
+    rosa_id, gasto_rosa_id = rosa.id, gasto_rosa.id
+
+    r = client.delete(
+        f"/api/v1/cuenta/movimiento/{rosa_id}", headers=ADMIN_HEADERS
+    )
+    assert r.status_code == 204, r.text
+
+    db.expunge_all()
+    assert db.get(Gasto, gasto_rosa_id) is None
+    assert db.get(MovimientoCaja, rosa_id) is None
+
+    r = client.get("/api/v1/cuenta/libro", params={
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-01",
+        "fecha_hasta": "2026-10-31",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    assert len(libro["filas"]) == 5
+    # El egreso de 120.000 deja de restar: el saldo final sube ese mismo monto.
+    assert Decimal(str(libro["saldo_final"])) == Decimal("3283600")
+    assert all(
+        c["clasificacion"] != "GASTO_CASA" for c in libro["clasificaciones"]
+    )
+
+
+def test_hora_del_movimiento_ordena_el_libro_sin_tocar_saldos(client, cleaner, db):
+    """La hora solo POSICIONA la fila: manda sobre el orden de registro.
+
+    Caso real: el cambio de dólares se registró al final del día (19:13) pero
+    en el papel ocurrió antes de las salidas. Sin hora, el saldo corrido se ve
+    negativo aunque el saldo final sea el correcto; con hora se lee en orden.
+    """
+    cuenta = _crear_cuenta(client, cleaner, db)
+    url = f"/api/v1/cuenta/{cuenta['id']}/movimiento"
+
+    def crear(**datos):
+        r = client.post(
+            url,
+            json={"metodo_caja_id": cuenta["id"], "moneda_id": 1, **datos},
+            headers=ADMIN_HEADERS,
+        )
+        assert r.status_code == 201, r.text
+        mov = r.json()
+        cleaner.registrar("movimiento_caja", mov["id"])
+        return mov
+
+    salida = crear(
+        fecha="2026-10-26", tipo="SALIDA", monto=20000,
+        concepto="Lorenzo, guardado",
+    )
+    tardia = crear(
+        fecha="2026-10-26", tipo="ENTRADA", monto=28575000,
+        persona_entidad="JACKSON", concepto="Jackson, cambio dólares por pesos",
+        hora="18:00",
+    )
+
+    params = {
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-26",
+        "fecha_hasta": "2026-10-26",
+    }
+    r = client.get("/api/v1/cuenta/libro", params=params, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+
+    # La fila con hora se acomoda antes de las que no la tienen.
+    assert [f["id"] for f in libro["filas"]] == [tardia["id"], salida["id"]]
+    assert all(Decimal(str(f["saldo"])) >= 0 for f in libro["filas"])
+    # La hora no mueve dinero: el saldo final es el mismo de siempre.
+    assert Decimal(str(libro["saldo_final"])) == Decimal("28555000")
+
+    # Quitarle la hora devuelve la fila al orden de registro (id).
+    r = client.put(
+        f"/api/v1/cuenta/movimiento/{tardia['id']}",
+        json={"hora": None},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    r = client.get("/api/v1/cuenta/libro", params=params, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    assert [f["id"] for f in r.json()["filas"]] == [salida["id"], tardia["id"]]

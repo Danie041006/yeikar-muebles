@@ -1273,11 +1273,12 @@ def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, us
     db.refresh(obj)
     return obj
 
-def _bloquear_movimiento_ligado(obj: model.MovimientoCaja, usuario: Optional[Usuario]) -> None:
-    """Un asiento derivado de un pago o transferencia no se edita/borra desde
-    cuentas: desvincularlo del libro dejaría el cobro intacto y la caja sin él.
-    Solo Dueño/Administrador puede (y debe corregir el origen)."""
-    if not (obj.pago_id or obj.transferencia_id):
+def _validar_borrado_transferencia(
+    obj: model.MovimientoCaja, usuario: Optional[Usuario]
+) -> None:
+    """Una transferencia son dos patas unidas: solo Dueño/Administrador puede
+    borrarla completa (nunca una sola pata)."""
+    if not obj.transferencia_id:
         return
     if usuario is None:
         return  # llamadas internas ya autorizadas (p. ej. /reports es solo-admin)
@@ -1285,9 +1286,58 @@ def _bloquear_movimiento_ligado(obj: model.MovimientoCaja, usuario: Optional[Usu
 
     if not es_admin_user(usuario):
         raise ValueError(
-            "Este movimiento fue generado por un pago o una transferencia: "
-            "solo Dueño/Administrador puede editarlo o eliminarlo."
+            "Esta fila es una pata de una transferencia entre cuentas: solo "
+            "Dueño/Administrador puede eliminarla (se borran las dos patas)."
         )
+
+
+def _gasto_id_de_movimiento(obj: model.MovimientoCaja) -> Optional[int]:
+    """ID del Gasto espejo cuando el movimiento nació de una salida clasificada."""
+    referencia = (obj.referencia or "").strip()
+    if not referencia.startswith("Gasto #"):
+        return None
+    try:
+        return int(referencia.split("#", 1)[1].split()[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def _snapshot_movimiento(obj: model.MovimientoCaja) -> dict:
+    """Datos del asiento para la auditoría (antes de corregirlo o borrarlo)."""
+    return {
+        "metodo_caja_id": obj.metodo_caja_id,
+        "fecha": obj.fecha,
+        "hora": obj.hora,
+        "tipo": obj.tipo,
+        "monto": obj.monto,
+        "moneda_id": obj.moneda_id,
+        "persona_entidad": obj.persona_entidad,
+        "concepto": obj.concepto,
+        "referencia": obj.referencia,
+        "pago_id": obj.pago_id,
+        "transferencia_id": obj.transferencia_id,
+    }
+
+
+def _validar_movimiento_editable(obj: model.MovimientoCaja) -> None:
+    """Un asiento derivado no se edita por separado: su origen manda.
+
+    - Pago de venta: el abono (monto/fecha/cuenta) se corrige desde Ventas con
+      su historial de correcciones; editar solo la caja descuadraría la venta.
+    - Transferencia: son dos patas unidas; cambiar una sola fabrica o
+      desaparece dinero. Se elimina completa y se crea de nuevo.
+    """
+    if obj.pago_id:
+        raise ValueError(
+            "Este movimiento viene de un cobro de venta: el abono se corrige "
+            "desde Ventas, no desde el libro de caja."
+        )
+    if obj.transferencia_id:
+        raise ValueError(
+            "Es una pata de una transferencia entre cuentas: no se puede "
+            "editar por separado. Elimina la transferencia y créala de nuevo."
+        )
+
 
 def actualizar_movimiento_caja(
     db: Session,
@@ -1298,21 +1348,22 @@ def actualizar_movimiento_caja(
     obj = db.query(model.MovimientoCaja).filter(model.MovimientoCaja.id == movimiento_id).first()
     if not obj:
         return None
-    _bloquear_movimiento_ligado(obj, usuario)
     datos = esquema.model_dump(exclude_unset=True)
+    # La hora solo ACOMODA la fila en el libro (no mueve dinero), así que se
+    # puede corregir incluso en asientos derivados (cobro o transferencia).
+    # Cualquier otro campo sigue bloqueado en esos casos.
+    if set(datos) - {"hora"}:
+        _validar_movimiento_editable(obj)
+    antes = _snapshot_movimiento(obj)
 
     # Movimiento espejo de un gasto (referencia "Gasto #N"): corregir el
     # movimiento también debe corregir el gasto, o la caja y los reportes
     # quedan descuadrados. Cambiar el tipo (salida↔entrada) no tiene sentido
     # para un gasto: se rechaza y se corrige desde Gastos.
     gasto_espejo = None
-    if (obj.referencia or "").startswith("Gasto #"):
-        try:
-            gasto_id = int(obj.referencia.split("#", 1)[1].split(" ")[0])
-        except (ValueError, IndexError):
-            gasto_id = None
-        if gasto_id:
-            gasto_espejo = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+    gasto_id = _gasto_id_de_movimiento(obj)
+    if gasto_id:
+        gasto_espejo = db.query(Gasto).filter(Gasto.id == gasto_id).first()
     if gasto_espejo is not None and "tipo" in datos and datos["tipo"] != obj.tipo:
         raise ValueError(
             "No se puede cambiar el tipo de un movimiento clasificado como gasto. "
@@ -1323,6 +1374,17 @@ def actualizar_movimiento_caja(
         setattr(obj, campo, valor)
     if "monto" in datos or "tasa_cambio" in datos:
         obj.monto_en_moneda_base = round(Decimal(str(obj.monto)) * Decimal(str(obj.tasa_cambio or 1.0)), 2)
+
+    # Una transferencia es UNA operación: la hora (que solo posiciona la fila
+    # en el libro) se aplica a las dos patas para que se lean juntas.
+    if "hora" in datos and obj.transferencia_id:
+        db.query(model.MovimientoCaja).filter(
+            model.MovimientoCaja.transferencia_id == obj.transferencia_id,
+            model.MovimientoCaja.id != obj.id,
+        ).update(
+            {model.MovimientoCaja.hora: obj.hora},
+            synchronize_session=False,
+        )
 
     if gasto_espejo is not None:
         if "monto" in datos:
@@ -1337,6 +1399,15 @@ def actualizar_movimiento_caja(
             )
         gasto_espejo.monto_en_moneda_base = obj.monto_en_moneda_base
 
+    record_event(
+        db,
+        actor=usuario,
+        action="UPDATE",
+        entity_type="movimiento_caja",
+        entity_id=obj.id,
+        before=antes,
+        after=_snapshot_movimiento(obj),
+    )
     db.commit()
     db.refresh(obj)
     return obj
@@ -1349,7 +1420,43 @@ def eliminar_movimiento_caja(
     obj = db.query(model.MovimientoCaja).filter(model.MovimientoCaja.id == movimiento_id).first()
     if not obj:
         return False
-    _bloquear_movimiento_ligado(obj, usuario)
+    if obj.pago_id:
+        # Borrar solo la pata de caja dejaría el abono de la venta intacto (y
+        # la venta cobrada sin dinero). No hay borrado de abonos: se corrige o
+        # se elimina la venta completa desde Ventas.
+        raise ValueError(
+            "Este movimiento viene de un cobro de venta: no se elimina desde "
+            "el libro. Corrige o elimina la venta desde Ventas."
+        )
+    _validar_borrado_transferencia(obj, usuario)
+    antes = _snapshot_movimiento(obj)
+
+    # Salida clasificada: su Gasto es la otra cara del asiento. Borrar solo el
+    # movimiento dejaría el gasto (y los reportes) vivos, así que se elimina el
+    # gasto completo, que a su vez retira su movimiento espejo.
+    gasto_id = _gasto_id_de_movimiento(obj)
+    if gasto_id:
+        from app.modules.gastos import service as gastos_service
+
+        gasto = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+        if gasto is not None:
+            if not gastos_service.eliminar_gasto(db, gasto_id, usuario, commit=False):
+                raise ValueError(
+                    "Este movimiento tiene un gasto asociado registrado por "
+                    "otro usuario: solo su autor o Dueño/Administrador puede "
+                    "eliminarlo."
+                )
+            record_event(
+                db,
+                actor=usuario,
+                action="DELETE",
+                entity_type="movimiento_caja",
+                entity_id=obj.id,
+                before=antes,
+            )
+            db.commit()
+            return True
+
     # Una transferencia es UNA operación con dos patas: borrar una borra ambas
     # (dejar una sola pata fabricaría dinero o lo haría desaparecer del libro).
     if obj.transferencia_id:
@@ -1358,6 +1465,14 @@ def eliminar_movimiento_caja(
         ).delete(synchronize_session=False)
     else:
         db.delete(obj)
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="movimiento_caja",
+        entity_id=obj.id,
+        before=antes,
+    )
     db.commit()
     return True
 

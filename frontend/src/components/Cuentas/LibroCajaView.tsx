@@ -7,16 +7,20 @@ import {
   CLASIFICACIONES_GASTO, nombreClasificacion,
 } from '../../services/gastoService';
 import {
-  Badge, Button, Card, EmptyState, Field, Input, Modal, SearchSelect,
+  Badge, Button, Card, ConfirmDialog, EmptyState, Field, Input, Modal, SearchSelect,
   Select, Spinner, StatCard, Textarea, ResponsiveDataTable, type DataColumn,
 } from '../ui';
 import { fmtMoneda } from '../../utils/format';
 import { fmtFechaHoraVE } from '../../utils/fechas';
 import { formatMontoInput, parseMontoInput } from '../../utils/monto';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
 
 const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/** "18:00:00" | "18:00" → "18:00" (valor para <input type="time">). */
+const horaCorta = (h?: string | null) => (h ? String(h).slice(0, 5) : '');
 
 const POR_PAGINA = 40;
 
@@ -59,15 +63,18 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
   const [error, setError] = useState('');
   const [pagina, setPagina] = useState(1);
   const toast = useToast();
+  const { esAdmin } = useAuth();
 
   // Detalle / edición de una fila del libro. No hay iconos: se abre al
   // hacer clic en la fila.
   const [detalle, setDetalle] = useState<LibroCajaVistaFila | null>(null);
   const [editando, setEditando] = useState(false);
   const [guardando, setGuardando] = useState(false);
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false);
   const [errorMov, setErrorMov] = useState('');
   const [editForm, setEditForm] = useState({
     fecha: '',
+    hora: '',
     tipo: 'ENTRADA' as LibroCajaVistaFila['tipo_movimiento'],
     monto: '',
     persona_entidad: '',
@@ -115,9 +122,11 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
     const monto = Number(fila.ingreso) > 0 ? Number(fila.ingreso) : Number(fila.egreso);
     setDetalle(fila);
     setEditando(false);
+    setConfirmarEliminar(false);
     setErrorMov('');
     setEditForm({
       fecha: fila.fecha,
+      hora: horaCorta(fila.hora),
       tipo: fila.tipo_movimiento,
       monto: formatMontoInput(String(monto)),
       persona_entidad: fila.persona_entidad ?? '',
@@ -128,31 +137,56 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
   const cerrarDetalle = () => {
     setDetalle(null);
     setEditando(false);
+    setConfirmarEliminar(false);
     setErrorMov('');
+  };
+
+  const eliminarMovimiento = async () => {
+    if (!detalle) return;
+    setErrorMov('');
+    try {
+      await cuentasService.eliminarMovimiento(detalle.id);
+      toast.success('Movimiento eliminado');
+      setConfirmarEliminar(false);
+      cerrarDetalle();
+      await cargar();
+    } catch (e: any) {
+      setConfirmarEliminar(false);
+      setErrorMov(e?.response?.data?.detail ?? 'No se pudo eliminar el movimiento.');
+    }
   };
 
   const guardarEdicion = async () => {
     if (!detalle) return;
-    const monto = parseMontoInput(editForm.monto);
-    if (!editForm.fecha) {
-      setErrorMov('La fecha es obligatoria.');
-      return;
-    }
-    if (!Number.isFinite(monto) || monto <= 0) {
-      setErrorMov('El monto debe ser mayor a 0.');
-      return;
+    // En una transferencia solo se ajusta la HORA: sus importes son una sola
+    // operación con dos patas y no se editan por separado.
+    const soloHora = !movimientoEditable;
+    let monto = 0;
+    if (!soloHora) {
+      monto = parseMontoInput(editForm.monto);
+      if (!editForm.fecha) {
+        setErrorMov('La fecha es obligatoria.');
+        return;
+      }
+      if (!Number.isFinite(monto) || monto <= 0) {
+        setErrorMov('El monto debe ser mayor a 0.');
+        return;
+      }
     }
     setGuardando(true);
     setErrorMov('');
     try {
-      await cuentasService.actualizarMovimiento(detalle.id, {
+      await cuentasService.actualizarMovimiento(detalle.id, soloHora ? {
+        hora: editForm.hora || null,
+      } : {
         fecha: editForm.fecha,
+        hora: editForm.hora || null,
         tipo: editForm.tipo,
         monto,
         persona_entidad: editForm.persona_entidad.trim() || null,
         concepto: editForm.concepto.trim() || null,
       });
-      toast.success('Movimiento corregido');
+      toast.success(soloHora ? 'Hora actualizada' : 'Movimiento corregido');
       cerrarDetalle();
       await cargar();
     } catch (e: any) {
@@ -165,12 +199,37 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
   const movimientoEditable = !!detalle
     && detalle.origen !== 'VENTA'
     && detalle.origen !== 'TRANSFERENCIA';
+  // Las filas importadas del libro conservan origen LIBRO aunque su salida
+  // tenga un Gasto espejo (referencia "Gasto #N"): ese gasto también manda.
+  const tieneGastoAsociado = !!detalle
+    && (detalle.origen === 'GASTO' || (detalle.referencia ?? '').startsWith('Gasto #'));
   const puedeCambiarTipo = !!detalle
-    && detalle.origen !== 'GASTO'
+    && !tieneGastoAsociado
     && (detalle.tipo_movimiento === 'ENTRADA' || detalle.tipo_movimiento === 'SALIDA');
+
+  // Los cobros de venta no se borran desde la caja: se corrige/elimina la
+  // venta. Una transferencia solo la puede borrar Dueño/Administrador, y
+  // siempre se llevan sus dos patas.
+  const puedeEliminar = !!detalle
+    && detalle.origen !== 'VENTA'
+    && (detalle.origen !== 'TRANSFERENCIA' || esAdmin);
+
+  // La hora solo posiciona la fila en el libro (no mueve dinero), así que se
+  // corrige incluso en una transferencia: se aplica a sus dos patas.
+  const puedeEditarHora = !!detalle && detalle.origen !== 'VENTA';
+  const puedeEditar = !!detalle && (movimientoEditable || puedeEditarHora);
 
   const moneda = data?.moneda_codigo || 'COP';
   const fmt = (v: string | number) => fmtMoneda(Number(v || 0), moneda);
+
+  const mensajeEliminar = detalle
+    ? `Se eliminará el movimiento del ${new Date(`${detalle.fecha}T00:00:00`).toLocaleDateString('es-CO')} por ${fmt(Number(detalle.ingreso) > 0 ? detalle.ingreso : detalle.egreso)} y el saldo de la cuenta se recalculará.` +
+      (tieneGastoAsociado
+        ? ' También se eliminará el gasto asociado: desaparece de Gastos y de los reportes.'
+        : detalle.origen === 'TRANSFERENCIA'
+          ? ' Se eliminarán las dos patas de la transferencia (origen y destino).'
+          : '')
+    : '';
 
   // El libro se calcula de viejo a nuevo para el saldo corrido, pero se
   // muestra de lo más reciente a lo más viejo.
@@ -310,7 +369,7 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
           {loading ? 'Cargando...' : 'Actualizar'}
         </Button>
         <p className="ml-auto text-[11px] text-yeikar-neutral/35">
-          Saldo corrido del libro, como la hoja
+          Saldo corrido del libro, como la hoja · haz clic en una fila para editar o eliminar
         </p>
       </div>
 
@@ -426,9 +485,16 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
         size="md"
         footer={
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {!editando && detalle && !movimientoEditable && (
+            {!editando && detalle && detalle.origen === 'VENTA' && (
               <span className="mr-auto self-center text-xs text-yeikar-neutral/45">
-                Se corrige desde {detalle.origen === 'VENTA' ? 'la venta' : 'la transferencia'} de origen.
+                Este movimiento viene de un cobro de venta: se corrige desde Ventas.
+              </span>
+            )}
+            {!editando && detalle && detalle.origen === 'TRANSFERENCIA' && (
+              <span className="mr-auto self-center text-xs text-yeikar-neutral/45">
+                {esAdmin
+                  ? 'Aquí solo puedes ajustar la hora. Para el resto, se elimina la transferencia completa (las dos patas).'
+                  : 'Aquí solo puedes ajustar la hora. Solo Dueño/Administrador puede eliminar la transferencia.'}
               </span>
             )}
             {editando ? (
@@ -443,8 +509,17 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
             ) : (
               <>
                 <Button variant="outline" onClick={cerrarDetalle}>Cerrar</Button>
-                {detalle && movimientoEditable && (
+                {detalle && puedeEditar && (
                   <Button onClick={() => setEditando(true)}>Editar</Button>
+                )}
+                {detalle && puedeEliminar && (
+                  <Button
+                    variant="danger"
+                    onClick={() => setConfirmarEliminar(true)}
+                    disabled={guardando}
+                  >
+                    Eliminar
+                  </Button>
                 )}
               </>
             )}
@@ -465,6 +540,11 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
             <FilaDetalle label="Hora de registro">
               {fmtFechaHoraVE(detalle.created_at)}
             </FilaDetalle>
+            {detalle.hora && (
+              <FilaDetalle label="Hora del movimiento">
+                {horaCorta(detalle.hora)}
+              </FilaDetalle>
+            )}
             <FilaDetalle label="Concepto">
               {detalle.concepto || '—'}
             </FilaDetalle>
@@ -487,61 +567,86 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
           </dl>
         )}
 
+        {detalle && !editando && errorMov && (
+          <p className="mt-4 text-sm font-medium text-red-600">{errorMov}</p>
+        )}
+
         {detalle && editando && (
           <div className="space-y-4">
-            <Field label="Fecha" required>
+            <Field
+              label="Hora del movimiento"
+              hint="Opcional. Solo ordena la fila en el libro (saldo corrido); no cambia montos."
+            >
               <Input
-                type="date"
-                value={editForm.fecha}
-                onChange={(e) => setEditForm({ ...editForm, fecha: e.target.value })}
+                type="time"
+                value={editForm.hora}
+                onChange={(e) => setEditForm({ ...editForm, hora: e.target.value })}
               />
             </Field>
-            <Field label="Tipo">
-              {puedeCambiarTipo ? (
-                <Select
-                  value={editForm.tipo}
-                  onChange={(e) => setEditForm({
-                    ...editForm,
-                    tipo: e.target.value as LibroCajaVistaFila['tipo_movimiento'],
-                  })}
-                >
-                  <option value="ENTRADA">Entrada</option>
-                  <option value="SALIDA">Salida</option>
-                </Select>
-              ) : (
-                <div className="rounded-lg border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 px-3 py-2 text-sm text-yeikar-neutral/70">
-                  {detalle.tipo}
-                </div>
-              )}
-            </Field>
-            <Field label="Monto" required hint="Puedes corregir el monto sin borrar el movimiento.">
-              <Input
-                type="text"
-                inputMode="decimal"
-                value={editForm.monto}
-                onChange={(e) => setEditForm({ ...editForm, monto: formatMontoInput(e.target.value) })}
-                placeholder="0"
-              />
-            </Field>
-            <Field label="Persona o entidad">
-              <Input
-                value={editForm.persona_entidad}
-                onChange={(e) => setEditForm({ ...editForm, persona_entidad: e.target.value })}
-                placeholder="Cliente, proveedor, empleado..."
-              />
-            </Field>
-            <Field label="Concepto">
-              <Textarea
-                rows={3}
-                value={editForm.concepto}
-                onChange={(e) => setEditForm({ ...editForm, concepto: e.target.value })}
-                placeholder="Motivo del movimiento..."
-              />
-            </Field>
-            {detalle.clasificacion && (
+
+            {!movimientoEditable ? (
               <p className="text-xs text-yeikar-neutral/45">
-                La clasificación ({nombreClasificacion(detalle.clasificacion)}) se corrige desde Gastos.
+                {detalle.origen === 'TRANSFERENCIA'
+                  ? 'Es una transferencia: aquí solo se ajusta la hora (se aplica a las dos patas). Los importes se corrigen eliminándola completa.'
+                  : 'Este movimiento viene de un cobro de venta: solo se ajusta la hora; el resto se corrige desde Ventas.'}
               </p>
+            ) : (
+              <>
+                <Field label="Fecha" required>
+                  <Input
+                    type="date"
+                    value={editForm.fecha}
+                    onChange={(e) => setEditForm({ ...editForm, fecha: e.target.value })}
+                  />
+                </Field>
+                <Field label="Tipo">
+                  {puedeCambiarTipo ? (
+                    <Select
+                      value={editForm.tipo}
+                      onChange={(e) => setEditForm({
+                        ...editForm,
+                        tipo: e.target.value as LibroCajaVistaFila['tipo_movimiento'],
+                      })}
+                    >
+                      <option value="ENTRADA">Entrada</option>
+                      <option value="SALIDA">Salida</option>
+                    </Select>
+                  ) : (
+                    <div className="rounded-lg border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 px-3 py-2 text-sm text-yeikar-neutral/70">
+                      {detalle.tipo}
+                    </div>
+                  )}
+                </Field>
+                <Field label="Monto" required hint="Puedes corregir el monto sin borrar el movimiento.">
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={editForm.monto}
+                    onChange={(e) => setEditForm({ ...editForm, monto: formatMontoInput(e.target.value) })}
+                    placeholder="0"
+                  />
+                </Field>
+                <Field label="Persona o entidad">
+                  <Input
+                    value={editForm.persona_entidad}
+                    onChange={(e) => setEditForm({ ...editForm, persona_entidad: e.target.value })}
+                    placeholder="Cliente, proveedor, empleado..."
+                  />
+                </Field>
+                <Field label="Concepto">
+                  <Textarea
+                    rows={3}
+                    value={editForm.concepto}
+                    onChange={(e) => setEditForm({ ...editForm, concepto: e.target.value })}
+                    placeholder="Motivo del movimiento..."
+                  />
+                </Field>
+                {detalle.clasificacion && (
+                  <p className="text-xs text-yeikar-neutral/45">
+                    La clasificación ({nombreClasificacion(detalle.clasificacion)}) se corrige desde Gastos.
+                  </p>
+                )}
+              </>
             )}
             {errorMov && (
               <p className="text-sm font-medium text-red-600">{errorMov}</p>
@@ -549,6 +654,15 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={confirmarEliminar}
+        title="Eliminar movimiento"
+        message={mensajeEliminar}
+        confirmLabel="Sí, eliminar"
+        onConfirm={eliminarMovimiento}
+        onCancel={() => setConfirmarEliminar(false)}
+      />
     </div>
   );
 }

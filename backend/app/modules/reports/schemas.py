@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List, Literal, Optional
 from decimal import Decimal
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 
 # ------------------------------------------------------------
@@ -132,6 +132,8 @@ class ResponsableResponse(BaseModel):
 class MovimientoCajaBase(BaseModel):
     metodo_caja_id: int
     fecha: date
+    # Hora del movimiento en el libro (opcional): solo lo ordena, no mueve dinero.
+    hora: Optional[time] = None
     tipo: str = Field(..., pattern="^(APERTURA|ENTRADA|SALIDA|AJUSTE)$")
     # monto > 0: la dirección del flujo la expresa el tipo (una SALIDA negativa
     # INGRESABA dinero a la cuenta y permitía drenar caja con un solo request).
@@ -155,13 +157,15 @@ class MovimientoCajaCreate(MovimientoCajaBase):
 class MovimientoCajaUpdate(BaseModel):
     metodo_caja_id: Optional[int] = None
     fecha: Optional[date] = None
+    # Hora del movimiento en el libro (opcional). Solo posiciona la fila en el
+    # saldo corrido; no mueve dinero. NULL = orden de registro.
+    hora: Optional[time] = None
     # Mismas invariantes que el alta: el signo lo da el tipo y el monto siempre
     # es positivo (un monto negativo invertía la contribución al saldo).
     tipo: Optional[str] = Field(None, pattern="^(APERTURA|ENTRADA|SALIDA|AJUSTE)$")
     monto: Optional[Decimal] = Field(None, gt=0)
     persona_entidad: Optional[str] = None
     concepto: Optional[str] = None
-    referencia: Optional[str] = None
     referencia: Optional[str] = None
 
 class MovimientoCajaResponse(MovimientoCajaBase):
@@ -614,6 +618,8 @@ class LibroCajaDeshacerResponse(BaseModel):
 class LibroCajaVistaFila(BaseModel):
     id: int
     fecha: date
+    # Hora del movimiento en el libro (NULL = se ordena por registro).
+    hora: Optional[time] = None
     tipo: str = ""
     tipo_movimiento: str = "ENTRADA"
     concepto: str = ""

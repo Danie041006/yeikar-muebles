@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Date, DateTime, Text, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Date, DateTime, Text, Time, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -92,6 +92,11 @@ class MovimientoCaja(Base):
     movimiento: quien entrega el dinero (en una entrada) o quien lo recibe
     (en una salida). Puede ser cliente, proveedor, empleado, familiar, etc.
     No es quien registra (eso es `usuario_id`); es texto libre y opcional.
+
+    `hora` es la hora DEL MOVIMIENTO (la del papel/libro), opcional. El libro
+    ordena por fecha y hora para que el saldo corrido se lea en el orden real
+    del día; las filas sin hora conservan el orden de registro (id). No mueve
+    dinero: solo posiciona la fila.
     """
     __tablename__ = "movimiento_caja"
 
@@ -100,6 +105,8 @@ class MovimientoCaja(Base):
     usuario_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
     pago_id = Column(BigInteger, ForeignKey("pago.id", ondelete="CASCADE"), nullable=True, index=True)
     fecha = Column(Date, nullable=False)
+    # Hora del movimiento en el libro (opcional). Ver docstring de la clase.
+    hora = Column(Time, nullable=True)
     tipo = Column(String(20), nullable=False)  # APERTURA | ENTRADA | SALIDA | AJUSTE
     monto = Column(Numeric(15, 2), nullable=False)
     moneda_id = Column(BigInteger, ForeignKey("moneda.id", ondelete="RESTRICT"), nullable=False, default=1)

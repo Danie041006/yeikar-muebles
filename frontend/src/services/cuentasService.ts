@@ -23,6 +23,8 @@ export interface MovimientoCaja {
   metodo_caja_id: number;
   usuario_id?: number | null;
   fecha: string;
+  /** Hora del movimiento en el libro (opcional): solo ordena la fila. */
+  hora?: string | null;
   tipo: 'APERTURA' | 'ENTRADA' | 'SALIDA' | 'AJUSTE';
   monto: number;
   moneda_id: number;
@@ -64,6 +66,8 @@ export interface Moneda {
 export interface MovimientoCreate {
   metodo_caja_id: number;
   fecha: string;
+  /** Hora del movimiento en el libro (opcional): solo ordena la fila. */
+  hora?: string | null;
   tipo: 'APERTURA' | 'ENTRADA' | 'SALIDA' | 'AJUSTE';
   monto: number;
   moneda_id: number;
@@ -188,6 +192,8 @@ export interface LibroCajaDeshacerResponse {
 export interface LibroCajaVistaFila {
   id: number;
   fecha: string;
+  /** Hora del movimiento en el libro (NULL = se ordena por registro). */
+  hora?: string | null;
   tipo: string;
   tipo_movimiento: 'APERTURA' | 'ENTRADA' | 'SALIDA' | 'AJUSTE';
   concepto: string;

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Optional
 
@@ -11,7 +11,7 @@ from app.core.client_ip import obtener_ip_cliente
 
 
 def _json_safe(value: Any) -> Any:
-    if isinstance(value, (datetime, date)):
+    if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, Decimal):
         return float(value)

@@ -339,7 +339,12 @@ def actualizar_gasto(
     db.refresh(db_gasto)
     return db_gasto
 
-def eliminar_gasto(db: Session, gasto_id: int, usuario: Usuario | None = None) -> bool:
+def eliminar_gasto(
+    db: Session,
+    gasto_id: int,
+    usuario: Usuario | None = None,
+    commit: bool = True,
+) -> bool:
     db_gasto = obtener_gasto(db, gasto_id, usuario)
     if not db_gasto:
         return False
@@ -372,5 +377,6 @@ def eliminar_gasto(db: Session, gasto_id: int, usuario: Usuario | None = None) -
         before=_snapshot(db_gasto),
     )
     db.delete(db_gasto)
-    db.commit()
+    if commit:
+        db.commit()
     return True
