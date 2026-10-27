@@ -692,3 +692,53 @@ def test_hora_del_movimiento_ordena_el_libro_sin_tocar_saldos(client, cleaner, d
     r = client.get("/api/v1/cuenta/libro", params=params, headers=ADMIN_HEADERS)
     assert r.status_code == 200, r.text
     assert [f["id"] for f in r.json()["filas"]] == [salida["id"], tardia["id"]]
+
+
+def test_clasificacion_donacion_crea_gasto_y_sale_en_el_libro(client, cleaner, db):
+    """Una salida de caja marcada como Donación queda como Gasto DONACION.
+
+    Caso real: la dueña saca plata de la caja para dar una donación y quiere
+    verla clasificada aparte (no como gasto operativo ni personal).
+    """
+    cuenta = _crear_cuenta(client, cleaner, db)
+
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-12",
+        "tipo": "SALIDA",
+        "monto": 50000,
+        "moneda_id": 1,
+        "persona_entidad": "IGLESIA",
+        "concepto": "Donación a la iglesia",
+        "clasificacion": "Donación",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar("movimiento_caja", mov["id"])
+
+    db.expire_all()
+    fila = db.get(MovimientoCaja, mov["id"])
+    assert fila is not None
+    assert (fila.referencia or "").startswith("Gasto #")
+    gasto_id = int(fila.referencia.split("#", 1)[1].split()[0])
+    cleaner.registrar("gasto", gasto_id)
+
+    gasto = db.get(Gasto, gasto_id)
+    assert gasto is not None
+    assert gasto.clasificacion == "DONACION"
+    assert gasto.tipo_gasto.nombre == "Donación"
+
+    r = client.get("/api/v1/cuenta/libro", params={
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-01",
+        "fecha_hasta": "2026-10-31",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    donacion = next(
+        (c for c in libro["clasificaciones"] if c["clasificacion"] == "DONACION"),
+        None,
+    )
+    assert donacion is not None, libro["clasificaciones"]
+    assert donacion["label"] == "Donación"
+    assert Decimal(str(donacion["total"])) == Decimal("50000")
