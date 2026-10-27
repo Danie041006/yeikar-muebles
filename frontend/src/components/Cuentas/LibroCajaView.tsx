@@ -43,9 +43,11 @@ function FilaDetalle({ label, children }: { label: string; children: ReactNode }
 
 interface Props {
   cuentas: ResumenCuenta[];
+  /** Avisa al padre la cuenta y el rango que se están viendo (para el reporte). */
+  onFiltroChange?: (filtro: { cuentaId: number; desde: string; hasta: string }) => void;
 }
 
-export default function LibroCajaView({ cuentas }: Props) {
+export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
   const cuentaCop = cuentas.find((c) => c.metodo_caja.codigo === 'EFECTIVO_COP')
     || cuentas.find((c) => c.metodo_caja.moneda_codigo === 'COP');
 
@@ -76,6 +78,11 @@ export default function LibroCajaView({ cuentas }: Props) {
   useEffect(() => {
     if (!cuentaId && cuentaCop) setCuentaId(cuentaCop.metodo_caja.id);
   }, [cuentaId, cuentaCop]);
+
+  // Mantiene al padre al tanto de cuenta y rango (el reporte abre con esto).
+  useEffect(() => {
+    if (cuentaId) onFiltroChange?.({ cuentaId, desde, hasta });
+  }, [cuentaId, desde, hasta, onFiltroChange]);
 
   const cargar = useCallback(async () => {
     if (!cuentaId) return;

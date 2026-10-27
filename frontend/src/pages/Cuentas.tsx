@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   cuentasService, ResumenCuenta, MovimientoCaja, Moneda,
-  MovimientoCreate, MetodoCaja, TransferenciaPayload, LibroCajaResumen,
+  MovimientoCreate, MetodoCaja, TransferenciaPayload,
 } from '../services/cuentasService';
 import { CLASIFICACIONES_GASTO } from '../services/gastoService';
 import {
@@ -13,6 +13,7 @@ import { nombreMoneda, fmtMoneda } from '../utils/format';
 import { formatMontoInput, parseMontoInput } from '../utils/monto';
 import { useToast } from '../context/ToastContext';
 import LibroCajaView from '../components/Cuentas/LibroCajaView';
+import ReporteCuentasModal from '../components/Cuentas/ReporteCuentasModal';
 
 const TIPOS = [
   { key: '', label: 'Todos' },
@@ -102,15 +103,14 @@ export default function Cuentas() {
   const [confirmAccion, setConfirmAccion] = useState<null | { tipo: 'cuenta' | 'movimiento'; id: number; nombre?: string }>(null);
   const [detalleMov, setDetalleMov] = useState<MovimientoCaja | null>(null);
 
-  // Importación del libro de caja (texto pegado desde Excel)
-  const [showLibroModal, setShowLibroModal] = useState(false);
-  const [libroTexto, setLibroTexto] = useState('');
-  const [libroCuentaId, setLibroCuentaId] = useState(0);
-  const [libroPreview, setLibroPreview] = useState<LibroCajaResumen | null>(null);
-  const [libroLoading, setLibroLoading] = useState(false);
-  const [cuadrarSaldoInicial, setCuadrarSaldoInicial] = useState(false);
-  const [permitirSaldoDistinto, setPermitirSaldoDistinto] = useState(false);
-  const [omitirDuplicados, setOmitirDuplicados] = useState(true);
+  // Reporte del libro de caja (PDF / Excel)
+  const [showReporteModal, setShowReporteModal] = useState(false);
+  const [reporteDefaults, setReporteDefaults] = useState<{
+    cuentaId: number; desde: string; hasta: string;
+  } | null>(null);
+  const handleLibroFiltro = useCallback((filtro: {
+    cuentaId: number; desde: string; hasta: string;
+  }) => setReporteDefaults(filtro), []);
 
   const cargarTodo = useCallback(async () => {
     setLoading(true);
@@ -261,90 +261,6 @@ export default function Cuentas() {
       setConfirmAccion(null);
     }
   };
-
-  // ─── Libro de caja: analizar e importar ────────────────────────────────
-  const abrirLibro = () => {
-    const cop = resumen.find((r) => r.metodo_caja.codigo === 'EFECTIVO_COP')
-      || resumen.find((r) => r.metodo_caja.moneda_codigo === 'COP');
-    setLibroCuentaId(cop?.metodo_caja.id || resumen[0]?.metodo_caja.id || 0);
-    setLibroTexto('');
-    setLibroPreview(null);
-    setCuadrarSaldoInicial(false);
-    setPermitirSaldoDistinto(false);
-    setOmitirDuplicados(true);
-    setError('');
-    setShowLibroModal(true);
-  };
-
-  const analizarLibro = async () => {
-    if (!libroTexto.trim() || !libroCuentaId) {
-      setError('Pega el libro y elige la cuenta antes de analizarlo.');
-      return;
-    }
-    setLibroLoading(true);
-    setError('');
-    try {
-      const prev = await cuentasService.previsualizarLibro({
-        texto: libroTexto,
-        metodo_caja_id: libroCuentaId,
-      });
-      setLibroPreview(prev);
-      setPermitirSaldoDistinto(false);
-      setOmitirDuplicados(true);
-      // Si la cuenta está vacía, el saldo inicial del libro es la única
-      // apertura posible: se sugiere cuadrarla.
-      setCuadrarSaldoInicial(
-        Number(prev.saldo_previo_cuenta ?? 0) === 0 && !!prev.saldo_inicial
-      );
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'No se pudo analizar el libro.');
-      setLibroPreview(null);
-    } finally {
-      setLibroLoading(false);
-    }
-  };
-
-  const importarLibro = async () => {
-    if (!libroPreview || libroPreview.errores.length > 0 || libroPreview.ya_importado) return;
-    setLibroLoading(true);
-    setError('');
-    try {
-      const res = await cuentasService.importarLibro({
-        texto: libroTexto,
-        metodo_caja_id: libroCuentaId,
-        cuadrar_saldo_inicial: cuadrarSaldoInicial,
-        permitir_saldo_distinto: permitirSaldoDistinto,
-        omitir_duplicados: omitirDuplicados,
-      });
-      toast.success(
-        `Libro ${res.periodo} importado: ${res.movimientos} movimientos y ${res.gastos} gastos clasificados${res.omitidos ? ` · ${res.omitidos} duplicados omitidos` : ''}.`
-      );
-      setShowLibroModal(false);
-      setLibroPreview(null);
-      setLibroTexto('');
-      cargarTodo();
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? 'No se pudo importar el libro.');
-    } finally {
-      setLibroLoading(false);
-    }
-  };
-
-  const libroDiferencia = Number(libroPreview?.diferencia_saldo_inicial ?? 0);
-  const libroClasificaciones = libroPreview
-    ? CLASIFICACIONES_GASTO.map((c) => {
-        const filas = libroPreview.filas_detalle.filter(
-          (f) => f.clasificacion === c.value
-        );
-        return {
-          ...c,
-          count: filas.length,
-          total: filas.reduce((s, f) => s + Number(f.egreso), 0),
-        };
-      })
-    : [];
-  const libroClasificadosTotal = libroClasificaciones.reduce((s, c) => s + c.count, 0);
-  const libroOmitidas = libroPreview?.omitidas ?? [];
 
   // ─── Transferencias entre cuentas ──────────────────────────────────────
   const saldoDe = (cuentaId: number, monedaId: number) => {
@@ -631,11 +547,11 @@ export default function Cuentas() {
           : `${resumen.length} cuentas · ${movimientos.length} movimientos en el filtro`}
         actions={
           <>
-            <Button variant="outline" onClick={abrirLibro}>
+            <Button variant="outline" onClick={() => setShowReporteModal(true)}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3M4 18V7a2 2 0 012-2h5l2 2h5a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2z" />
               </svg>
-              Importar libro
+              Reporte
             </Button>
             <Button variant="outline" onClick={abrirTransfer}>
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -686,7 +602,7 @@ export default function Cuentas() {
       )}
 
       {vista === 'libro' ? (
-        <LibroCajaView cuentas={resumen} />
+        <LibroCajaView cuentas={resumen} onFiltroChange={handleLibroFiltro} />
       ) : (
         <>
       <div className="grid grid-cols-1 gap-5">
@@ -1318,232 +1234,15 @@ export default function Cuentas() {
         )}
       </Modal>
 
-      {/* Importar libro de caja (pegar el mes desde Excel) */}
-      <Modal
-        open={showLibroModal}
-        onClose={() => setShowLibroModal(false)}
-        title="Importar libro de caja"
-        subtitle="Pega el mes completo: cada fila se vuelve un movimiento y los egresos con G D/C/P/F/I se registran como gastos clasificados"
-        size="xl"
-        footer={
-          <>
-            <Button variant="outline" onClick={() => setShowLibroModal(false)}>Cancelar</Button>
-            <Button variant="outline" onClick={analizarLibro} disabled={libroLoading}>
-              {libroLoading ? 'Analizando...' : 'Analizar'}
-            </Button>
-            <Button
-              onClick={importarLibro}
-              disabled={
-                libroLoading || !libroPreview || libroPreview.errores.length > 0
-                || libroPreview.ya_importado
-              }
-            >
-              Importar
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Cuenta destino" required hint="Debe ser una cuenta en pesos colombianos (COP)">
-              <SearchSelect
-                value={libroCuentaId}
-                onChange={(v) => { setLibroCuentaId(Number(v)); setLibroPreview(null); }}
-                options={resumen
-                  .filter((r) => !r.metodo_caja.moneda_codigo || r.metodo_caja.moneda_codigo === 'COP')
-                  .map((r) => ({
-                    value: r.metodo_caja.id,
-                    label: `${r.metodo_caja.nombre} · ${r.metodo_caja.moneda_codigo || 'COP'}`,
-                  }))}
-                placeholder="Seleccione la cuenta..."
-              />
-            </Field>
-            <Field label="Archivo (opcional)" hint="También puedes pegar el texto directamente abajo">
-              <label className="flex items-center justify-center gap-2 h-[42px] px-3 rounded-xl border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-xs font-bold text-yeikar-neutral/50 transition-colors">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0 0l-4-4m4 4l4-4" />
-                </svg>
-                Cargar .txt / .csv / .tsv
-                <input
-                  type="file"
-                  accept=".txt,.csv,.tsv,.tab,text/plain,text/csv,text/tab-separated-values"
-                  className="hidden"
-                  onChange={async (e) => {
-                    const archivo = e.target.files?.[0];
-                    if (!archivo) return;
-                    setLibroTexto(await archivo.text());
-                    setLibroPreview(null);
-                    e.target.value = '';
-                  }}
-                />
-              </label>
-            </Field>
-          </div>
-
-          <Field
-            label="Libro pegado"
-            required
-            hint="Formato: FECHA · TIPO · CONCEPTO · INGRESO · EGRESO · SALDO. La fila de SALDO inicial se usa como punto de partida."
-          >
-            <Textarea
-              rows={9}
-              className="font-mono text-[11px] whitespace-pre"
-              value={libroTexto}
-              onChange={(e) => { setLibroTexto(e.target.value); setLibroPreview(null); }}
-              placeholder={"FECHA\tTIPO\tCONCEPTO\tINGRESO\tEGRESO\tSALDO\n10/1/2026\tSALDO\tMES DE SEPTIEMBRE\t\t\t$ 3,683,600\n10/1/2026\tDOÑA ROSA G C\tPAGO DE MERCADO\t\t$ 120,000\t$ 2,313,600"}
-            />
-          </Field>
-
-          {libroPreview && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-                {[
-                  { label: 'Período', value: libroPreview.periodo },
-                  { label: 'Saldo inicial', value: fmtMoneda(Number(libroPreview.saldo_inicial ?? 0), 'COP') },
-                  { label: 'Ingresos', value: fmtMoneda(Number(libroPreview.total_ingresos), 'COP') },
-                  { label: 'Egresos', value: fmtMoneda(Number(libroPreview.total_egresos), 'COP') },
-                  { label: 'Saldo final', value: fmtMoneda(Number(libroPreview.saldo_final ?? 0), 'COP') },
-                  { label: 'Gastos', value: `${libroPreview.gastos} clasificados` },
-                ].map((item) => (
-                  <div key={item.label} className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/20 p-2.5">
-                    <p className="text-[10px] font-mono uppercase tracking-wider text-yeikar-neutral/40">{item.label}</p>
-                    <p className="mt-1 font-mono text-sm font-black text-yeikar-secondary truncate" title={item.value}>{item.value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {libroPreview.errores.length > 0 && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-3 space-y-1">
-                  <p className="text-xs font-bold uppercase tracking-wide text-red-700">No se puede importar todavía</p>
-                  {libroPreview.errores.map((e, i) => (
-                    <p key={i} className="text-xs text-red-700">• {e}</p>
-                  ))}
-                </div>
-              )}
-
-              {libroPreview.advertencias.length > 0 && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-1">
-                  <p className="text-xs font-bold uppercase tracking-wide text-amber-800">Revisa antes de importar</p>
-                  {libroPreview.advertencias.map((a, i) => (
-                    <p key={i} className="text-xs text-amber-800">• {a}</p>
-                  ))}
-                </div>
-              )}
-
-              {libroPreview.ya_importado && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
-                  Este período ya fue importado en esta cuenta. Para repetirlo, primero elimina la importación anterior.
-                </div>
-              )}
-
-              <div className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 p-3 space-y-2">
-                <label className="flex items-start gap-2 text-xs text-yeikar-neutral/70">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={cuadrarSaldoInicial}
-                    onChange={(e) => setCuadrarSaldoInicial(e.target.checked)}
-                  />
-                  <span>
-                    Cuadrar la cuenta con el saldo inicial del libro
-                    ({fmtMoneda(Number(libroPreview.saldo_inicial ?? 0), 'COP')}).
-                    Se registra un ajuste por la diferencia contra el saldo actual
-                    ({fmtMoneda(Number(libroPreview.saldo_previo_cuenta ?? 0), 'COP')}),
-                    no una apertura duplicada.
-                  </span>
-                </label>
-                {!cuadrarSaldoInicial && libroDiferencia !== 0 && Number(libroPreview.saldo_previo_cuenta ?? 0) !== 0 && (
-                  <label className="flex items-start gap-2 text-xs text-yeikar-neutral/70">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={permitirSaldoDistinto}
-                      onChange={(e) => setPermitirSaldoDistinto(e.target.checked)}
-                    />
-                    <span>
-                      Importar sin cuadrar, aunque el saldo de la cuenta antes del período
-                      ({fmtMoneda(Number(libroPreview.saldo_previo_cuenta ?? 0), 'COP')}) no coincida con el del libro
-                      (diferencia {fmtMoneda(libroDiferencia, 'COP')}).
-                    </span>
-                  </label>
-                )}
-                {libroPreview.duplicados > 0 && (
-                  <label className="flex items-start gap-2 text-xs text-yeikar-neutral/70">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5"
-                      checked={omitirDuplicados}
-                      onChange={(e) => setOmitirDuplicados(e.target.checked)}
-                    />
-                    <span>
-                      Omitir {libroPreview.duplicados} fila{libroPreview.duplicados === 1 ? '' : 's'} que
-                      ya están registradas en la cuenta (posibles duplicados de ventas, nómina o compras).
-                    </span>
-                  </label>
-                )}
-                <p className="text-[10px] text-yeikar-neutral/40">
-                  La fila de saldo inicial del libro no se duplica como movimiento: solo se usa para cuadrar la cuenta.
-                </p>
-              </div>
-
-              {libroPreview.duplicados > 0 && omitirDuplicados && (
-                <details className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-                  <summary className="cursor-pointer text-xs font-bold text-amber-800">
-                    Ver las {libroPreview.duplicados} filas que se omitirían
-                  </summary>
-                  <ul className="mt-2 space-y-1">
-                    {libroPreview.filas_detalle.filter((f) => f.duplicado_de).map((f) => (
-                      <li key={f.linea} className="text-[11px] text-amber-900/80">
-                        <span className="font-mono">Línea {f.linea} · {f.fecha}:</span>{' '}
-                        {f.tipo || f.concepto} — ya está en la cuenta como {f.duplicado_de}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-
-              {libroClasificadosTotal > 0 && (
-                <div className="rounded-xl border border-yeikar-secondary-light/10 p-3">
-                  <p className="text-xs font-bold uppercase tracking-wide text-yeikar-secondary mb-2">
-                    Gastos detectados por clasificación
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                    {libroClasificaciones.filter((c) => c.count > 0).map((c) => (
-                      <div key={c.value} className="rounded-lg border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 p-2">
-                        <Badge tone={c.tone} size="sm">{c.label}</Badge>
-                        <p className="mt-1.5 font-mono text-sm font-black text-yeikar-secondary">
-                          {fmtMoneda(c.total, 'COP')}
-                        </p>
-                        <p className="text-[10px] text-yeikar-neutral/40">{c.count} gasto{c.count === 1 ? '' : 's'}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {libroOmitidas.length > 0 && (
-                <details className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 p-3">
-                  <summary className="cursor-pointer text-xs font-bold text-yeikar-neutral/60">
-                    {libroOmitidas.length} fila{libroOmitidas.length === 1 ? '' : 's'} sin montos (notas)
-                  </summary>
-                  <ul className="mt-2 space-y-1">
-                    {libroOmitidas.map((o) => (
-                      <li key={o.linea} className="text-[11px] text-yeikar-neutral/50">
-                        <span className="font-mono">Línea {o.linea}:</span> {o.texto} · {o.motivo}
-                      </li>
-                    ))}
-                  </ul>
-                </details>
-              )}
-
-              <p className="text-[11px] text-yeikar-neutral/40">
-                {libroPreview.filas} filas leídas · {libroPreview.movimientos} movimientos de caja ·
-                {' '}{libroPreview.gastos} con clasificación de gasto.
-              </p>
-            </div>
-          )}
-        </div>
-      </Modal>
+      {/* Reporte del libro de caja (PDF / Excel) */}
+      <ReporteCuentasModal
+        open={showReporteModal}
+        onClose={() => setShowReporteModal(false)}
+        cuentas={resumen}
+        cuentaInicialId={reporteDefaults?.cuentaId}
+        desdeInicial={reporteDefaults?.desde}
+        hastaInicial={reporteDefaults?.hasta}
+      />
 
       <ConfirmDialog
         open={confirmAccion !== null}
