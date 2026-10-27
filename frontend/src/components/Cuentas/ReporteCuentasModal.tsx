@@ -181,7 +181,6 @@ export default function ReporteCuentasModal({
       }
       onClose();
     } catch (e: any) {
-      console.error('Error generando el reporte de cuentas:', e);
       setError(e?.response?.data?.detail ?? 'No se pudo generar el reporte.');
     } finally {
       setLoading(false);
@@ -198,7 +197,7 @@ export default function ReporteCuentasModal({
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={loading}>Cancelar</Button>
-          <Button onClick={generar} disabled={loading}>
+          <Button onClick={generar} disabled={loading || !cuentaId}>
             {loading
               ? <><Spinner size="sm" /> Generando...</>
               : `Generar ${formato === 'PDF' ? 'PDF' : 'Excel'}`}
