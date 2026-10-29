@@ -3021,7 +3021,7 @@ export default function Cotizaciones() {
                             Al facturar sale del inventario de plásticos.
                           </p>
                         )}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                           <div>
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
                               Cantidad
@@ -3036,34 +3036,18 @@ export default function Cotizaciones() {
                             />
                           </div>
 
-                          {!item.es_obsequio && (
-                          <div>
+                          <div className="sm:col-span-2">
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
-                              % Ganancia
+                              Observación / Especificaciones de este mueble
                             </label>
                             <input
-                              type="number"
-                              value={item.ganancia}
-                              onChange={(e) => updateItemField(index, 'ganancia', e.target.value)}
-                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
+                              type="text"
+                              placeholder="Ej: Tela lino gris perla, patas en roble..."
+                              value={item.observaciones}
+                              onChange={(e) => updateItemField(index, 'observaciones', e.target.value)}
+                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
                             />
                           </div>
-                          )}
-
-                          {!item.es_obsequio && (
-                          <div>
-                            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1" title="Impuestos adicionales sobre el costo">
-                              % Impuestos
-                            </label>
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.impuesto}
-                              onChange={(e) => updateItemField(index, 'impuesto', e.target.value)}
-                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                            />
-                          </div>
-                          )}
                         </div>
 
                         {esItemReventa(item) && (
@@ -3071,19 +3055,6 @@ export default function Cotizaciones() {
                             Reventa comercial {baseMostrar ? `· Costo ref: ${baseMostrar}` : ''}
                           </span>
                         )}
-
-                        <div className="pt-1 border-t border-yeikar-secondary-light/10">
-                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
-                            Observación / Especificaciones de este mueble
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="Ej: Tela lino gris perla, patas en roble..."
-                            value={item.observaciones}
-                            onChange={(e) => updateItemField(index, 'observaciones', e.target.value)}
-                            className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
-                          />
-                        </div>
                         {item.tipo_item === 'FABRICADO' && (
                           <PiezasJuegoEditor
                             piezas={item.piezas ?? []}
