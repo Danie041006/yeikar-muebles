@@ -62,6 +62,8 @@ def test_normalizador_acepta_codigos_y_nombres():
     assert normalizar_clasificacion("G I") == "GASTO_INVERSION"
     assert normalizar_clasificacion("PRESTAMO") == "PRESTAMO"
     assert normalizar_clasificacion("Gasto Préstamo") == "PRESTAMO"
+    assert normalizar_clasificacion("IMPUESTO") == "IMPUESTO"
+    assert normalizar_clasificacion("Impuestos y Tasas") == "IMPUESTO"
     assert normalizar_clasificacion(None) is None
     with pytest.raises(ValueError):
         normalizar_clasificacion("G X")
@@ -102,6 +104,41 @@ def test_salida_clasificada_crea_gasto_y_movimiento(client, cleaner, db):
     cleaner.registrar_caja_ref(mov["referencia"])
 
     assert _saldo(db, cuenta["id"]) == Decimal("-100000")
+
+
+def test_salida_impuestos_crea_gasto_impuestos(client, cleaner, db):
+    """Salida de caja marcada como Impuestos: crea el Gasto con el motivo
+    'Impuestos y Tasas' (el mismo del catálogo) y su movimiento espejo."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+    descripcion = f"Pago de impuestos prueba {uuid.uuid4().hex[:6]}"
+
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-20",
+        "tipo": "SALIDA",
+        "monto": 250000,
+        "moneda_id": 1,
+        "persona_entidad": "CAMARA DE COMERCIO",
+        "concepto": descripcion,
+        "clasificacion": "IMPUESTO",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+
+    db.expire_all()
+    gasto = db.query(Gasto).filter(Gasto.descripcion == descripcion).first()
+    assert gasto is not None, "debe crear el Gasto de impuestos"
+    cleaner.registrar("gasto", gasto.id)
+    assert gasto.clasificacion == "IMPUESTO"
+    assert gasto.tipo_gasto is not None
+    assert gasto.tipo_gasto.nombre == "Impuestos y Tasas"
+    assert Decimal(str(gasto.monto)) == Decimal("250000")
+
+    assert mov["tipo"] == "SALIDA"
+    assert mov["referencia"] == f"Gasto #{gasto.id}"
+    cleaner.registrar_caja_ref(mov["referencia"])
+
+    assert _saldo(db, cuenta["id"]) == Decimal("-250000")
 
 
 def test_entrada_con_clasificacion_se_rechaza(client, cleaner, db):

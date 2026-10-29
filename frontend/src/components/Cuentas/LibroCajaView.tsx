@@ -33,7 +33,7 @@ const ultimoDiaMes = () => {
   return iso(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0));
 };
 
-const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral'> =
+const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral' | 'red'> =
   Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
 
 function FilaDetalle({ label, children }: { label: string; children: ReactNode }) {

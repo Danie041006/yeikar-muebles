@@ -37,7 +37,7 @@ const CAT_TONE: Record<string, 'blue' | 'red' | 'green' | 'neutral'> = {
   PRODUCCION: 'green',
 };
 
-const CLASIF_TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral'> =
+const CLASIF_TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral' | 'red'> =
   Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
 
 const hoy = () => new Date().toISOString().split('T')[0];

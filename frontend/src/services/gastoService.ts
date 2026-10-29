@@ -78,6 +78,7 @@ export const CLASIFICACIONES_GASTO = [
   { value: 'GASTO_PERSONAL', label: 'Gasto Personal', tone: 'amber' as const },
   { value: 'GASTO_FAMILIAR', label: 'Gasto Familiar', tone: 'purple' as const },
   { value: 'GASTO_INVERSION', label: 'Gasto de Inversión', tone: 'gold' as const },
+  { value: 'IMPUESTO', label: 'Impuestos y Tasas', tone: 'red' as const },
   { value: 'PRESTAMO', label: 'Préstamo', tone: 'neutral' as const },
   { value: 'DONACION', label: 'Donación', tone: 'blue' as const },
 ];

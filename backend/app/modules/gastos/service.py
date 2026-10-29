@@ -28,6 +28,9 @@ CLASIFICACIONES_GASTO = {
     # contraprestación para el negocio. Se registra igual que un egreso
     # clasificado y queda en el catálogo de tipos de gasto como "Donación".
     "DONACION": "Donación",
+    # Atajo pedido desde Cuentas: una salida de impuestos se registra con este
+    # motivo y reutiliza el TipoGasto "Impuestos y Tasas" del catálogo.
+    "IMPUESTO": "Impuestos y Tasas",
 }
 CLASIFICACIONES_VALIDAS = set(CLASIFICACIONES_GASTO)
 
@@ -62,13 +65,15 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
         "DONACION": "DONACION", "DONACIONES": "DONACION",
         "GASTODONACION": "DONACION", "GDONACION": "DONACION",
         "DONATIVO": "DONACION", "DONATIVOS": "DONACION", "GDONATIVO": "DONACION",
+        "IMPUESTO": "IMPUESTO", "IMPUESTOS": "IMPUESTO",
+        "IMPUESTOSYTASAS": "IMPUESTO", "IMPUESTOYTASAS": "IMPUESTO",
     }
     clave = equivalencias.get(compacto)
     if clave is None:
         raise ValueError(
             "Clasificación inválida. Usa Gasto Deducible, Gasto de Casa, "
-            "Gasto Personal, Gasto Fábrica, Gasto de Inversión, Préstamo o "
-            "Donación."
+            "Gasto Personal, Gasto Fábrica, Gasto de Inversión, Préstamo, "
+            "Donación o Impuestos."
         )
     return clave
 
