@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional, List
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 
 
@@ -489,6 +489,13 @@ def costo_unitario_real_material(db: Session, material_id: int) -> dict:
         model.MovimientoInventario.material_id == material_id,
         model.MovimientoInventario.tipo == "ENTRADA",
         model.MovimientoInventario.costo_unitario.isnot(None),
+        # Solo sirve una entrada que aporte costo: las cargas iniciales suelen
+        # venir con costo_unitario = 0 y borrarían el costo del catálogo. Una
+        # entrada con costo 0 pero con "la pasada" (flete) sí aporta costo real.
+        or_(
+            model.MovimientoInventario.costo_unitario > 0,
+            model.MovimientoInventario.llevada > 0,
+        ),
     ).order_by(
         model.MovimientoInventario.fecha.desc(),
         model.MovimientoInventario.id.desc(),

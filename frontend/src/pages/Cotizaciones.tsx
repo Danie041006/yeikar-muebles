@@ -33,7 +33,7 @@ import { useAuth } from '../context/AuthContext';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
 import PiezasJuegoEditor, { validarPiezasJuego, type PiezaJuegoForm } from '../components/Cotizaciones/PiezasJuegoEditor';
-import { Package, Sparkles, Plus, Loader2, Wrench, Truck } from 'lucide-react';
+import { Package, Plus, Loader2, Wrench, Truck } from 'lucide-react';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { produccionService } from '../services/produccionService';
 
@@ -61,6 +61,9 @@ interface CotizacionItemForm {
   /** Unidad base y dimensionalidad del material seleccionado. */
   materialUnidad?: string | null;
   materialDimension?: Dimensionalidad;
+  /** El precio del insumo se cargó solo desde su costo real (no lo escribió
+   *  el usuario). Si el usuario lo edita, pasa a false y no se vuelve a tocar. */
+  precioAuto?: boolean;
   /** Promo obsequio: renglón del plástico de regalo (precio 0, ligado al colchón). */
   es_obsequio?: boolean;
   /** Piezas del juego (opcional): se producen y costean por separado. */
@@ -120,6 +123,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
         cantidadBase,
         materialUnidad: unidadBase,
         materialDimension: dimensionalidad(unidadBase),
+        precioAuto: false,
         insumoCosto: {
           costo_compra: 0,
           pasada_unitaria: 0,
@@ -993,6 +997,7 @@ export default function Cotizaciones() {
         calcResult: null, calcLoading: false, receta_personalizada: null,
         unidadCaptura: '', cantidadBase: null,
         materialUnidad: null, materialDimension: 'OTRA',
+        precioAuto: true,
       }
     ]);
   };
@@ -1000,8 +1005,11 @@ export default function Cotizaciones() {
   /** Al elegir material de un INSUMO: carga su unidad/dimensionalidad y
    *  aplica la captura por defecto. Para madera (m³) arranca en cm (cuenta
    *  del taller); para lineales arranca en la unidad base. El costo real se
-   *  pide a Inventario (compra + pasada) y se muestra por unidad vendida. */
+   *  pide a Inventario (compra + pasada) y se usa como PRECIO POR DEFECTO por
+   *  unidad vendida; si el material no tiene costo, el precio se escribe a mano. */
   const aplicarMaterialInsumo = async (index: number, matId: number) => {
+    const materialAnterior = items[index]?.material_id;
+    const cambioMaterial = !materialAnterior || materialAnterior !== String(matId);
     updateItemField(index, 'material_id', String(matId));
     updateItemField(index, 'insumoCosto', null);
 
@@ -1018,6 +1026,11 @@ export default function Cotizaciones() {
       if (!actual || actual.material_id !== String(mat.id)) return prev;
       const factor = factorCapturaABase(dim, unidadBase, unidadCaptura);
       const cantidadBase = cantidadBaseDesdeCaptura(actual.cantidad, factor);
+      const costoVenta = costoBase * factor;
+      // Si el usuario ya escribió un precio, se respeta; si no (o si cambió de
+      // material), se precarga el costo real por unidad de venta.
+      const precioActual = Number(actual.calcResult?.precio_venta) || 0;
+      const usarAuto = cambioMaterial || actual.precioAuto !== false || precioActual === 0;
       const next = [...prev];
       next[index] = {
         ...actual,
@@ -1025,8 +1038,9 @@ export default function Cotizaciones() {
         materialDimension: dim,
         unidadCaptura,
         cantidadBase,
+        precioAuto: usarAuto,
         insumoCosto: { costo_compra: costoBase, pasada_unitaria: 0, costo_real: costoBase },
-        calcResult: calcularResultadoInsumo(costoBase * factor, 0),
+        calcResult: calcularResultadoInsumo(costoVenta, usarAuto ? costoVenta : precioActual),
       };
       return next;
     });
@@ -1041,14 +1055,22 @@ export default function Cotizaciones() {
             actual.materialUnidad ?? unidadBase,
             actual.unidadCaptura ?? '',
           );
+          // Sin compras valorizadas el endpoint devuelve 0: se conserva el
+          // costo del catálogo para no borrar el precio que ya se mostró.
+          const costoRealBase = c.costo_real > 0 ? c.costo_real : costoBase;
+          const costoVenta = costoRealBase * factor;
+          const precioActual = Number(actual.calcResult?.precio_venta) || 0;
+          const usarAuto = actual.precioAuto !== false || precioActual === 0;
           const next = [...prev];
           next[index] = {
             ...actual,
-            insumoCosto: c,
-            calcResult: calcularResultadoInsumo(
-              c.costo_real * factor,
-              Number(actual.calcResult?.precio_venta) || 0,
-            ),
+            precioAuto: usarAuto,
+            insumoCosto: {
+              costo_compra: c.costo_compra > 0 ? c.costo_compra : costoBase,
+              pasada_unitaria: c.pasada_unitaria,
+              costo_real: costoRealBase,
+            },
+            calcResult: calcularResultadoInsumo(costoVenta, usarAuto ? costoVenta : precioActual),
           };
           return next;
         });
@@ -1925,14 +1947,6 @@ export default function Cotizaciones() {
       ? convertirAPrecioCotizacion(Number(item.calcResult.precio_venta), item.calcResult.moneda_codigo)
       : NaN;
 
-  /** Texto del subtotal del renglón; avisa cuando falta la tasa del día. */
-  const textoSubtotalRenglon = (it: { calcResult: CalculationResult | null; cantidad: number }): string => {
-    if (!it.calcResult) return formatCurrency(0, currencyCode);
-    const v = precioRenglonEnMoneda(it);
-    if (!isFinite(v)) return 'Falta tasa del día';
-    return formatCurrency(v * it.cantidad, currencyCode);
-  };
-
   // Monedas extranjeras presentes en los renglones y distintas de la moneda de
   // la cotización: para esas se requiere la tasa del día. Se detecta desde el
   // cálculo ya hecho O desde el producto seleccionado (reventa aún sin calcular).
@@ -2662,6 +2676,7 @@ export default function Cotizaciones() {
                                   // El costo NO se pisa con el precio: la utilidad
                                   // se calcula contra el costo real (compra+pasada)
                                   // expresado en la MISMA unidad de venta.
+                                  updateItemField(index, 'precioAuto', false);
                                   updateItemField(index, 'calcResult', calcularResultadoInsumo(costoRealVenta, precio));
                                 }}
                                 className="w-full p-2 border border-stone-200 rounded-lg bg-white text-sm font-mono focus:ring-2 focus:ring-yeikar-primary focus:outline-none"
@@ -2674,7 +2689,7 @@ export default function Cotizaciones() {
                           </div>
                           {esConversion && (
                             <div className="text-[11px] text-emerald-900/80 bg-emerald-50/60 border border-emerald-100 rounded-lg px-3 py-1.5">
-                              <b>{item.cantidad.toLocaleString('es-CO', { maximumFractionDigits: 4 })}</b> {unidadVenta} ={' '}
+                              <b>{Number(item.cantidad).toLocaleString('es-CO', { maximumFractionDigits: 4 })}</b> {unidadVenta} ={' '}
                               <b>{cantidadBase.toLocaleString('es-CO', { maximumFractionDigits: 4 })} {unidadBase}</b>
                               {dim === 'VOLUMEN' && captura === 'CM' && (
                                 <span className="text-emerald-700"> · cuenta del taller ÷ 10.000</span>
@@ -2694,7 +2709,11 @@ export default function Cotizaciones() {
                                   ({formatCurrency(costoRealBase, 'COP')} / {unidadBase})
                                 </span>
                               )}
-                              <span className="text-emerald-700">→ El precio de venta se escribe manualmente</span>
+                              <span className="text-emerald-700">
+                                {costoRealBase > 0
+                                  ? '→ Precio precargado = costo real (puedes ajustarlo)'
+                                  : '→ Este material no tiene costo registrado: escribe el precio'}
+                              </span>
                             </div>
                           )}
                           <div>
@@ -2993,14 +3012,16 @@ export default function Cotizaciones() {
                           </div>
                         )}
 
-                        {/* Quantity, Dimensions & Commercial Params */}
+                        {/* Cantidad y parámetros comerciales. Las medidas del
+                            mueble salen de su ficha (base del producto): no se
+                            piden una por una en cada cotización. */}
                         {item.es_obsequio && (
                           <p className="text-[11px] text-fuchsia-800 bg-fuchsia-50/60 border border-fuchsia-100 rounded-lg px-3 py-1.5">
                             Obsequio de promoción: va incluido con el colchón, no se cobra.
                             Al facturar sale del inventario de plásticos.
                           </p>
                         )}
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-1">
                           <div>
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
                               Cantidad
@@ -3015,48 +3036,6 @@ export default function Cotizaciones() {
                             />
                           </div>
 
-                          {!esItemReventa(item) ? (
-                            <>
-                              <div>
-                                <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
-                                  Ancho (m)
-                                </label>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={item.ancho}
-                                  onChange={(e) => updateItemField(index, 'ancho', e.target.value)}
-                                  className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                                />
-                              </div>
-                              <div>
-                                <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
-                                  Largo (m)
-                                </label>
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  value={item.largo}
-                                  onChange={(e) => updateItemField(index, 'largo', e.target.value)}
-                                  className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono"
-                                />
-                              </div>
-                            </>
-                          ) : (
-                            <div className="col-span-2 flex items-end">
-                              <div className="w-full space-y-1">
-                                <span className="block text-[10px] text-yeikar-secondary bg-yeikar-tertiary border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-2 w-full font-medium">
-                                  Reventa comercial {baseMostrar ? `· Costo ref: ${baseMostrar}` : ''}
-                                </span>
-                                {!item.calcResult && item.producto_id && !item.es_obsequio && (
-                                  <span className="block text-[10px] font-bold text-amber-700">
-                                    Confirma la tasa del día en el formulario ↑
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
                           {!item.es_obsequio && (
                           <div>
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
@@ -3070,12 +3049,9 @@ export default function Cotizaciones() {
                             />
                           </div>
                           )}
-                        </div>
 
-                        {/* Secondary row: Taxes, Observations, Recipe Structure, Subtotal */}
-                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center pt-1 border-t border-yeikar-secondary-light/10">
                           {!item.es_obsequio && (
-                          <div className="sm:col-span-2">
+                          <div>
                             <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1" title="Impuestos adicionales sobre el costo">
                               % Impuestos
                             </label>
@@ -3088,63 +3064,25 @@ export default function Cotizaciones() {
                             />
                           </div>
                           )}
+                        </div>
 
-                          <div className="sm:col-span-5">
-                            <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
-                              Observación / Especificaciones de este mueble
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="Ej: Tela lino gris perla, patas en roble..."
-                              value={item.observaciones}
-                              onChange={(e) => updateItemField(index, 'observaciones', e.target.value)}
-                              className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
-                            />
-                          </div>
+                        {esItemReventa(item) && (
+                          <span className="block text-[10px] text-yeikar-secondary bg-yeikar-tertiary border border-yeikar-secondary-light/15 rounded-lg px-2.5 py-2 w-full font-medium">
+                            Reventa comercial {baseMostrar ? `· Costo ref: ${baseMostrar}` : ''}
+                          </span>
+                        )}
 
-                          <div className="sm:col-span-2 flex items-end">
-                            {!esItemReventa(item) && (
-                              <div className="flex items-center gap-1 w-full">
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenPersonalizarReceta(index)}
-                                  className="w-full bg-yeikar-primary/10 hover:bg-yeikar-primary/20 text-yeikar-primary-dark border border-yeikar-primary/30 px-2 py-2 rounded-lg text-[10px] font-bold transition-all flex items-center justify-center gap-1 leading-none"
-                                  title="Personalizar materiales e insumos de la receta para esta cotización"
-                                >
-                                  <Sparkles className="w-3.5 h-3.5 text-yeikar-primary-dark shrink-0" />
-                                  <span>Receta</span>
-                                </button>
-                                {item.receta_personalizada && (
-                                  <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded-full font-sans uppercase shrink-0">
-                                    Modificada
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="sm:col-span-3 text-right font-mono">
-                            <span className="block text-[9px] uppercase font-bold text-stone-400">
-                              Subtotal Renglón
-                            </span>
-                            {item.calcLoading ? (
-                              <span className="text-xs text-stone-400 font-bold">Calculando...</span>
-                            ) : item.calcResult ? (
-                              <span className="text-sm font-black text-yeikar-secondary">
-                                {textoSubtotalRenglon(item)}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-stone-400 font-bold">{formatCurrency(0, currencyCode)}</span>
-                            )}
-                            {item.calcResult && Number(item.calcResult.impuestos) > 0 && (
-                              <span className="block text-[9px] font-normal text-stone-400">
-                                incl. {(() => {
-                                  const impConv = convertirAPrecioCotizacion(Number(item.calcResult?.impuestos), item.calcResult?.moneda_codigo);
-                                  return isFinite(impConv) ? formatCurrency(impConv * item.cantidad, currencyCode) : '—';
-                                })()} imp.
-                              </span>
-                            )}
-                          </div>
+                        <div className="pt-1 border-t border-yeikar-secondary-light/10">
+                          <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
+                            Observación / Especificaciones de este mueble
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ej: Tela lino gris perla, patas en roble..."
+                            value={item.observaciones}
+                            onChange={(e) => updateItemField(index, 'observaciones', e.target.value)}
+                            className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs"
+                          />
                         </div>
                         {item.tipo_item === 'FABRICADO' && (
                           <PiezasJuegoEditor

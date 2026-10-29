@@ -138,6 +138,58 @@ def test_endpoint_costo_real_sin_llevada_y_sin_entradas(client, cleaner, db):
     assert c2["costo_real"] == 8000.0
 
 
+def test_endpoint_ignora_entrada_con_costo_cero(client, cleaner, db):
+    """Una carga inicial con costo 0 no puede borrar el costo del catálogo.
+    El endpoint debe caer a material.costo_base (caso H.D.F 9 mm en producción:
+    la entrada del inventario inicial quedó en 0 y el costo real salía 0)."""
+    mat = crear_material(client, cleaner, costo_base=84760.0)
+    # La API rechaza costo_unitario=0; la carga inicial histórica entró por
+    # importación, así que se simula insertando el movimiento directo.
+    from app.modules.inventory.model import MovimientoInventario
+    mov = MovimientoInventario(
+        material_id=mat["id"], ubicacion_id=1, tipo="ENTRADA",
+        cantidad=8, costo_unitario=0,
+    )
+    db.add(mov)
+    db.commit()
+    db.refresh(mov)
+    cleaner.registrar("movimiento_inventario", mov.id)
+    registrar_inventario_de_material(db, cleaner, mat["id"])
+
+    c = _costo_real(client, mat["id"])
+    assert c["costo_compra"] == 84760.0, f"no debe borrarse el costo del catálogo: {c}"
+    assert c["costo_real"] == 84760.0
+
+
+def test_endpoint_usa_la_ultima_entrada_valorizada(client, cleaner, db):
+    """Si después de una compra valorizada entra una carga en 0, se conserva
+    el costo de la última entrada que sí traía costo (no la de 0)."""
+    mat = crear_material(client, cleaner, costo_base=0.0)
+    r = client.post("/api/v1/inventario/movimiento", json={
+        "material_id": mat["id"],
+        "ubicacion_id": 1,
+        "tipo": "ENTRADA",
+        "cantidad": 10,
+        "costo_unitario": 30000,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code in (200, 201), r.text
+
+    from app.modules.inventory.model import MovimientoInventario
+    mov = MovimientoInventario(
+        material_id=mat["id"], ubicacion_id=1, tipo="ENTRADA",
+        cantidad=5, costo_unitario=0,
+    )
+    db.add(mov)
+    db.commit()
+    db.refresh(mov)
+    cleaner.registrar("movimiento_inventario", mov.id)
+    registrar_inventario_de_material(db, cleaner, mat["id"])
+
+    c = _costo_real(client, mat["id"])
+    assert c["costo_compra"] == 30000.0, f"debe usar la entrada valorizada: {c}"
+    assert c["costo_real"] == 30000.0
+
+
 def test_venta_insumo_con_pasada_calcula_utilidad_real(client, cleaner, db):
     """Costo real 35.000 (compra 30.000 + pasada 5.000) vendido a 50.000 →
     utilidad 15.000/und y margen 42.86%. El costo NO puede ser 30.000 (como si
