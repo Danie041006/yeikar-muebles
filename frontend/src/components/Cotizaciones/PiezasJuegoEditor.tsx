@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Camera, Layers, Plus, Trash2, X } from 'lucide-react';
 
 /** Pieza declarada de un renglón-juego (sin precio propio). */
@@ -70,6 +70,69 @@ interface Props {
   piezas: PiezaJuegoForm[];
   onChange: (piezas: PiezaJuegoForm[]) => void;
   disabled?: boolean;
+}
+
+/** Input decimal para la cantidad de una pieza.
+ *
+ *  Un <input type="number"> controlado con min/step hace que el navegador
+ *  considere válidos solo 0.01, 1.01, 2.01… y BLOQUEE el submit del formulario
+ *  con "los dos valores válidos más cercanos son…" aunque la cantidad sea 1.
+ *  Además, al borrar el campo el estado numérico vuelve a 0 y no deja teclear.
+ *  Este input guarda el TEXTO mientras el usuario escribe y solo publica
+ *  números válidos (> 0) al formulario (mismo patrón que CantidadDecimalInput
+ *  de Cotizaciones.tsx). */
+function CantidadPiezaInput({
+  value,
+  onChange,
+  disabled = false,
+  ariaLabel,
+  className,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  disabled?: boolean;
+  ariaLabel: string;
+  className?: string;
+}) {
+  const [texto, setTexto] = useState(() => (value ? String(value) : ''));
+  const enfocado = useRef(false);
+
+  useEffect(() => {
+    if (!enfocado.current) setTexto(value ? String(value) : '');
+  }, [value]);
+
+  const normalizar = (t: string): number | null => {
+    const n = Number(t.replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={texto}
+      onFocus={() => { enfocado.current = true; }}
+      onChange={(e) => {
+        const t = e.target.value;
+        setTexto(t);
+        const n = normalizar(t);
+        if (n !== null) onChange(n);
+      }}
+      onBlur={() => {
+        enfocado.current = false;
+        const n = normalizar(texto);
+        if (n !== null) {
+          onChange(n);
+          setTexto(String(n));
+        } else {
+          setTexto(value ? String(value) : '');
+        }
+      }}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      className={className}
+    />
+  );
 }
 
 /**
@@ -213,14 +276,11 @@ export default function PiezasJuegoEditor({ piezas, onChange, disabled = false }
                       aria-label={`Nombre de la pieza ${indice + 1}`}
                       className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-xs focus:border-yeikar-primary focus:outline-none focus:ring-1 focus:ring-yeikar-primary disabled:bg-stone-50"
                     />
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="1"
+                    <CantidadPiezaInput
                       value={pieza.cantidad}
-                      onChange={(e) => actualizar(indice, { cantidad: Number(e.target.value) })}
+                      onChange={(cantidad) => actualizar(indice, { cantidad })}
                       disabled={disabled}
-                      aria-label={`Cantidad de ${pieza.nombre || `la pieza ${indice + 1}`}`}
+                      ariaLabel={`Cantidad de ${pieza.nombre || `la pieza ${indice + 1}`}`}
                       className="w-full rounded-lg border border-stone-200 bg-white px-2 py-1.5 text-center font-mono text-xs focus:border-yeikar-primary focus:outline-none focus:ring-1 focus:ring-yeikar-primary disabled:bg-stone-50"
                     />
                     <input
