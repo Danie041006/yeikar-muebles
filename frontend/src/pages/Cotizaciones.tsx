@@ -76,6 +76,8 @@ function piezasParaPayload(item: CotizacionItemForm) {
     nombre: p.nombre.trim(),
     cantidad: p.cantidad,
     notas: p.notas.trim() || null,
+    // Foto opcional (data URL comprimida en el navegador).
+    foto: p.foto || null,
   }));
 }
 
@@ -149,6 +151,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
         nombre: p.nombre,
         cantidad: Number(p.cantidad) || 1,
         notas: p.notas || '',
+        foto: p.foto ?? null,
       })),
       es_obsequio: d.es_obsequio || false,
     };
@@ -1228,20 +1231,33 @@ export default function Cotizaciones() {
   // El backend valida lo mismo; aquí solo se ocultan las acciones.
   const puedeEditar = (quote: Quote) => esAdmin || quote.creado_por_id === user?.id;
 
-  const handleOpenEdit = (quote: Quote) => {
-    setEditingQuote(quote);
-    setSelectedClientId(String(quote.cliente_id));
-    setClienteSeleccionado(quote.cliente
-      ? { value: quote.cliente_id, label: `${quote.cliente.nombre} (${quote.cliente.telefono})` }
+  const handleOpenEdit = async (quote: Quote) => {
+    // El listado no trae las fotos de las piezas (para no inflar el JSON):
+    // se pide el detalle fresco al abrir el editor. Si falla (sin red), se
+    // usa la copia cacheada o el propio listado.
+    let full = quote;
+    try {
+      full = (await api.get<Quote>(`/cotizacion/${quote.id}`)).data;
+    } catch {
+      try {
+        full = await cotizacionService.getById(quote.id);
+      } catch {
+        full = quote;
+      }
+    }
+    setEditingQuote(full);
+    setSelectedClientId(String(full.cliente_id));
+    setClienteSeleccionado(full.cliente
+      ? { value: full.cliente_id, label: `${full.cliente.nombre} (${full.cliente.telefono})` }
       : null);
-    setObservaciones(quote.observaciones || '');
+    setObservaciones(full.observaciones || '');
     // Se conserva la fecha original, pero queda editable (corregir fechas mal puestas).
-    setFechaCotizacion(quote.fecha ? String(quote.fecha).slice(0, 10) : hoyVE());
-    setSelectedMonedaId(quote.moneda_id || 1);
-    setTasaCambio(quote.tasa_cambio || 1);
+    setFechaCotizacion(full.fecha ? String(full.fecha).slice(0, 10) : hoyVE());
+    setSelectedMonedaId(full.moneda_id || 1);
+    setTasaCambio(full.tasa_cambio || 1);
     setTasasDia({});
     setItems(sincronizarCantidadesObsequio(
-      itemsDesdeCotizacion(quote, quote.moneda?.codigo || 'COP'),
+      itemsDesdeCotizacion(full, full.moneda?.codigo || 'COP'),
       promosPorColchon,
     ));
     setError('');

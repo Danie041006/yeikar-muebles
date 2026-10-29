@@ -308,6 +308,8 @@ export interface ReferenciaReceta {
   /** Checklist de piezas del mueble (sofá, poltronas…): se imprime en la hoja. */
   piezas_mueble?: PiezaOrden[];
   producto_fotos?: FotoReferencia[];
+  /** Foto de la pieza del juego (data URL), si la cotización la trae. */
+  pieza_foto?: string | null;
 }
 
 export const produccionService = {

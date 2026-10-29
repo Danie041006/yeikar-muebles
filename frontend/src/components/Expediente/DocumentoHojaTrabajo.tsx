@@ -39,6 +39,8 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
     : 'Materiales e Insumos del Mueble';
 
   const fotos = (hoja.producto_fotos || []).filter((f) => f.url);
+  // En una orden-pieza la foto de la pieza manda; si no, la del mueble padre.
+  const fotoReferencia = hoja.pieza_foto || fotos[0]?.url || null;
 
   const observaciones = [
     { tipo: 'PEDIDO', etiqueta: 'Del pedido', texto: hoja.observaciones_pedido },
@@ -220,16 +222,16 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
           {/* Columna Derecha: Foto de Referencia (5 cols) */}
           <div className="col-span-5 border border-stone-300 rounded-xl overflow-hidden bg-white shadow-xs flex flex-col justify-between">
             <div className="bg-[#2D1B10] text-[#F9F7F2] text-[7.5px] font-mono font-bold uppercase tracking-[0.18em] px-2.5 py-1 flex items-center justify-between">
-              <span>Foto de Referencia</span>
+              <span>{hoja.pieza_foto ? 'Foto de la pieza' : 'Foto de Referencia'}</span>
               <span className="text-[#D4AF37]">Guía Visual</span>
             </div>
-            {fotos[0] ? (
+            {fotoReferencia ? (
               <div
                 className="flex-1 flex items-center justify-center p-1.5 bg-white overflow-hidden"
                 style={{ minHeight: '62mm', maxHeight: '68mm' }}
               >
                 <img
-                  src={fotos[0].url}
+                  src={fotoReferencia}
                   alt={hoja.producto_nombre}
                   className="w-full h-full object-contain rounded-md"
                   style={{ maxHeight: '66mm' }}

@@ -707,7 +707,9 @@ export default function EtapaModal({
   const etapasOrden = [...(orden?.etapas ?? [])].sort((a, b) => (a.id || 0) - (b.id || 0));
 
   // ── Ficha del mueble (tab "La etapa") ──
-  const fotoProducto = referenciaReceta?.producto_fotos?.find((f) => f.url)?.url ?? null;
+  const fotoProducto = referenciaReceta?.pieza_foto
+    || referenciaReceta?.producto_fotos?.find((f) => f.url)?.url
+    || null;
   const accionPrimaria = acciones.find((a) => a.primario) ?? null;
   // La Hoja de Trabajo aplica a cualquier orden: los muebles a la medida no
   // tienen producto de catálogo, pero sí descripción y checklist de piezas.

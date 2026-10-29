@@ -56,6 +56,12 @@ PIEZAS_JUEGO = [
 ]
 
 
+FOTO_PIEZA = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII="
+)
+
+
 def _detalle_a_medida(piezas=PIEZAS_JUEGO, cantidad=2, precio=5000000):
     """Renglón-juego a medida tal como lo manda el frontend (sin precios por pieza)."""
     return {
@@ -138,6 +144,56 @@ def test_conversion_crea_una_orden_por_pieza(client, db, cleaner):
     )
     assert r.status_code in (200, 201), r.text
     assert len(_ordenes_de_detalle(db, detalle["id"])) == 4
+
+
+# ===========================================================================
+# 1b. Foto opcional de cada pieza: cotización → pedido → hoja de trabajo
+# ===========================================================================
+def test_pieza_conserva_foto_en_cotizacion_pedido_y_hoja(client, db, cleaner):
+    cliente = crear_cliente(client, cleaner)
+    piezas = [
+        {"nombre": "Mesa de comedor", "cantidad": 1, "foto": FOTO_PIEZA},
+        {"nombre": "Sillas", "cantidad": 2},
+    ]
+    detalle_cot = _detalle_a_medida(piezas=piezas, cantidad=1)
+
+    cot = crear_cotizacion_multidetalle(client, cleaner, cliente["id"], [detalle_cot])
+    pieza_cot = cot["detalles"][0]["piezas"]
+    assert pieza_cot[0]["foto"] == FOTO_PIEZA
+    assert pieza_cot[1].get("foto") is None
+
+    # El listado no lleva la foto (el JSON se mantiene liviano); el detalle sí.
+    r = client.get("/api/v1/cotizacion/", params={"limite": 1000}, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    fila = next(c for c in r.json() if c["id"] == cot["id"])
+    assert "foto" not in fila["detalles"][0]["piezas"][0]
+
+    r = client.get(f"/api/v1/cotizacion/{cot['id']}", headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    assert r.json()["detalles"][0]["piezas"][0]["foto"] == FOTO_PIEZA
+
+    # La conversión copia la foto a la pieza del pedido.
+    r, pedido = convertir_cotizacion(
+        client, cleaner, cot["id"], [_detalle_para_conversion(detalle_cot)]
+    )
+    assert r.status_code == 201, r.text
+    piezas_pedido = pedido["detalles"][0]["piezas"]
+    assert piezas_pedido[0]["foto"] == FOTO_PIEZA
+    assert piezas_pedido[1].get("foto") is None
+
+    # Y la Hoja de Trabajo de la orden-pieza la usa como foto de referencia.
+    orden = _ordenes_de_detalle(db, pedido["detalles"][0]["id"])[0]
+    cleaner.registrar("orden_produccion", orden["id"])
+    empleado = crear_empleado(client, cleaner, cargo_id=cargo_id(db, "EBANISTA"))
+    etapa = crear_etapa(
+        client, cleaner, orden["id"], area_id(db, "Ebanistería"), empleado["id"]
+    )
+    r = client.get(
+        f"/api/v1/produccion/etapa/{etapa['id']}/referencia-receta",
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["pieza_foto"] == FOTO_PIEZA
 
 
 # ===========================================================================

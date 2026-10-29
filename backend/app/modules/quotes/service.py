@@ -332,6 +332,7 @@ def _agregar_piezas_cotizacion(db_detalle, piezas) -> None:
             nombre=(datos.get("nombre") or "").strip(),
             cantidad=datos.get("cantidad") or 1,
             notas=(datos.get("notas") or "").strip() or None,
+            foto=datos.get("foto") or None,
             orden=orden,
         ))
 

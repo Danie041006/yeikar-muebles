@@ -35,6 +35,7 @@ def _datos_pieza(pieza) -> dict:
         "nombre": getattr(pieza, "nombre", ""),
         "cantidad": getattr(pieza, "cantidad", 1),
         "notas": getattr(pieza, "notas", None),
+        "foto": getattr(pieza, "foto", None),
     }
 
 
@@ -56,6 +57,7 @@ def _piezas_desde_payload(detalle_dict: dict, cotizado) -> list:
             "nombre": (datos.get("nombre") or "").strip(),
             "cantidad": datos.get("cantidad") or 1,
             "notas": (datos.get("notas") or "").strip() or None,
+            "foto": datos.get("foto") or None,
         })
     return normalizadas
 
@@ -66,6 +68,7 @@ def _agregar_piezas_pedido(db_detalle, piezas: list | None) -> None:
             nombre=pieza["nombre"],
             cantidad=pieza["cantidad"],
             notas=pieza["notas"],
+            foto=pieza.get("foto") or None,
             orden=orden,
         ))
 

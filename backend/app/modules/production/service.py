@@ -20,7 +20,7 @@ from app.modules.production.schemas import (
     ProduccionCrudoManoObraCreate, ProduccionCrudoManoObraUpdate,
     PiezaOrdenCreate, PiezaOrdenUpdate,
 )
-from app.modules.orders.model import DetallePedido, Pedido
+from app.modules.orders.model import DetallePedido, DetallePedidoPieza, Pedido
 from app.modules.productos.model import Material, Producto, ProductoMaterial, ReglaGastoSeccion, MaterialUnidadUso
 from app.modules.empleados.model import Empleado
 from app.modules.clients.model import Client
@@ -2063,6 +2063,18 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         else float(detalle.cantidad) if detalle else 1.0
     )
 
+    # Foto de la pieza del juego (si la cotización la trae): la Hoja de Trabajo
+    # la usa como referencia visual en lugar de la foto del mueble padre.
+    pieza_foto = None
+    if es_pieza_de_juego and orden.detalle_pieza_id:
+        pieza_pedido = (
+            db.query(DetallePedidoPieza)
+            .filter(DetallePedidoPieza.id == orden.detalle_pieza_id)
+            .first()
+        )
+        if pieza_pedido is not None:
+            pieza_foto = pieza_pedido.foto
+
     return {
         "producto_id": None if es_pieza_de_juego else (producto_contexto.id if producto_contexto else None),
         "producto_nombre": nombre_mueble,
@@ -2093,6 +2105,7 @@ def obtener_referencia_receta(db: Session, id_etapa: int, usuario: Usuario | Non
         "piezas": float(piezas),
         "piezas_mueble": piezas_mueble,
         "producto_fotos": fotos,
+        "pieza_foto": pieza_foto,
     }
 
 

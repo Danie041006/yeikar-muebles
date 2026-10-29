@@ -528,6 +528,8 @@ class ReferenciaRecetaResponse(BaseModel):
     # imprime con casillas. Distinto de `piezas` (unidades idénticas de línea).
     piezas_mueble: List[PiezaOrdenResponse] = []
     producto_fotos: List[FotoReferencia] = []
+    # Foto de la pieza del juego (data URL comprimida), si la cotización la trae.
+    pieza_foto: Optional[str] = None
 
 
 # ------------------------------------------------------------

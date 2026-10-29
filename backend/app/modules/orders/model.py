@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String, Boolean
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 from sqlalchemy.sql import func
 from app.db.base import Base
 from app.modules.clients.model import Client
@@ -155,6 +155,8 @@ class DetallePedidoPieza(Base):
     nombre = Column(String(150), nullable=False)
     cantidad = Column(Numeric(10, 2), nullable=False, server_default="1", default=1)
     notas = Column(Text, nullable=True)
+    # Foto opcional de la pieza (copiada de la cotización al convertir).
+    foto = deferred(Column(Text, nullable=True))
     orden = Column(BigInteger, nullable=False, default=0)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

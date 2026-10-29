@@ -35,7 +35,7 @@ def crear_cotizacion(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/", response_model=List[schemas.CotizacionResponse])
+@router.get("/", response_model=List[schemas.CotizacionListaResponse])
 def listar_cotizaciones(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),

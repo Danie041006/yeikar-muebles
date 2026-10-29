@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import date, datetime
 from typing import Optional, List, Any
 import unicodedata
@@ -75,6 +75,23 @@ class PiezaJuegoBase(BaseModel):
     # Cantidad por UNIDAD del renglón (por juego): 6 sillas por comedor.
     cantidad: float = Field(gt=0, le=1000)
     notas: Optional[str] = None
+    # Foto opcional de la pieza como data URL (el navegador la comprime antes
+    # de enviarla; el backend solo la guarda con la pieza). No es obligatoria.
+    foto: Optional[str] = Field(None, max_length=2_000_000)
+
+    @field_validator("foto")
+    @classmethod
+    def _validar_foto(cls, valor: Optional[str]) -> Optional[str]:
+        if valor is None:
+            return None
+        valor = valor.strip()
+        if not valor:
+            return None
+        if not valor.startswith("data:image/") or ";base64," not in valor:
+            raise ValueError("La foto de la pieza debe ser una imagen válida.")
+        if len(valor) > 1_500_000:
+            raise ValueError("La foto de la pieza es demasiado grande (máx. 1,5 MB).")
+        return valor
 
     @model_validator(mode="after")
     def _normalizar(self):
@@ -90,6 +107,19 @@ class PiezaJuegoCreate(PiezaJuegoBase):
 class DetalleCotizacionPiezaResponse(PiezaJuegoBase):
     id: int
     detalle_cotizacion_id: int
+    orden: int
+
+    class Config:
+        from_attributes = True
+
+
+class DetalleCotizacionPiezaListaResponse(BaseModel):
+    """Pieza para los listados: sin la foto (data URL) para no inflar el JSON."""
+    id: int
+    detalle_cotizacion_id: int
+    nombre: str
+    cantidad: float
+    notas: Optional[str] = None
     orden: int
 
     class Config:
@@ -168,6 +198,17 @@ class DetalleCotizacionResponse(DetalleCotizacionBase):
     class Config:
         from_attributes = True
 
+
+class DetalleCotizacionListaResponse(DetalleCotizacionBase):
+    """Renglón de los listados: piezas sin foto (solo nombre/cantidad/nota)."""
+    id: int
+    cotizacion_id: int
+    material: Optional[MaterialResponse] = None
+    piezas: List[DetalleCotizacionPiezaListaResponse] = []
+
+    class Config:
+        from_attributes = True
+
 class CotizacionBase(BaseModel):
     fecha: date
     estado: str
@@ -217,3 +258,8 @@ class CotizacionResponse(CotizacionBase):
 
     class Config:
         from_attributes = True
+
+
+class CotizacionListaResponse(CotizacionResponse):
+    """Listado: mismo contrato que el detalle pero sin las fotos de las piezas."""
+    detalles: List[DetalleCotizacionListaResponse] = []

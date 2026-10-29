@@ -22,7 +22,7 @@ def crear_pedido(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.get("/", response_model=List[schemas.PedidoConEntregasResponse])
+@router.get("/", response_model=List[schemas.PedidoListaConEntregasResponse])
 def listar_pedidos(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),

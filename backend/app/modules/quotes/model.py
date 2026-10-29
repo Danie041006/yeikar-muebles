@@ -1,5 +1,5 @@
 from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String, Boolean, Integer, JSON
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, deferred
 from sqlalchemy.sql import func
 from app.db.base import Base
 from app.modules.clients.model import Client
@@ -96,6 +96,9 @@ class DetalleCotizacionPieza(Base):
     nombre = Column(String(150), nullable=False)
     cantidad = Column(Numeric(10, 2), nullable=False, server_default="1", default=1)
     notas = Column(Text, nullable=True)
+    # Foto opcional de la pieza (data URL ya comprimida en el navegador).
+    # `deferred`: los listados no cargan el texto/base64; solo el detalle.
+    foto = deferred(Column(Text, nullable=True))
     # Orden de aparición en el renglón (Mesa, Sillas, Sillones…).
     orden = Column(BigInteger, nullable=False, default=0)
     created_at = Column(DateTime, server_default=func.now())

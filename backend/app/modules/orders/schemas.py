@@ -19,6 +19,19 @@ class DetallePedidoPiezaResponse(PiezaJuegoBase):
     class Config:
         from_attributes = True
 
+
+class DetallePedidoPiezaListaResponse(BaseModel):
+    """Pieza para los listados: sin la foto (data URL) para no inflar el JSON."""
+    id: int
+    detalle_pedido_id: int
+    nombre: str
+    cantidad: float
+    notas: Optional[str] = None
+    orden: int
+
+    class Config:
+        from_attributes = True
+
 class DetallePedidoBase(BaseModel):
     producto_id: Optional[int] = None
     material_id: Optional[int] = None
@@ -90,6 +103,20 @@ class DetallePedidoResponse(DetallePedidoBase):
     class Config:
         from_attributes = True
 
+
+class DetallePedidoListaResponse(DetallePedidoBase):
+    """Renglón de los listados: piezas sin foto."""
+    id: int
+    pedido_id: int
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    producto: Optional[ProductoResponse] = None
+    material: Optional[MaterialResponse] = None
+    piezas: List[DetallePedidoPiezaListaResponse] = []
+
+    class Config:
+        from_attributes = True
+
 class PedidoBase(BaseModel):
     fecha: date
     estado: str
@@ -141,6 +168,11 @@ class PedidoConEntregasResponse(PedidoResponse):
     """Pedido con el resumen de entregas (lista y detalle de Pedidos)."""
 
     entrega_resumen: Optional[EntregaResumen] = None
+
+
+class PedidoListaConEntregasResponse(PedidoConEntregasResponse):
+    """Listado de pedidos: mismo contrato sin las fotos de las piezas."""
+    detalles: List[DetallePedidoListaResponse] = []
 
 class ConvertirCotizacionBody(BaseModel):
     detalles: List[DetallePedidoCreate]

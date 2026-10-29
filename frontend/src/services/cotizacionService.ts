@@ -49,6 +49,8 @@ export interface PiezaJuego {
   /** Cantidad por unidad del renglón (por juego). */
   cantidad: number;
   notas?: string | null;
+  /** Foto opcional de la pieza (data URL comprimida). */
+  foto?: string | null;
   orden?: number;
 }
 
