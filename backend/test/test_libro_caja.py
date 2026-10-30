@@ -742,3 +742,113 @@ def test_clasificacion_donacion_crea_gasto_y_sale_en_el_libro(client, cleaner, d
     assert donacion is not None, libro["clasificaciones"]
     assert donacion["label"] == "Donación"
     assert Decimal(str(donacion["total"])) == Decimal("50000")
+
+
+def test_fabrica_y_camiones_son_clasificaciones_propias():
+    """Decisión de la dueña (30/10/2026): Familiar y Fábrica son canastas
+    separadas; los camiones también. La letra F del libro sigue siendo
+    Familiar (con los gastos ya registrados), la fábrica se escribe completa.
+    """
+    from app.modules.gastos.service import normalizar_clasificacion
+
+    # La F del libro NO cambia: sigue siendo Familiar.
+    assert normalizar_clasificacion("F") == "GASTO_FAMILIAR"
+    assert normalizar_clasificacion("G F") == "GASTO_FAMILIAR"
+    assert normalizar_clasificacion("Gasto Familiar") == "GASTO_FAMILIAR"
+
+    # La fábrica y los camiones son clasificaciones nuevas.
+    assert normalizar_clasificacion("Gastos de Fábrica") == "GASTO_FABRICA"
+    assert normalizar_clasificacion("G FABRICA") == "GASTO_FABRICA"
+    assert normalizar_clasificacion("Gastos de Camiones") == "GASTO_CAMIONES"
+    assert normalizar_clasificacion("G CAMIONES") == "GASTO_CAMIONES"
+    assert normalizar_clasificacion("G CAMION") == "GASTO_CAMIONES"
+
+    # "Gastos de X" normalizado no colisiona con las letras: G+F no se
+    # comparte, que antes lo mandaba todo a Familiar.
+    import pytest
+
+    with pytest.raises(ValueError):
+        normalizar_clasificacion("GZ")
+    assert normalizar_clasificacion("G D") == "GASTO_DEDUCIBLE"
+    assert normalizar_clasificacion("G I") == "GASTO_INVERSION"
+
+
+def test_libro_acepta_g_camiones_y_g_fabrica():
+    """El libro pegado reconoce 'G CAMIONES' y 'G FABRICA' a palabra completa
+    (el dueño ya no usa solo letras); una palabra que no es código no
+    clasifica la fila. La C de CAMION no se confunde con la C de Casa.
+    """
+    from app.modules.reports.libro_caja import parsear_libro
+
+    texto = "\n".join([
+        "10/1/2026\tSALDO\tMES DE SEPTIEMBRE\t\t\t$ 1,000,000",
+        "10/1/2026\tRENAULT G CAMIONES\tLLANTAS\t\t$ 200,000\t$ 800,000",
+        "10/1/2026\tGASOLINA G\tACEITE\t\t$ 150,000\t$ 650,000",
+        "10/1/2026\tCAMIONETA G FABRICA\tMERCADO\t\t$ 99,000\t$ 551,000",
+    ])
+    parsed = parsear_libro(texto)
+    # La fila de SALDO entra como fila sin clasificación.
+    assert [f.clasificacion for f in parsed.filas] == [
+        None, "GASTO_CAMIONES", None, "GASTO_FABRICA",
+    ]
+
+
+def test_salida_de_camiones_reusa_el_tipo_gasto_del_catalogo(client, cleaner, db):
+    """Un egreso clasificado "Gastos de Camiones" queda como Gasto
+    GASTO_CAMIONES y REUTILIZA el TipoGasto "GASTOS DE CAMIONES" que el
+    catálogo ya trae (no se duplica). Sale con su label en el libro.
+    """
+    from app.modules.catalogos.model import TipoGasto
+
+    cuenta = _crear_cuenta(client, cleaner, db)
+
+    # El catálogo ya trae el tipo de la dueña (id 216 en producción).
+    tipo = db.query(TipoGasto).filter(
+        TipoGasto.nombre == "GASTOS DE CAMIONES"
+    ).first()
+    if not tipo:
+        tipo = TipoGasto(nombre="GASTOS DE CAMIONES", categoria="OPERATIVO")
+        db.add(tipo)
+        db.commit()
+        db.refresh(tipo)
+
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-14",
+        "tipo": "SALIDA",
+        "monto": 180000,
+        "moneda_id": 1,
+        "persona_entidad": "GASOLINERA",
+        "concepto": "Gasolina del camión",
+        "clasificacion": "Gastos de Camiones",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar("movimiento_caja", mov["id"])
+
+    db.expire_all()
+    fila = db.get(MovimientoCaja, mov["id"])
+    assert fila is not None
+    assert (fila.referencia or "").startswith("Gasto #")
+    gasto_id = int(fila.referencia.split("#", 1)[1].split()[0])
+    cleaner.registrar("gasto", gasto_id)
+
+    gasto = db.get(Gasto, gasto_id)
+    assert gasto is not None
+    assert gasto.clasificacion == "GASTO_CAMIONES"
+    assert gasto.tipo_gasto_id == tipo.id
+
+    r = client.get("/api/v1/cuenta/libro", params={
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-01",
+        "fecha_hasta": "2026-10-31",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    camiones = next(
+        (c for c in libro["clasificaciones"] if c["clasificacion"] == "GASTO_CAMIONES"),
+        None,
+    )
+    assert camiones is not None, libro["clasificaciones"]
+    assert camiones["label"] == "Gastos de Camiones"
+    assert Decimal(str(camiones["total"])) == Decimal("180000")

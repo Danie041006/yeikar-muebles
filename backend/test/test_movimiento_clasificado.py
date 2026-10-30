@@ -57,8 +57,15 @@ def test_normalizador_acepta_codigos_y_nombres():
     assert normalizar_clasificacion("G C") == "GASTO_CASA"
     assert normalizar_clasificacion("G P") == "GASTO_PERSONAL"
     assert normalizar_clasificacion("G F") == "GASTO_FAMILIAR"
-    assert normalizar_clasificacion("FABRICA") == "GASTO_FAMILIAR"
-    assert normalizar_clasificacion("Gasto Fábrica") == "GASTO_FAMILIAR"
+    # Decisión 30/10/2026: Familiar y Fábrica son canastas separadas (la
+    # F del libro sigue siendo Familiar); los camiones también.
+    assert normalizar_clasificacion("Familia") == "GASTO_FAMILIAR"
+    assert normalizar_clasificacion("FABRICA") == "GASTO_FABRICA"
+    assert normalizar_clasificacion("Gastos de Fábrica") == "GASTO_FABRICA"
+    assert normalizar_clasificacion("G FABRICA") == "GASTO_FABRICA"
+    assert normalizar_clasificacion("CAMIONES") == "GASTO_CAMIONES"
+    assert normalizar_clasificacion("Gastos de Camiones") == "GASTO_CAMIONES"
+    assert normalizar_clasificacion("G CAMION") == "GASTO_CAMIONES"
     assert normalizar_clasificacion("G I") == "GASTO_INVERSION"
     assert normalizar_clasificacion("PRESTAMO") == "PRESTAMO"
     assert normalizar_clasificacion("Gasto Préstamo") == "PRESTAMO"

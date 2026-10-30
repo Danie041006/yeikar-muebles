@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface BadgeProps {
-  tone?: 'neutral' | 'gold' | 'green' | 'red' | 'blue' | 'amber' | 'purple';
+  tone?: 'neutral' | 'gold' | 'green' | 'red' | 'blue' | 'amber' | 'purple' | 'orange' | 'teal';
   children: React.ReactNode;
   dot?: boolean;
   pulse?: boolean;
@@ -17,6 +17,8 @@ const tones: Record<NonNullable<BadgeProps['tone']>, string> = {
   blue: 'bg-sky-50 text-sky-700 border-sky-200/60',
   amber: 'bg-amber-50 text-amber-800 border-amber-200/60',
   purple: 'bg-purple-50 text-purple-700 border-purple-200/60',
+  orange: 'bg-orange-50 text-orange-700 border-orange-200/60',
+  teal: 'bg-teal-50 text-teal-700 border-teal-200/60',
 };
 
 const dots: Record<NonNullable<BadgeProps['tone']>, string> = {
@@ -27,6 +29,8 @@ const dots: Record<NonNullable<BadgeProps['tone']>, string> = {
   blue: 'bg-sky-500',
   amber: 'bg-amber-500',
   purple: 'bg-purple-500',
+  orange: 'bg-orange-500',
+  teal: 'bg-teal-500',
 };
 
 export default function Badge({

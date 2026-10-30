@@ -17,7 +17,8 @@ Reglas de la importación:
   corrida o el monto esté tecleado distinto; esas diferencias se avisan.
 - Si el TIPO trae G D / G C / G P / G F / G I, el egreso se crea además como
   Gasto con su clasificación explícita (Gasto Deducible, de Casa, Personal,
-  Fábrica o de Inversión). El campo es opcional: las filas sin código se
+  Familiar, Gastos de Fábrica/Camiones o de Inversión). El campo es opcional:
+  las filas sin código se
   importan solo como movimiento de caja. La clasificación "Préstamo" existe
   además para las salidas registradas a mano desde Cuentas.
 - El libro va en la MONEDA de la cuenta elegida (no solo COP): cada
@@ -56,13 +57,18 @@ from app.modules.tasas_cambio.service import (
 )
 from app.modules.users.model import Usuario
 
-# Código del libro → clave canónica del gasto.
+# Código del libro → clave canónica del gasto. Además de las letras
+# (G D, G C, G P, G F, G I), el libro de la dueña puede traer la palabra
+# completa: "G CAMIONES" y "G FABRICA" son las clasificaciones nuevas.
 CLASIFICACION_POR_CODIGO = {
     "D": "GASTO_DEDUCIBLE",
     "C": "GASTO_CASA",
     "P": "GASTO_PERSONAL",
     "F": "GASTO_FAMILIAR",
     "I": "GASTO_INVERSION",
+    "CAMION": "GASTO_CAMIONES",
+    "CAMIONES": "GASTO_CAMIONES",
+    "FABRICA": "GASTO_FABRICA",
 }
 
 _FECHA_RE = re.compile(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
@@ -70,7 +76,7 @@ _FECHA_RE = re.compile(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
 # dinero lo llevan, y así no confundimos los números que aparecen dentro del
 # concepto (tasas, "500 MIL", teléfonos, etc.).
 _TOKEN_RE = re.compile(r"\$\s*\d[\d.,]*")
-_CLASIF_RE = re.compile(r"\bG\s*([DCPFI])\b", re.IGNORECASE)
+_CLASIF_RE = re.compile(r"\bG\s*(CAMIONES?|FABRICA|[DCPFI])\b", re.IGNORECASE)
 _CERO = Decimal("0.00")
 
 

@@ -15,13 +15,20 @@ from app.modules.users.model import Usuario
 # Destino del dinero en el libro de caja (códigos G D/C/P/F/I), con el
 # nombre explícito que se muestra en la interfaz. Es una dimensión aparte de
 # la categoría del tipo de gasto: no la reemplaza. El campo es opcional.
+#
+# Decisión de la dueña (30/10/2026): Familiar y Fábrica son canastas
+# DIFERENTES. La F histórica queda como Gasto Familiar (con los 57 gastos
+# ya registrados en ella) y la fábrica (Cámara de Comercio, liquidaciones,
+# insumos) pasa a su propia clasificación; los camiones del taller también.
 CLASIFICACIONES_GASTO = {
     "GASTO_DEDUCIBLE": "Gasto Deducible",
     "GASTO_CASA": "Gasto de Casa",
     "GASTO_PERSONAL": "Gasto Personal",
-    # La dueña usa la F para la fábrica (Cámara de Comercio, liquidaciones,
-    # insumos). La clave interna conserva el nombre histórico.
-    "GASTO_FAMILIAR": "Gasto Fábrica",
+    "GASTO_FAMILIAR": "Gasto Familiar",
+    # El label "Gastos de Camiones" coincide (case-insensitive) con el
+    # TipoGasto "GASTOS DE CAMIONES" del catálogo: no crea duplicado.
+    "GASTO_CAMIONES": "Gastos de Camiones",
+    "GASTO_FABRICA": "Gastos de Fábrica",
     "GASTO_INVERSION": "Gasto de Inversión",
     "PRESTAMO": "Préstamo",
     # Donativos (iglesia, fundaciones, vecinos): sale plata de la caja sin
@@ -55,9 +62,19 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
         "C": "GASTO_CASA", "CASA": "GASTO_CASA", "GASTOCASA": "GASTO_CASA",
         "P": "GASTO_PERSONAL", "PERSONAL": "GASTO_PERSONAL",
         "GASTOPERSONAL": "GASTO_PERSONAL",
-        "F": "GASTO_FAMILIAR", "FABRICA": "GASTO_FAMILIAR",
-        "GASTOFABRICA": "GASTO_FAMILIAR", "FAMILIAR": "GASTO_FAMILIAR",
+        # La F del libro sigue siendo Familiar; la fábrica es su propia
+        # clasificación (GASTO_FABRICA), decisión de la dueña 30/10/2026.
+        "F": "GASTO_FAMILIAR", "FAMILIAR": "GASTO_FAMILIAR",
         "FAMILIA": "GASTO_FAMILIAR", "GASTOFAMILIAR": "GASTO_FAMILIAR",
+        "GASTOFAMILIA": "GASTO_FAMILIAR",
+        "FABRICA": "GASTO_FABRICA", "GFABRICA": "GASTO_FABRICA",
+        "GASTOFABRICA": "GASTO_FABRICA", "GASTOSDEFABRICA": "GASTO_FABRICA",
+        "GASTODEFABRICA": "GASTO_FABRICA", "GASTOSFABRICA": "GASTO_FABRICA",
+        "CAMION": "GASTO_CAMIONES", "GCAMION": "GASTO_CAMIONES",
+        "GASTOCAMION": "GASTO_CAMIONES", "GASTOCAMIONES": "GASTO_CAMIONES",
+        "CAMIONES": "GASTO_CAMIONES", "GCAMIONES": "GASTO_CAMIONES",
+        "GASTODECAMION": "GASTO_CAMIONES", "GASTODECAMIONES": "GASTO_CAMIONES",
+        "GASTOSDECAMION": "GASTO_CAMIONES", "GASTOSDECAMIONES": "GASTO_CAMIONES",
         "I": "GASTO_INVERSION", "INVERSION": "GASTO_INVERSION",
         "GASTOINVERSION": "GASTO_INVERSION",
         "PRESTAMO": "PRESTAMO", "PRESTAMOS": "PRESTAMO",
@@ -72,7 +89,8 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
     if clave is None:
         raise ValueError(
             "Clasificación inválida. Usa Gasto Deducible, Gasto de Casa, "
-            "Gasto Personal, Gasto Fábrica, Gasto de Inversión, Préstamo, "
+            "Gasto Personal, Gasto Familiar, Gastos de Fábrica, "
+            "Gastos de Camiones, Gasto de Inversión, Préstamo, "
             "Donación o Impuestos."
         )
     return clave
@@ -82,8 +100,8 @@ def tipo_gasto_para_clasificacion(db: Session, clasificacion: str) -> TipoGasto:
     """Devuelve (o crea) el TipoGasto canónico de una clasificación.
 
     Se usa al registrar un egreso clasificado desde la caja y al importar el
-    libro: el catálogo queda con un tipo por clasificación ("Gasto Fábrica",
-    "Préstamo"...), sin duplicados.
+    libro: el catálogo queda con un tipo por clasificación ("Gastos de
+    Fábrica", "Préstamo"...), sin duplicados.
     """
     nombre = CLASIFICACIONES_GASTO[clasificacion]
     existente = (
