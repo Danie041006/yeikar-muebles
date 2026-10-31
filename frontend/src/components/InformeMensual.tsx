@@ -10,6 +10,7 @@ import {
   EstadoPorMoneda,
 } from '../services/reportesService';
 import { ventaService, Venta } from '../services/ventaService';
+import { hoyVE } from '../utils/fechas';
 import { getMonedas, Moneda } from '../services/gastoService';
 import { buildInformePrintHtml } from '../utils/informePrintHtml';
 import { SearchSelect, MontoInput } from './ui';
@@ -50,7 +51,7 @@ type DevolucionForm = {
 
 const emptyCajaForm = (monedaCopId?: number): CajaForm => ({
   metodo_caja_id: 0,
-  fecha: new Date().toISOString().slice(0, 10),
+  fecha: hoyVE(),
   tipo: 'ENTRADA',
   monto: '',
   moneda_id: monedaCopId ?? 1,
@@ -60,7 +61,7 @@ const emptyCajaForm = (monedaCopId?: number): CajaForm => ({
 
 const emptyDevolucionForm = (monedaCopId?: number): DevolucionForm => ({
   venta_id: 0,
-  fecha: new Date().toISOString().slice(0, 10),
+  fecha: hoyVE(),
   cantidad: '1',
   motivo: '',
   monto_devuelto: '',

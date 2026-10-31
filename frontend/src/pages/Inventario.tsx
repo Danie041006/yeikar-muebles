@@ -1173,7 +1173,7 @@ export default function Inventario() {
         estado: 'PENDIENTE',
         es_stock: true,
         producto_id: producirPieza.producto_id,
-        fecha_inicio: new Date().toISOString().slice(0, 10),
+        fecha_inicio: hoyVE(),
       });
       setProducirPieza(null);
       toast.success(`Orden #${orden.id} creada. Gestiona sus etapas en Producción.`);

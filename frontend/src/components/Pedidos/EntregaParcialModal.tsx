@@ -9,6 +9,7 @@ import {
 } from '../../services/envioService';
 import type { Order } from '../../services/pedidoService';
 import { Button, EmptyState, Field, Input, Modal, Spinner } from '../ui';
+import { hoyVE } from '../../utils/fechas';
 
 interface EntregaParcialModalProps {
   open: boolean;
@@ -49,7 +50,7 @@ export default function EntregaParcialModal({
     setDireccion(pedido.cliente?.direccion || '');
     setGuia('');
     setObservaciones('');
-    setFechaEntrega(new Date().toISOString().slice(0, 10));
+    setFechaEntrega(hoyVE());
     setEntregarAhora(true);
 
     envioService.getPendientes(pedido.id)
@@ -281,7 +282,7 @@ export default function EntregaParcialModal({
                 <Input
                   type="date"
                   value={fechaEntrega}
-                  max={new Date().toISOString().slice(0, 10)}
+                  max={hoyVE()}
                   onChange={(event) => setFechaEntrega(event.target.value)}
                 />
               </Field>

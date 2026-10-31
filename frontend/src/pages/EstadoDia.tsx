@@ -11,6 +11,7 @@ import {
   ResponsiveDataTable, type DataColumn,
 } from '../components/ui';
 import { nombreMoneda, fmtMoneda, formatCurrency } from '../utils/format';
+import { hoyVE } from '../utils/fechas';
 
 const TIPO_TONE: Record<string, 'green' | 'red' | 'blue' | 'neutral'> = {
   ENTRADA: 'green',
@@ -25,7 +26,7 @@ const TAB_COP: MonedaVistaDiaria = {
 };
 
 export default function EstadoDia() {
-  const [fecha, setFecha] = useState(() => new Date().toISOString().split('T')[0]);
+  const [fecha, setFecha] = useState(() => hoyVE());
   const [monedaVista, setMonedaVista] = useState('COP');
   const [data, setData] = useState<ResumenDiario | null>(null);
   const [loading, setLoading] = useState(false);

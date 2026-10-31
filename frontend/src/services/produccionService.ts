@@ -1,4 +1,5 @@
 import api from './api';
+import { ahoraVE } from '../utils/fechas';
 import {
   cancelarOperacionLocal,
   conCache,
@@ -394,8 +395,8 @@ export const produccionService = {
       optimista: async () => {
         await parchearEtapa(id, {
           estado,
-          ...(estado === 'EN_PROCESO' ? { fecha_inicio: new Date().toISOString() } : {}),
-          ...(estado === 'COMPLETADA' ? { fecha_fin: new Date().toISOString() } : {}),
+          ...(estado === 'EN_PROCESO' ? { fecha_inicio: ahoraVE() } : {}),
+          ...(estado === 'COMPLETADA' ? { fecha_fin: ahoraVE() } : {}),
         });
       },
     });
@@ -430,14 +431,14 @@ export const produccionService = {
       }) as unknown as EtapaProduccion,
       optimista: async (idLocal) => {
         const actual = await leerCache<EtapaProduccion>(`etapa:${etapaId}`);
-        await parchearEtapa(etapaId, { estado: 'COMPLETADA', fecha_fin: new Date().toISOString() });
+        await parchearEtapa(etapaId, { estado: 'COMPLETADA', fecha_fin: ahoraVE() });
         await insertarEtapaEnCaches(etapaId, {
           id: idLocal,
           orden_produccion_id: actual?.orden_produccion_id ?? 0,
           area_id: payload.area_id,
           empleado_responsable_id: payload.empleado_responsable_id,
           estado: 'ASIGNADA',
-          fecha_inicio: new Date().toISOString(),
+          fecha_inicio: ahoraVE(),
           observaciones: payload.observaciones,
           consumos: [],
           mano_obras: [],

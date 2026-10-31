@@ -7,6 +7,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect } from '../components/ui';
 import DocumentoHojaTrabajo from '../components/Expediente/DocumentoHojaTrabajo';
 import EtapaModal from '../components/Produccion/EtapaModal';
+import { ahoraVE } from '../utils/fechas';
 import { TRANSICIONES_ETAPA, esOrdenExhibicion, esOrdenRetrabajo, etiquetaOrden, nombreOrden, type Empleado, type Material } from '../components/Produccion/tipos';
 import { useToast } from '../context/ToastContext';
 
@@ -621,7 +622,7 @@ export default function ProduccionKanban() {
         empleado_responsable_id: parseInt(nuevaEtapaForm.empleado_id),
         estado: 'ASIGNADA',
         observaciones: nuevaEtapaForm.observaciones || 'Creado manualmente desde Kanban',
-        fecha_inicio: new Date().toISOString(),
+        fecha_inicio: ahoraVE(),
       });
       setOrdenParaNuevaEtapa(null);
       setNuevaEtapaForm({ area_id: '', empleado_id: '', observaciones: '' });

@@ -205,7 +205,7 @@ def _parse_fecha(
 def _anio_base(texto: str) -> int:
     anios = [int(a) for a in re.findall(r"\b(20\d{2})\b", texto)]
     if not anios:
-        return date.today().year
+        return hoy_ve().year
     return Counter(anios).most_common(1)[0][0]
 
 

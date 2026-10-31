@@ -11,6 +11,7 @@ import {
 } from '../components/ui';
 import { nombreMoneda, fmtMoneda } from '../utils/format';
 import { formatMontoInput, parseMontoInput } from '../utils/monto';
+import { hoyVE } from '../utils/fechas';
 import { useToast } from '../context/ToastContext';
 import LibroCajaView from '../components/Cuentas/LibroCajaView';
 import ReporteCuentasModal from '../components/Cuentas/ReporteCuentasModal';
@@ -25,7 +26,7 @@ const TIPOS = [
 
 const emptyMovForm = (metodoId = 0, monedaCopId = 1) => ({
   metodo_caja_id: metodoId,
-  fecha: new Date().toISOString().split('T')[0],
+  fecha: hoyVE(),
   tipo: 'ENTRADA' as MovimientoCreate['tipo'],
   monto: '',
   moneda_id: monedaCopId,
@@ -54,7 +55,7 @@ const emptyTransferForm = () => ({
   cuenta_origen_id: 0,
   cuenta_destino_id: 0,
   monto: 0,
-  fecha: new Date().toISOString().split('T')[0],
+  fecha: hoyVE(),
   tasa_conversion: '',
   tasa_invertida: false,
   tasa_cambio: '',

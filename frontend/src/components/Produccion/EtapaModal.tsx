@@ -19,7 +19,7 @@ import ConfirmDialog from '../ui/ConfirmDialog';
 import { SearchSelect, MontoInput } from '../ui';
 import CostosOrdenEnVivo from '../CostosOrdenEnVivo';
 import { useToast } from '../../context/ToastContext';
-import { fmtFechaVE } from '../../utils/fechas';
+import { fmtFechaVE, ahoraVE } from '../../utils/fechas';
 import { esOrdenExhibicion, esOrdenRetrabajo, fmt, nombreOrden, type Empleado, type Material } from './tipos';
 import {
   dimensionalidad,
@@ -479,7 +479,7 @@ export default function EtapaModal({
         etapa_produccion_id: stage.id,
         material_id: materialId,
         cantidad: cantidad as unknown as number,
-        fecha: new Date().toISOString(),
+        fecha: ahoraVE(),
         seccion: referenciaReceta?.seccion_actual || undefined,
         observaciones: newConsumo.observaciones || undefined,
         solicitante_empleado_id: parseInt(newConsumo.solicitante_id),

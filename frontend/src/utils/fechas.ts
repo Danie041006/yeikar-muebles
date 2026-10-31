@@ -21,6 +21,30 @@ export function hoyVE(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Caracas' });
 }
 
+/**
+ * Ahora en Venezuela como timestamp naive `YYYY-MM-DDTHH:mm:ss` (hora pared
+ * VE, sin zona), igual que los guarda el backend (`ahora_ve()`).
+ *
+ * Para payloads de negocio (etapas de producción, despachos, consumos):
+ * `new Date().toISOString()` manda UTC y después de las 8:00 pm el timestamp
+ * cae en el día siguiente (rompe nómina y reportes diarios).
+ */
+export function ahoraVE(): string {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Caracas',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const valor = (tipo: string) =>
+    partes.find((p) => p.type === tipo)?.value ?? '00';
+  return `${valor('year')}-${valor('month')}-${valor('day')}T${valor('hour')}:${valor('minute')}:${valor('second')}`;
+}
+
 export function fmtFechaVE(
   v: string | Date | null | undefined,
   vacio = '—',

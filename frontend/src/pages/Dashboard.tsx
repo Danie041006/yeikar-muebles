@@ -18,7 +18,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Card, StatCard, Badge, Button, ResponsiveDataTable, type DataColumn } from '../components/ui';
-import { fmtFechaVE } from '../utils/fechas';
+import { fmtFechaVE, hoyVE } from '../utils/fechas';
 
 interface IngresoMesDetail {
   moneda: string;
@@ -89,7 +89,7 @@ export default function Dashboard() {
 
       api.get<RecentOrder[]>('/pedido/')
         .then((r) => {
-          const todayStr = new Date().toISOString().split('T')[0];
+          const todayStr = hoyVE();
           const delayed = r.data.filter(
             (p) =>
               (p.estado === 'COTIZADO' || p.estado === 'PRODUCCION') &&

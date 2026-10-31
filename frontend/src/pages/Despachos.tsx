@@ -8,6 +8,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { SearchSelect, MontoInput } from '../components/ui';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import { ahoraVE } from '../utils/fechas';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 const PAGE_SIZE = 12;
@@ -173,7 +174,7 @@ export default function Despachos() {
       costo_flete: costoFlete ? parseFloat(costoFlete) : null,
       moneda_flete_id: monedaFleteId ? parseInt(monedaFleteId) : null,
       estado: 'EN_TRANSITO', // automatically set in transit upon assignment/dispatch
-      fecha_salida: new Date().toISOString(),
+      fecha_salida: ahoraVE(),
     };
     try {
       await envioService.update(assigningEnvio.id, data);

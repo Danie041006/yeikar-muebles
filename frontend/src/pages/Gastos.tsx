@@ -9,6 +9,7 @@ import {
   cuentasPorPagarService, CuentaPorPagar, ResumenCuentasPorPagar, Abono, DetalleCuentaPorPagar, DetalleCuentaPorPagarCreate,
 } from '../services/cuentasPorPagarService';
 import { nombreMoneda, fmtMoneda, fmtNumero } from '../utils/format';
+import { hoyVE } from '../utils/fechas';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import { useToast } from '../context/ToastContext';
@@ -40,7 +41,7 @@ const CAT_TONE: Record<string, 'blue' | 'red' | 'green' | 'neutral'> = {
 const CLASIF_TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral' | 'red' | 'orange' | 'teal'> =
   Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
 
-const hoy = () => new Date().toISOString().split('T')[0];
+const hoy = () => hoyVE();
 
 export default function Gastos() {
   const toast = useToast();
@@ -92,7 +93,7 @@ export default function Gastos() {
     tipo_gasto_id: 0,
     moneda_id: 1,
     area_id: 0,
-    fecha: new Date().toISOString().split('T')[0],
+    fecha: hoyVE(),
     monto: 0,
     tasa_cambio: 1,
     clasificacion: null,
@@ -190,7 +191,7 @@ export default function Gastos() {
       tipo_gasto_id: 0,
       moneda_id: 1,
       area_id: 0,
-      fecha: new Date().toISOString().split('T')[0],
+      fecha: hoyVE(),
       monto: 0,
       tasa_cambio: 1,
       clasificacion: null,
