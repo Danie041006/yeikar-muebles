@@ -20,6 +20,7 @@ from app.modules.sales.router import router as sales_router, pago_router as pago
 from app.modules.facturacion.router import router as facturacion_router
 from app.modules.gastos.router import router as gastos_router
 from app.modules.cuentas_por_pagar.router import router as cuentas_por_pagar_router
+from app.modules.prestamos.router import router as prestamos_router
 from app.modules.inventory.router import router as inventario_router
 from app.modules.purchases.router import router as compras_router
 from app.modules.reports.router import router as reportes_router, router_metodos_cobro
@@ -125,6 +126,7 @@ app.include_router(reportes_router, prefix="/api/v1", tags=["reportes"])
 # accesible a cualquier usuario autenticado; el CRUD sigue en reportes_router.
 app.include_router(router_metodos_cobro, prefix="/api/v1", tags=["metodos-caja"])
 app.include_router(cuentas_router, prefix="/api/v1", tags=["cuentas"])
+app.include_router(prestamos_router, prefix="/api/v1", tags=["préstamos"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
 app.include_router(envios_router, prefix="/api/v1/envio", tags=["envios"])
 app.include_router(iqe_router, prefix="/api/v1/intelligent-quotation", tags=["cotización inteligente"])

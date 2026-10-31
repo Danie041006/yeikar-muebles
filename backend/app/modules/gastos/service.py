@@ -396,6 +396,25 @@ def eliminar_gasto(
     # Al eliminar un gasto con salida de caja, se revierte su movimiento para
     # que el saldo de la cuenta no quede con un egreso que ya no existe.
     from app.modules.reports.model import MovimientoCaja
+
+    # Si la salida creó un préstamo por cobrar, borrar solo el gasto dejaría la
+    # deuda viva sin el egreso que la originó. Se elimina desde Cuentas, que
+    # arrastra las dos caras (gasto + préstamo).
+    from app.modules.prestamos import service as prestamos_service
+
+    movimiento_gasto = (
+        db.query(MovimientoCaja)
+        .filter(MovimientoCaja.referencia == f"Gasto #{db_gasto.id}")
+        .first()
+    )
+    if movimiento_gasto is not None and prestamos_service.prestamo_de_movimiento(
+        db, movimiento_gasto.id
+    ):
+        raise ValueError(
+            "Este gasto es un préstamo por cobrar: elimínalo desde Cuentas "
+            "(el movimiento del libro), para borrar también la deuda."
+        )
+
     db.query(MovimientoCaja).filter(
         MovimientoCaja.referencia == f"Gasto #{db_gasto.id}"
     ).delete(synchronize_session=False)

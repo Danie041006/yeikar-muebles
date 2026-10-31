@@ -3,6 +3,8 @@ from typing import List, Literal, Optional
 from decimal import Decimal
 from datetime import date, datetime, time
 
+from app.modules.prestamos.schemas import CobroPrestamoCreate
+
 
 # ------------------------------------------------------------
 # P&L (existente)
@@ -152,7 +154,13 @@ class MovimientoCajaBase(BaseModel):
     clasificacion: Optional[str] = None
 
 class MovimientoCajaCreate(MovimientoCajaBase):
-    pass
+    # Solo en SALIDA clasificada como PRESTAMO:
+    #   POR_COBRAR (por defecto) = presté dinero → queda por cobrar.
+    #   PAGO_DEUDA = estoy pagando un préstamo que YO debo (no genera deuda).
+    tipo_prestamo: Optional[str] = Field(None, pattern="^(POR_COBRAR|PAGO_DEUDA)$")
+    # Solo en ENTRADA: cobro de un préstamo. La entrada de caja y el abono al
+    # préstamo se crean juntos; el monto de arriba se ignora y se recalcula.
+    cobro_prestamo: Optional[CobroPrestamoCreate] = None
 
 class MovimientoCajaUpdate(BaseModel):
     metodo_caja_id: Optional[int] = None

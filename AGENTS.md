@@ -154,6 +154,17 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 - El parser infiere D/M vs M/D por el mes dominante, usa el **cambio de saldo** como signo (el libro a veces trae el ingreso/egreso en la columna contraria), omite filas de notas sin montos y marca **posibles duplicados** comparando sentido + importe + nombre contra los movimientos ya existentes. La importación puede omitirlos (`omitir_duplicados`, default true) y **cuadrar el saldo inicial** contra lo que ya tiene la cuenta (`cuadrar_saldo_inicial`, registra un ajuste por la diferencia, no una apertura duplicada).
 - Tests: `cd backend && venv/bin/python -m pytest test/test_libro_caja.py -v`.
 
+## Préstamos por cobrar (dinero que la empresa prestó)
+
+- **Nacen en Cuentas, no en un módulo aparte**: `Salida` de caja con Tipo de gasto **Préstamo** + `persona_entidad` obligatoria. El backend crea el `Gasto` de siempre **y** un registro en `prestamo` (tabla nueva) ligado al movimiento de caja. En la UI hay un sub-selector: **"Presté dinero (me deben)"** (`tipo_prestamo=POR_COBRAR`, default) vs **"Pagué un préstamo que yo debo"** (`PAGO_DEUDA`, no genera deuda).
+- **Se cobran desde la Entrada**: `ENTRADA` con `cobro_prestamo: {persona_nombre, moneda_id, monto, tasa_conversion?}`. La entrada de caja y el abono (`pago_prestamo`) se crean en la **misma transacción**. El monto va en la moneda del préstamo y puede ser parcial; se aplica **FIFO** (más antiguo primero) entre los préstamos pendientes de esa persona y moneda.
+- **Moneda distinta**: si la cuenta donde entra el dinero no es la del préstamo, `tasa_conversion` es obligatoria (`1 [moneda préstamo] = X [moneda cuenta]`). El valor en COP del cobro se congela a la tasa del préstamo (no se revalúa) y `movimiento_caja.tasa_cambio` se deriva para que `monto × tasa = monto_en_moneda_base`.
+- **Borrar/editar**: eliminar la entrada de cobro devuelve el saldo al préstamo; eliminar la salida que prestó borra el préstamo (si no tiene cobros; si los tiene responde 409). Editar monto/fecha/persona de la salida sincroniza la deuda solo si no hay cobros; el concepto sí se puede corregir siempre. El gasto no se puede borrar desde Gastos (hay que hacerlo desde Cuentas).
+- **API**: `GET /api/v1/prestamo/` (historial con pagos), `GET /api/v1/prestamo/pendientes` (selector: persona + moneda + saldo) y `GET /api/v1/prestamo/resumen` (totales por moneda y por persona). Módulo de permisos: `cuentas`.
+- **No hay backfill**: solo se registran los préstamos creados desde el despliegue (31/10/2026). Los `PRESTAMO` históricos quedan como gastos y no generan deuda.
+- **UI**: tarjeta "Préstamos por cobrar" en **Cuentas → Cuentas y saldos** y el detalle con abonos. Sin pantalla nueva en el menú.
+- Tests: `pytest test/test_prestamos.py -v`.
+
 ## Testing
 
 ```sh

@@ -78,6 +78,82 @@ export interface MovimientoCreate {
   // Solo en SALIDA: clasificación del egreso (G D/C/P/F/I o Préstamo).
   // Si viene, la salida se registra también como Gasto clasificado.
   clasificacion?: string | null;
+  // Solo en SALIDA clasificada PRESTAMO:
+  //   POR_COBRAR = presté dinero (queda por cobrar a nombre de la persona).
+  //   PAGO_DEUDA = estoy pagando un préstamo que YO debo.
+  tipo_prestamo?: 'POR_COBRAR' | 'PAGO_DEUDA';
+  // Solo en ENTRADA: cobro de un préstamo (crea la entrada y el abono juntos).
+  cobro_prestamo?: CobroPrestamoPayload;
+}
+
+export interface CobroPrestamoPayload {
+  persona_nombre: string;
+  /** Moneda del préstamo (el monto va en esta moneda). */
+  moneda_id: number;
+  monto: number;
+  /** 1 [moneda del préstamo] = X [moneda de la cuenta]. Solo si difieren. */
+  tasa_conversion?: number | null;
+}
+
+export interface PagoPrestamo {
+  id: number;
+  prestamo_id: number;
+  fecha: string;
+  monto: number;
+  metodo_caja_id: number;
+  metodo_caja_nombre?: string | null;
+  moneda_cuenta_id: number;
+  moneda_cuenta_codigo?: string | null;
+  tasa_conversion: number;
+  monto_en_moneda_cuenta: number;
+  monto_en_moneda_base: number;
+  movimiento_caja_id?: number | null;
+  creador_nombre?: string | null;
+  created_at?: string | null;
+}
+
+export interface Prestamo {
+  id: number;
+  persona_nombre: string;
+  fecha: string;
+  moneda_id: number;
+  monto: number;
+  tasa_cambio: number;
+  monto_en_moneda_base: number;
+  monto_abonado: number;
+  saldo: number;
+  estado: 'PENDIENTE' | 'PAGADO';
+  metodo_caja_id?: number | null;
+  movimiento_caja_id?: number | null;
+  observaciones?: string | null;
+  creador_nombre?: string | null;
+  moneda?: Moneda | null;
+  pagos: PagoPrestamo[];
+}
+
+export interface PendientePrestamo {
+  persona_nombre: string;
+  moneda_id: number;
+  moneda_codigo: string;
+  moneda_simbolo?: string | null;
+  saldo: number;
+  prestamos: number;
+  ultima_fecha?: string | null;
+}
+
+export interface TotalPrestamosMoneda {
+  moneda_id: number;
+  moneda_codigo: string;
+  moneda_simbolo?: string | null;
+  total_prestado: number;
+  total_cobrado: number;
+  saldo: number;
+}
+
+export interface ResumenPrestamos {
+  personas_con_saldo: number;
+  por_moneda: TotalPrestamosMoneda[];
+  por_persona: PendientePrestamo[];
 }
 
 export interface TransferenciaPayload {
@@ -313,6 +389,26 @@ export const cuentasService = {
     fecha_hasta?: string;
   }): Promise<LibroCajaVista> => {
     const res = await api.get<LibroCajaVista>('/cuenta/libro', { params });
+    return res.data;
+  },
+
+  // Préstamos por cobrar: nacen de una salida PRESTAMO y se cobran desde una
+  // entrada "Cobro de préstamo" (el abono y la entrada son una sola operación).
+  getPrestamos: async (params?: {
+    estado?: string;
+    persona?: string;
+    fecha_desde?: string;
+    fecha_hasta?: string;
+  }): Promise<Prestamo[]> => {
+    const res = await api.get<Prestamo[]>('/prestamo/', { params });
+    return res.data;
+  },
+  getPrestamosPendientes: async (): Promise<PendientePrestamo[]> => {
+    const res = await api.get<PendientePrestamo[]>('/prestamo/pendientes');
+    return res.data;
+  },
+  getPrestamosResumen: async (): Promise<ResumenPrestamos> => {
+    const res = await api.get<ResumenPrestamos>('/prestamo/resumen');
     return res.data;
   },
 };

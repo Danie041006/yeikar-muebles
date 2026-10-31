@@ -1193,19 +1193,75 @@ def listar_movimientos_caja(db: Session, metodo_id: Optional[int] = None, fecha_
 
 def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, usuario_id: Optional[int] = None) -> model.MovimientoCaja:
     datos = esquema.model_dump()
-    monto = Decimal(str(datos["monto"]))
-    # La tasa no se pide en el formulario de caja: se resuelve sola. Para COP
-    # es 1; para otra moneda se usa la TRM registrada a la fecha.
-    tasa = datos.get("tasa_cambio")
-    moneda = db.query(Moneda).filter(Moneda.id == datos["moneda_id"]).first()
-    if moneda is not None and moneda.codigo == "COP":
-        tasa = Decimal("1.0")
-    elif tasa is None:
-        from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
-        tasa = obtener_tasa_moneda_a_cop(db, datos["moneda_id"], datos["fecha"])
-    tasa = Decimal(str(tasa or 1.0))
-    datos["tasa_cambio"] = tasa
-    datos["monto_en_moneda_base"] = round(monto * tasa, 2)
+    cobro = datos.pop("cobro_prestamo", None)
+    tipo_prestamo = datos.pop("tipo_prestamo", None)
+
+    plan_cobro = None
+    tasa_conversion_cobro = Decimal("1.0")
+    moneda_cuenta_cobro_id: Optional[int] = None
+
+    if cobro is not None:
+        # Cobro de un préstamo: la entrada de caja y el abono al préstamo son
+        # UNA sola operación. El monto viaja en la moneda del préstamo; lo que
+        # entra a la cuenta se calcula aquí (con la tasa indicada si difieren).
+        if datos["tipo"] != "ENTRADA":
+            raise ValueError("El cobro de un préstamo se registra como ENTRADA de caja.")
+        from app.modules.prestamos import service as prestamos_service
+
+        plan_cobro = prestamos_service.planificar_cobro(
+            db,
+            persona_nombre=cobro["persona_nombre"],
+            moneda_id=cobro["moneda_id"],
+            monto=cobro["monto"],
+        )
+        cuenta_destino = (
+            db.query(model.MetodoCaja)
+            .filter(model.MetodoCaja.id == datos["metodo_caja_id"])
+            .first()
+        )
+        if cuenta_destino is None:
+            raise ValueError("La cuenta de caja indicada no existe.")
+        moneda_cuenta_cobro_id = cuenta_destino.moneda_id or 1
+        if moneda_cuenta_cobro_id == cobro["moneda_id"]:
+            monto_cuenta = Decimal(str(plan_cobro.monto))
+        else:
+            tasa_indicada = cobro.get("tasa_conversion")
+            if not tasa_indicada or Decimal(str(tasa_indicada)) <= 0:
+                raise ValueError(
+                    "Indica la tasa de cambio: 1 [moneda del préstamo] = ? "
+                    "[moneda de la cuenta]."
+                )
+            tasa_conversion_cobro = Decimal(str(tasa_indicada))
+            monto_cuenta = (Decimal(str(plan_cobro.monto)) * tasa_conversion_cobro).quantize(
+                Decimal("0.01")
+            )
+        monto_base = plan_cobro.monto_base
+        datos["moneda_id"] = moneda_cuenta_cobro_id
+        datos["monto"] = monto_cuenta
+        datos["tasa_cambio"] = (
+            (monto_base / monto_cuenta).quantize(Decimal("0.000001"))
+            if monto_cuenta > 0
+            else Decimal("1.0")
+        )
+        datos["monto_en_moneda_base"] = monto_base
+        datos["persona_entidad"] = plan_cobro.persona_nombre
+        if not datos.get("concepto"):
+            datos["concepto"] = f"Cobro de préstamo · {plan_cobro.persona_nombre}"
+    else:
+        monto = Decimal(str(datos["monto"]))
+        # La tasa no se pide en el formulario de caja: se resuelve sola. Para COP
+        # es 1; para otra moneda se usa la TRM registrada a la fecha.
+        tasa = datos.get("tasa_cambio")
+        moneda = db.query(Moneda).filter(Moneda.id == datos["moneda_id"]).first()
+        if moneda is not None and moneda.codigo == "COP":
+            tasa = Decimal("1.0")
+        elif tasa is None:
+            from app.modules.tasas_cambio.service import obtener_tasa_moneda_a_cop
+            tasa = obtener_tasa_moneda_a_cop(db, datos["moneda_id"], datos["fecha"])
+        tasa = Decimal(str(tasa or 1.0))
+        datos["tasa_cambio"] = tasa
+        datos["monto_en_moneda_base"] = round(monto * tasa, 2)
+
     for campo in ("persona_entidad", "concepto", "referencia"):
         if datos.get(campo) is not None:
             datos[campo] = str(datos[campo]).strip() or None
@@ -1223,11 +1279,34 @@ def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, us
             "Solo las salidas de caja se pueden clasificar como gasto o préstamo."
         )
 
+    # Préstamo que se hace: queda por cobrar a nombre de la persona. El pago de
+    # un préstamo propio (PAGO_DEUDA) es solo el egreso y no genera deuda.
+    if clasificacion == "PRESTAMO":
+        tipo_prestamo = tipo_prestamo or "POR_COBRAR"
+        if tipo_prestamo == "POR_COBRAR" and not (datos.get("persona_entidad") or "").strip():
+            raise ValueError(
+                "Indica la persona a la que le prestaste el dinero (para poder cobrárselo después)."
+            )
+    else:
+        tipo_prestamo = None
+
     datos["usuario_id"] = usuario_id
 
     if clasificacion is None:
         obj = model.MovimientoCaja(**datos)
         db.add(obj)
+        db.flush()
+        if plan_cobro is not None:
+            from app.modules.prestamos import service as prestamos_service
+
+            prestamos_service.registrar_cobro(
+                db,
+                plan_cobro,
+                movimiento=obj,
+                moneda_cuenta_id=moneda_cuenta_cobro_id or obj.moneda_id,
+                tasa_conversion=tasa_conversion_cobro,
+                usuario_id=usuario_id,
+            )
         db.commit()
         db.refresh(obj)
         return obj
@@ -1269,6 +1348,23 @@ def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, us
         raise ValueError("No se pudo crear el movimiento de la salida clasificada.")
     if persona:
         obj.persona_entidad = persona
+
+    if tipo_prestamo == "POR_COBRAR":
+        from app.modules.prestamos import service as prestamos_service
+
+        prestamos_service.crear_prestamo(
+            db,
+            persona_nombre=obj.persona_entidad,
+            fecha=obj.fecha,
+            moneda_id=obj.moneda_id,
+            monto=obj.monto,
+            tasa_cambio=obj.tasa_cambio,
+            metodo_caja_id=obj.metodo_caja_id,
+            movimiento_caja_id=obj.id,
+            observaciones=obj.concepto,
+            usuario_id=usuario_id,
+        )
+
     db.commit()
     db.refresh(obj)
     return obj
@@ -1319,13 +1415,15 @@ def _snapshot_movimiento(obj: model.MovimientoCaja) -> dict:
     }
 
 
-def _validar_movimiento_editable(obj: model.MovimientoCaja) -> None:
+def _validar_movimiento_editable(db: Session, obj: model.MovimientoCaja) -> None:
     """Un asiento derivado no se edita por separado: su origen manda.
 
     - Pago de venta: el abono (monto/fecha/cuenta) se corrige desde Ventas con
       su historial de correcciones; editar solo la caja descuadraría la venta.
     - Transferencia: son dos patas unidas; cambiar una sola fabrica o
       desaparece dinero. Se elimina completa y se crea de nuevo.
+    - Cobro de préstamo: el abono quedó atado a este asiento; el saldo se
+      recalcula al eliminarlo. Se corrige eliminando y creando de nuevo.
     """
     if obj.pago_id:
         raise ValueError(
@@ -1336,6 +1434,13 @@ def _validar_movimiento_editable(obj: model.MovimientoCaja) -> None:
         raise ValueError(
             "Es una pata de una transferencia entre cuentas: no se puede "
             "editar por separado. Elimina la transferencia y créala de nuevo."
+        )
+    from app.modules.prestamos import service as prestamos_service
+
+    if prestamos_service.pagos_de_movimiento(db, obj.id):
+        raise ValueError(
+            "Este movimiento es un cobro de préstamo: elimínalo y créalo de "
+            "nuevo para corregirlo (el saldo se ajusta solo)."
         )
 
 
@@ -1353,7 +1458,29 @@ def actualizar_movimiento_caja(
     # puede corregir incluso en asientos derivados (cobro o transferencia).
     # Cualquier otro campo sigue bloqueado en esos casos.
     if set(datos) - {"hora"}:
-        _validar_movimiento_editable(obj)
+        _validar_movimiento_editable(db, obj)
+
+    # La salida que creó un préstamo y su deuda son la misma operación: los
+    # datos básicos se mantienen sincronizados (mientras no haya cobros).
+    from app.modules.prestamos import service as prestamos_service
+
+    prestamo_origen = prestamos_service.prestamo_de_movimiento(db, obj.id)
+    if prestamo_origen is not None:
+        # Solo bloquea si REALMENTE cambian los datos que sostienen la deuda:
+        # el formulario reenvía monto/fecha aunque el usuario solo corrija el
+        # concepto, y eso no debe impedir la edición.
+        persona_nueva = (str(datos.get("persona_entidad") or "").strip() or None)
+        cambia_monto = "monto" in datos and Decimal(str(datos["monto"])) != Decimal(str(obj.monto))
+        cambia_fecha = "fecha" in datos and datos["fecha"] != obj.fecha
+        cambia_persona = "persona_entidad" in datos and persona_nueva != obj.persona_entidad
+        if (cambia_monto or cambia_fecha or cambia_persona) and prestamos_service.pagos_de_prestamo(
+            db, prestamo_origen.id
+        ):
+            raise ValueError(
+                "Este movimiento creó un préstamo que ya tiene cobros: no se puede "
+                "cambiar monto, fecha ni persona. Elimina primero las entradas de cobro."
+            )
+
     antes = _snapshot_movimiento(obj)
 
     # Movimiento espejo de un gasto (referencia "Gasto #N"): corregir el
@@ -1374,6 +1501,15 @@ def actualizar_movimiento_caja(
         setattr(obj, campo, valor)
     if "monto" in datos or "tasa_cambio" in datos:
         obj.monto_en_moneda_base = round(Decimal(str(obj.monto)) * Decimal(str(obj.tasa_cambio or 1.0)), 2)
+
+    if prestamo_origen is not None:
+        if "monto" in datos:
+            prestamo_origen.monto = obj.monto
+            prestamo_origen.monto_en_moneda_base = obj.monto_en_moneda_base
+        if "fecha" in datos:
+            prestamo_origen.fecha = obj.fecha
+        if "persona_entidad" in datos and obj.persona_entidad:
+            prestamo_origen.persona_nombre = obj.persona_entidad
 
     # Una transferencia es UNA operación: la hora (que solo posiciona la fila
     # en el libro) se aplica a las dos patas para que se lean juntas.
@@ -1430,6 +1566,14 @@ def eliminar_movimiento_caja(
         )
     _validar_borrado_transferencia(obj, usuario)
     antes = _snapshot_movimiento(obj)
+
+    # Préstamos: si este asiento es un cobro, devuelve el saldo al préstamo;
+    # si es la salida que prestó el dinero, borra el préstamo (solo cuando no
+    # tiene cobros). Sin esto quedarían deudas fantasma o saldos inflados.
+    from app.modules.prestamos import service as prestamos_service
+
+    prestamos_service.revertir_cobros_de_movimiento(db, obj.id)
+    prestamos_service.eliminar_prestamo_de_movimiento(db, obj.id)
 
     # Salida clasificada: su Gasto es la otra cara del asiento. Borrar solo el
     # movimiento dejaría el gasto (y los reportes) vivos, así que se elimina el

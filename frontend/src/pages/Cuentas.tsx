@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import {
   cuentasService, ResumenCuenta, MovimientoCaja, Moneda,
   MovimientoCreate, MetodoCaja, TransferenciaPayload,
+  PendientePrestamo, Prestamo, ResumenPrestamos,
 } from '../services/cuentasService';
 import { CLASIFICACIONES_GASTO } from '../services/gastoService';
 import {
@@ -34,6 +35,12 @@ const emptyMovForm = (metodoId = 0, monedaCopId = 1) => ({
   concepto: '',
   // Solo para salidas: clasificación opcional del egreso.
   clasificacion: '',
+  // Préstamos: en la salida decide si queda por cobrar; en la entrada marca
+  // que el dinero que entra es el cobro de un préstamo.
+  tipo_prestamo: 'POR_COBRAR' as 'POR_COBRAR' | 'PAGO_DEUDA',
+  motivo_entrada: 'INGRESO' as 'INGRESO' | 'PRESTAMO',
+  prestamo_key: '',
+  tasa_conversion: '',
 });
 
 const fmt = (n: number) => (Number.isFinite(n) ? n.toLocaleString('es-CO', { maximumFractionDigits: 0 }) : '0');
@@ -43,6 +50,10 @@ const fmtTasa = (n: number) => (
     ? n.toLocaleString('es-CO', { maximumFractionDigits: 6 })
     : '—'
 );
+
+/** Clave del selector de deudores: una fila por persona + moneda. */
+const clavePrestamo = (p: { persona_nombre: string; moneda_id: number }) =>
+  `${p.persona_nombre}|${p.moneda_id}`;
 
 const TIPO_TONE: Record<string, 'neutral' | 'green' | 'red' | 'amber'> = {
   APERTURA: 'neutral',
@@ -104,6 +115,14 @@ export default function Cuentas() {
   const [confirmAccion, setConfirmAccion] = useState<null | { tipo: 'cuenta' | 'movimiento'; id: number; nombre?: string }>(null);
   const [detalleMov, setDetalleMov] = useState<MovimientoCaja | null>(null);
 
+  // Préstamos por cobrar (se crean con una salida PRESTAMO y se cobran con
+  // una entrada "Cobro de préstamo"). Sin pantalla aparte: todo vive en Cuentas.
+  const [pendientes, setPendientes] = useState<PendientePrestamo[]>([]);
+  const [resumenPrestamos, setResumenPrestamos] = useState<ResumenPrestamos | null>(null);
+  const [showPrestamosModal, setShowPrestamosModal] = useState(false);
+  const [prestamosDetalle, setPrestamosDetalle] = useState<Prestamo[]>([]);
+  const [loadingPrestamos, setLoadingPrestamos] = useState(false);
+
   // Reporte del libro de caja (PDF / Excel)
   const [showReporteModal, setShowReporteModal] = useState(false);
   const [reporteDefaults, setReporteDefaults] = useState<{
@@ -117,7 +136,7 @@ export default function Cuentas() {
     setLoading(true);
     setError('');
     try {
-      const [res, movs, mon] = await Promise.all([
+      const [res, movs, mon, pend, resPrest] = await Promise.all([
         cuentasService.getResumen(),
         cuentasService.getMovimientos({
           metodo_caja_id: filtroCuenta || undefined,
@@ -125,12 +144,16 @@ export default function Cuentas() {
           fecha_hasta: fechaHasta || undefined,
         }),
         cuentasService.getMonedas(),
+        cuentasService.getPrestamosPendientes().catch(() => [] as PendientePrestamo[]),
+        cuentasService.getPrestamosResumen().catch(() => null),
       ]);
       setResumen(res);
       setMovimientos(filtroTipo
         ? movs.filter((m) => m.tipo === filtroTipo)
         : movs);
       setMonedas(mon);
+      setPendientes(pend);
+      setResumenPrestamos(resPrest);
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? 'Error al cargar las cuentas.');
     } finally {
@@ -144,6 +167,33 @@ export default function Cuentas() {
 
   const monedaCopId = monedas.find((m) => m.codigo === 'COP')?.id ?? 1;
   const monedaDe = (id?: number) => monedas.find((m) => m.id === id);
+
+  // ─── Préstamos: estado derivado del formulario ─────────────────────────
+  const cuentaFormSel = resumen.find((r) => r.metodo_caja.id === movForm.metodo_caja_id);
+  const monedaCuentaForm = cuentaFormSel?.metodo_caja.moneda_id ?? movForm.moneda_id;
+  const esCobroPrestamo = !editMov && movForm.tipo === 'ENTRADA' && movForm.motivo_entrada === 'PRESTAMO';
+  const deudorSel = pendientes.find((p) => clavePrestamo(p) === movForm.prestamo_key);
+  const monedasCobroDistintas = !!deudorSel && monedaCuentaForm !== deudorSel.moneda_id;
+  const montoCobroNum = parseMontoInput(movForm.monto);
+  const tasaCobroNum = parseMontoInput(movForm.tasa_conversion);
+  const montoQueEntra = !deudorSel || !Number.isFinite(montoCobroNum)
+    ? 0
+    : monedasCobroDistintas
+      ? montoCobroNum * (Number.isFinite(tasaCobroNum) ? tasaCobroNum : 0)
+      : montoCobroNum;
+  const monedaPrestamoSel = deudorSel ? monedaDe(deudorSel.moneda_id) : undefined;
+
+  const abrirPrestamos = async () => {
+    setShowPrestamosModal(true);
+    setLoadingPrestamos(true);
+    try {
+      setPrestamosDetalle(await cuentasService.getPrestamos());
+    } catch {
+      setPrestamosDetalle([]);
+    } finally {
+      setLoadingPrestamos(false);
+    }
+  };
 
   // ─── Cuentas ───────────────────────────────────────────────────────────
   const abrirCuenta = (cuenta?: MetodoCaja) => {
@@ -202,14 +252,12 @@ export default function Cuentas() {
     setEditMov(mov ?? null);
     if (mov) {
       setMovForm({
-        metodo_caja_id: mov.metodo_caja_id,
+        ...emptyMovForm(mov.metodo_caja_id, mov.moneda_id),
         fecha: mov.fecha.slice(0, 10),
         tipo: mov.tipo,
         monto: formatMontoInput(String(mov.monto)),
-        moneda_id: mov.moneda_id,
         persona_entidad: mov.persona_entidad ?? '',
         concepto: mov.concepto ?? '',
-        clasificacion: '',
       });
     } else {
       // Movimiento nuevo: la moneda arranca en la moneda propia de la cuenta.
@@ -226,18 +274,56 @@ export default function Cuentas() {
       setError('Cuenta y monto son obligatorios (mayor a 0).');
       return;
     }
+
+    // Cobro de un préstamo: el monto va en la moneda del préstamo y la persona
+    // sale del selector (no del campo libre). Si la cuenta es de otra moneda,
+    // la tasa es obligatoria.
+    const esCobro = !editMov && movForm.tipo === 'ENTRADA' && movForm.motivo_entrada === 'PRESTAMO';
+    let cobro: MovimientoCreate['cobro_prestamo'];
+    if (esCobro) {
+      const deudor = pendientes.find((p) => clavePrestamo(p) === movForm.prestamo_key);
+      if (!deudor) {
+        setError('Selecciona a quién le estás cobrando el préstamo.');
+        return;
+      }
+      if (monto > Number(deudor.saldo) + 0.005) {
+        setError(`El monto excede lo que debe ${deudor.persona_nombre}: ${deudor.moneda_simbolo ?? ''}${fmt(Number(deudor.saldo))}.`);
+        return;
+      }
+      const cuentaDestino = resumen.find((r) => r.metodo_caja.id === movForm.metodo_caja_id);
+      const monedaCuenta = cuentaDestino?.metodo_caja.moneda_id ?? deudor.moneda_id;
+      const tasa = parseMontoInput(movForm.tasa_conversion);
+      if (monedaCuenta !== deudor.moneda_id && (!Number.isFinite(tasa) || tasa <= 0)) {
+        setError('Indica la tasa de cambio entre la moneda del préstamo y la de la cuenta.');
+        return;
+      }
+      cobro = {
+        persona_nombre: deudor.persona_nombre,
+        moneda_id: deudor.moneda_id,
+        monto,
+        tasa_conversion: monedaCuenta !== deudor.moneda_id ? tasa : undefined,
+      };
+    }
+
     const payload = {
       fecha: movForm.fecha,
       tipo: movForm.tipo,
+      // En el cobro el monto real lo recalcula el backend (moneda de la cuenta).
       monto,
       moneda_id: movForm.moneda_id,
-      persona_entidad: movForm.persona_entidad.trim() || null,
+      persona_entidad: esCobro ? cobro!.persona_nombre : movForm.persona_entidad.trim() || null,
       concepto: movForm.concepto.trim() || null,
       // La clasificación solo aplica a salidas nuevas: el alta crea además el
       // Gasto clasificado. En edición se cambia desde el módulo Gastos.
       ...(!editMov && movForm.tipo === 'SALIDA' && movForm.clasificacion
         ? { clasificacion: movForm.clasificacion }
         : {}),
+      // En una salida "Préstamo": decide si queda por cobrar o si es el pago
+      // de una deuda propia (que no genera préstamo).
+      ...(!editMov && movForm.tipo === 'SALIDA' && movForm.clasificacion === 'PRESTAMO'
+        ? { tipo_prestamo: movForm.tipo_prestamo }
+        : {}),
+      ...(cobro ? { cobro_prestamo: cobro } : {}),
     };
     try {
       if (editMov) {
@@ -671,6 +757,56 @@ export default function Cuentas() {
         ))}
       </div>
 
+      {/* Préstamos por cobrar: solo aparece cuando hay algo pendiente */}
+      {resumenPrestamos && resumenPrestamos.por_persona.length > 0 && (
+        <Card
+          title="Préstamos por cobrar"
+          action={<Button variant="outline" size="sm" onClick={abrirPrestamos}>Ver detalle</Button>}
+        >
+          <div className="px-5 py-4 flex flex-wrap items-center gap-x-10 gap-y-3">
+            <div className="flex flex-wrap items-end gap-x-8 gap-y-2">
+              {resumenPrestamos.por_moneda
+                .filter((m) => Number(m.saldo) !== 0)
+                .map((m) => (
+                  <div key={m.moneda_id}>
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-yeikar-neutral/40">
+                      Por cobrar · {m.moneda_codigo}
+                    </p>
+                    <p className="font-mono text-2xl font-black text-yeikar-secondary">
+                      {m.moneda_simbolo ?? ''}{fmt(Number(m.saldo))}
+                    </p>
+                  </div>
+                ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {resumenPrestamos.por_persona.slice(0, 6).map((p) => (
+                <button
+                  key={clavePrestamo(p)}
+                  type="button"
+                  onClick={abrirPrestamos}
+                  className="rounded-full border border-yeikar-secondary-light/15 bg-yeikar-tertiary/20 px-3 py-1 text-xs hover:border-yeikar-primary/40 transition-colors"
+                  title={`${p.prestamos} préstamo${p.prestamos !== 1 ? 's' : ''}`}
+                >
+                  <span className="font-semibold text-yeikar-secondary">{p.persona_nombre}</span>
+                  <span className="ml-1.5 font-mono text-yeikar-neutral/60">
+                    {p.moneda_simbolo ?? ''}{fmt(Number(p.saldo))}
+                  </span>
+                </button>
+              ))}
+              {resumenPrestamos.por_persona.length > 6 && (
+                <button
+                  type="button"
+                  onClick={abrirPrestamos}
+                  className="rounded-full border border-dashed border-yeikar-secondary-light/25 px-3 py-1 text-xs text-yeikar-neutral/50 hover:text-yeikar-secondary"
+                >
+                  +{resumenPrestamos.por_persona.length - 6} más
+                </button>
+              )}
+            </div>
+          </div>
+        </Card>
+      )}
+
       {/* Historial de movimientos */}
       <Card
         title="Movimientos"
@@ -848,6 +984,80 @@ export default function Cuentas() {
               />
             </Field>
           </div>
+          {!editMov && movForm.tipo === 'ENTRADA' && (
+            <Field label="¿De qué es la entrada?">
+              <Select
+                value={movForm.motivo_entrada}
+                onChange={(e) => setMovForm((prev) => ({
+                  ...prev,
+                  motivo_entrada: e.target.value as 'INGRESO' | 'PRESTAMO',
+                  prestamo_key: '',
+                  tasa_conversion: '',
+                }))}
+              >
+                <option value="INGRESO">Dinero normal (venta, abono, otro)</option>
+                <option value="PRESTAMO">Me están pagando un préstamo</option>
+              </Select>
+            </Field>
+          )}
+
+          {esCobroPrestamo && (
+            <div className="rounded-xl bg-yeikar-tertiary/30 p-4 space-y-3">
+              <Field label="¿Quién te paga?" required>
+                <SearchSelect
+                  value={movForm.prestamo_key}
+                  onChange={(v) => {
+                    const key = String(v);
+                    const deudor = pendientes.find((p) => clavePrestamo(p) === key);
+                    setMovForm((prev) => ({
+                      ...prev,
+                      prestamo_key: key,
+                      // Prellena con lo que debe y con su nombre (por si acaso).
+                      monto: deudor ? formatMontoInput(String(Number(deudor.saldo))) : prev.monto,
+                      persona_entidad: deudor?.persona_nombre ?? prev.persona_entidad,
+                      tasa_conversion: '',
+                    }));
+                  }}
+                  options={
+                    pendientes.length === 0
+                      ? [{ value: '', label: 'No hay préstamos por cobrar' }]
+                      : pendientes.map((p) => ({
+                          value: clavePrestamo(p),
+                          label: `${p.persona_nombre} · debe ${p.moneda_simbolo ?? ''}${fmt(Number(p.saldo))} ${p.moneda_codigo}`,
+                        }))
+                  }
+                  placeholder="Selecciona al deudor..."
+                  disabled={pendientes.length === 0}
+                />
+              </Field>
+              {deudorSel && (
+                <p className="text-xs text-yeikar-neutral/60">
+                  Debe{' '}
+                  <strong className="font-mono text-yeikar-secondary">
+                    {deudorSel.moneda_simbolo ?? ''}{fmt(Number(deudorSel.saldo))} {deudorSel.moneda_codigo}
+                  </strong>
+                  {deudorSel.prestamos > 1
+                    ? ` en ${deudorSel.prestamos} préstamos (se cobra el más viejo primero)`
+                    : ''}
+                </p>
+              )}
+              {monedasCobroDistintas && (
+                <Field
+                  label={`Tasa: 1 ${deudorSel?.moneda_codigo} = ? ${monedaDe(monedaCuentaForm)?.codigo ?? ''}`}
+                  required
+                >
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={movForm.tasa_conversion}
+                    onChange={(e) => setMovForm({ ...movForm, tasa_conversion: formatMontoInput(e.target.value) })}
+                    placeholder="0"
+                  />
+                </Field>
+              )}
+            </div>
+          )}
+
           {!editMov && movForm.tipo === 'SALIDA' && (
             <Field
               label="Tipo de gasto (opcional)"
@@ -864,7 +1074,35 @@ export default function Cuentas() {
               </Select>
             </Field>
           )}
-          <Field label="Monto" required>
+
+          {!editMov && movForm.tipo === 'SALIDA' && movForm.clasificacion === 'PRESTAMO' && (
+            <div className="rounded-xl bg-yeikar-tertiary/30 p-4 space-y-2">
+              <Field label="¿Qué es este préstamo?" required>
+                <Select
+                  value={movForm.tipo_prestamo}
+                  onChange={(e) => setMovForm({
+                    ...movForm,
+                    tipo_prestamo: e.target.value as 'POR_COBRAR' | 'PAGO_DEUDA',
+                  })}
+                >
+                  <option value="POR_COBRAR">Presté dinero (me deben)</option>
+                  <option value="PAGO_DEUDA">Pagué un préstamo que yo debo</option>
+                </Select>
+              </Field>
+              <p className="text-xs text-yeikar-neutral/60">
+                {movForm.tipo_prestamo === 'POR_COBRAR'
+                  ? 'Queda por cobrar a nombre de la persona.'
+                  : 'Solo se registra el egreso: no genera deuda.'}
+              </p>
+            </div>
+          )}
+
+          <Field
+            label={esCobroPrestamo
+              ? `Monto a cobrar (${monedaPrestamoSel?.codigo ?? deudorSel?.moneda_codigo ?? ''})`
+              : 'Monto'}
+            required
+          >
             <Input
               type="text"
               inputMode="decimal"
@@ -873,16 +1111,37 @@ export default function Cuentas() {
               placeholder="0"
             />
           </Field>
-          <Field
-            label="Persona o entidad"
-            hint="Cliente, proveedor, empleado, familiar... Es la otra parte del movimiento, no quien lo registra."
-          >
-            <Input
-              value={movForm.persona_entidad}
-              onChange={(e) => setMovForm({ ...movForm, persona_entidad: e.target.value })}
-              placeholder="Ej: DOÑA ROSA, CAMARA DE COMERCIO, un cliente..."
-            />
-          </Field>
+          {esCobroPrestamo && deudorSel && (
+            <div className="rounded-lg bg-yeikar-tertiary/40 px-4 py-2 text-xs flex flex-wrap items-center gap-x-6 gap-y-1 text-yeikar-neutral/60">
+              <span>
+                Queda debiendo{' '}
+                <strong className="font-mono text-yeikar-secondary">
+                  {deudorSel.moneda_simbolo ?? ''}{fmt(Math.max(0, Number(deudorSel.saldo) - (Number.isFinite(montoCobroNum) ? montoCobroNum : 0)))}{' '}
+                  {deudorSel.moneda_codigo}
+                </strong>
+              </span>
+              {monedasCobroDistintas && (
+                <span>
+                  Entran a la cuenta{' '}
+                  <strong className="font-mono text-yeikar-secondary">
+                    {monedaDe(monedaCuentaForm)?.simbolo ?? ''}{fmt(Number(montoQueEntra))}
+                  </strong>
+                </span>
+              )}
+            </div>
+          )}
+          {!esCobroPrestamo && (
+            <Field
+              label="Persona o entidad"
+              hint="Cliente, proveedor, empleado, familiar... Es la otra parte del movimiento, no quien lo registra."
+            >
+              <Input
+                value={movForm.persona_entidad}
+                onChange={(e) => setMovForm({ ...movForm, persona_entidad: e.target.value })}
+                placeholder="Ej: DOÑA ROSA, CAMARA DE COMERCIO, un cliente..."
+              />
+            </Field>
+          )}
           <Field label="Concepto">
             <Textarea
               rows={2}
@@ -1231,6 +1490,81 @@ export default function Cuentas() {
                 </DetalleFila>
               )}
             </dl>
+          </div>
+        )}
+      </Modal>
+
+      {/* Detalle de préstamos por cobrar */}
+      <Modal
+        open={showPrestamosModal}
+        onClose={() => setShowPrestamosModal(false)}
+        title="Préstamos por cobrar"
+        subtitle="Quién recibió el dinero, cuánto debe y qué ha pagado"
+        size="lg"
+        footer={
+          <Button variant="outline" onClick={() => setShowPrestamosModal(false)}>Cerrar</Button>
+        }
+      >
+        {loadingPrestamos ? (
+          <div className="py-10 flex justify-center"><Spinner /></div>
+        ) : prestamosDetalle.length === 0 ? (
+          <EmptyState
+            compact
+            title="Sin préstamos"
+            description='Registra uno con "Nuevo movimiento → Salida → Tipo de gasto Préstamo" e indica la persona.'
+          />
+        ) : (
+          <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
+            {prestamosDetalle.map((p) => {
+              const simbolo = p.moneda?.simbolo ?? monedaDe(p.moneda_id)?.simbolo ?? '';
+              const codigo = p.moneda?.codigo ?? monedaDe(p.moneda_id)?.codigo ?? '';
+              return (
+                <div key={p.id} className="rounded-xl border border-yeikar-secondary-light/10 overflow-hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 bg-yeikar-tertiary/30">
+                    <div className="min-w-0">
+                      <p className="font-bold text-yeikar-secondary truncate">{p.persona_nombre}</p>
+                      <p className="text-[10px] font-mono uppercase tracking-wider text-yeikar-neutral/40">
+                        {p.fecha.slice(0, 10)} · préstamo #{p.id}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-sm">
+                        <span className="text-yeikar-neutral/40">debe </span>
+                        <strong className="text-yeikar-secondary">{simbolo}{fmt(Number(p.saldo))} {codigo}</strong>
+                      </span>
+                      <Badge tone={p.estado === 'PAGADO' ? 'green' : 'amber'} size="sm">
+                        {p.estado === 'PAGADO' ? 'Pagado' : 'Pendiente'}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="px-4 py-2.5 text-xs text-yeikar-neutral/60 flex flex-wrap gap-x-6 gap-y-1">
+                    <span>Prestado: <strong className="font-mono">{simbolo}{fmt(Number(p.monto))}</strong></span>
+                    <span>Cobrado: <strong className="font-mono">{simbolo}{fmt(Number(p.monto_abonado))}</strong></span>
+                    {p.observaciones && <span className="italic truncate max-w-full">{p.observaciones}</span>}
+                  </div>
+                  {p.pagos.length > 0 && (
+                    <div className="border-t border-yeikar-secondary-light/10">
+                      {p.pagos.map((pago) => (
+                        <div key={pago.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-1.5 text-xs odd:bg-yeikar-tertiary/10">
+                          <span className="text-yeikar-neutral/50">
+                            {pago.fecha.slice(0, 10)} · {pago.metodo_caja_nombre ?? 'caja'}
+                            {pago.creador_nombre ? ` · ${pago.creador_nombre}` : ''}
+                          </span>
+                          <span className="font-mono text-green-700">
+                            +{simbolo}{fmt(Number(pago.monto))} {codigo}
+                            {Number(pago.tasa_conversion) !== 1 && (
+                              <span className="ml-1.5 text-[10px] text-yeikar-neutral/40">
+                                tasa {fmtTasa(Number(pago.tasa_conversion))} → entraron {pago.moneda_cuenta_codigo ?? ''} {fmt(Number(pago.monto_en_moneda_cuenta))}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </Modal>

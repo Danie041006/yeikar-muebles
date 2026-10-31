@@ -175,6 +175,8 @@ ORDEN_LIMPIEZA = [
     "credencial_webauthn",
     "refresh_token",
     "usuario",
+    "pago_prestamo",
+    "prestamo",
     "movimiento_caja",
     "metodo_caja",
 ]
