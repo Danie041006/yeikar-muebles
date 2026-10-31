@@ -184,9 +184,12 @@ def _con_piezas(query):
 
 
 def obtener_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
+    # Lectura compartida (igual que cotizaciones, ventas y producción):
+    # cualquiera con el módulo 'pedidos' ve el pedido de otro compañero. Sin
+    # esto, Paola veía la cotización y la venta pero "Ver pedido" le respondía
+    # "Pedido no encontrado" si el pedido lo registró otra cuenta. La escritura
+    # sigue validando propiedad en actualizar/eliminar.
     query = db.query(model.Pedido).filter(model.Pedido.id == id_pedido)
-    if usuario is not None:
-        query = filtrar_registros_propios(query, model.Pedido.creado_por_id, usuario)
     return _con_piezas(query).first()
 
 def obtener_pedidos(
@@ -200,8 +203,7 @@ def obtener_pedidos(
     usuario: Usuario | None = None,
 ):
     query = db.query(model.Pedido)
-    if usuario is not None:
-        query = filtrar_registros_propios(query, model.Pedido.creado_por_id, usuario)
+    # Lectura compartida: todos con el módulo 'pedidos' ven todos los pedidos.
     if buscar:
         query = query.join(Client).filter(
             or_(
@@ -428,7 +430,12 @@ def actualizar_pedido(
     return db_pedido
 
 def eliminar_pedido(db: Session, id_pedido: int, usuario: Usuario | None = None):
-    db_pedido = obtener_pedido(db, id_pedido, usuario)
+    # La lectura es compartida, pero borrar sigue siendo del autor (o de un
+    # rol con alcance total), igual que actualizar_pedido.
+    query = db.query(model.Pedido).filter(model.Pedido.id == id_pedido)
+    if usuario is not None:
+        query = filtrar_registros_propios(query, model.Pedido.creado_por_id, usuario)
+    db_pedido = _con_piezas(query).first()
     if not db_pedido:
         return False
     # Un pedido en curso o con documentos derivados se cancela, no se borra:

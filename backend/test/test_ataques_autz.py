@@ -114,9 +114,9 @@ def _finalizar_pedido(client, cleaner, ped, precio=100_000):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_01_idor_ventas_sobre_registros_jackson(client, db, cleaner):
-    """Ventas (daniel) intenta VER/EDITAR pedidos, cotizaciones, órdenes de
-    producción y gastos creados por jackson (Dueño). Debe ser repelido
-    (403/404), nunca 200."""
+    """Ventas (daniel) NO puede MUTAR registros de jackson ni entrar a módulos
+    que no tiene. La LECTURA de pedidos y cotizaciones es compartida por
+    diseño (ventas/cobradores deben ver el trabajo de los demás)."""
     cot, ped = _crear_pedido_jackson(client, cleaner)
     orden = crear_orden_desde_pedido(client, cleaner, ped["detalles"][0]["id"])
 
@@ -128,10 +128,23 @@ def test_01_idor_ventas_sobre_registros_jackson(client, db, cleaner):
     gasto_id = r.json()["id"]
     cleaner.registrar("gasto", gasto_id)
 
+    # Lectura compartida (política del ERP): pedido y cotización se pueden VER.
+    compartidos = [
+        ("GET", f"/api/v1/pedido/{ped['id']}"),
+        ("GET", f"/api/v1/cotizacion/{cot['id']}"),
+    ]
+    for metodo, path in compartidos:
+        rr = client.request(metodo, path, headers=VENTAS_HEADERS)
+        print(f"  compartido {metodo} {path} → {rr.status_code}")
+        assert rr.status_code == 200, (
+            f"{metodo} {path} → {rr.status_code}: el módulo debe ser de lectura "
+            f"compartida {rr.text[:200]}"
+        )
+
+    # Mutaciones ajenas y módulos sin permiso: repelidos, nunca 200.
     intentos = [
-        ("GET", f"/api/v1/pedido/{ped['id']}", None),
         ("PUT", f"/api/v1/pedido/{ped['id']}", {"observaciones": "intento de daniel"}),
-        ("GET", f"/api/v1/cotizacion/{cot['id']}", None),
+        ("DELETE", f"/api/v1/pedido/{ped['id']}", None),
         ("GET", f"/api/v1/produccion/orden/{orden['id']}", None),
         ("GET", f"/api/v1/gasto/gastos/{gasto_id}", None),
     ]

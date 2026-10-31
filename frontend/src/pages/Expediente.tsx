@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { FolderOpen, Loader2 } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { PageHeader, SearchInput, Spinner, EmptyState } from '../components/ui';
 import BadgeEstado from '../components/BadgeEstado';
@@ -13,7 +14,7 @@ import type { Quote } from '../services/cotizacionService';
 import { pedidoService, Order } from '../services/pedidoService';
 import { facturacionService, Factura } from '../services/facturacionService';
 import { envioService, Envio } from '../services/envioService';
-import { formatCurrency } from '../utils/format';
+import { formatCurrency, extractErrorMessage } from '../utils/format';
 import { fmtFechaVE } from '../utils/fechas';
 
 type Tab = 'cotizaciones' | 'pedidos' | 'facturas' | 'envios' | 'entradas-salidas';
@@ -40,6 +41,7 @@ const fmtD = (v?: string | null) => fmtFechaVE(v);
 
 export default function Expediente() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const toast = useToast();
   const [tab, setTab] = useState<Tab>(TIPO_ALIAS[searchParams.get('tipo') ?? ''] ?? 'cotizaciones');
   const [buscar, setBuscar] = useState('');
   const [loading, setLoading] = useState(true);
@@ -108,6 +110,7 @@ export default function Expediente() {
     } catch (e) {
       console.error('Error abriendo ficha:', e);
       setFicha(null);
+      toast.error(extractErrorMessage(e, 'No se pudo abrir la ficha del registro.'));
     } finally {
       setLoadingFicha(false);
     }

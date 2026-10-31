@@ -89,10 +89,10 @@ def cadena_expediente(
         )
         .filter(Pedido.id == pedido_id)
     )
-    # El expediente aplica el mismo alcance por creador que GET /pedido/{id}:
-    # sin esto, cualquier lector del módulo pedidos veía toda la cadena ajena.
-    if usuario is not None:
-        query = filtrar_registros_propios(query, Pedido.creado_por_id, usuario)
+    # Lectura compartida (igual que GET /pedido/{id}): la ficha del pedido no
+    # se oculta por creador — Paola necesita ver la cadena completa de pedidos
+    # registrados por otra cuenta. La auditoría interna sigue siendo solo para
+    # Dueño/Administrador.
     pedido = query.first()
     if not pedido:
         return None
@@ -672,8 +672,8 @@ def expediente_cotizacion(
         "auditoria": [],
     }
     if pedido:
-        # La cotización es de lectura compartida, pero su cadena de pedido
-        # hereda el alcance por creador (se omite si no es del solicitante).
+        # La cadena del pedido también es de lectura compartida: la ficha
+        # muestra cotización → pedido → venta → factura → despacho.
         sub = cadena_expediente(
             db, pedido.id, incluir_auditoria=incluir_auditoria, usuario=usuario
         )
@@ -769,9 +769,9 @@ def expediente_cliente(
         .limit(200)
         .all()
     )
+    # Lectura compartida de pedidos (igual que la ficha del pedido); las
+    # facturas conservan su alcance por creador.
     pedidos_q = db.query(Pedido).filter(Pedido.cliente_id == cliente_id)
-    if usuario is not None:
-        pedidos_q = filtrar_registros_propios(pedidos_q, Pedido.creado_por_id, usuario)
     pedidos = pedidos_q.order_by(Pedido.fecha.desc(), Pedido.id.desc()).limit(200).all()
     ventas = (
         db.query(Venta)
