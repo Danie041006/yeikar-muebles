@@ -25,6 +25,8 @@ export interface DetalleCotizacionExp {
   material_id?: number | null;
   tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   producto_nombre?: string | null;
+  /** Descripción escrita del mueble a la medida. */
+  descripcion_especifica?: string | null;
   cantidad: number;
   unidad_captura?: 'M' | 'CM' | null;
   cantidad_base?: number | null;

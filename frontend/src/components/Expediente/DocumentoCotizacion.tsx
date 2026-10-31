@@ -19,6 +19,8 @@ export interface DetalleDocumento {
   material_id?: number | null;
   tipo_item?: string | null;
   producto_nombre?: string | null;
+  /** Descripción del mueble a la medida (lo que se escribió en el renglón). */
+  descripcion_especifica?: string | null;
   cantidad: number;
   precio: number;
   ancho?: number | null;
@@ -195,7 +197,17 @@ export default function DocumentoCotizacion({
                     // histórica): nombre y descripción se FUSIONAN en un solo
                     // campo — nunca se muestra "Prod #?".
                     const sinAsociar = !det.producto_id && !det.material_id;
-                    const textoItem = det.observaciones || det.producto_nombre || 'ÍTEM A MEDIDA';
+                    // A la medida: se imprime lo que la vendedora escribió en
+                    // el renglón (descripción específica), no "Ítem a medida".
+                    const textoItem = det.descripcion_especifica
+                      || det.producto_nombre
+                      || det.observaciones
+                      || 'ÍTEM A MEDIDA';
+                    // Nota extra del renglón (si escribieron descripción y
+                    // además observaciones) para no perder nada de lo tecleado.
+                    const notaItem = det.observaciones && det.observaciones !== textoItem
+                      ? det.observaciones
+                      : null;
                     const modelName = det.producto_nombre
                       || (det.material_id ? `Insumo #${det.material_id}` : 'Ítem a medida');
                     const dims = sinAsociar || esInsumo ? null : `${det.ancho ?? 1.0}×${det.largo ?? 1.0} m`;
@@ -251,6 +263,9 @@ export default function DocumentoCotizacion({
                               <span>
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
+                                {notaItem && (
+                                  <span className="block text-[8px] text-stone-600 italic font-medium">{notaItem}</span>
+                                )}
                               </span>
                             </div>
                           </td>

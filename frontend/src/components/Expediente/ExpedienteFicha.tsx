@@ -117,7 +117,7 @@ function SeccionCotizacion({ cot }: { cot?: CotizacionExp | null }) {
           {cot.detalles.map((d, i) => (
             <tr key={i}>
               <td className={`${tablaTd} whitespace-normal font-semibold`}>
-                {d.producto_nombre || d.observaciones || (d.producto_id ? `Producto #${d.producto_id}` : 'Ítem a medida')}
+                {d.producto_nombre || d.descripcion_especifica || d.observaciones || (d.producto_id ? `Producto #${d.producto_id}` : 'Ítem a medida')}
               </td>
               <td className={`${tablaTd} text-right`}>
                 {cantidadDetalle(d)}{unidadDetalle(d) ? ` ${unidadDetalle(d)}` : ''}
@@ -625,6 +625,7 @@ export default function ExpedienteFicha({
                     material_id: d.material_id,
                     tipo_item: d.tipo_item,
                     producto_nombre: d.producto_nombre,
+                    descripcion_especifica: d.descripcion_especifica,
                     cantidad: d.cantidad,
                     precio: d.precio,
                     unidad_captura: d.unidad_captura ?? null,
@@ -689,6 +690,7 @@ export default function ExpedienteFicha({
                     material_id: d.material_id,
                     tipo_item: d.tipo_item,
                     producto_nombre: d.producto_nombre,
+                    descripcion_especifica: d.descripcion_especifica,
                     cantidad: d.cantidad,
                     precio: d.precio,
                     unidad_captura: d.unidad_captura ?? null,
