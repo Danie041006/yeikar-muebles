@@ -1924,7 +1924,7 @@ export default function Cotizaciones() {
       setIsConvertOpen(false);
       const avisoAbono =
         abonoActivo && monedaAdelantoSel
-          ? ` Abono inicial registrado: ${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel.codigo)}${metodoLabel ? ` · ${metodoLabel}` : ''}.`
+          ? ` Abono inicial registrado: ${formatCurrency(abonoMontoPago, monedaAdelantoSel.codigo)}${metodoLabel ? ` · ${metodoLabel}` : ''}.`
           : '';
       toast.success(`¡Cotización convertida a pedido con éxito!${avisoAbono} El pedido entró directamente a producción y se creó la factura automáticamente.`);
       fetchQuotes(search);
@@ -3303,7 +3303,7 @@ export default function Cotizaciones() {
                 <div className="flex justify-between">
                   <span className="font-bold text-yeikar-neutral/50">Total</span>
                   <span className="font-mono font-bold text-yeikar-secondary">
-                    {formatCurrency(Math.round(quoteTotal), quoteMoneda?.codigo ?? 'COP')}
+                    {formatCurrency(quoteTotal, quoteMoneda?.codigo ?? 'COP')}
                   </span>
                 </div>
                 {Number(selectedQuoteForConvert?.tasa_cambio) && quoteMoneda?.codigo !== 'COP' && (
@@ -3336,7 +3336,7 @@ export default function Cotizaciones() {
                   </label>
                   <span className="text-xs font-mono font-bold text-yeikar-primary">
                     {abonoActivo && tasaAbonoValida
-                      ? `= ${formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteMoneda?.codigo ?? 'COP')}`
+                      ? `= ${formatCurrency(abonoEnMonedaCotizacion, quoteMoneda?.codigo ?? 'COP')}`
                       : abonoActivo
                       ? '— indica la tasa'
                       : 'Sin abono'}
@@ -3469,8 +3469,8 @@ export default function Cotizaciones() {
                     {abonoActivo && tasaAbonoValida && (
                       <p className="mt-1 text-[11px] font-mono text-yeikar-neutral/60">
                         {adelantoModo === 'pct'
-                          ? `Abono de ${formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteCod)} equivale a ≈ ${formatCurrency(Math.round(abonoMontoPago), adelantoCod)}`
-                          : `Abono de ${formatCurrency(Math.round(abonoMontoPago), adelantoCod)} equivale a ≈ ${formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteCod)}`}
+                          ? `Abono de ${formatCurrency(abonoEnMonedaCotizacion, quoteCod)} equivale a ≈ ${formatCurrency(abonoMontoPago, adelantoCod)}`
+                          : `Abono de ${formatCurrency(abonoMontoPago, adelantoCod)} equivale a ≈ ${formatCurrency(abonoEnMonedaCotizacion, quoteCod)}`}
                       </p>
                     )}
                   </div>
@@ -3478,13 +3478,13 @@ export default function Cotizaciones() {
 
                 {abonoActivo && monedasIguales && (
                   <p className="mt-2 text-xs font-mono text-yeikar-neutral/50">
-                    Abono en la moneda de la factura: {formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? quoteMoneda?.codigo ?? '')}.
+                    Abono en la moneda de la factura: {formatCurrency(abonoMontoPago, monedaAdelantoSel?.codigo ?? quoteMoneda?.codigo ?? '')}.
                   </p>
                 )}
 
                 {abonoActivo && abonoExcedeTotal && (
                   <p className="mt-2 text-xs font-semibold text-red-600">
-                    El abono ({formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteMoneda?.codigo ?? 'COP')}) excede el total del pedido ({formatCurrency(Math.round(quoteTotal), quoteMoneda?.codigo ?? 'COP')}).
+                    El abono ({formatCurrency(abonoEnMonedaCotizacion, quoteMoneda?.codigo ?? 'COP')}) excede el total del pedido ({formatCurrency(quoteTotal, quoteMoneda?.codigo ?? 'COP')}).
                   </p>
                 )}
               </div>
@@ -3502,8 +3502,8 @@ export default function Cotizaciones() {
                     Abono inicial:{' '}
                     {adelantoModo === 'pct'
                       ? `${pctAbono}%`
-                      : `${formatCurrency(Math.round(abonoMontoPago), monedaAdelantoSel?.codigo ?? '')} ${monedaAdelantoSel?.codigo ?? ''}`}{' '}
-                    = {formatCurrency(Math.round(abonoEnMonedaCotizacion), quoteMoneda?.codigo ?? '')}
+                      : `${formatCurrency(abonoMontoPago, monedaAdelantoSel?.codigo ?? '')} ${monedaAdelantoSel?.codigo ?? ''}`}{' '}
+                    = {formatCurrency(abonoEnMonedaCotizacion, quoteMoneda?.codigo ?? '')}
                     {!monedasIguales && tasaAbonoValida
                       ? ` · 1 ${parAdelanto.baseCod} = ${tasaHumanaAbono.toLocaleString('es-ES')} ${parAdelanto.quoteCod}`
                       : ''}

@@ -275,8 +275,8 @@ def test_abono_ves_requiere_trm(client, cleaner, db):
 # ---------------------------------------------------------------------------
 def test_abono_ves_con_trm(client, cleaner, db):
     """Adelanto 1000 VES @ tasa 10 (1 VES = 10 COP) en factura USD 500@3900:
-       el equivalente en la moneda de la factura SIEMPRE es entero:
-       10000 COP base = 2.5641 USD → baja a 2 USD (regla del taller, < 0.9)."""
+       el equivalente en la moneda de la factura conserva DOS decimales:
+       10000 COP base = 2.5641 USD → 2.56 USD (sin aproximar a entero)."""
     cliente = crear_cliente(client, cleaner)
     producto = crear_producto(client, cleaner)
     cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
@@ -290,10 +290,54 @@ def test_abono_ves_con_trm(client, cleaner, db):
     venta = _buscar_venta(client, cleaner, db, r.json()["id"])
     assert venta is not None, "Debe existir la factura en USD"
     assert venta["estado"] == "ABONADA", f"Con abono parcial debe quedar ABONADA, fue {venta['estado']}"
-    assert venta["total_pagado"] == 2.0, \
-        f"1000 VES*10 = 10000 COP base = 2.5641 USD → entero 2; total_pagado={venta['total_pagado']}"
-    assert venta["saldo_pendiente"] == pytest.approx(500 - 2, abs=0.01), \
+    assert venta["total_pagado"] == pytest.approx(2.56, abs=0.01), \
+        f"1000 VES*10 = 10000 COP base = 2.5641 USD → 2.56; total_pagado={venta['total_pagado']}"
+    assert venta["saldo_pendiente"] == pytest.approx(500 - 2.56, abs=0.01), \
         f"saldo_pendiente={venta['saldo_pendiente']}"
+
+
+@pytest.mark.parametrize(
+    "monto_cop,tasa_natural,esperado_usd",
+    [
+        (3_000_000, 3220, 931.68),
+        (5_000_000, 3250, 1538.46),
+    ],
+)
+def test_abono_cop_en_venta_usd_conserva_centavos(
+    client, cleaner, db, monto_cop, tasa_natural, esperado_usd
+):
+    """Un abono en COP contra una factura USD conserva los centavos:
+    3.000.000 / 3.220 = 931,68 USD (antes se aproximaba a 932)."""
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)
+    cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
+                           precio=5000, moneda_id=2, tasa_cambio=3900)
+    r = _convertir(client, cleaner, cot["id"], producto_id=producto["id"], precio=5000)
+    assert r.status_code == 201, f"convertir → {r.status_code}: {r.text}"
+
+    venta = _buscar_venta(client, cleaner, db, r.json()["id"])
+    assert venta is not None
+
+    r, body = crear_pago(
+        client, cleaner, venta["id"], 1, monto_cop,
+        metodo_pago="EFECTIVO_COP", tasa_cambio=1 / tasa_natural,
+    )
+    assert r.status_code in (200, 201), f"pago COP → {r.status_code}: {body}"
+    assert body["monto_en_moneda_base"] == pytest.approx(esperado_usd, abs=0.005), (
+        f"{monto_cop} COP / {tasa_natural} debe ser {esperado_usd} USD, "
+        f"fue {body['monto_en_moneda_base']}"
+    )
+
+    fila = db.execute(text(
+        "SELECT monto, moneda_id, monto_en_moneda_base "
+        "FROM movimiento_caja WHERE pago_id = :p"
+    ), {"p": body["id"]}).fetchone()
+    assert fila is not None, "el abono debe generar movimiento de caja"
+    assert float(fila[0]) == pytest.approx(monto_cop, abs=0.01)
+    assert int(fila[1]) == 1, "la caja debe quedar en COP"
+    assert float(fila[2]) == pytest.approx(monto_cop, abs=0.01), (
+        "la caja debe registrar los COP reales, no una conversión doble"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,6 @@ from datetime import date, datetime
 from decimal import Decimal
 from collections import defaultdict
 from typing import Optional
-import math
 import re
 import unicodedata
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
@@ -327,23 +326,6 @@ def _recalcular_estado_venta(db: Session, venta: Venta, margen_saldo: float = 0.
         venta.estado = "PENDIENTE"
 
 
-def _redondear_a_entero_cobro(valor: float) -> float:
-    """Equivalente de un pago/descuento con tasa SIEMPRE entero.
-
-    Regla del taller: si el decimal es < 0.9 se baja al entero actual
-    (61,538 → 61); si es >= 0.9 sube al siguiente entero (61,94 → 62).
-    Los cobros en la vida real se manejan enteros; los decimales descuadran.
-    Los valores no finitos (inf/nan de un fuzzing) pasan sin tocar: los
-    rechaza la validación de tasa desviada que viene después.
-    """
-    if not math.isfinite(valor):
-        return float(valor)
-    entero = math.floor(valor)
-    if valor - entero >= 0.9:
-        return float(entero + 1)
-    return float(entero)
-
-
 def _monto_base_para_cobro(
     venta: Venta, moneda_id: int, monto: float, tasa_cambio: float | None
 ) -> tuple[float, float]:
@@ -351,8 +333,10 @@ def _monto_base_para_cobro(
 
     Se usa al crear un cobro/descuento y también al corregir el monto de un
     cobro existente. Si la moneda coincide con la de la venta, es 1:1. Si no,
-    aplica la misma regla que los cobros: redondeo al millar cuando la factura
-    es en COP y equivalente entero (decimal < 0.9 baja; >= 0.9 sube).
+    aplica la misma regla que los cobros:
+      - Factura COP: el equivalente se redondea al millar (paso YEIKAR).
+      - Factura USD/VES: se conservan DOS decimales. Antes se forzaba a entero
+        (931,68 → 932), lo que inventaba centavos en el saldo del cliente.
     """
     if moneda_id == venta.moneda_id:
         return float(monto), 0.01
@@ -369,7 +353,7 @@ def _monto_base_para_cobro(
     # moneda mínima en Colombia es 50 COP; el paso YEIKAR es 1.000). La
     # diferencia del redondeo (máx. ±500 COP) se absorbe como ajuste y por
     # eso el margen de saldo sube al paso completo. En facturas USD/VES la
-    # base tiene centavos normales (moneda legal) y no se redondea.
+    # base tiene centavos normales (moneda legal) y NO se redondea.
     if venta.moneda_id == 1:
         monto_base = float(
             redondear_a_multiplo(
@@ -380,11 +364,7 @@ def _monto_base_para_cobro(
         )
         margen_saldo = float(PASO_PRECIO_COP)
 
-    # Al saltar la tasa el equivalente en la moneda de la venta SIEMPRE es
-    # entero (así lo manejaron en el taller): decimal < 0.9 → baja al entero
-    # actual; decimal >= 0.9 → sube al siguiente entero. Nunca decimales.
-    monto_base = _redondear_a_entero_cobro(monto_base)
-    return monto_base, margen_saldo
+    return round(monto_base, 2), margen_saldo
 
 
 def _convertir_a_moneda_venta(
@@ -445,6 +425,11 @@ def _monto_movimiento_caja_pago(db_pago: Pago, venta: Venta) -> tuple[float, flo
     Si el pago es en moneda extranjera sobre una factura COP, la caja registra
     el mismo valor en COP que descuenta del saldo (ya redondeado al millar).
     """
+    # Pago en la moneda base (COP): la caja ya está en COP. No se multiplica
+    # por la tasa de la venta (antes un pago COP contra factura USD quedaba
+    # convertido dos veces: 5.000.000 COP → 1.538,46 "COP").
+    if db_pago.moneda_id == 1:
+        return 1.0, float(db_pago.monto)
     tasa_caja = round(
         float(db_pago.tasa_cambio or 1.0) * float(venta.tasa_cambio or 1.0), 6
     )
