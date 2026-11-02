@@ -768,6 +768,24 @@ def test_fabrica_y_camiones_son_clasificaciones_propias():
     assert normalizar_clasificacion("G CONSTRUCCION") == "GASTO_CONSTRUCCION"
     assert normalizar_clasificacion("CONSTRUCCIONES") == "GASTO_CONSTRUCCION"
 
+    # Nómina y servicio, separados casa/fábrica (02/11/2026).
+    assert normalizar_clasificacion("Nómina Fábrica") == "NOMINA_FABRICA"
+    assert normalizar_clasificacion("Nomina de Fabrica") == "NOMINA_FABRICA"
+    assert normalizar_clasificacion("Nómina Casa") == "NOMINA_CASA"
+    assert normalizar_clasificacion("NOMINAS DE CASA") == "NOMINA_CASA"
+    assert normalizar_clasificacion("Servicio Fábrica") == "SERVICIO_FABRICA"
+    assert normalizar_clasificacion("Servicios de Fábrica") == "SERVICIO_FABRICA"
+    assert normalizar_clasificacion("Servicio Casa") == "SERVICIO_CASA"
+    assert normalizar_clasificacion("SERVICIOS CASA") == "SERVICIO_CASA"
+
+    # Oficina y herramientas (02/11/2026).
+    assert normalizar_clasificacion("Gastos de Oficina") == "GASTO_OFICINA"
+    assert normalizar_clasificacion("G OFICINA") == "GASTO_OFICINA"
+    assert normalizar_clasificacion("OFICINAS") == "GASTO_OFICINA"
+    assert normalizar_clasificacion("Gastos de Herramientas") == "GASTO_HERRAMIENTAS"
+    assert normalizar_clasificacion("G HERRAMIENTAS") == "GASTO_HERRAMIENTAS"
+    assert normalizar_clasificacion("HERRAMIENTA") == "GASTO_HERRAMIENTAS"
+
     # "Gastos de X" normalizado no colisiona con las letras: G+F no se
     # comparte, que antes lo mandaba todo a Familiar.
     import pytest
@@ -1007,6 +1025,14 @@ def test_libro_acepta_g_construccion():
     texto = "\n".join([
         "10/1/2026\tSALDO\tMES DE SEPTIEMBRE\t\t\t$ 1,000,000",
         "10/1/2026\tOBRA G CONSTRUCCION\tCEMENTO\t\t$ 200,000\t$ 800,000",
+        "10/1/2026\tNOMINA G NOMINA FABRICA\tOBREROS\t\t$ 300,000\t$ 500,000",
+        "10/1/2026\tLUZ G SERVICIO CASA\tRECIBO\t\t$ 50,000\t$ 450,000",
+        "10/1/2026\tAGUA G SERVICIO DE FABRICA\tRECIBO\t\t$ 20,000\t$ 430,000",
+        "10/1/2026\tPAPELERIA G OFICINA\tRESMA\t\t$ 10,000\t$ 420,000",
+        "10/1/2026\tTALADRO G HERRAMIENTAS\tCOMPRA\t\t$ 15,000\t$ 405,000",
     ])
     parsed = parsear_libro(texto)
-    assert parsed.filas[1].clasificacion == "GASTO_CONSTRUCCION"
+    assert [f.clasificacion for f in parsed.filas] == [
+        None, "GASTO_CONSTRUCCION", "NOMINA_FABRICA", "SERVICIO_CASA",
+        "SERVICIO_FABRICA", "GASTO_OFICINA", "GASTO_HERRAMIENTAS",
+    ]

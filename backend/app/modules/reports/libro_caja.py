@@ -71,6 +71,28 @@ CLASIFICACION_POR_CODIGO = {
     "FABRICA": "GASTO_FABRICA",
     "CONSTRUCCION": "GASTO_CONSTRUCCION",
     "CONSTRUCCIONES": "GASTO_CONSTRUCCION",
+    # Nómina/servicio casa-fábrica (se escriben a palabra completa).
+    "NOMINA FABRICA": "NOMINA_FABRICA",
+    "NOMINAS FABRICA": "NOMINA_FABRICA",
+    "NOMINA DE FABRICA": "NOMINA_FABRICA",
+    "NOMINAS DE FABRICA": "NOMINA_FABRICA",
+    "NOMINA CASA": "NOMINA_CASA",
+    "NOMINAS CASA": "NOMINA_CASA",
+    "NOMINA DE CASA": "NOMINA_CASA",
+    "NOMINAS DE CASA": "NOMINA_CASA",
+    "SERVICIO FABRICA": "SERVICIO_FABRICA",
+    "SERVICIOS FABRICA": "SERVICIO_FABRICA",
+    "SERVICIO DE FABRICA": "SERVICIO_FABRICA",
+    "SERVICIOS DE FABRICA": "SERVICIO_FABRICA",
+    "SERVICIO CASA": "SERVICIO_CASA",
+    "SERVICIOS CASA": "SERVICIO_CASA",
+    "SERVICIO DE CASA": "SERVICIO_CASA",
+    "SERVICIOS DE CASA": "SERVICIO_CASA",
+    # Oficina y herramientas.
+    "OFICINA": "GASTO_OFICINA",
+    "OFICINAS": "GASTO_OFICINA",
+    "HERRAMIENTA": "GASTO_HERRAMIENTAS",
+    "HERRAMIENTAS": "GASTO_HERRAMIENTAS",
 }
 
 _FECHA_RE = re.compile(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
@@ -78,7 +100,12 @@ _FECHA_RE = re.compile(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
 # dinero lo llevan, y así no confundimos los números que aparecen dentro del
 # concepto (tasas, "500 MIL", teléfonos, etc.).
 _TOKEN_RE = re.compile(r"\$\s*\d[\d.,]*")
-_CLASIF_RE = re.compile(r"\bG\s*(CAMIONES?|CONSTRUCCION(?:ES)?|FABRICA|[DCPFI])\b", re.IGNORECASE)
+_CLASIF_RE = re.compile(
+    r"\bG\s*(NOMINAS?\s+(?:DE\s+)?(?:FABRICA|CASA)"
+    r"|SERVICIOS?\s+(?:DE\s+)?(?:FABRICA|CASA)"
+    r"|CAMIONES?|CONSTRUCCION(?:ES)?|OFICINAS?|HERRAMIENTAS?|FABRICA|[DCPFI])\b",
+    re.IGNORECASE,
+)
 _CERO = Decimal("0.00")
 
 
@@ -319,7 +346,7 @@ def _parse_linea(
     tipo, concepto = _partir_tipo_concepto(medio)
     texto_clasif = f"{tipo} {concepto}"
     clasif_match = _CLASIF_RE.search(texto_clasif)
-    codigo = clasif_match.group(1).upper() if clasif_match else None
+    codigo = re.sub(r"\s+", " ", clasif_match.group(1).upper()) if clasif_match else None
 
     return {
         "tipo_resultado": "fila",

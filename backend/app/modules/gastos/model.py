@@ -14,8 +14,10 @@ class Gasto(Base):
     # Destino del dinero según el libro de caja: GASTO_DEDUCIBLE |
     # GASTO_CASA | GASTO_PERSONAL | GASTO_FAMILIAR (se muestra "Gasto
     # Familiar") | GASTO_FABRICA ("Gastos de Fábrica") | GASTO_CONSTRUCCION
-    # ("Gastos de Construcción") | GASTO_CAMIONES ("Gastos de Camiones") |
-    # GASTO_INVERSION | PRESTAMO | DONACION | IMPUESTO.
+    # ("Gastos de Construcción") | NOMINA_FABRICA | NOMINA_CASA |
+    # SERVICIO_FABRICA | SERVICIO_CASA | GASTO_OFICINA ("Gastos de Oficina") |
+    # GASTO_HERRAMIENTAS ("Gastos de Herramientas") | GASTO_CAMIONES
+    # ("Gastos de Camiones") | GASTO_INVERSION | PRESTAMO | DONACION | IMPUESTO.
     # Es independiente del tipo de gasto y es OPCIONAL (NULL = sin clasificar).
     clasificacion = Column(String(30), nullable=True, index=True)
     fecha = Column(Date, nullable=False)

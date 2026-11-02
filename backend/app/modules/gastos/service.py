@@ -31,6 +31,13 @@ CLASIFICACIONES_GASTO = {
     "GASTO_FABRICA": "Gastos de Fábrica",
     # Construcción (obras, materiales de obra, albañilería): canasta propia.
     "GASTO_CONSTRUCCION": "Gastos de Construcción",
+    # Nómina y servicios separados casa/fábrica (pedido 02/11/2026).
+    "NOMINA_FABRICA": "Nómina Fábrica",
+    "NOMINA_CASA": "Nómina Casa",
+    "SERVICIO_FABRICA": "Servicio Fábrica",
+    "SERVICIO_CASA": "Servicio Casa",
+    "GASTO_OFICINA": "Gastos de Oficina",
+    "GASTO_HERRAMIENTAS": "Gastos de Herramientas",
     "GASTO_INVERSION": "Gasto de Inversión",
     "PRESTAMO": "Préstamo",
     # Donativos (iglesia, fundaciones, vecinos): sale plata de la caja sin
@@ -79,6 +86,39 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
         "GASTODECONSTRUCCION": "GASTO_CONSTRUCCION",
         "GASTOSDECONSTRUCCION": "GASTO_CONSTRUCCION",
         "OBRA": "GASTO_CONSTRUCCION", "GOBRA": "GASTO_CONSTRUCCION",
+        # Nómina y servicios, separados casa/fábrica.
+        "NOMINAFABRICA": "NOMINA_FABRICA",
+        "NOMINASFABRICA": "NOMINA_FABRICA",
+        "NOMINADEFABRICA": "NOMINA_FABRICA",
+        "NOMINASDEFABRICA": "NOMINA_FABRICA",
+        "GNOMINAFABRICA": "NOMINA_FABRICA",
+        "NOMINACASA": "NOMINA_CASA",
+        "NOMINASCASA": "NOMINA_CASA",
+        "NOMINADECASA": "NOMINA_CASA",
+        "NOMINASDECASA": "NOMINA_CASA",
+        "GNOMINACASA": "NOMINA_CASA",
+        "SERVICIOFABRICA": "SERVICIO_FABRICA",
+        "SERVICIOSFABRICA": "SERVICIO_FABRICA",
+        "SERVICIODEFABRICA": "SERVICIO_FABRICA",
+        "SERVICIOSDEFABRICA": "SERVICIO_FABRICA",
+        "GSERVICIOFABRICA": "SERVICIO_FABRICA",
+        "SERVICIOCASA": "SERVICIO_CASA",
+        "SERVICIOSCASA": "SERVICIO_CASA",
+        "SERVICIODECASA": "SERVICIO_CASA",
+        "SERVICIOSDECASA": "SERVICIO_CASA",
+        "GSERVICIOCASA": "SERVICIO_CASA",
+        # Oficina y herramientas (pedido 02/11/2026).
+        "OFICINA": "GASTO_OFICINA", "OFICINAS": "GASTO_OFICINA",
+        "GOFICINA": "GASTO_OFICINA", "GASTOOFICINA": "GASTO_OFICINA",
+        "GASTOSOFICINA": "GASTO_OFICINA", "GASTODEOFICINA": "GASTO_OFICINA",
+        "GASTOSDEOFICINA": "GASTO_OFICINA",
+        "HERRAMIENTA": "GASTO_HERRAMIENTAS", "HERRAMIENTAS": "GASTO_HERRAMIENTAS",
+        "GHERRAMIENTA": "GASTO_HERRAMIENTAS",
+        "GHERRAMIENTAS": "GASTO_HERRAMIENTAS",
+        "GASTOHERRAMIENTA": "GASTO_HERRAMIENTAS",
+        "GASTOSHERRAMIENTAS": "GASTO_HERRAMIENTAS",
+        "GASTODEHERRAMIENTAS": "GASTO_HERRAMIENTAS",
+        "GASTOSDEHERRAMIENTAS": "GASTO_HERRAMIENTAS",
         "CAMION": "GASTO_CAMIONES", "GCAMION": "GASTO_CAMIONES",
         "GASTOCAMION": "GASTO_CAMIONES", "GASTOCAMIONES": "GASTO_CAMIONES",
         "CAMIONES": "GASTO_CAMIONES", "GCAMIONES": "GASTO_CAMIONES",
@@ -98,9 +138,10 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
     if clave is None:
         raise ValueError(
             "Clasificación inválida. Usa Gasto Deducible, Gasto de Casa, "
-            "Gasto Personal, Gasto Familiar, Gastos de Fábrica, "
-            "Gastos de Camiones, Gastos de Construcción, Gasto de Inversión, "
-            "Préstamo, Donación o Impuestos."
+            "Gasto Personal, Gasto Familiar, Gastos de Fábrica, Gastos de "
+            "Construcción, Gastos de Camiones, Gastos de Oficina, Gastos de "
+            "Herramientas, Gasto de Inversión, Nómina Fábrica, Nómina Casa, "
+            "Servicio Fábrica, Servicio Casa, Préstamo, Donación o Impuestos."
         )
     return clave
 
