@@ -30,8 +30,10 @@ export default function Pedidos() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
-  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  // 0 = Todos. Con "Historial Completo" marcado se busca TODO el historial;
+  // los selectores solo acotan si la usuaria elige un mes/año específico.
+  const [selectedMonth, setSelectedMonth] = useState(0);
+  const [selectedYear, setSelectedYear] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -80,8 +82,8 @@ export default function Pedidos() {
       const data = await pedidoService.getAll(
         searchTerm,
         soloMesActual,
-        soloMesActual ? undefined : selectedMonth,
-        soloMesActual ? undefined : selectedYear
+        !soloMesActual && selectedMonth > 0 ? selectedMonth : undefined,
+        !soloMesActual && selectedYear > 0 ? selectedYear : undefined
       );
       setOrders(data);
     } catch (err: any) {
@@ -409,7 +411,7 @@ export default function Pedidos() {
           <SearchInput
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar pedidos por cliente o estado..."
+            placeholder="Buscar por #pedido, cliente, cédula o estado..."
             className="w-full sm:w-72"
           />
 
@@ -432,6 +434,7 @@ export default function Pedidos() {
                   onChange={(e) => setSelectedMonth(Number(e.target.value))}
                   className="bg-white border border-yeikar-secondary-light/15 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-yeikar-primary/25 text-xs font-mono text-yeikar-neutral"
                 >
+                  <option value={0}>Todos los meses</option>
                   {Array.from({ length: 12 }, (_, i) => i + 1).map(m => (
                     <option key={m} value={m}>
                       {new Date(2020, m - 1).toLocaleString('es-ES', { month: 'long' })}
@@ -443,6 +446,7 @@ export default function Pedidos() {
                   onChange={(e) => setSelectedYear(Number(e.target.value))}
                   className="bg-white border border-yeikar-secondary-light/15 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-yeikar-primary/25 text-xs font-mono text-yeikar-neutral"
                 >
+                  <option value={0}>Todos los años</option>
                   {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i).map(y => (
                     <option key={y} value={y}>{y}</option>
                   ))}

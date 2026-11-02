@@ -1855,23 +1855,30 @@ export default function Cotizaciones() {
         // Copiar los renglones EXACTOS de la cotización: el backend valida cada
         // detalle contra la cotización por (tipo_item, producto_id, material_id).
         // Sin tipo_item/material_id, los renglones INSUMO y REVENTA se rechazan.
-        convertDetails = selectedQuoteForConvert.detalles.map((det) => ({
-          producto_id: det.producto_id ?? undefined,
-          material_id: det.material_id ?? undefined,
-          tipo_item: det.tipo_item || 'FABRICADO',
-          cantidad: det.cantidad,
-          precio: det.precio,
-          ancho: det.ancho ?? undefined,
-          largo: det.largo ?? undefined,
-          descripcion_especifica: det.descripcion_especifica ?? det.observaciones ?? undefined,
-          observaciones: det.observaciones ?? undefined,
-          es_obsequio: det.es_obsequio || undefined,
-          piezas: det.piezas?.map((p) => ({
-            nombre: p.nombre,
-            cantidad: Number(p.cantidad) || 1,
-            notas: p.notas || null,
-          })),
-        }));
+        // REPARACION/SERVICIO nunca llevan producto ni material: si una
+        // cotización vieja los trae por error, se limpian aquí para que la
+        // conversión no falle con 422.
+        convertDetails = selectedQuoteForConvert.detalles.map((det) => {
+          const tipo = det.tipo_item || 'FABRICADO';
+          const sinProducto = tipo === 'REPARACION' || tipo === 'SERVICIO';
+          return {
+            producto_id: sinProducto ? undefined : (det.producto_id ?? undefined),
+            material_id: sinProducto ? undefined : (det.material_id ?? undefined),
+            tipo_item: tipo,
+            cantidad: det.cantidad,
+            precio: det.precio,
+            ancho: det.ancho ?? undefined,
+            largo: det.largo ?? undefined,
+            descripcion_especifica: det.descripcion_especifica ?? det.observaciones ?? undefined,
+            observaciones: det.observaciones ?? undefined,
+            es_obsequio: det.es_obsequio || undefined,
+            piezas: det.piezas?.map((p) => ({
+              nombre: p.nombre,
+              cantidad: Number(p.cantidad) || 1,
+              notas: p.notas || null,
+            })),
+          };
+        });
       } else {
         const match = selectedQuoteForConvert.observaciones?.match(/Producto: (.*) \((.*)x(.*)m\)/);
         let pId: number | undefined;
@@ -1884,7 +1891,7 @@ export default function Cotizaciones() {
           if (found) pId = found.id;
         }
         if (!pId) {
-          toast.error('No se pudo identificar el producto de esta cotización. Verifique que tenga detalles o que el producto exista en el catálogo.');
+          toast.error('Esta cotización no tiene renglones guardados (formato viejo). Ábrela, edítala y agrega los renglones antes de convertirla a pedido.');
           return;
         }
         convertDetails = [
@@ -2161,6 +2168,15 @@ export default function Cotizaciones() {
           title="Enviar"
         >
           Enviar
+        </button>
+      )}
+      {puedeEditar(quote) && quote.estado === 'BORRADOR' && !quote.pedido_id && (
+        <button
+          onClick={() => handleOpenConvert(quote)}
+          className="bg-yeikar-primary hover:bg-yeikar-primary-light text-yeikar-neutral px-2.5 py-1.5 rounded text-xs font-bold font-headline shadow-sm"
+          title="Convertir esta cotización a pedido directamente desde el borrador: entra a producción sin pasar por Enviar"
+        >
+          Pedido
         </button>
       )}
       {puedeEditar(quote) && quote.estado === 'ENVIADA' && (

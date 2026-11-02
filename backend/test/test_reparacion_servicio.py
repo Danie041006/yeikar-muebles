@@ -206,3 +206,85 @@ def test_flete_real_se_resta_del_margen(client, db, cleaner):
     rent = client.get(f"/api/v1/pedido/{pedido['id']}/rentabilidad", headers=ADMIN_HEADERS).json()
     assert rent["flete_real_base"] == 15000.0
     assert rent["margen_real"] == rent["total_cobrado_base"] - rent["costo_real_produccion"] - 15000.0
+
+
+def test_dos_reparaciones_distintas_se_convierten(client, db, cleaner):
+    """Dos renglones REPARACION en la MISMA cotización (precios distintos).
+
+    Antes el emparejamiento usaba la clave (tipo, producto_id, material_id):
+    como REPARACION no lleva producto ni material, ambas filas colapsaban en
+    (REPARACION, None, None) y la conversión fallaba siempre con
+    "el ítem no coincide con la cotización". Ahora se emparejan por posición
+    dentro de su propio tipo.
+    """
+    cliente = crear_cliente(client, cleaner)
+    detalles = [
+        {"tipo_item": "REPARACION", "cantidad": 1, "precio": 250000.0,
+         "descripcion_especifica": "Tapizar sofá de 3 puestos", "costo_total": 45000.0},
+        {"tipo_item": "REPARACION", "cantidad": 2, "precio": 90000.0,
+         "descripcion_especifica": "Tapizar dos poltronas", "costo_total": 30000.0},
+    ]
+    cot = crear_cotizacion_multidetalle(client, cleaner, cliente["id"], detalles)
+    # La cotización nace BORRADOR y se convierte directo (sin pasar por ENVIADA).
+    assert cot["estado"] == "BORRADOR"
+
+    r, pedido = convertir_cotizacion(client, cleaner, cot["id"], [
+        {"tipo_item": "REPARACION", "cantidad": 1, "precio": 250000.0,
+         "descripcion_especifica": "Tapizar sofá de 3 puestos"},
+        {"tipo_item": "REPARACION", "cantidad": 2, "precio": 90000.0,
+         "descripcion_especifica": "Tapizar dos poltronas"},
+    ])
+    assert r.status_code in (200, 201), f"convertir → {r.status_code}: {r.text}"
+    assert pedido["estado"] == "PRODUCCION"
+
+    # Cada reparación conserva SU descripción y SU precio (no se cruzaron).
+    por_precio = {
+        round(float(d["precio"]), 2): (d["descripcion_especifica"] or "")
+        for d in pedido["detalles"]
+    }
+    assert por_precio[250000.0] == "Tapizar sofá de 3 puestos"
+    assert por_precio[90000.0] == "Tapizar dos poltronas"
+
+    # Una orden de producción por renglón de reparación.
+    n_ordenes = db.execute(text(
+        "SELECT COUNT(*) FROM orden_produccion o "
+        "JOIN detalle_pedido d ON d.id = o.detalle_pedido_id "
+        "WHERE d.pedido_id = :p"
+    ), {"p": pedido["id"]}).scalar()
+    assert n_ordenes == 2
+
+
+def test_reparacion_y_servicio_mezclados_se_emparejan(client, db, cleaner):
+    """REPARACION y SERVICIO comparten "sin producto", pero cada tipo tiene su
+    propia cola posicional: el servicio no debe consumir el renglón de reparación."""
+    cliente = crear_cliente(client, cleaner)
+    detalles = [
+        {"tipo_item": "SERVICIO", "cantidad": 1, "precio": 30000.0,
+         "descripcion_especifica": "Flete a domicilio"},
+        {"tipo_item": "REPARACION", "cantidad": 1, "precio": 120000.0,
+         "descripcion_especifica": "Reparar retapizado"},
+    ]
+    cot = crear_cotizacion_multidetalle(client, cleaner, cliente["id"], detalles)
+    r, pedido = convertir_cotizacion(client, cleaner, cot["id"], [
+        {"tipo_item": "SERVICIO", "cantidad": 1, "precio": 30000.0,
+         "descripcion_especifica": "Flete a domicilio"},
+        {"tipo_item": "REPARACION", "cantidad": 1, "precio": 120000.0,
+         "descripcion_especifica": "Reparar retapizado"},
+    ])
+    assert r.status_code in (200, 201), f"convertir → {r.status_code}: {r.text}"
+    assert pedido["estado"] == "PRODUCCION"
+
+    por_precio = {
+        round(float(d["precio"]), 2): (d["descripcion_especifica"] or "")
+        for d in pedido["detalles"]
+    }
+    assert por_precio[30000.0] == "Flete a domicilio"
+    assert por_precio[120000.0] == "Reparar retapizado"
+
+    # Solo la reparación genera orden; el servicio no entra a producción.
+    n_ordenes = db.execute(text(
+        "SELECT COUNT(*) FROM orden_produccion o "
+        "JOIN detalle_pedido d ON d.id = o.detalle_pedido_id "
+        "WHERE d.pedido_id = :p"
+    ), {"p": pedido["id"]}).scalar()
+    assert n_ordenes == 1

@@ -205,13 +205,21 @@ def obtener_pedidos(
     query = db.query(model.Pedido)
     # Lectura compartida: todos con el módulo 'pedidos' ven todos los pedidos.
     if buscar:
-        query = query.join(Client).filter(
-            or_(
-                model.Pedido.observaciones.ilike(f"%{buscar}%"),
-                model.Pedido.estado.ilike(f"%{buscar}%"),
-                Client.nombre.ilike(f"%{buscar}%")
-            )
-        )
+        filtros = [
+            model.Pedido.observaciones.ilike(f"%{buscar}%"),
+            model.Pedido.estado.ilike(f"%{buscar}%"),
+            Client.nombre.ilike(f"%{buscar}%"),
+            # Cédula del cliente (Paola a veces busca por cédula, no por nombre).
+            Client.cedula.ilike(f"%{buscar}%"),
+        ]
+        # "117" o "#117" también encuentran el pedido: por su id y por el id de
+        # la cotización que lo generó (el número que se ve en Cotizaciones).
+        termino_numerico = str(buscar).strip().lstrip("#").strip()
+        if termino_numerico.isdigit():
+            n = int(termino_numerico)
+            filtros.append(model.Pedido.id == n)
+            filtros.append(model.Pedido.cotizacion_id == n)
+        query = query.join(Client).filter(or_(*filtros))
 
     # Date/history filters: rango [inicio, fin) para que el índice (fecha, id)
     # sea usable (extract(month/year) no puede usar un índice btree).
@@ -547,30 +555,38 @@ def convertir_cotizacion_a_pedido(
     #    reutilizable. La dueña puede dividir UN renglón cotizado en varias
     #    líneas del pedido (facturación independiente por detalle_pedido, p. ej.
     #    el mismo producto facturado en dos montos USD distintos).
-    #  - Muebles A LA MEDIDA (sin producto ni material): por POSICIÓN entre los
-    #    renglones a medida, consumiendo. No tienen clave que los distinga, así
-    #    que un indexado por (tipo, None, None) colapsaba todos en el último y
-    #    la conversión fallaba o validaba contra el renglón equivocado.
+    #  - Renglones SIN producto ni material (muebles A LA MEDIDA, REPARACION y
+    #    SERVICIO): por POSICIÓN dentro de su propio tipo, consumiendo. No
+    #    tienen clave que los distinga: indexarlos por (tipo, None, None)
+    #    colapsaba varios renglones en el último y la conversión de DOS
+    #    reparaciones en una misma cotización fallaba siempre con "el ítem no
+    #    coincide con la cotización", aunque los precios fueran correctos.
     detalles_cotizacion: dict = {}
-    a_medida_cotizados: list = []
+    posicionales: dict[str, list] = {}
     for dc in (db_cotizacion.detalles or []):
         tipo_dc = dc.tipo_item or "FABRICADO"
-        if dc.producto_id is None and dc.material_id is None and tipo_dc == "FABRICADO":
-            a_medida_cotizados.append(dc)
+        if dc.producto_id is None and dc.material_id is None:
+            posicionales.setdefault(tipo_dc, []).append(dc)
         else:
             detalles_cotizacion[(tipo_dc, dc.producto_id, dc.material_id)] = dc
 
-    a_medida_idx = 0
+    posicionales_idx: dict[str, int] = {}
     dcs_match: list = []
     for detalle in detalles:
         detalle_dict = detalle if isinstance(detalle, dict) else detalle.model_dump()
         tipo = detalle_dict.get("tipo_item", "FABRICADO")
         pid = detalle_dict.get("producto_id")
         mid = detalle_dict.get("material_id")
-        es_a_medida = pid is None and mid is None and tipo == "FABRICADO"
-        if es_a_medida:
-            dc = a_medida_cotizados[a_medida_idx] if a_medida_idx < len(a_medida_cotizados) else None
-            a_medida_idx += 1
+        es_posicional = pid is None and mid is None
+        if es_posicional:
+            lista_posicional = posicionales.get(tipo, [])
+            idx_posicional = posicionales_idx.get(tipo, 0)
+            dc = (
+                lista_posicional[idx_posicional]
+                if idx_posicional < len(lista_posicional)
+                else None
+            )
+            posicionales_idx[tipo] = idx_posicional + 1
         else:
             dc = detalles_cotizacion.get((tipo, pid, mid))
         if dc is None:
