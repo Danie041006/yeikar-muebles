@@ -1,4 +1,5 @@
 import api from './api';
+import type { AdjuntoInfo } from './adjuntosService';
 
 export interface MetodoCaja {
   id: number;
@@ -280,6 +281,8 @@ export interface LibroCajaVistaFila {
   origen: string;
   referencia?: string | null;
   persona_entidad?: string | null;
+  /** Pago de venta que originó la fila (para ver su comprobante). */
+  pago_id?: number | null;
   /** Quién registró/importó el movimiento. */
   usuario_id?: number | null;
   usuario_nombre?: string | null;
@@ -354,6 +357,11 @@ export const cuentasService = {
   // Movimientos
   getMovimientos: async (params?: { metodo_caja_id?: number; fecha_desde?: string; fecha_hasta?: string }): Promise<MovimientoCaja[]> => {
     const res = await api.get<MovimientoCaja[]>('/cuenta/movimientos', { params });
+    return res.data;
+  },
+  /** Comprobantes del pago de venta que originó un movimiento de caja. */
+  getComprobantesMovimiento: async (movimientoId: number): Promise<AdjuntoInfo[]> => {
+    const res = await api.get<AdjuntoInfo[]>(`/cuenta/movimiento/${movimientoId}/comprobantes`);
     return res.data;
   },
   crearMovimiento: async (metodoId: number, data: Omit<MovimientoCreate, 'metodo_caja_id'>): Promise<MovimientoCaja> => {

@@ -13,6 +13,8 @@ import {
 import { nombreMoneda, fmtMoneda } from '../utils/format';
 import { formatMontoInput, parseMontoInput } from '../utils/monto';
 import { hoyVE } from '../utils/fechas';
+import AdjuntoImagen from '../components/AdjuntoImagen';
+import type { AdjuntoInfo } from '../services/adjuntosService';
 import { useToast } from '../context/ToastContext';
 import LibroCajaView from '../components/Cuentas/LibroCajaView';
 import ReporteCuentasModal from '../components/Cuentas/ReporteCuentasModal';
@@ -114,6 +116,21 @@ export default function Cuentas() {
 
   const [confirmAccion, setConfirmAccion] = useState<null | { tipo: 'cuenta' | 'movimiento'; id: number; nombre?: string }>(null);
   const [detalleMov, setDetalleMov] = useState<MovimientoCaja | null>(null);
+  const [comprobantesMov, setComprobantesMov] = useState<AdjuntoInfo[]>([]);
+  const [comprobanteVer, setComprobanteVer] = useState<AdjuntoInfo | null>(null);
+
+  useEffect(() => {
+    if (!detalleMov?.pago_id) {
+      setComprobantesMov([]);
+      return;
+    }
+    let activo = true;
+    cuentasService
+      .getComprobantesMovimiento(detalleMov.id)
+      .then((data) => { if (activo) setComprobantesMov(data); })
+      .catch(() => { if (activo) setComprobantesMov([]); });
+    return () => { activo = false; };
+  }, [detalleMov]);
 
   // Préstamos por cobrar (se crean con una salida PRESTAMO y se cobran con
   // una entrada "Cobro de préstamo"). Sin pantalla aparte: todo vive en Cuentas.
@@ -1489,10 +1506,51 @@ export default function Cuentas() {
                     : `Transferencia #T${detalleMov.transferencia_id} (sale de una cuenta y entra en la otra)`}
                 </DetalleFila>
               )}
+              {detalleMov.pago_id && (
+                <DetalleFila label="Comprobante">
+                  {comprobantesMov.length > 0 ? (
+                    <span className="flex flex-wrap gap-2">
+                      {comprobantesMov.map((c) => (
+                        <AdjuntoImagen
+                          key={c.id}
+                          adjunto={c}
+                          alt="comprobante"
+                          className="h-16 w-16 cursor-pointer rounded-lg border border-yeikar-secondary-light/20 transition-colors hover:border-yeikar-primary/60"
+                          onClick={() => setComprobanteVer(c)}
+                        />
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-yeikar-neutral/40">Sin comprobante adjunto</span>
+                  )}
+                </DetalleFila>
+              )}
             </dl>
           </div>
         )}
       </Modal>
+
+      {/* Visor del comprobante del cobro */}
+      {comprobanteVer && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setComprobanteVer(null)}
+        >
+          <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <button
+              onClick={() => setComprobanteVer(null)}
+              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-sm text-white hover:bg-black/80"
+            >
+              ×
+            </button>
+            <AdjuntoImagen
+              adjunto={comprobanteVer}
+              alt="comprobante"
+              className="max-h-[85vh] w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Detalle de préstamos por cobrar */}
       <Modal

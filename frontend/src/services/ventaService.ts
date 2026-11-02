@@ -124,6 +124,8 @@ export interface CuentaPorCobrar {
   saldo_pendiente: number;
   moneda_codigo: string;
   pedido_estado?: string | null;
+  /** Cantidad de comprobantes adjuntos a los pagos de esta venta. */
+  recibos_count?: number;
   /** Renglones del pedido: por qué se debe lo que se debe. */
   items?: ItemDeuda[];
 }

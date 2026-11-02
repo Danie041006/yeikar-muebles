@@ -13,6 +13,8 @@ import {
 import { fmtMoneda } from '../../utils/format';
 import { fmtFechaHoraVE } from '../../utils/fechas';
 import { formatMontoInput, parseMontoInput } from '../../utils/monto';
+import AdjuntoImagen from '../AdjuntoImagen';
+import type { AdjuntoInfo } from '../../services/adjuntosService';
 import { useToast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 
@@ -68,6 +70,8 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
   // Detalle / edición de una fila del libro. No hay iconos: se abre al
   // hacer clic en la fila.
   const [detalle, setDetalle] = useState<LibroCajaVistaFila | null>(null);
+  const [comprobantes, setComprobantes] = useState<AdjuntoInfo[]>([]);
+  const [comprobanteVer, setComprobanteVer] = useState<AdjuntoInfo | null>(null);
   const [editando, setEditando] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState(false);
@@ -124,6 +128,14 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
     setEditando(false);
     setConfirmarEliminar(false);
     setErrorMov('');
+    setComprobantes([]);
+    setComprobanteVer(null);
+    if (fila.pago_id) {
+      cuentasService
+        .getComprobantesMovimiento(fila.id)
+        .then(setComprobantes)
+        .catch(() => setComprobantes([]));
+    }
     setEditForm({
       fecha: fila.fecha,
       hora: horaCorta(fila.hora),
@@ -139,6 +151,8 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
     setEditando(false);
     setConfirmarEliminar(false);
     setErrorMov('');
+    setComprobantes([]);
+    setComprobanteVer(null);
   };
 
   const eliminarMovimiento = async () => {
@@ -564,6 +578,25 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
             <FilaDetalle label="Saldo">
               {fmt(detalle.saldo)}
             </FilaDetalle>
+            {detalle.pago_id && (
+              <FilaDetalle label="Comprobante">
+                {comprobantes.length > 0 ? (
+                  <span className="flex flex-wrap gap-2">
+                    {comprobantes.map((c) => (
+                      <AdjuntoImagen
+                        key={c.id}
+                        adjunto={c}
+                        alt="comprobante"
+                        className="h-16 w-16 cursor-pointer rounded-lg border border-yeikar-secondary-light/20 transition-colors hover:border-yeikar-primary/60"
+                        onClick={() => setComprobanteVer(c)}
+                      />
+                    ))}
+                  </span>
+                ) : (
+                  <span className="text-yeikar-neutral/40">Sin comprobante adjunto</span>
+                )}
+              </FilaDetalle>
+            )}
           </dl>
         )}
 
@@ -654,6 +687,28 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
           </div>
         )}
       </Modal>
+
+      {/* Visor del comprobante del cobro */}
+      {comprobanteVer && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+          onClick={() => setComprobanteVer(null)}
+        >
+          <div className="relative w-full max-w-2xl overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <button
+              onClick={() => setComprobanteVer(null)}
+              className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-sm text-white hover:bg-black/80"
+            >
+              ×
+            </button>
+            <AdjuntoImagen
+              adjunto={comprobanteVer}
+              alt="comprobante"
+              className="max-h-[85vh] w-full object-contain"
+            />
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirmarEliminar}

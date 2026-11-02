@@ -1766,6 +1766,7 @@ def _mov_caja_response(m: model.MovimientoCaja) -> schemas.MovimientoCajaRespons
         usuario_id=m.usuario_id,
         monto_en_moneda_base=m.monto_en_moneda_base,
         transferencia_id=m.transferencia_id,
+        pago_id=m.pago_id,
         tasa_conversion=m.tasa_conversion,
         interes=m.interes,
         created_at=m.created_at,

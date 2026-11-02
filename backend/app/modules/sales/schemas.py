@@ -246,6 +246,8 @@ class CuentaPorCobrarResponse(BaseModel):
     saldo_pendiente: float
     moneda_codigo: str
     pedido_estado: Optional[str] = None
+    # Cantidad de comprobantes adjuntos a los pagos de esta venta.
+    recibos_count: int = 0
     # Renglones del pedido (venta → pedido → cotización) para ver el motivo.
     items: List[ItemDeudaResponse] = []
 

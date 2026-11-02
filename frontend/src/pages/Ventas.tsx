@@ -88,6 +88,8 @@ interface CobroPendiente {
   saldo: number;
   codigo: string;
   items: ItemDeuda[];
+  /** Comprobantes adjuntos a los pagos de esta venta. */
+  recibosCount: number;
 }
 
 function progresoCobro(total: number, pagado: number): number {
@@ -291,7 +293,7 @@ function PanelCobro({
 }
 
 function TarjetaCobro({ cobro, onOpen }: { cobro: CobroPendiente; onOpen: () => void }) {
-  const { venta, total, pagado, saldo, codigo } = cobro;
+  const { venta, total, pagado, saldo, codigo, recibosCount } = cobro;
   const entregado = venta.pedido_estado === 'ENTREGADO';
   const progreso = progresoCobro(total, pagado);
   const items = cobro.items ?? [];
@@ -353,7 +355,20 @@ function TarjetaCobro({ cobro, onOpen }: { cobro: CobroPendiente; onOpen: () => 
       </span>
 
       <span className="flex items-center justify-between border-t border-yeikar-secondary-light/10 px-4 py-2 text-[11px] font-bold text-yeikar-neutral/45">
-        <span>{items.length > 0 ? `${items.length} artículo${items.length !== 1 ? 's' : ''}` : 'Sin renglones'}</span>
+        <span className="flex items-center gap-2">
+          <span>{items.length > 0 ? `${items.length} artículo${items.length !== 1 ? 's' : ''}` : 'Sin renglones'}</span>
+          {recibosCount > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono text-[10px] font-black text-emerald-700"
+              title={`${recibosCount} comprobante${recibosCount !== 1 ? 's' : ''} adjunto${recibosCount !== 1 ? 's' : ''}`}
+            >
+              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              </svg>
+              {recibosCount}
+            </span>
+          )}
+        </span>
         <span className="flex items-center gap-1 text-yeikar-secondary">
           Ver pedido y cobrar
           <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1206,16 +1221,19 @@ function ModalDetalle({
                               )}
                               {/* Recibos del cobro (comprobantes digitales) */}
                               {p.recibos && p.recibos.length > 0 && (
-                                <span className="mt-1.5 flex gap-1.5">
+                                <span className="mt-1.5 flex items-center gap-1.5">
                                   {p.recibos.map((r) => (
                                     <AdjuntoImagen
                                       key={r.id}
                                       adjunto={r}
                                       alt="recibo"
-                                      className="h-10 w-10 rounded-lg border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
+                                      className="h-12 w-12 rounded-lg border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
                                       onClick={() => setReciboVer({ id: r.id, mime: r.mime })}
                                     />
                                   ))}
+                                  <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-yeikar-neutral/40">
+                                    Comprobante
+                                  </span>
                                 </span>
                               )}
                               {esMultimoneda && (
@@ -2060,7 +2078,7 @@ export default function Ventas() {
     const descontado = cuenta ? Number(cuenta.total_descontado ?? 0) : 0;
     const saldo = cuenta ? Number(cuenta.saldo_pendiente) : Math.max(total - pagado, 0);
     const codigo = cuenta?.moneda_codigo ?? v.moneda?.codigo ?? 'USD';
-    return { venta: v, total, pagado, descontado, saldo, codigo, items: cuenta?.items ?? [] };
+    return { venta: v, total, pagado, descontado, saldo, codigo, items: cuenta?.items ?? [], recibosCount: cuenta?.recibos_count ?? 0 };
   };
   const cobrosEntregados = ventasEntregadas.map(combinarVentaConCuenta);
   const cobrosEnProceso = ventasEnProceso.map(combinarVentaConCuenta);

@@ -1166,6 +1166,7 @@ def obtener_libro_caja(
             "origen": origen,
             "referencia": mov.referencia,
             "persona_entidad": mov.persona_entidad,
+            "pago_id": mov.pago_id,
             "usuario_id": mov.usuario_id,
             "usuario_nombre": usuario_nombre,
             "created_at": created_at,

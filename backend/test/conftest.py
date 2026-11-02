@@ -118,6 +118,7 @@ def db():
 # Cleaner: registro + borrado estricto en orden inverso de FKs
 # ---------------------------------------------------------------------------
 ORDEN_LIMPIEZA = [
+    "adjunto",
     "devolucion_venta",
     "descuento_venta",
     "pago",

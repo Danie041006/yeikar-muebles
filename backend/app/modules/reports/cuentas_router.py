@@ -9,6 +9,9 @@ from app.modules.users.model import Usuario
 from app.modules.users.deps import require_module
 from app.modules.reports import service, schemas
 from app.modules.reports import libro_caja
+from app.modules.reports.model import MovimientoCaja
+from app.modules.adjuntos.service import adjuntos_info
+from app.modules.adjuntos.schemas import AdjuntoInfo
 
 router = APIRouter(prefix="/cuenta", tags=["cuentas"], dependencies=[Depends(require_module('cuentas'))])
 
@@ -76,6 +79,26 @@ def get_movimientos_cuenta(
     current_user: Usuario = Depends(get_current_user)
 ):
     return service.listar_movimientos_caja(db, metodo_caja_id, fecha_desde, fecha_hasta)
+
+
+@router.get("/movimiento/{movimiento_id}/comprobantes", response_model=List[AdjuntoInfo])
+def get_comprobantes_movimiento(
+    movimiento_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user)
+):
+    """Comprobantes del pago de venta que originó este movimiento de caja.
+
+    Se expone bajo el módulo Cuentas para que quien ve el libro pueda abrir la
+    imagen sin necesitar permisos de Ventas. Si el movimiento no viene de un
+    pago (manual, gasto o transferencia), devuelve una lista vacía.
+    """
+    mov = db.query(MovimientoCaja).filter(MovimientoCaja.id == movimiento_id).first()
+    if not mov:
+        raise HTTPException(status_code=404, detail="Movimiento no encontrado")
+    if not mov.pago_id:
+        return []
+    return adjuntos_info(db, "PAGO", mov.pago_id)
 
 
 @router.post("/{metodo_id}/movimiento", response_model=schemas.MovimientoCajaResponse, status_code=201)

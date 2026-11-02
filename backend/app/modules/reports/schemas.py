@@ -181,6 +181,8 @@ class MovimientoCajaResponse(MovimientoCajaBase):
     usuario_id: Optional[int] = None
     monto_en_moneda_base: Optional[Decimal] = None
     transferencia_id: Optional[int] = None
+    # Pago de venta que originó el movimiento (para mostrar su comprobante).
+    pago_id: Optional[int] = None
     # Solo en transferencias: tasa de conversión usada e interés aplicado a la
     # pata de entrada (en moneda destino; positivo suma, negativo resta).
     tasa_conversion: Optional[Decimal] = None
@@ -638,6 +640,8 @@ class LibroCajaVistaFila(BaseModel):
     origen: str = "MANUAL"
     referencia: Optional[str] = None
     persona_entidad: Optional[str] = None
+    # Pago de venta que originó la fila (para consultar su comprobante).
+    pago_id: Optional[int] = None
     # Quién digitó/importó el movimiento y cuándo (hora Venezuela).
     usuario_id: Optional[int] = None
     usuario_nombre: Optional[str] = None

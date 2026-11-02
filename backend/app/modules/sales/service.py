@@ -1198,6 +1198,19 @@ def obtener_cuentas_por_cobrar(db: Session):
     pagos, descuentos = _cobros_base_por_venta(db, [v.id for v in ventas])
     lineas = _lineas_por_venta(db, ventas)
 
+    # Comprobantes adjuntos a los pagos de cada venta (para marcarlas en Cobros).
+    from app.modules.adjuntos.model import Adjunto
+    recibos_por_venta = dict(
+        db.query(Pago.venta_id, func.count(Adjunto.id))
+        .join(Adjunto, Adjunto.entidad_id == Pago.id)
+        .filter(
+            Adjunto.entidad_tipo == "PAGO",
+            Pago.venta_id.in_([v.id for v in ventas]),
+        )
+        .group_by(Pago.venta_id)
+        .all()
+    )
+
     cuentas = []
     for v in ventas:
         total_pagado = float(pagos.get(v.id, 0) or 0)
@@ -1225,6 +1238,7 @@ def obtener_cuentas_por_cobrar(db: Session):
             "saldo_pendiente": saldo_pendiente,
             "moneda_codigo": v.moneda.codigo if v.moneda else "COP",
             "pedido_estado": v.pedido_estado,
+            "recibos_count": int(recibos_por_venta.get(v.id, 0)),
             "items": items,
         })
 
