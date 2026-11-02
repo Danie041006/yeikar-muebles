@@ -763,6 +763,11 @@ def test_fabrica_y_camiones_son_clasificaciones_propias():
     assert normalizar_clasificacion("G CAMIONES") == "GASTO_CAMIONES"
     assert normalizar_clasificacion("G CAMION") == "GASTO_CAMIONES"
 
+    # Construcción: canasta propia (agregada 02/11/2026).
+    assert normalizar_clasificacion("Gastos de Construcción") == "GASTO_CONSTRUCCION"
+    assert normalizar_clasificacion("G CONSTRUCCION") == "GASTO_CONSTRUCCION"
+    assert normalizar_clasificacion("CONSTRUCCIONES") == "GASTO_CONSTRUCCION"
+
     # "Gastos de X" normalizado no colisiona con las letras: G+F no se
     # comparte, que antes lo mandaba todo a Familiar.
     import pytest
@@ -852,3 +857,156 @@ def test_salida_de_camiones_reusa_el_tipo_gasto_del_catalogo(client, cleaner, db
     assert camiones is not None, libro["clasificaciones"]
     assert camiones["label"] == "Gastos de Camiones"
     assert Decimal(str(camiones["total"])) == Decimal("180000")
+
+
+def test_editar_tipo_de_gasto_de_una_salida_clasificada(client, cleaner, db):
+    """El tipo de gasto (clasificación) se corrige desde la edición del libro.
+
+    Antes solo se podía desde Gastos; ahora el Gasto espejo se actualiza al
+    editar el movimiento y el libro muestra la clasificación nueva.
+    """
+    cuenta = _crear_cuenta(client, cleaner, db)
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-20",
+        "tipo": "SALIDA",
+        "monto": 50000,
+        "moneda_id": 1,
+        "clasificacion": "G F",
+        "persona_entidad": "PROVEEDOR",
+        "concepto": "Compra de materiales",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar("movimiento_caja", mov["id"])
+    gasto_id = int(mov["referencia"].split("#", 1)[1])
+    cleaner.registrar("gasto", gasto_id)
+
+    gasto = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+    assert gasto.clasificacion == "GASTO_FAMILIAR"
+
+    # Cambiar el tipo de gasto desde la edición del libro (incluye el nuevo
+    # "Gastos de Construcción").
+    r = client.put(
+        f"/api/v1/cuenta/movimiento/{mov['id']}",
+        json={"clasificacion": "G CONSTRUCCION"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    gasto = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+    assert gasto.clasificacion == "GASTO_CONSTRUCCION"
+    assert gasto.tipo_gasto.nombre == "Gastos de Construcción"
+
+    # El libro lo refleja en la fila y en el resumen por clasificación.
+    r = client.get("/api/v1/cuenta/libro", params={
+        "metodo_caja_id": cuenta["id"],
+        "fecha_desde": "2026-10-01",
+        "fecha_hasta": "2026-10-31",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    libro = r.json()
+    fila = next(f for f in libro["filas"] if f["id"] == mov["id"])
+    assert fila["clasificacion"] == "GASTO_CONSTRUCCION"
+    assert any(
+        c["clasificacion"] == "GASTO_CONSTRUCCION" and c["count"] == 1
+        for c in libro["clasificaciones"]
+    )
+
+    # El listado de movimientos (pantalla Cuentas) expone la clasificación
+    # para poder precargarla en el formulario de edición.
+    r = client.get("/api/v1/cuenta/movimientos", params={
+        "metodo_caja_id": cuenta["id"],
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    fila_mov = next(m for m in r.json() if m["id"] == mov["id"])
+    assert fila_mov["clasificacion"] == "GASTO_CONSTRUCCION"
+
+    # Quitar la clasificación deja el gasto (el egreso no desaparece).
+    r = client.put(
+        f"/api/v1/cuenta/movimiento/{mov['id']}",
+        json={"clasificacion": None},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    gasto = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+    assert gasto is not None
+    assert gasto.clasificacion is None
+
+
+def test_clasificar_una_salida_existente_no_duplica_el_movimiento(client, cleaner, db):
+    """Poner tipo de gasto a una salida que no lo tenía crea el Gasto sin
+    generar otro movimiento de caja (el egreso ya estaba en el libro)."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-21",
+        "tipo": "SALIDA",
+        "monto": 30000,
+        "moneda_id": 1,
+        "concepto": "Salida sin clasificar",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar("movimiento_caja", mov["id"])
+    assert mov["referencia"] is None
+
+    movs_antes = db.query(MovimientoCaja).filter(
+        MovimientoCaja.metodo_caja_id == cuenta["id"]
+    ).count()
+
+    r = client.put(
+        f"/api/v1/cuenta/movimiento/{mov['id']}",
+        json={"clasificacion": "G D"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    db.expire_all()
+    obj = db.query(MovimientoCaja).filter(MovimientoCaja.id == mov["id"]).first()
+    assert (obj.referencia or "").startswith("Gasto #")
+    gasto_id = int(obj.referencia.split("#", 1)[1])
+    cleaner.registrar("gasto", gasto_id)
+    gasto = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+    assert gasto.clasificacion == "GASTO_DEDUCIBLE"
+
+    movs_despues = db.query(MovimientoCaja).filter(
+        MovimientoCaja.metodo_caja_id == cuenta["id"]
+    ).count()
+    assert movs_despues == movs_antes, "clasificar no debe duplicar el movimiento de caja"
+
+
+def test_editar_clasificacion_en_entrada_se_rechaza(client, cleaner, db):
+    """La clasificación de gasto solo aplica a salidas."""
+    cuenta = _crear_cuenta(client, cleaner, db)
+    r = client.post(f"/api/v1/cuenta/{cuenta['id']}/movimiento", json={
+        "metodo_caja_id": cuenta["id"],
+        "fecha": "2026-10-22",
+        "tipo": "ENTRADA",
+        "monto": 10000,
+        "moneda_id": 1,
+        "concepto": "Entrada de prueba",
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar("movimiento_caja", mov["id"])
+
+    r = client.put(
+        f"/api/v1/cuenta/movimiento/{mov['id']}",
+        json={"clasificacion": "G D"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 409, r.text
+    assert "salidas" in r.json()["detail"].lower()
+
+
+def test_libro_acepta_g_construccion():
+    """El parser reconoce 'G CONSTRUCCION' a palabra completa."""
+    from app.modules.reports.libro_caja import parsear_libro
+
+    texto = "\n".join([
+        "10/1/2026\tSALDO\tMES DE SEPTIEMBRE\t\t\t$ 1,000,000",
+        "10/1/2026\tOBRA G CONSTRUCCION\tCEMENTO\t\t$ 200,000\t$ 800,000",
+    ])
+    parsed = parsear_libro(texto)
+    assert parsed.filas[1].clasificacion == "GASTO_CONSTRUCCION"

@@ -1189,7 +1189,8 @@ def listar_movimientos_caja(db: Session, metodo_id: Optional[int] = None, fecha_
         query = query.filter(model.MovimientoCaja.fecha >= fecha_desde)
     if fecha_hasta:
         query = query.filter(model.MovimientoCaja.fecha <= fecha_hasta)
-    return query.order_by(model.MovimientoCaja.fecha.desc(), model.MovimientoCaja.id.desc()).all()
+    movimientos = query.order_by(model.MovimientoCaja.fecha.desc(), model.MovimientoCaja.id.desc()).all()
+    return _adjuntar_clasificacion(db, movimientos)
 
 def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, usuario_id: Optional[int] = None) -> model.MovimientoCaja:
     datos = esquema.model_dump()
@@ -1309,7 +1310,7 @@ def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, us
             )
         db.commit()
         db.refresh(obj)
-        return obj
+        return _adjuntar_clasificacion(db, obj)
 
     # Salida clasificada: se crea el Gasto (con su tipo del catálogo) y el
     # gasto genera el movimiento de caja. Así aparece en Gastos y en reportes,
@@ -1367,7 +1368,7 @@ def crear_movimiento_caja(db: Session, esquema: schemas.MovimientoCajaCreate, us
 
     db.commit()
     db.refresh(obj)
-    return obj
+    return _adjuntar_clasificacion(db, obj)
 
 def _validar_borrado_transferencia(
     obj: model.MovimientoCaja, usuario: Optional[Usuario]
@@ -1398,9 +1399,29 @@ def _gasto_id_de_movimiento(obj: model.MovimientoCaja) -> Optional[int]:
         return None
 
 
-def _snapshot_movimiento(obj: model.MovimientoCaja) -> dict:
+def _adjuntar_clasificacion(db: Session, movimientos):
+    """Expone en cada movimiento la clasificación de su Gasto espejo.
+
+    `movimiento_caja` no guarda la clasificación (vive en el Gasto); el schema
+    de respuesta la declara opcional, así que se completa aquí para que la
+    pantalla de Cuentas pueda mostrarla y editarla.
+    """
+    lista = movimientos if isinstance(movimientos, list) else [movimientos]
+    gasto_ids = {gid for m in lista for gid in [_gasto_id_de_movimiento(m)] if gid}
+    mapa = {}
+    if gasto_ids:
+        mapa = {
+            g.id: g.clasificacion
+            for g in db.query(Gasto).filter(Gasto.id.in_(gasto_ids)).all()
+        }
+    for m in lista:
+        m.clasificacion = mapa.get(_gasto_id_de_movimiento(m))
+    return movimientos
+
+
+def _snapshot_movimiento(obj: model.MovimientoCaja, db: Optional[Session] = None) -> dict:
     """Datos del asiento para la auditoría (antes de corregirlo o borrarlo)."""
-    return {
+    datos = {
         "metodo_caja_id": obj.metodo_caja_id,
         "fecha": obj.fecha,
         "hora": obj.hora,
@@ -1413,6 +1434,12 @@ def _snapshot_movimiento(obj: model.MovimientoCaja) -> dict:
         "pago_id": obj.pago_id,
         "transferencia_id": obj.transferencia_id,
     }
+    if db is not None:
+        gasto_id = _gasto_id_de_movimiento(obj)
+        if gasto_id:
+            gasto = db.query(Gasto).filter(Gasto.id == gasto_id).first()
+            datos["clasificacion"] = gasto.clasificacion if gasto else None
+    return datos
 
 
 def _validar_movimiento_editable(db: Session, obj: model.MovimientoCaja) -> None:
@@ -1454,10 +1481,28 @@ def actualizar_movimiento_caja(
     if not obj:
         return None
     datos = esquema.model_dump(exclude_unset=True)
+    # El tipo de gasto (clasificación) no vive en movimiento_caja: se aplica
+    # sobre el Gasto espejo. Se saca de `datos` para que el setattr genérico
+    # no intente escribirlo como columna.
+    clasificacion_enviada = "clasificacion" in datos
+    clasificacion = datos.pop("clasificacion", None)
+    if clasificacion_enviada:
+        from app.modules.gastos import service as gastos_service
+
+        clasificacion = gastos_service.normalizar_clasificacion(clasificacion)
+        if clasificacion is not None and obj.tipo != "SALIDA":
+            raise ValueError(
+                "Solo las salidas de caja se pueden clasificar como gasto o préstamo."
+            )
+        if clasificacion == "PRESTAMO":
+            raise ValueError(
+                "Un préstamo no se crea desde la edición del libro: elimina la "
+                "salida y créala de nuevo con el tipo de gasto Préstamo."
+            )
     # La hora solo ACOMODA la fila en el libro (no mueve dinero), así que se
     # puede corregir incluso en asientos derivados (cobro o transferencia).
     # Cualquier otro campo sigue bloqueado en esos casos.
-    if set(datos) - {"hora"}:
+    if (set(datos) - {"hora"}) or clasificacion_enviada:
         _validar_movimiento_editable(db, obj)
 
     # La salida que creó un préstamo y su deuda son la misma operación: los
@@ -1481,7 +1526,7 @@ def actualizar_movimiento_caja(
                 "cambiar monto, fecha ni persona. Elimina primero las entradas de cobro."
             )
 
-    antes = _snapshot_movimiento(obj)
+    antes = _snapshot_movimiento(obj, db)
 
     # Movimiento espejo de un gasto (referencia "Gasto #N"): corregir el
     # movimiento también debe corregir el gasto, o la caja y los reportes
@@ -1496,6 +1541,50 @@ def actualizar_movimiento_caja(
             "No se puede cambiar el tipo de un movimiento clasificado como gasto. "
             "Corrígelo desde Gastos o elimínalo y créalo de nuevo."
         )
+
+    # Corrección del tipo de gasto (clasificación). Si la salida ya tiene Gasto
+    # espejo se actualiza ese mismo registro; si no lo tiene, se crea el Gasto
+    # SIN método de caja (no genera otro movimiento) y se vincula este asiento,
+    # así el egreso no se duplica en el libro.
+    if clasificacion_enviada:
+        if prestamo_origen is not None:
+            raise ValueError(
+                "Este movimiento creó un préstamo: su tipo de gasto no se cambia "
+                "desde el libro. Elimínalo y créalo de nuevo."
+            )
+        from app.modules.gastos import service as gastos_service
+        from app.modules.gastos import schemas as gastos_schemas
+
+        if gasto_espejo is None and clasificacion is not None:
+            tipo_gasto = gastos_service.tipo_gasto_para_clasificacion(db, clasificacion)
+            persona = str(datos.get("persona_entidad", obj.persona_entidad) or "").strip() or None
+            concepto = str(datos.get("concepto", obj.concepto) or "").strip() or f"Salida de caja #{obj.id}"
+            gasto_espejo = gastos_service.crear_gasto(
+                db,
+                gastos_schemas.GastoCreate(
+                    tipo_gasto_id=tipo_gasto.id,
+                    moneda_id=obj.moneda_id,
+                    fecha=datos.get("fecha", obj.fecha),
+                    descripcion=concepto,
+                    monto=datos.get("monto", obj.monto),
+                    tasa_cambio=obj.tasa_cambio,
+                    clasificacion=clasificacion,
+                    observaciones=(f"Persona/entidad: {persona}" if persona else None),
+                ),
+                usuario,
+                commit=False,
+            )
+            obj.referencia = f"Gasto #{gasto_espejo.id}"
+        elif gasto_espejo is not None:
+            if clasificacion is None:
+                # Se quita la clasificación, pero el egreso sigue existiendo
+                # como gasto (sin clasificar): no se borra dinero del P&L.
+                gasto_espejo.clasificacion = None
+            else:
+                gasto_espejo.clasificacion = clasificacion
+                gasto_espejo.tipo_gasto_id = (
+                    gastos_service.tipo_gasto_para_clasificacion(db, clasificacion).id
+                )
 
     for campo, valor in datos.items():
         setattr(obj, campo, valor)
@@ -1542,11 +1631,11 @@ def actualizar_movimiento_caja(
         entity_type="movimiento_caja",
         entity_id=obj.id,
         before=antes,
-        after=_snapshot_movimiento(obj),
+        after=_snapshot_movimiento(obj, db),
     )
     db.commit()
     db.refresh(obj)
-    return obj
+    return _adjuntar_clasificacion(db, obj)
 
 def eliminar_movimiento_caja(
     db: Session,
@@ -1565,7 +1654,7 @@ def eliminar_movimiento_caja(
             "el libro. Corrige o elimina la venta desde Ventas."
         )
     _validar_borrado_transferencia(obj, usuario)
-    antes = _snapshot_movimiento(obj)
+    antes = _snapshot_movimiento(obj, db)
 
     # Préstamos: si este asiento es un cobro, devuelve el saldo al préstamo;
     # si es la salida que prestó el dinero, borra el préstamo (solo cuando no

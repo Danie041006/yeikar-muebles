@@ -29,6 +29,8 @@ CLASIFICACIONES_GASTO = {
     # TipoGasto "GASTOS DE CAMIONES" del catálogo: no crea duplicado.
     "GASTO_CAMIONES": "Gastos de Camiones",
     "GASTO_FABRICA": "Gastos de Fábrica",
+    # Construcción (obras, materiales de obra, albañilería): canasta propia.
+    "GASTO_CONSTRUCCION": "Gastos de Construcción",
     "GASTO_INVERSION": "Gasto de Inversión",
     "PRESTAMO": "Préstamo",
     # Donativos (iglesia, fundaciones, vecinos): sale plata de la caja sin
@@ -70,6 +72,13 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
         "FABRICA": "GASTO_FABRICA", "GFABRICA": "GASTO_FABRICA",
         "GASTOFABRICA": "GASTO_FABRICA", "GASTOSDEFABRICA": "GASTO_FABRICA",
         "GASTODEFABRICA": "GASTO_FABRICA", "GASTOSFABRICA": "GASTO_FABRICA",
+        "CONSTRUCCION": "GASTO_CONSTRUCCION", "GCONSTRUCCION": "GASTO_CONSTRUCCION",
+        "CONSTRUCCIONES": "GASTO_CONSTRUCCION", "GCONSTRUCCIONES": "GASTO_CONSTRUCCION",
+        "GASTOCONSTRUCCION": "GASTO_CONSTRUCCION",
+        "GASTOSCONSTRUCCION": "GASTO_CONSTRUCCION",
+        "GASTODECONSTRUCCION": "GASTO_CONSTRUCCION",
+        "GASTOSDECONSTRUCCION": "GASTO_CONSTRUCCION",
+        "OBRA": "GASTO_CONSTRUCCION", "GOBRA": "GASTO_CONSTRUCCION",
         "CAMION": "GASTO_CAMIONES", "GCAMION": "GASTO_CAMIONES",
         "GASTOCAMION": "GASTO_CAMIONES", "GASTOCAMIONES": "GASTO_CAMIONES",
         "CAMIONES": "GASTO_CAMIONES", "GCAMIONES": "GASTO_CAMIONES",
@@ -90,8 +99,8 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
         raise ValueError(
             "Clasificación inválida. Usa Gasto Deducible, Gasto de Casa, "
             "Gasto Personal, Gasto Familiar, Gastos de Fábrica, "
-            "Gastos de Camiones, Gasto de Inversión, Préstamo, "
-            "Donación o Impuestos."
+            "Gastos de Camiones, Gastos de Construcción, Gasto de Inversión, "
+            "Préstamo, Donación o Impuestos."
         )
     return clave
 

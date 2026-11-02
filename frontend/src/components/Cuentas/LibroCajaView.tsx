@@ -35,7 +35,7 @@ const ultimoDiaMes = () => {
   return iso(new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0));
 };
 
-const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral' | 'red' | 'orange' | 'teal'> =
+const TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral' | 'red' | 'orange' | 'teal' | 'lime'> =
   Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
 
 function FilaDetalle({ label, children }: { label: string; children: ReactNode }) {
@@ -64,6 +64,9 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [pagina, setPagina] = useState(1);
+  // Al hacer clic en el resumen de gastos por tipo se filtra la tabla para
+  // ver solo esos egresos (el saldo corrido sigue siendo el del libro real).
+  const [filtroClasificacion, setFiltroClasificacion] = useState<string | null>(null);
   const toast = useToast();
   const { esAdmin } = useAuth();
 
@@ -83,6 +86,7 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
     monto: '',
     persona_entidad: '',
     concepto: '',
+    clasificacion: '',
   });
 
   // Si las cuentas llegan después del primer render, se elige la de COP.
@@ -119,6 +123,19 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
   }, [cuentaId, desde, hasta]);
 
   useEffect(() => {
+    setPagina(1);
+  }, [filtroClasificacion]);
+
+  // Si el período/cuenta cambia y el tipo filtrado ya no tiene gastos, se
+  // quita el filtro para no dejar la tabla vacía sin explicación.
+  useEffect(() => {
+    if (!data || !filtroClasificacion) return;
+    if (!data.clasificaciones.some((c) => c.clasificacion === filtroClasificacion)) {
+      setFiltroClasificacion(null);
+    }
+  }, [data, filtroClasificacion]);
+
+  useEffect(() => {
     cargar();
   }, [cargar]);
 
@@ -143,6 +160,7 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
       monto: formatMontoInput(String(monto)),
       persona_entidad: fila.persona_entidad ?? '',
       concepto: fila.concepto ?? '',
+      clasificacion: fila.clasificacion ?? '',
     });
   };
 
@@ -199,6 +217,9 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
         monto,
         persona_entidad: editForm.persona_entidad.trim() || null,
         concepto: editForm.concepto.trim() || null,
+        ...(editForm.tipo === 'SALIDA' && detalle.clasificacion !== 'PRESTAMO'
+          ? { clasificacion: editForm.clasificacion || null }
+          : {}),
       });
       toast.success(soloHora ? 'Hora actualizada' : 'Movimiento corregido');
       cerrarDetalle();
@@ -246,9 +267,14 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
     : '';
 
   // El libro se calcula de viejo a nuevo para el saldo corrido, pero se
-  // muestra de lo más reciente a lo más viejo.
-  const filasOrdenadas = [...(data?.filas ?? [])].reverse();
+  // muestra de lo más reciente a lo más viejo. Con el filtro por tipo de
+  // gasto se ocultan las demás filas (el saldo mostrado sigue siendo el real).
+  const filasLibro = [...(data?.filas ?? [])].reverse();
+  const filasOrdenadas = filtroClasificacion
+    ? filasLibro.filter((f) => f.clasificacion === filtroClasificacion)
+    : filasLibro;
   const totalFilas = filasOrdenadas.length;
+  const totalFiltrado = filasOrdenadas.reduce((acc, f) => acc + Number(f.egreso || 0), 0);
   const totalPaginas = Math.max(1, Math.ceil(totalFilas / POR_PAGINA));
   const paginaActual = Math.min(pagina, totalPaginas);
   const inicioPagina = (paginaActual - 1) * POR_PAGINA;
@@ -424,18 +450,48 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
 
           {data.clasificaciones.length > 0 && (
             <div className="card p-4">
-              <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-yeikar-neutral/45 mb-2">
-                Gastos del período por clasificación
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {data.clasificaciones.map((c) => (
-                  <div key={c.clasificacion} className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/20 px-3 py-2">
-                    <Badge tone={TONE[c.clasificacion] ?? 'neutral'} size="sm">{c.label}</Badge>
-                    <span className="ml-2 font-mono text-sm font-black text-yeikar-secondary">{fmt(c.total)}</span>
-                    <span className="ml-1 text-[10px] text-yeikar-neutral/40">({c.count})</span>
-                  </div>
-                ))}
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-yeikar-neutral/45">
+                  Gastos del período por clasificación
+                </p>
+                <p className="text-[10px] text-yeikar-neutral/35">
+                  Haz clic en un tipo para ver solo esos gastos
+                </p>
               </div>
+              <div className="flex flex-wrap gap-2">
+                {data.clasificaciones.map((c) => {
+                  const activo = filtroClasificacion === c.clasificacion;
+                  return (
+                    <button
+                      key={c.clasificacion}
+                      type="button"
+                      aria-pressed={activo}
+                      onClick={() => setFiltroClasificacion(activo ? null : c.clasificacion)}
+                      title={activo ? 'Quitar filtro' : `Ver solo ${c.label}`}
+                      className={`rounded-xl border px-3 py-2 text-left transition-all ${
+                        activo
+                          ? 'border-yeikar-primary bg-yeikar-primary/10 ring-2 ring-yeikar-primary/30'
+                          : 'border-yeikar-secondary-light/10 bg-yeikar-tertiary/20 hover:border-yeikar-primary/40 hover:bg-yeikar-tertiary/40'
+                      }`}
+                    >
+                      <Badge tone={TONE[c.clasificacion] ?? 'neutral'} size="sm">{c.label}</Badge>
+                      <span className="ml-2 font-mono text-sm font-black text-yeikar-secondary">{fmt(c.total)}</span>
+                      <span className="ml-1 text-[10px] text-yeikar-neutral/40">({c.count})</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {filtroClasificacion && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-yeikar-primary/30 bg-yeikar-primary/5 px-4 py-2">
+              <span className="text-xs text-yeikar-secondary">
+                Mostrando solo <strong>{nombreClasificacion(filtroClasificacion)}</strong>: {filasOrdenadas.length} movimiento{filasOrdenadas.length === 1 ? '' : 's'} · {fmt(totalFiltrado)}
+              </span>
+              <Button variant="outline" size="sm" onClick={() => setFiltroClasificacion(null)}>
+                Ver todos
+              </Button>
             </div>
           )}
 
@@ -659,6 +715,30 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
                     placeholder="0"
                   />
                 </Field>
+                {editForm.tipo === 'SALIDA' && (
+                  detalle.clasificacion === 'PRESTAMO' ? (
+                    <Field label="Tipo de gasto">
+                      <div className="rounded-lg border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 px-3 py-2 text-sm text-yeikar-neutral/70">
+                        Préstamo. Se corrige eliminando la salida y creándola de nuevo.
+                      </div>
+                    </Field>
+                  ) : (
+                    <Field
+                      label="Tipo de gasto (opcional)"
+                      hint="Si lo eliges, la salida queda registrada también como Gasto clasificado (aparece en Gastos y reportes)."
+                    >
+                      <Select
+                        value={editForm.clasificacion}
+                        onChange={(e) => setEditForm({ ...editForm, clasificacion: e.target.value })}
+                      >
+                        <option value="">Sin clasificar</option>
+                        {CLASIFICACIONES_GASTO.filter((c) => c.value !== 'PRESTAMO').map((c) => (
+                          <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )
+                )}
                 <Field label="Persona o entidad">
                   <Input
                     value={editForm.persona_entidad}
@@ -674,11 +754,6 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
                     placeholder="Motivo del movimiento..."
                   />
                 </Field>
-                {detalle.clasificacion && (
-                  <p className="text-xs text-yeikar-neutral/45">
-                    La clasificación ({nombreClasificacion(detalle.clasificacion)}) se corrige desde Gastos.
-                  </p>
-                )}
               </>
             )}
             {errorMov && (

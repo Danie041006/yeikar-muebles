@@ -38,6 +38,8 @@ export interface MovimientoCaja {
   referencia?: string | null;
   persona_entidad?: string | null;
   concepto?: string | null;
+  /** Clasificación del Gasto espejo (G D/C/P/F/I...), si la salida la tiene. */
+  clasificacion?: string | null;
   created_at?: string | null;
   metodo_caja?: MetodoCaja | null;
   moneda?: { id: number; codigo: string; simbolo: string } | null;

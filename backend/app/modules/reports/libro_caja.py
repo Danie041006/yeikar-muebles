@@ -69,6 +69,8 @@ CLASIFICACION_POR_CODIGO = {
     "CAMION": "GASTO_CAMIONES",
     "CAMIONES": "GASTO_CAMIONES",
     "FABRICA": "GASTO_FABRICA",
+    "CONSTRUCCION": "GASTO_CONSTRUCCION",
+    "CONSTRUCCIONES": "GASTO_CONSTRUCCION",
 }
 
 _FECHA_RE = re.compile(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
@@ -76,7 +78,7 @@ _FECHA_RE = re.compile(r"^\s*(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b")
 # dinero lo llevan, y así no confundimos los números que aparecen dentro del
 # concepto (tasas, "500 MIL", teléfonos, etc.).
 _TOKEN_RE = re.compile(r"\$\s*\d[\d.,]*")
-_CLASIF_RE = re.compile(r"\bG\s*(CAMIONES?|FABRICA|[DCPFI])\b", re.IGNORECASE)
+_CLASIF_RE = re.compile(r"\bG\s*(CAMIONES?|CONSTRUCCION(?:ES)?|FABRICA|[DCPFI])\b", re.IGNORECASE)
 _CERO = Decimal("0.00")
 
 

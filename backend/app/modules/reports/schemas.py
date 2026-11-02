@@ -175,6 +175,10 @@ class MovimientoCajaUpdate(BaseModel):
     persona_entidad: Optional[str] = None
     concepto: Optional[str] = None
     referencia: Optional[str] = None
+    # Tipo de gasto (clasificación G D/C/P/F/I) de una SALIDA. Se corrige sobre
+    # el Gasto espejo; si la salida no tenía gasto, se le crea uno sin duplicar
+    # el movimiento de caja. None/'' = sin clasificar.
+    clasificacion: Optional[str] = None
 
 class MovimientoCajaResponse(MovimientoCajaBase):
     id: int

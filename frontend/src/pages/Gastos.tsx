@@ -38,7 +38,7 @@ const CAT_TONE: Record<string, 'blue' | 'red' | 'green' | 'neutral'> = {
   PRODUCCION: 'green',
 };
 
-const CLASIF_TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral' | 'red' | 'orange' | 'teal'> =
+const CLASIF_TONE: Record<string, 'green' | 'blue' | 'amber' | 'purple' | 'gold' | 'neutral' | 'red' | 'orange' | 'teal' | 'lime'> =
   Object.fromEntries(CLASIFICACIONES_GASTO.map((c) => [c.value, c.tone]));
 
 const hoy = () => hoyVE();
@@ -977,7 +977,7 @@ export default function Gastos() {
               ))}
             </datalist>
           </Field>
-          <Field label="Clasificación (opcional)" hint="Gasto Deducible, de Casa, Personal, Familiar o de Inversión">
+          <Field label="Clasificación (opcional)" hint="Deducible, de Casa, Personal, Familiar, de Fábrica, de Construcción, de Camiones, de Inversión, Préstamo, Donación o Impuesto">
             <Select
               value={form.clasificacion ?? ''}
               onChange={(e) => setForm({ ...form, clasificacion: e.target.value || null })}

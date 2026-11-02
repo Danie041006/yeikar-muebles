@@ -275,6 +275,7 @@ export default function Cuentas() {
         monto: formatMontoInput(String(mov.monto)),
         persona_entidad: mov.persona_entidad ?? '',
         concepto: mov.concepto ?? '',
+        clasificacion: mov.clasificacion ?? '',
       });
     } else {
       // Movimiento nuevo: la moneda arranca en la moneda propia de la cuenta.
@@ -330,10 +331,11 @@ export default function Cuentas() {
       moneda_id: movForm.moneda_id,
       persona_entidad: esCobro ? cobro!.persona_nombre : movForm.persona_entidad.trim() || null,
       concepto: movForm.concepto.trim() || null,
-      // La clasificación solo aplica a salidas nuevas: el alta crea además el
-      // Gasto clasificado. En edición se cambia desde el módulo Gastos.
-      ...(!editMov && movForm.tipo === 'SALIDA' && movForm.clasificacion
-        ? { clasificacion: movForm.clasificacion }
+      // La clasificación aplica a cualquier SALIDA, también al editar: si la
+      // salida no tenía Gasto, el backend lo crea y vincula este movimiento
+      // (sin duplicar el egreso). Un préstamo ya creado no se reclasifica.
+      ...(movForm.tipo === 'SALIDA' && editMov?.clasificacion !== 'PRESTAMO'
+        ? { clasificacion: movForm.clasificacion || null }
         : {}),
       // En una salida "Préstamo": decide si queda por cobrar o si es el pago
       // de una deuda propia (que no genera préstamo).
@@ -1075,21 +1077,33 @@ export default function Cuentas() {
             </div>
           )}
 
-          {!editMov && movForm.tipo === 'SALIDA' && (
-            <Field
-              label="Tipo de gasto (opcional)"
-              hint="Si lo eliges, la salida queda registrada también como Gasto clasificado (aparece en Gastos y reportes)."
-            >
-              <Select
-                value={movForm.clasificacion}
-                onChange={(e) => setMovForm({ ...movForm, clasificacion: e.target.value })}
+          {movForm.tipo === 'SALIDA' && (
+            editMov?.clasificacion === 'PRESTAMO' ? (
+              <Field label="Tipo de gasto">
+                <div className="rounded-lg border border-yeikar-secondary-light/20 bg-yeikar-tertiary/30 px-3 py-2 text-sm text-yeikar-neutral/70">
+                  Préstamo. Se corrige eliminando la salida y creándola de nuevo.
+                </div>
+              </Field>
+            ) : (
+              <Field
+                label="Tipo de gasto (opcional)"
+                hint={editMov
+                  ? 'Puedes cambiarlo o agregarlo aunque la salida no tuviera uno: se actualiza el Gasto asociado (o se crea) sin duplicar la caja.'
+                  : 'Si lo eliges, la salida queda registrada también como Gasto clasificado (aparece en Gastos y reportes).'}
               >
-                <option value="">Sin clasificar</option>
-                {CLASIFICACIONES_GASTO.map((c) => (
-                  <option key={c.value} value={c.value}>{c.label}</option>
-                ))}
-              </Select>
-            </Field>
+                <Select
+                  value={movForm.clasificacion}
+                  onChange={(e) => setMovForm({ ...movForm, clasificacion: e.target.value })}
+                >
+                  <option value="">Sin clasificar</option>
+                  {CLASIFICACIONES_GASTO
+                    .filter((c) => !editMov || c.value !== 'PRESTAMO')
+                    .map((c) => (
+                      <option key={c.value} value={c.value}>{c.label}</option>
+                    ))}
+                </Select>
+              </Field>
+            )
           )}
 
           {!editMov && movForm.tipo === 'SALIDA' && movForm.clasificacion === 'PRESTAMO' && (
