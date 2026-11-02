@@ -4,6 +4,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from collections import defaultdict
 from typing import Optional
+import math
 import re
 import unicodedata
 from app.core.redondeo import PASO_PRECIO_COP, redondear_a_multiplo
@@ -332,11 +333,13 @@ def _monto_base_para_cobro(
     """Calcula el equivalente en la moneda de la venta y el margen de saldo.
 
     Se usa al crear un cobro/descuento y también al corregir el monto de un
-    cobro existente. Si la moneda coincide con la de la venta, es 1:1. Si no,
-    aplica la misma regla que los cobros:
+    cobro existente. Si la moneda coincide con la de la venta, es 1:1. Si no:
       - Factura COP: el equivalente se redondea al millar (paso YEIKAR).
-      - Factura USD/VES: se conservan DOS decimales. Antes se forzaba a entero
-        (931,68 → 932), lo que inventaba centavos en el saldo del cliente.
+      - Factura USD/VES: se aproxima al entero más cercano y se guarda SIN
+        decimales. Si la fracción es 0,5 o más sube (931,68 → 932); si es
+        menor, baja (1.538,46 → 1.538). Ejemplos:
+        3.000.000 COP @ 3.220 = 931,68 → 932 USD;
+        5.000.000 COP @ 3.250 = 1.538,46 → 1.538 USD.
     """
     if moneda_id == venta.moneda_id:
         return float(monto), 0.01
@@ -353,7 +356,7 @@ def _monto_base_para_cobro(
     # moneda mínima en Colombia es 50 COP; el paso YEIKAR es 1.000). La
     # diferencia del redondeo (máx. ±500 COP) se absorbe como ajuste y por
     # eso el margen de saldo sube al paso completo. En facturas USD/VES la
-    # base tiene centavos normales (moneda legal) y NO se redondea.
+    # base se maneja en unidades enteras, aproximando al entero más cercano.
     if venta.moneda_id == 1:
         monto_base = float(
             redondear_a_multiplo(
@@ -363,8 +366,11 @@ def _monto_base_para_cobro(
             )
         )
         margen_saldo = float(PASO_PRECIO_COP)
+    else:
+        # floor(x + 0.5) = redondeo half-up para montos positivos (0,5 sube).
+        monto_base = float(math.floor(monto_base + 0.5))
 
-    return round(monto_base, 2), margen_saldo
+    return float(monto_base), margen_saldo
 
 
 def _convertir_a_moneda_venta(

@@ -192,6 +192,21 @@ export function convertirMonedaHumana(
 }
 
 /**
+ * Equivalente de un cobro en la moneda de la venta:
+ *  - COP: 2 decimales (el backend luego aplica el paso de 1.000 COP).
+ *  - USD/VES: entero más cercano, SIN decimales (0,5 sube).
+ *    931,68 → 932 · 1.538,46 → 1.538.
+ */
+export function redondearEquivalenteMoneda(
+  valor: number,
+  codDestino?: string | null
+): number {
+  const n = Number(valor) || 0;
+  const cod = (codDestino || 'COP').toUpperCase();
+  return cod === 'COP' ? Math.round(n * 100) / 100 : Math.round(n);
+}
+
+/**
  * Calcula la tasa a almacenar en el backend para un pago (tasa_cambio en modelo Pago).
  * En el backend de ventas: monto_en_moneda_venta = monto_pago * tasa_almacenada.
  */

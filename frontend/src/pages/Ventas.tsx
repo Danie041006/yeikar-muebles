@@ -23,7 +23,7 @@ import {
   type DescuentoCreate,
   type MetodoPagoOption,
 } from '../services/ventaService';
-import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, extractErrorMessage, fmtConversionTasa } from '../utils/format';
+import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, redondearEquivalenteMoneda, extractErrorMessage, fmtConversionTasa } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { fmtFechaVE, fmtFechaHoraVE, hoyVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
@@ -623,7 +623,7 @@ function ModalDetalle({
     : 0;
   const montoNum = parseFloat(monto) || 0;
   const montoEquivalente = necesitaTRM && tasaHumana > 0
-    ? Math.round(convertirMonedaHumana(montoNum, monedaPago?.codigo, monedaVenta?.codigo, tasaHumana) * 100) / 100
+    ? redondearEquivalenteMoneda(convertirMonedaHumana(montoNum, monedaPago?.codigo, monedaVenta?.codigo, tasaHumana), monedaVenta?.codigo)
     : montoNum;
   const saldoRestante = detalle ? Number(detalle.saldo_pendiente) : 0;
 
@@ -637,7 +637,7 @@ function ModalDetalle({
     : 0;
   const descMontoNum = parseFloat(descMonto) || 0;
   const descEquivalente = necesitaTRMDesc && tasaHumanaDesc > 0
-    ? Math.round(convertirMonedaHumana(descMontoNum, monedaDesc?.codigo, monedaVenta?.codigo, tasaHumanaDesc) * 100) / 100
+    ? redondearEquivalenteMoneda(convertirMonedaHumana(descMontoNum, monedaDesc?.codigo, monedaVenta?.codigo, tasaHumanaDesc), monedaVenta?.codigo)
     : descMontoNum;
 
   const abrirDescForm = () => {
@@ -763,7 +763,7 @@ function ModalDetalle({
         setErrorPago(`Ingresa primero la tasa de cambio (${parPago.label}) para calcular el monto restante.`);
         return;
       }
-      const montoCalc = convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaPago?.codigo, tasaHumana);
+      const montoCalc = redondearEquivalenteMoneda(convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaPago?.codigo, tasaHumana), monedaPago?.codigo);
       setMonto(montoCalc.toFixed(2));
     } else {
       setMonto(saldoRestante.toString());
@@ -819,7 +819,7 @@ function ModalDetalle({
         setDescError(`Ingresa primero la tasa de cambio (${parDesc.label}) para calcular el monto restante.`);
         return;
       }
-      const montoCalc = convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaDesc?.codigo, tasaHumanaDesc);
+      const montoCalc = redondearEquivalenteMoneda(convertirMonedaHumana(saldoRestante, monedaVenta?.codigo, monedaDesc?.codigo, tasaHumanaDesc), monedaDesc?.codigo);
       setDescMonto(montoCalc.toFixed(2));
     } else {
       setDescMonto(saldoRestante.toString());
@@ -1550,10 +1550,16 @@ function ModalDetalle({
                       {necesitaTRM && montoNum > 0 && tasaHumana > 0 && (
                         <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                           <p className="text-sm font-bold text-amber-800 font-mono">
-                            ≈ {montoEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {nombreMoneda(monedaVenta?.codigo)}
+                            ≈ {montoEquivalente.toLocaleString('es-ES', {
+                              minimumFractionDigits: monedaVenta?.codigo === 'COP' ? 2 : 0,
+                              maximumFractionDigits: monedaVenta?.codigo === 'COP' ? 2 : 0,
+                            })} {nombreMoneda(monedaVenta?.codigo)}
                           </p>
                           <p className="text-[10px] text-amber-600/70 font-mono mt-0.5">
-                            {montoNum.toLocaleString('es-ES')} {monedaPago?.codigo} {monedaPago?.codigo === parPago.quoteCod ? '÷' : '×'} {tasaHumana.toLocaleString('es-ES')} = {montoEquivalente.toLocaleString('es-ES', { minimumFractionDigits: 2 })} {monedaVenta?.codigo}
+                            {montoNum.toLocaleString('es-ES')} {monedaPago?.codigo} {monedaPago?.codigo === parPago.quoteCod ? '÷' : '×'} {tasaHumana.toLocaleString('es-ES')} = {montoEquivalente.toLocaleString('es-ES', {
+                              minimumFractionDigits: monedaVenta?.codigo === 'COP' ? 2 : 0,
+                              maximumFractionDigits: monedaVenta?.codigo === 'COP' ? 2 : 0,
+                            })} {monedaVenta?.codigo}
                           </p>
                           {monedaVenta?.codigo === 'COP' && (
                             <p className="text-[10px] text-emerald-700 font-mono mt-0.5 bg-emerald-50 rounded px-1.5 py-0.5">

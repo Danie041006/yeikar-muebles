@@ -275,8 +275,8 @@ def test_abono_ves_requiere_trm(client, cleaner, db):
 # ---------------------------------------------------------------------------
 def test_abono_ves_con_trm(client, cleaner, db):
     """Adelanto 1000 VES @ tasa 10 (1 VES = 10 COP) en factura USD 500@3900:
-       el equivalente en la moneda de la factura conserva DOS decimales:
-       10000 COP base = 2.5641 USD → 2.56 USD (sin aproximar a entero)."""
+       el equivalente en la moneda de la factura se aproxima al entero más
+       cercano: 10000 COP = 2.5641 USD → 3 USD (la fracción 0,56 sube)."""
     cliente = crear_cliente(client, cleaner)
     producto = crear_producto(client, cleaner)
     cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
@@ -290,24 +290,26 @@ def test_abono_ves_con_trm(client, cleaner, db):
     venta = _buscar_venta(client, cleaner, db, r.json()["id"])
     assert venta is not None, "Debe existir la factura en USD"
     assert venta["estado"] == "ABONADA", f"Con abono parcial debe quedar ABONADA, fue {venta['estado']}"
-    assert venta["total_pagado"] == pytest.approx(2.56, abs=0.01), \
-        f"1000 VES*10 = 10000 COP base = 2.5641 USD → 2.56; total_pagado={venta['total_pagado']}"
-    assert venta["saldo_pendiente"] == pytest.approx(500 - 2.56, abs=0.01), \
+    assert venta["total_pagado"] == pytest.approx(3.0, abs=0.01), \
+        f"1000 VES*10 = 10000 COP base = 2.5641 USD → 3; total_pagado={venta['total_pagado']}"
+    assert venta["saldo_pendiente"] == pytest.approx(500 - 3, abs=0.01), \
         f"saldo_pendiente={venta['saldo_pendiente']}"
 
 
 @pytest.mark.parametrize(
     "monto_cop,tasa_natural,esperado_usd",
     [
-        (3_000_000, 3220, 931.68),
-        (5_000_000, 3250, 1538.46),
+        (3_000_000, 3220, 932.0),
+        (5_000_000, 3250, 1538.0),
     ],
 )
-def test_abono_cop_en_venta_usd_conserva_centavos(
+def test_abono_cop_en_venta_usd_aproxima_al_entero(
     client, cleaner, db, monto_cop, tasa_natural, esperado_usd
 ):
-    """Un abono en COP contra una factura USD conserva los centavos:
-    3.000.000 / 3.220 = 931,68 USD (antes se aproximaba a 932)."""
+    """Un abono en COP contra una factura USD se guarda sin decimales,
+    aproximando al entero más cercano:
+    3.000.000 / 3.220 = 931,68 → 932 USD;
+    5.000.000 / 3.250 = 1.538,46 → 1.538 USD."""
     cliente = crear_cliente(client, cleaner)
     producto = crear_producto(client, cleaner)
     cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"],
@@ -323,7 +325,7 @@ def test_abono_cop_en_venta_usd_conserva_centavos(
         metodo_pago="EFECTIVO_COP", tasa_cambio=1 / tasa_natural,
     )
     assert r.status_code in (200, 201), f"pago COP → {r.status_code}: {body}"
-    assert body["monto_en_moneda_base"] == pytest.approx(esperado_usd, abs=0.005), (
+    assert body["monto_en_moneda_base"] == pytest.approx(esperado_usd, abs=0.001), (
         f"{monto_cop} COP / {tasa_natural} debe ser {esperado_usd} USD, "
         f"fue {body['monto_en_moneda_base']}"
     )
