@@ -1419,9 +1419,12 @@ export default function Cotizaciones() {
       setErrorForm('Indica el nombre y la clasificación del producto.');
       return;
     }
+    // El precio es OPCIONAL: hay cotizaciones que se arman antes de tener el
+    // precio. Se crea el producto sin precio y luego se define desde el renglón
+    // con el botón "Sin precio — definir" (no se guarda un 0 como precio real).
     const precio = parseFloat(npForm.precio || '0');
-    if (!(precio > 0)) {
-      setErrorForm('Indica el precio estimado de venta (lo cotizas tal cual).');
+    if (!Number.isFinite(precio) || precio < 0) {
+      setErrorForm('El precio estimado no puede ser negativo.');
       return;
     }
     const tipoSeleccionado = tiposProducto.find((t) => t.id === Number(npForm.tipo_producto_id));
@@ -1437,8 +1440,10 @@ export default function Cotizaciones() {
         es_reventa: esClasificacionStock(tipoSeleccionado?.nombre),
         moneda_id: Number(npForm.moneda_id) || 1,
         // Solo precio de venta: el motor lo cotiza TAL CUAL (no le suma margen).
+        // Sin precio (vacío o 0) se guarda NULL: el renglón queda "Sin precio —
+        // definir" y se puede completar después sin bloquear la cotización.
         precio_costo_base: undefined,
-        precio_venta_base: precio,
+        precio_venta_base: precio > 0 ? precio : null,
       });
       // Fotos (opcionales), en orden de selección: la primera es la portada.
       for (const foto of fotosNp) {
@@ -1555,15 +1560,30 @@ export default function Cotizaciones() {
       return;
     }
 
-    // No permitir guardar cotizaciones sin precio real: si falta la tasa del
-    // día de un producto en moneda extranjera, el precio convertido es inválido.
-    // Aplica también a insumos (el precio tecleado no puede ser 0).
+    // No permitir guardar cotizaciones sin precio real por un problema de
+    // cálculo/tasa, PERO sí se permite dejar renglones con precio pendiente
+    // cuando el producto del catálogo aún no tiene precio definido (se creó
+    // desde la cotización y el precio se pone después).
     const itemSinPrecio = items.find((it) => {
       // El obsequio de promo va a precio 0 por diseño.
       if (it.es_obsequio) return false;
       if (!it.calcResult) return true;
       const p = precioRenglonEnMoneda(it);
-      return !(isFinite(p) && p > 0);
+      if (isFinite(p) && p > 0) return false;
+      // NaN = falta la tasa del día o el cálculo quedó inválido: no se guarda.
+      if (!isFinite(p)) return true;
+      // p === 0: se permite solo si el producto aún no tiene precio de catálogo.
+      if (it.tipo_item !== 'INSUMO' && it.producto_id) {
+        const prod = products.find((pp) => pp.id === Number(it.producto_id));
+        if (
+          prod &&
+          !(Number(prod.precio_venta_base) > 0) &&
+          !(Number(prod.precio_costo_base) > 0)
+        ) {
+          return false;
+        }
+      }
+      return true;
     });
     if (itemSinPrecio) {
       if (itemSinPrecio.tipo_item === 'INSUMO') {
@@ -4216,7 +4236,7 @@ export default function Cotizaciones() {
           <div className="bg-white rounded-3xl shadow-xl max-w-md w-full max-h-[90vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10">
             <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5 shrink-0">
               <h3 className="font-headline font-black text-lg">Producto Nuevo</h3>
-              <p className="text-xs text-white/70">Se crea en el catálogo y se agrega al renglón. Puedes cotizarlo hoy con su precio; la estructura de costos se completa después.</p>
+              <p className="text-xs text-white/70">Se crea en el catálogo y se agrega al renglón. El precio es opcional: si aún no lo tienen, déjalo en 0 y se define después. La estructura de costos se completa luego.</p>
             </div>
             <form onSubmit={handleCrearProductoDesdeCotizacion} className="p-6 space-y-4 font-body overflow-y-auto">
               <div>
@@ -4234,8 +4254,8 @@ export default function Cotizaciones() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio estimado de venta *</label>
-                  <MontoInput min="0" required placeholder="Ej. 950000" value={npForm.precio} onChange={(v) => setNpForm((f) => ({ ...f, precio: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Precio estimado de venta <span className="text-yeikar-neutral/40 font-normal">(opcional)</span></label>
+                  <MontoInput min="0" placeholder="Ej. 950000 (o déjalo vacío)" value={npForm.precio} onChange={(v) => setNpForm((f) => ({ ...f, precio: v }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-yeikar-secondary mb-1">Moneda del precio</label>
@@ -4248,6 +4268,8 @@ export default function Cotizaciones() {
                 </div>
               </div>
               <p className="text-[11px] text-yeikar-neutral/50">
+                Si aún no tienes el precio, déjalo en 0 o vacío: el renglón queda como
+                <b> “Sin precio — definir”</b> y lo completas después sin perder la cotización.
                 El cotizador detecta la moneda sola: si no es COP, te pedirá la tasa del día al guardar.
               </p>
               <div>
