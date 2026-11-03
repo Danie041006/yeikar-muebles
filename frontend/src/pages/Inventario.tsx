@@ -175,6 +175,7 @@ export default function Inventario() {
     monedas.find((m) => m.id === Number(mid))?.codigo ?? 'COP';
 
   // Edición de insumo (dentro del panel)
+  const [editMaterialEsLamina, setEditMaterialEsLamina] = useState(false);
   const [editMaterial, setEditMaterial] = useState({
     nombre: '', costo_base: '', stock_minimo: '8',
     largo_cm: '', ancho_cm: '', categoria_inventario_id: '',
@@ -309,6 +310,9 @@ export default function Inventario() {
   const [asignando, setAsignando] = useState(false);
 
   const [showMaterialModal, setShowMaterialModal] = useState(false);
+  // Las dimensiones de lámina no se muestran de entrada (confunden al crear un
+  // insumo normal): solo aparecen si el material es laminar.
+  const [newMaterialEsLamina, setNewMaterialEsLamina] = useState(false);
   const [newMaterial, setNewMaterial] = useState({
     nombre: '',
     costo_base: '',
@@ -572,6 +576,7 @@ export default function Inventario() {
 
       setShowMaterialModal(false);
       setNewMaterial({ nombre: '', costo_base: '', unidad_medida_id: '', stock_minimo: '8', largo_cm: '', ancho_cm: '', categoria_inventario_id: '', departamento: null });
+      setNewMaterialEsLamina(false);
       fetchInsumos();
       toast.success('Insumo registrado.');
     } catch (error: any) {
@@ -805,6 +810,7 @@ export default function Inventario() {
       departamento: mat.departamento ?? null,
       unidad_medida_id: mat.unidad_medida_id != null ? String(mat.unidad_medida_id) : '',
     });
+    setEditMaterialEsLamina(mat.largo_cm != null && mat.ancho_cm != null);
     // Unidades de uso: factor_base < 1 se muestra como "1 BASE = N unidad"
     // (más natural); factor >= 1 como "1 unidad = N BASE".
     setUnidadesUsoEdit(
@@ -2753,25 +2759,47 @@ export default function Inventario() {
                         )}
                       </div>
 
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-yeikar-secondary">Largo Lámina (cm)</label>
-                          <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.largo_cm} onChange={(e) => setEditMaterial((p) => ({ ...p, largo_cm: e.target.value }))} className={inputCls} />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-yeikar-secondary">Ancho Lámina (cm)</label>
-                          <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.ancho_cm} onChange={(e) => setEditMaterial((p) => ({ ...p, ancho_cm: e.target.value }))} className={inputCls} />
-                        </div>
+                      <div className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 p-3 space-y-2">
+                        <label className="flex items-start gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={editMaterialEsLamina}
+                            onChange={(e) => {
+                              const activa = e.target.checked;
+                              setEditMaterialEsLamina(activa);
+                              if (!activa) {
+                                setEditMaterial((p) => ({ ...p, largo_cm: '', ancho_cm: '' }));
+                              }
+                            }}
+                            className="mt-0.5 h-4 w-4 accent-yeikar-primary"
+                          />
+                          <span>
+                            <span className="block text-xs font-bold text-yeikar-secondary">Es una lámina (MDF, melamina, espuma…)</span>
+                            <span className="block text-[11px] text-yeikar-neutral/50">
+                              Actívalo solo si se consume por cortes con costo proporcional al área.
+                            </span>
+                          </span>
+                        </label>
+                        {editMaterialEsLamina && (
+                          <>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-xs font-bold text-yeikar-secondary">Largo Lámina (cm)</label>
+                                <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.largo_cm} onChange={(e) => setEditMaterial((p) => ({ ...p, largo_cm: e.target.value }))} className={inputCls} />
+                              </div>
+                              <div className="space-y-1">
+                                <label className="text-xs font-bold text-yeikar-secondary">Ancho Lámina (cm)</label>
+                                <input type="number" min="0" step="0.01" placeholder="—" value={editMaterial.ancho_cm} onChange={(e) => setEditMaterial((p) => ({ ...p, ancho_cm: e.target.value }))} className={inputCls} />
+                              </div>
+                            </div>
+                            {editMaterial.largo_cm && editMaterial.ancho_cm && (
+                              <p className="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                                Material laminar: admite consumos por cortes ({(parseFloat(editMaterial.largo_cm) * parseFloat(editMaterial.ancho_cm) / 10000).toFixed(2)} m² por lámina).
+                              </p>
+                            )}
+                          </>
+                        )}
                       </div>
-                      {editMaterial.largo_cm && editMaterial.ancho_cm ? (
-                        <p className="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                          Material laminar: admite consumos por cortes ({(parseFloat(editMaterial.largo_cm) * parseFloat(editMaterial.ancho_cm) / 10000).toFixed(2)} m² por lámina).
-                        </p>
-                      ) : (
-                        <p className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                          Sin dimensiones: no podrá pedirse por láminas completas ni cortarse en producción. Llena largo × ancho para habilitarlo.
-                        </p>
-                      )}
                       <button
                         type="submit"
                         disabled={savingEdit}
@@ -3769,24 +3797,45 @@ export default function Inventario() {
                   placeholder="General..."
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Largo de Lámina (cm)</label>
-                  <input type="number" min="0" step="0.01" placeholder="Ej. 244" value={newMaterial.largo_cm} onChange={(e) => setNewMaterial(prev => ({ ...prev, largo_cm: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Ancho de Lámina (cm)</label>
-                  <input type="number" min="0" step="0.01" placeholder="Ej. 183" value={newMaterial.ancho_cm} onChange={(e) => setNewMaterial(prev => ({ ...prev, ancho_cm: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
-                </div>
+              <div className="rounded-xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/10 p-3 space-y-3">
+                <label className="flex items-start gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={newMaterialEsLamina}
+                    onChange={(e) => {
+                      const activa = e.target.checked;
+                      setNewMaterialEsLamina(activa);
+                      if (!activa) {
+                        setNewMaterial(prev => ({ ...prev, largo_cm: '', ancho_cm: '' }));
+                      }
+                    }}
+                    className="mt-0.5 h-4 w-4 accent-yeikar-primary"
+                  />
+                  <span>
+                    <span className="block text-xs font-bold text-yeikar-secondary">Es una lámina (MDF, melamina, espuma…)</span>
+                    <span className="block text-[11px] text-yeikar-neutral/50">
+                      Actívalo solo si quieres consumirla por cortes con costo proporcional al área.
+                    </span>
+                  </span>
+                </label>
+                {newMaterialEsLamina && (
+                  <>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-bold text-yeikar-secondary mb-1">Largo de Lámina (cm)</label>
+                        <input type="number" min="0" step="0.01" placeholder="Ej. 244" value={newMaterial.largo_cm} onChange={(e) => setNewMaterial(prev => ({ ...prev, largo_cm: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-yeikar-secondary mb-1">Ancho de Lámina (cm)</label>
+                        <input type="number" min="0" step="0.01" placeholder="Ej. 183" value={newMaterial.ancho_cm} onChange={(e) => setNewMaterial(prev => ({ ...prev, ancho_cm: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-yeikar-neutral/50">
+                      Llena <b>largo × ancho</b> para habilitar pedidos por lámina completa y cortes en producción.
+                    </p>
+                  </>
+                )}
               </div>
-              <p className="text-[11px] text-yeikar-neutral/50 -mt-2">
-                Solo para láminas (MDF, melamina, espuma...): permite consumir por <b>cortes</b> con costo proporcional al área.
-              </p>
-              {(!newMaterial.largo_cm || !newMaterial.ancho_cm) && (
-                <p className="text-[11px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
-                  Sin dimensiones: este material no podrá pedirse por láminas completas ni cortarse en producción. Llena largo × ancho para habilitarlo.
-                </p>
-              )}
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowMaterialModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all">Crear Insumo</button>
