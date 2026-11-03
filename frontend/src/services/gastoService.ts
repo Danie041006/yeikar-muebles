@@ -74,7 +74,6 @@ export interface GastoUpdate {
  */
 export const CLASIFICACIONES_GASTO = [
   { value: 'GASTO_DEDUCIBLE', label: 'Gasto Deducible', tone: 'green' as const },
-  { value: 'GASTO_CASA', label: 'Gasto de Casa', tone: 'blue' as const },
   { value: 'GASTO_PERSONAL', label: 'Gasto Personal', tone: 'amber' as const },
   { value: 'GASTO_FAMILIAR', label: 'Gasto Familiar', tone: 'purple' as const },
   { value: 'GASTO_FABRICA', label: 'Gastos de Fábrica', tone: 'orange' as const },

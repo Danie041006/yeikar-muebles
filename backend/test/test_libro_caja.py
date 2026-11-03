@@ -114,7 +114,7 @@ def test_preview_e_importacion_del_libro(client, cleaner, db):
 
     assert len(gastos) == 4
     assert {g.clasificacion for g in gastos} == {
-        "GASTO_CASA", "GASTO_FAMILIAR", "GASTO_PERSONAL", "GASTO_INVERSION",
+        "GASTO_FAMILIAR", "GASTO_PERSONAL", "GASTO_INVERSION",
     }
     # Los cuatro gastos descontaron la cuenta: la suma de sus montos es 600.000.
     assert sum(Decimal(str(g.monto)) for g in gastos) == Decimal("600000")
@@ -145,7 +145,7 @@ def test_preview_e_importacion_del_libro(client, cleaner, db):
     assert primera["persona_entidad"] == "DOÑA ROSA G C"
     assert primera["tipo"] == "DOÑA ROSA G C"
     assert primera["concepto"] == "PAGO DE MERCADO"
-    assert primera["clasificacion"] == "GASTO_CASA"
+    assert primera["clasificacion"] == "GASTO_FAMILIAR"
     assert primera["tipo_movimiento"] == "SALIDA"
     assert Decimal(str(primera["saldo"])) == Decimal("3563600")
     segunda = libro["filas"][1]
@@ -289,7 +289,7 @@ def test_fechas_mezcladas_y_gf_es_gasto_familiar():
         "2026-10-01", "2026-10-01", "2026-10-01", "2026-10-06",
     ]
     assert [f.clasificacion for f in parsed.filas] == [
-        None, "GASTO_FAMILIAR", "GASTO_CASA", "GASTO_PERSONAL",
+        None, "GASTO_FAMILIAR", "GASTO_FAMILIAR", "GASTO_PERSONAL",
     ]
 
 
@@ -631,9 +631,13 @@ def test_eliminar_fila_importada_clasificada_borra_su_gasto(client, cleaner, db)
     assert len(libro["filas"]) == 5
     # El egreso de 120.000 deja de restar: el saldo final sube ese mismo monto.
     assert Decimal(str(libro["saldo_final"])) == Decimal("3283600")
-    assert all(
-        c["clasificacion"] != "GASTO_CASA" for c in libro["clasificaciones"]
+    # La fila borrada era de "Casa" (ahora Familiar): la canasta Familiar
+    # conserva solo el gasto de luz (400.000).
+    familiar = next(
+        c for c in libro["clasificaciones"] if c["clasificacion"] == "GASTO_FAMILIAR"
     )
+    assert familiar["count"] == 1
+    assert Decimal(str(familiar["total"])) == Decimal("400000")
 
 
 def test_hora_del_movimiento_ordena_el_libro_sin_tocar_saldos(client, cleaner, db):

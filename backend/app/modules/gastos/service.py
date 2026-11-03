@@ -20,9 +20,13 @@ from app.modules.users.model import Usuario
 # DIFERENTES. La F histórica queda como Gasto Familiar (con los 57 gastos
 # ya registrados en ella) y la fábrica (Cámara de Comercio, liquidaciones,
 # insumos) pasa a su propia clasificación; los camiones del taller también.
+#
+# Decisión de la dueña (03/11/2026): "Gasto de Casa" y "Gasto Familiar" son
+# la misma canasta. Queda una sola clasificación (GASTO_FAMILIAR); los
+# gastos viejos con GASTO_CASA se migraron y el código "G C" del libro se
+# sigue aceptando, pero se guarda como Familiar.
 CLASIFICACIONES_GASTO = {
     "GASTO_DEDUCIBLE": "Gasto Deducible",
-    "GASTO_CASA": "Gasto de Casa",
     "GASTO_PERSONAL": "Gasto Personal",
     "GASTO_FAMILIAR": "Gasto Familiar",
     # El label "Gastos de Camiones" coincide (case-insensitive) con el
@@ -68,7 +72,11 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
     equivalencias = {
         "D": "GASTO_DEDUCIBLE", "DEDUCIBLE": "GASTO_DEDUCIBLE",
         "GASTODEDUCIBLE": "GASTO_DEDUCIBLE",
-        "C": "GASTO_CASA", "CASA": "GASTO_CASA", "GASTOCASA": "GASTO_CASA",
+        # "C" (Casa) y "F" (Familiar) son la misma canasta desde 03/11/2026:
+        # el libro viejo puede traer G C y se guarda como Familiar.
+        "C": "GASTO_FAMILIAR", "CASA": "GASTO_FAMILIAR",
+        "GASTOCASA": "GASTO_FAMILIAR", "GASTODECASA": "GASTO_FAMILIAR",
+        "GASTOSDECASA": "GASTO_FAMILIAR",
         "P": "GASTO_PERSONAL", "PERSONAL": "GASTO_PERSONAL",
         "GASTOPERSONAL": "GASTO_PERSONAL",
         # La F del libro sigue siendo Familiar; la fábrica es su propia
@@ -137,7 +145,7 @@ def normalizar_clasificacion(valor: str | None) -> str | None:
     clave = equivalencias.get(compacto)
     if clave is None:
         raise ValueError(
-            "Clasificación inválida. Usa Gasto Deducible, Gasto de Casa, "
+            "Clasificación inválida. Usa Gasto Deducible, "
             "Gasto Personal, Gasto Familiar, Gastos de Fábrica, Gastos de "
             "Construcción, Gastos de Camiones, Gastos de Oficina, Gastos de "
             "Herramientas, Gasto de Inversión, Nómina Fábrica, Nómina Casa, "

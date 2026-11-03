@@ -62,7 +62,9 @@ from app.modules.users.model import Usuario
 # completa: "G CAMIONES" y "G FABRICA" son las clasificaciones nuevas.
 CLASIFICACION_POR_CODIGO = {
     "D": "GASTO_DEDUCIBLE",
-    "C": "GASTO_CASA",
+    # "G C" (Casa) y "G F" (Familiar) son la misma canasta desde 03/11/2026.
+    "C": "GASTO_FAMILIAR",
+    "CASA": "GASTO_FAMILIAR",
     "P": "GASTO_PERSONAL",
     "F": "GASTO_FAMILIAR",
     "I": "GASTO_INVERSION",

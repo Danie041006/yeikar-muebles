@@ -54,7 +54,9 @@ def _saldo(db, cuenta_id):
 # ---------------------------------------------------------------------------
 def test_normalizador_acepta_codigos_y_nombres():
     assert normalizar_clasificacion("G D") == "GASTO_DEDUCIBLE"
-    assert normalizar_clasificacion("G C") == "GASTO_CASA"
+    # "G C" (Casa) se unificó con "G F" (Familiar) el 03/11/2026.
+    assert normalizar_clasificacion("G C") == "GASTO_FAMILIAR"
+    assert normalizar_clasificacion("Gasto de Casa") == "GASTO_FAMILIAR"
     assert normalizar_clasificacion("G P") == "GASTO_PERSONAL"
     assert normalizar_clasificacion("G F") == "GASTO_FAMILIAR"
     # Decisión 30/10/2026: Familiar y Fábrica son canastas separadas (la
@@ -100,8 +102,8 @@ def test_salida_clasificada_crea_gasto_y_movimiento(client, cleaner, db):
     gasto = db.query(Gasto).filter(Gasto.descripcion == descripcion).first()
     assert gasto is not None, "debe crear el Gasto clasificado"
     cleaner.registrar("gasto", gasto.id)
-    assert gasto.clasificacion == "GASTO_CASA"
-    assert gasto.tipo_gasto is not None and gasto.tipo_gasto.nombre == "Gasto de Casa"
+    assert gasto.clasificacion == "GASTO_FAMILIAR"
+    assert gasto.tipo_gasto is not None and gasto.tipo_gasto.nombre == "Gasto Familiar"
     assert Decimal(str(gasto.monto)) == Decimal("100000")
 
     assert mov["tipo"] == "SALIDA"
