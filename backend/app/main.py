@@ -24,7 +24,7 @@ from app.modules.prestamos.router import router as prestamos_router
 from app.modules.inventory.router import router as inventario_router
 from app.modules.purchases.router import router as compras_router
 from app.modules.reports.router import router as reportes_router, router_metodos_cobro
-from app.modules.reports.cuentas_router import router as cuentas_router
+from app.modules.reports.cuentas_router import router as cuentas_router, router_operativo as cuentas_router_operativo
 from app.modules.dashboard.router import router as dashboard_router
 from app.modules.envios.router import router as envios_router
 from app.modules.quotes.intelligent_router import router as iqe_router
@@ -126,6 +126,7 @@ app.include_router(reportes_router, prefix="/api/v1", tags=["reportes"])
 # accesible a cualquier usuario autenticado; el CRUD sigue en reportes_router.
 app.include_router(router_metodos_cobro, prefix="/api/v1", tags=["metodos-caja"])
 app.include_router(cuentas_router, prefix="/api/v1", tags=["cuentas"])
+app.include_router(cuentas_router_operativo, prefix="/api/v1", tags=["cuentas"])
 app.include_router(prestamos_router, prefix="/api/v1", tags=["préstamos"])
 app.include_router(dashboard_router, prefix="/api/v1", tags=["dashboard"])
 app.include_router(envios_router, prefix="/api/v1/envio", tags=["envios"])

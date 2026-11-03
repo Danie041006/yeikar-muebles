@@ -20,7 +20,7 @@ import {
   type MovimientoResponse,
 } from '../services/inventarioService';
 import { productosService, type Material } from '../services/productosService';
-import { cuentasService, type ResumenCuenta } from '../services/cuentasService';
+import { cuentasService } from '../services/cuentasService';
 import {
   Badge,
   Button,
@@ -136,30 +136,25 @@ export default function InventarioOficina() {
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const [mats, inv, cats, unis, resumen] = await Promise.all([
+      const [mats, inv, cats, unis, cuentasData] = await Promise.all([
         productosService.getMateriales(undefined, 1000),
         inventarioService.getInventario(),
         inventarioService.getCategorias('MATERIAL').catch(() => []),
         api.get<Unidad[]>('/catalogos/unidad-medida/').then((r) => r.data).catch(() => []),
-        cuentasService.getResumen().catch(() => []),
+        cuentasService.getOperativas().catch(() => []),
       ]);
       setMateriales(mats);
       setInventario(inv);
       setCategorias(cats);
       setUnidades(unis);
       setCuentas(
-        resumen.map((r: ResumenCuenta) => {
-          const propia =
-            r.saldo_por_moneda.find((l) => l.moneda_id === r.metodo_caja.moneda_id) ??
-            r.saldo_por_moneda[0];
-          return {
-            key: `${r.metodo_caja.id}:${propia?.moneda_id ?? r.metodo_caja.moneda_id ?? 1}`,
-            cuentaId: r.metodo_caja.id,
-            nombre: r.metodo_caja.nombre,
-            monedaId: propia?.moneda_id ?? r.metodo_caja.moneda_id ?? 1,
-            codigo: propia?.codigo ?? r.metodo_caja.moneda_codigo ?? 'COP',
-          };
-        }),
+        cuentasData.map((c) => ({
+          key: `${c.id}:${c.moneda_id ?? 1}`,
+          cuentaId: c.id,
+          nombre: c.nombre,
+          monedaId: c.moneda_id ?? 1,
+          codigo: c.moneda_codigo || 'COP',
+        })),
       );
     } catch (error) {
       toast.error(extractErrorMessage(error, 'No se pudo cargar el inventario de oficina.'));

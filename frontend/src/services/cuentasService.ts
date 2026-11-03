@@ -337,6 +337,13 @@ export const cuentasService = {
     return res.data;
   },
 
+  // Catálogo mínimo de cuentas (nombre y moneda) para formularios operativos:
+  // inventario, gastos, compras y nómina. No trae saldos ni movimientos.
+  getOperativas: async (): Promise<MetodoCaja[]> => {
+    const res = await api.get<MetodoCaja[]>('/cuenta/operativas');
+    return res.data;
+  },
+
   // Resumen de cuentas con saldo por moneda y en COP
   getResumen: async (): Promise<ResumenCuenta[]> => {
     const res = await api.get<ResumenCuenta[]>('/cuenta/resumen');

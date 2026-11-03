@@ -228,6 +228,35 @@ def require_module(modulo: str, solo_escritura: bool = False):
     return _depend
 
 
+def require_any_module(*modulos: str):
+    """Exige acceso (lectura) a AL MENOS UNO de los módulos indicados.
+
+    Sirve para endpoints operativos que necesitan datos mínimos de otro módulo
+    sin abrirle al usuario la pantalla completa: p. ej. el nombre y la moneda
+    de las cuentas de caja para registrar una entrada de inventario, sin
+    exponer saldos ni movimientos.
+    """
+    for modulo in modulos:
+        if modulo not in CLAVES_MODULOS:
+            raise ValueError(f"Módulo no registrado en el catálogo: {modulo}")
+
+    def _depend(
+        db: Session = Depends(get_db),
+        usuario_actual: Usuario = Depends(get_current_user),
+    ) -> Usuario:
+        if es_admin_user(usuario_actual):
+            return usuario_actual
+        accesos = obtener_accesos_usuario(db, usuario_actual)
+        if any(modulo in accesos for modulo in modulos):
+            return usuario_actual
+        raise HTTPException(
+            status_code=403,
+            detail="No tienes permisos para acceder a este módulo",
+        )
+
+    return _depend
+
+
 def es_admin(usuario_actual: Usuario = Depends(get_current_user)) -> Usuario:
     """Dependencia para endpoints exclusivos de Dueño/Administrador."""
     if not es_admin_user(usuario_actual):

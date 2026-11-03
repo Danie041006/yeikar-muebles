@@ -57,3 +57,33 @@ def test_admin_sigue_creando_cuentas(client, cleaner):
     })
     assert r.status_code == 201, r.text
     cleaner.registrar("metodo_caja", r.json()["id"])
+
+
+# ---------------------------------------------------------------------------
+# Catálogo mínimo de cuentas para formularios operativos
+# ---------------------------------------------------------------------------
+URL_OPERATIVAS = "/api/v1/cuenta/operativas"
+
+
+def test_cuentas_operativas_traen_nombre_y_moneda_sin_saldos(client):
+    """Quien registra inventario/gastos necesita elegir la cuenta de la que
+    salió el dinero, pero NO debe recibir saldos ni movimientos."""
+    r = client.get(URL_OPERATIVAS, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    filas = r.json()
+    assert isinstance(filas, list) and len(filas) > 0
+    fila = filas[0]
+    for campo in ("id", "nombre", "moneda_id", "moneda_codigo"):
+        assert campo in fila
+    assert "saldo_por_moneda" not in fila
+
+
+def test_cuentas_operativas_exigen_un_modulo_operativo(client):
+    # El rol Ventas no tiene inventario/gastos/compras/nómina: no ve cuentas.
+    r = client.get(URL_OPERATIVAS, headers=VENTAS_HEADERS)
+    assert r.status_code == 403, r.text
+
+
+def test_cuentas_operativas_sin_token_es_401(client):
+    r = client.get(URL_OPERATIVAS)
+    assert r.status_code == 401

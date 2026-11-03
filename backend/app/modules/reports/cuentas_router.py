@@ -6,14 +6,38 @@ from datetime import date
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
-from app.modules.users.deps import require_module
+from app.modules.users.deps import require_module, require_any_module
 from app.modules.reports import service, schemas
 from app.modules.reports import libro_caja
-from app.modules.reports.model import MovimientoCaja
+from app.modules.reports.model import MovimientoCaja, MetodoCaja
 from app.modules.adjuntos.service import adjuntos_info
 from app.modules.adjuntos.schemas import AdjuntoInfo
 
 router = APIRouter(prefix="/cuenta", tags=["cuentas"], dependencies=[Depends(require_module('cuentas'))])
+
+# Catálogo MÍNIMO de cuentas para formularios operativos (inventario, gastos,
+# compras, nómina). No expone saldos ni movimientos: quien no tiene el módulo
+# `cuentas` solo ve nombre y moneda para poder indicar de dónde salió el dinero.
+router_operativo = APIRouter(
+    prefix="/cuenta",
+    tags=["cuentas"],
+    dependencies=[Depends(require_any_module("inventario", "gastos", "compras", "nomina"))],
+)
+
+
+@router_operativo.get("/operativas", response_model=List[schemas.MetodoCajaResponse])
+def get_cuentas_operativas(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Cuentas activas (id, nombre, moneda) para elegir el origen/destino del
+    dinero en un formulario. Sin saldos ni historial."""
+    return (
+        db.query(MetodoCaja)
+        .filter(MetodoCaja.activo.is_(True))
+        .order_by(MetodoCaja.orden, MetodoCaja.nombre)
+        .all()
+    )
 
 
 # ------------------------------------------------------------

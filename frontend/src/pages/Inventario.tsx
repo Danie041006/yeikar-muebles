@@ -363,11 +363,11 @@ export default function Inventario() {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [ubiData, uniData, monData, metodosData, catsMat, catsProd, tiposData] = await Promise.all([
+      const [ubiData, uniData, monData, cuentasData, catsMat, catsProd, tiposData] = await Promise.all([
         api.get<Ubicacion[]>('/catalogos/ubicacion/'),
         api.get<UnidadMedida[]>('/catalogos/unidad-medida/'),
         api.get<MonedaInfo[]>('/catalogos/moneda/'),
-        cuentasService.getResumen().catch(() => []),
+        cuentasService.getOperativas().catch(() => []),
         inventarioService.getCategorias('MATERIAL').catch(() => []),
         inventarioService.getCategorias('PRODUCTO').catch(() => []),
         api.get<{ id: number; nombre: string }[]>('/catalogos/tipo-producto/').catch(() => null),
@@ -378,31 +378,19 @@ export default function Inventario() {
       setCategoriasMaterial(catsMat);
       setCategoriasProducto(catsProd);
       setTiposProducto(Array.isArray(tiposData) ? tiposData : (tiposData?.data ?? []));
-      // Métodos únicos de caja (el resumen trae una fila por cuenta)
-      const vistos = new Set<number>();
+      // Catálogo mínimo de cuentas (id, nombre y SU moneda). Sin saldos: basta
+      // para elegir de qué cuenta salió/entró el dinero. Se listan TODAS las
+      // cuentas activas.
       const metodos: { id: number; nombre: string }[] = [];
-      // Opciones cuenta+moneda para pagos de contado: UNA opción por cuenta,
-      // SIEMPRE en la moneda propia de la cuenta (la que dice su ficha). No se
-      // ofrecen otras monedas aunque tengan movimientos: evita pagar un insumo
-      // "Efectivo en Pesos" en dólares por error.
       const opciones: CuentaMonedaOpcion[] = [];
-      for (const r of metodosData) {
-        if (!vistos.has(r.metodo_caja.id)) {
-          vistos.add(r.metodo_caja.id);
-          metodos.push({ id: r.metodo_caja.id, nombre: r.metodo_caja.nombre });
-        }
-        const propia = r.saldo_por_moneda.find((l) => l.moneda_id === r.metodo_caja.moneda_id) ?? {
-          moneda_id: r.metodo_caja.moneda_id || 1,
-          codigo: r.metodo_caja.moneda_codigo || 'COP',
-          simbolo: r.metodo_caja.moneda_simbolo || '$',
-          monto: 0,
-        };
+      for (const c of cuentasData) {
+        metodos.push({ id: c.id, nombre: c.nombre });
         opciones.push({
-          key: `${r.metodo_caja.id}:${propia.moneda_id}`,
-          cuentaId: r.metodo_caja.id,
-          nombre: r.metodo_caja.nombre,
-          monedaId: propia.moneda_id,
-          codigo: propia.codigo,
+          key: `${c.id}:${c.moneda_id ?? 1}`,
+          cuentaId: c.id,
+          nombre: c.nombre,
+          monedaId: c.moneda_id ?? 1,
+          codigo: c.moneda_codigo || 'COP',
         });
       }
       setMetodosCaja(metodos);
