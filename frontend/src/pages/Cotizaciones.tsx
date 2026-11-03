@@ -3028,7 +3028,7 @@ export default function Cotizaciones() {
                                 Incluye regalo: {products.find((p) => p.id === Number(regaloVinculado.producto_id))?.nombre || 'plástico'}
                               </span>
                             )}
-                              {item.calcResult?.fuente_precio === 'estimado_sin_estructura' && (
+                              {item.calcResult?.fuente_precio === 'estimado_sin_estructura' && Number(item.calcResult?.precio_venta) > 0 && (
                                 <span
                                   className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-yeikar-primary/10 text-yeikar-primary-dark border border-yeikar-primary/25"
                                   title="Precio ESTIMADO: este mueble aún no tiene estructura de costos. Cuando la tengas, el precio se recalcula solo."
@@ -3036,7 +3036,9 @@ export default function Cotizaciones() {
                                   Precio estimado
                                 </span>
                               )}
-                              {item.calcResult?.fuente_precio === 'sin_definir' && selectedProd && (
+                              {(item.calcResult?.fuente_precio === 'sin_definir' ||
+                                (item.calcResult?.fuente_precio === 'estimado_sin_estructura' &&
+                                  !(Number(item.calcResult?.precio_venta) > 0))) && selectedProd && (
                                 <button
                                   type="button"
                                   onClick={() => abrirDefinirPrecio(selectedProd)}
