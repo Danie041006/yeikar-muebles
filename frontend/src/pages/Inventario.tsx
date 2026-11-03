@@ -365,6 +365,25 @@ export default function Inventario() {
   const monedaSeleccionada = monedas.find(m => String(m.id) === newProducto.moneda_id);
   const simboloPrecio = monedaSeleccionada?.simbolo || '$';
 
+  /** Carga (o recarga) el catálogo mínimo de cuentas para pagos de entradas.
+   * Se usa como respaldo si la carga inicial falló o quedó vacía: Paola y
+   * cualquier usuario con Inventario deben poder elegir la cuenta aunque no
+   * tengan el módulo completo de Cuentas. */
+  const cargarCuentasPago = useCallback(async () => {
+    try {
+      const cuentas = await cuentasService.getOperativas();
+      setCuentasPago(cuentas.map((c) => ({
+        key: `${c.id}:${c.moneda_id ?? 1}`,
+        cuentaId: c.id,
+        nombre: c.nombre,
+        monedaId: c.moneda_id ?? 1,
+        codigo: c.moneda_codigo || 'COP',
+      })));
+    } catch (error) {
+      console.error('No se pudieron cargar las cuentas operativas:', error);
+    }
+  }, []);
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -806,6 +825,7 @@ export default function Inventario() {
 
   // ---- Abrir panel de material (kardex + edición + movimiento) ----
   const handleOpenMaterial = async (mat: Material) => {
+    if (cuentasPago.length === 0) void cargarCuentasPago();
     setSelectedMaterialId(mat.id);
     setDetalleTab('movimiento');
     setEditMaterial({
@@ -1016,6 +1036,7 @@ export default function Inventario() {
 
   // ---- Abrir panel de producto ----
   const handleOpenProducto = (p: { id: number }) => {
+    if (cuentasPago.length === 0) void cargarCuentasPago();
     setSelectedProductoId(p.id);
     setDetalleTabProducto('movimiento');
     const prod = productosTodos.find(x => x.id === p.id) ?? productosExh.find(x => x.id === p.id) ?? productos.find(x => x.id === p.id);
@@ -1826,7 +1847,10 @@ export default function Inventario() {
           )}
           {(tab === 'productos' || tab === 'plasticos') && (
             <button
-              onClick={() => setShowProductoModal(true)}
+              onClick={() => {
+                if (cuentasPago.length === 0) void cargarCuentasPago();
+                setShowProductoModal(true);
+              }}
               className="bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral px-5 py-2.5 rounded-xl font-bold font-headline shadow-sm hover:shadow transition-all flex items-center gap-2 text-sm"
             >
                {tab === 'plasticos' ? 'Nuevo Producto de Plástico' : 'Nuevo Producto de Reventa'}
@@ -2555,9 +2579,10 @@ export default function Inventario() {
                         );
                       })()}
 
-                      {/* Pago: cuenta / fiado / tasa — SIEMPRE se pregunta en
-                          una entrada, aunque el costo aún no esté digitado. */}
-                      {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.cantidad || '0') > 0 && (() => {
+                      {/* Pago: SIEMPRE visible al elegir ENTRADA, antes de
+                          digitar cantidad o costo (Paola registra entradas
+                          sin precio y también debe ver la pregunta). */}
+                      {movMaterial.tipo === 'ENTRADA' && (() => {
                         const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
                         const brutoRef = parseFloat(movMaterial.costo_unitario || '0') || 0;
                         const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
@@ -2602,7 +2627,12 @@ export default function Inventario() {
                                 )}
                               </div>
                             )}
-                            {!cuentaId && granTotalRef <= 0 && (
+                            {!cuentaId && cantRef <= 0 && (
+                              <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
+                                Escribe la cantidad de la entrada. Si no se pagó, la deuda se calcula con el costo unitario × cantidad.
+                              </p>
+                            )}
+                            {!cuentaId && cantRef > 0 && granTotalRef <= 0 && (
                               <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
                                 Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
                               </p>
@@ -3323,9 +3353,9 @@ export default function Inventario() {
                     )}
                   </div>
                 )}
-                {/* Pago: SIEMPRE se pregunta en una entrada, aunque el costo
-                    aún no esté digitado (plásticos y reventa usan este form). */}
-                {movProducto.tipo === 'ENTRADA' && parseFloat(movProducto.cantidad || '0') > 0 && (() => {
+                {/* Pago: SIEMPRE visible al elegir ENTRADA, antes de digitar
+                    cantidad o costo (plásticos y reventa usan este form). */}
+                {movProducto.tipo === 'ENTRADA' && (() => {
                   const refMid = Number(productoSeleccionado?.moneda_id ?? MONEDA_BASE_ID);
                   const { cuentaId, monedaId } = parsePagoKey(movProducto.pagado_desde_metodo_caja_id);
                   const pagoMid = monedaId ?? refMid;
@@ -3338,7 +3368,8 @@ export default function Inventario() {
                   const bruto = parseFloat(movProducto.costo_unitario || '0') || 0;
                   const desc = parseFloat(movProducto.descuento_porcentaje || '0') || 0;
                   const costoNetoUnit = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
-                  const totalRef = costoNetoUnit * (parseFloat(movProducto.cantidad || '0') || 0);
+                  const cantProd = parseFloat(movProducto.cantidad || '0') || 0;
+                  const totalRef = costoNetoUnit * cantProd;
                   const totalCompra = totalRef + (parseFloat(movProducto.llevada || '0') || 0);
                   const deduc = !cuentaId ? 0
                     : pagoMid === refMid ? totalRef
@@ -3372,7 +3403,12 @@ export default function Inventario() {
                           )}
                         </div>
                       )}
-                      {!cuentaId && totalCompra <= 0 && (
+                      {!cuentaId && cantProd <= 0 && (
+                        <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
+                          Escribe la cantidad de la entrada. Si no se pagó, la deuda se calcula con el costo unitario × cantidad.
+                        </p>
+                      )}
+                      {!cuentaId && cantProd > 0 && totalCompra <= 0 && (
                         <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
                           Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
                         </p>
