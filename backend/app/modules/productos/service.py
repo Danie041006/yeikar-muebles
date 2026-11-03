@@ -514,3 +514,80 @@ def eliminar_promocion_obsequio(db: Session, id_promo: int) -> bool:
     db.delete(promo)
     db.commit()
     return True
+
+
+def validar_regalos_plastico(db: Session, detalles) -> None:
+    """Valida el regalo manual de plástico en una cotización o pedido.
+
+    Reglas (decisión de la dueña, nov-2026):
+      - El regalo debe ser un producto de la variedad curada de la promo vieja
+        (`promocion_obsequio.obsequio_id`) y venderse como REVENTA a precio 0.
+      - Máximo 1 plástico por unidad de colchón (`producto.es_colchon=True`).
+      - Sin colchón no se permite plástico: el cliente decide si lo lleva o no.
+
+    Acepta diccionarios o schemas Pydantic. Se llama ANTES de crear/convertir
+    para que un request manipulado no pueda regalar de más.
+    """
+    from app.modules.productos.model import PromocionObsequio
+
+    def _como_dict(detalle):
+        return detalle if isinstance(detalle, dict) else detalle.model_dump()
+
+    filas = [_como_dict(d) for d in (detalles or [])]
+    regalos = [d for d in filas if d.get("es_obsequio")]
+    if not regalos:
+        return
+
+    obsequio_ids = {
+        row[0]
+        for row in db.query(PromocionObsequio.obsequio_id)
+        .filter(PromocionObsequio.activo.is_(True))
+        .all()
+    }
+    if not obsequio_ids:
+        raise ValueError("No hay plásticos de regalo configurados.")
+
+    total_regalos = 0.0
+    for detalle in regalos:
+        producto_id = detalle.get("producto_id")
+        if not producto_id:
+            raise ValueError("El plástico de regalo debe tener un producto.")
+        if int(producto_id) not in obsequio_ids:
+            raise ValueError(
+                "El producto seleccionado no está en la variedad de plásticos de regalo."
+            )
+        if (detalle.get("tipo_item") or "FABRICADO") != "REVENTA":
+            raise ValueError("El plástico de regalo debe ser un producto de reventa.")
+        if float(detalle.get("precio") or 0) != 0:
+            raise ValueError("El plástico de regalo debe tener precio 0.")
+        total_regalos += float(detalle.get("cantidad") or 0)
+
+    producto_ids = {
+        int(d["producto_id"])
+        for d in filas
+        if d.get("producto_id") and not d.get("es_obsequio")
+    }
+    ids_colchon = set()
+    if producto_ids:
+        ids_colchon = {
+            row[0]
+            for row in db.query(model.Producto.id)
+            .filter(
+                model.Producto.id.in_(producto_ids),
+                model.Producto.es_colchon.is_(True),
+            )
+            .all()
+        }
+    total_colchones = sum(
+        float(d.get("cantidad") or 0)
+        for d in filas
+        if not d.get("es_obsequio")
+        and d.get("producto_id")
+        and int(d["producto_id"]) in ids_colchon
+    )
+
+    if total_regalos > total_colchones + 1e-9:
+        raise ValueError(
+            f"Los plásticos de regalo ({total_regalos:g}) no pueden superar los "
+            f"colchones ({total_colchones:g}). Máximo 1 por colchón."
+        )

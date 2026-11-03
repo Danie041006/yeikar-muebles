@@ -252,6 +252,8 @@ export default function Productos() {
     // tenga estructura de costos. Cuando exista, el precio se recalcula.
     precio_venta_base: '',
     precio_costo_base: '',
+    // Colchón: habilita en Cotizaciones la pregunta del plástico de regalo.
+    es_colchon: false,
   });
   // Fotos NUEVAS pendientes de subir (multicarga): la PRIMERA de la lista es
   // la portada; las existentes se administran desde la galería del modal.
@@ -454,6 +456,7 @@ export default function Productos() {
       // mueble no tenga estructura de costos.
       precio_venta_base: productForm.precio_venta_base ? parseFloat(productForm.precio_venta_base) : null,
       precio_costo_base: productForm.precio_costo_base ? parseFloat(productForm.precio_costo_base) : null,
+      es_colchon: productForm.es_colchon,
     };
     try {
       let productoId: number;
@@ -956,6 +959,11 @@ export default function Productos() {
               {p.alto_base ? ` × ${p.alto_base}m` : ''}
             </div>
           ) : null}
+          {p.es_colchon && (
+            <span className="bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200 px-2 py-0.5 rounded-lg text-[10px] font-black font-headline uppercase tracking-wider">
+              Colchón
+            </span>
+          )}
         </div>
 
         {p.descripcion && (
@@ -978,7 +986,7 @@ export default function Productos() {
         </button>
         <button
           onClick={() => {
-            setProductForm({ id: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo_producto_id: String(p.tipo_producto_id), descripcion: p.descripcion || '', ancho_base: String(p.ancho_base ?? ''), largo_base: String(p.largo_base ?? ''), alto_base: p.alto_base ? String(p.alto_base) : '', precio_venta_base: p.precio_venta_base != null ? String(p.precio_venta_base) : '', precio_costo_base: p.precio_costo_base != null ? String(p.precio_costo_base) : '' });
+            setProductForm({ id: p.id, nombre: p.nombre, codigo: p.codigo || '', tipo_producto_id: String(p.tipo_producto_id), descripcion: p.descripcion || '', ancho_base: String(p.ancho_base ?? ''), largo_base: String(p.largo_base ?? ''), alto_base: p.alto_base ? String(p.alto_base) : '', precio_venta_base: p.precio_venta_base != null ? String(p.precio_venta_base) : '', precio_costo_base: p.precio_costo_base != null ? String(p.precio_costo_base) : '', es_colchon: !!p.es_colchon });
             limpiarFotosNuevas();
             setShowProductModal(true);
           }}
@@ -1103,7 +1111,7 @@ export default function Productos() {
 
           <button
             onClick={() => {
-              setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '', largo_base: '', alto_base: '', precio_venta_base: '', precio_costo_base: '' });
+              setProductForm({ id: null, nombre: '', codigo: '', tipo_producto_id: '', descripcion: '', ancho_base: '', largo_base: '', alto_base: '', precio_venta_base: '', precio_costo_base: '', es_colchon: false });
               limpiarFotosNuevas();
               setShowProductModal(true);
             }}
@@ -1851,6 +1859,22 @@ export default function Productos() {
                   className="w-full bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm focus:outline-none focus:border-yeikar-primary"
                 />
               </div>
+
+              <label className="flex items-start gap-2.5 rounded-xl border border-yeikar-primary/20 bg-yeikar-primary/5 p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={productForm.es_colchon}
+                  onChange={(e) => setProductForm({ ...productForm, es_colchon: e.target.checked })}
+                  className="mt-0.5 h-4 w-4 rounded border-yeikar-secondary-light/30 text-yeikar-primary focus:ring-yeikar-primary"
+                />
+                <span>
+                  <span className="block text-xs font-bold text-yeikar-secondary">Es colchón</span>
+                  <span className="block text-[11px] text-yeikar-neutral/55">
+                    En Cotizaciones muestra la pregunta “¿lleva plástico de regalo?”.
+                    El cliente puede decir que no; máximo 1 por colchón.
+                  </span>
+                </span>
+              </label>
 
               {!(productForm.id && productos.find((p) => p.id === productForm.id)?.es_reventa) && (
                 <div>

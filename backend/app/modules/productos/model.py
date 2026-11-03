@@ -32,6 +32,10 @@ class Producto(Base):
     # showroom. Su venta descuenta stock al facturar (como reventa), pero NO
     # entra a producción desde un pedido ni cuenta como compra de reventa.
     es_exhibicion       = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
+    # True = colchón: en Cotizaciones muestra la pregunta "¿lleva plástico de
+    # regalo?" y permite agregar UNA unidad de plástico por unidad vendida.
+    # No todos los clientes quieren el plástico: es una selección manual.
+    es_colchon          = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
     # Moneda de los precios de referencia (costo/venta). Base del ERP: COP (id=1).
     # Los productos de reventa suelen comprarse en USD; la conversión a COP se
     # hace con la tasa vigente al USAR el precio, nunca congelada.

@@ -86,6 +86,13 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 - Costing engine in `cost_service.py` (`calcular_costo_producto`)
 - Excel import fallback: `precio_costo_base`, `precio_venta_base` on Producto model
 
+## Regalo de plástico (colchón) — manual
+
+- **Ya no hay promo automática.** `producto.es_colchon` marca los colchones; en Cotizaciones aparece la pregunta **“¿Lleva plástico de regalo?”** en la línea del colchón.
+- La variedad es la lista curada de `promocion_obsequio` (6 productos distintos; `13050 TAPA DE CESTA` puede salir agotada y deshabilitada).
+- El regalo es una línea `REVENTA` con `es_obsequio=True`, **precio 0**, máximo **1 por unidad de colchón**. Se valida en `validar_regalos_plastico` al crear/editar cotización y al crear/convertir pedido.
+- La tabla `promocion_obsequio` queda como lista curada/histórica: **ya no auto-agrega** regalos. Los regalos históricos siguen funcionando.
+
 ## Production order flow
 
 1. Quote converted → `Pedido` nace DIRECTAMENTE en `PRODUCCION` (sin paso intermedio COTIZADO/APROBADO) y se auto-crean las órdenes de cada línea FABRICADO (`OrdenProduccion` estado=PENDIENTE). Si la línea declara PIEZAS del juego, se crea UNA orden interna por pieza; si no, una sola orden como siempre.

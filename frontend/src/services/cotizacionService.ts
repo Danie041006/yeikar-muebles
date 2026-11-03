@@ -33,6 +33,8 @@ export interface Product {
   es_reventa?: boolean;
   /** Pieza de exhibición: se vende del stock del showroom (tratada como reventa). */
   es_exhibicion?: boolean;
+  /** Colchón: en Cotizaciones muestra la pregunta del plástico de regalo. */
+  es_colchon?: boolean;
   tipo_producto_id?: number;
   tipo_producto?: { nombre: string } | null;
   alto_base: number | null;

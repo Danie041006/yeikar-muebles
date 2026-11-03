@@ -28,6 +28,8 @@ export interface Product {
   es_reventa?: boolean;
   /** Pieza de exhibición: se fabrica, vive en el showroom y se vende de stock. */
   es_exhibicion?: boolean;
+  /** Colchón: en Cotizaciones muestra la pregunta del plástico de regalo. */
+  es_colchon?: boolean;
   /** Moneda de los precios de referencia (COP=1). Los reventa suelen ser USD. */
   moneda_id?: number | null;
   moneda?: MonedaInfo | null;
@@ -172,6 +174,10 @@ export interface PromocionObsequio {
   activo: boolean;
   colchon_nombre?: string | null;
   obsequio_nombre?: string | null;
+  /** Stock agregado del plástico (0 = agotado). */
+  obsequio_stock?: number;
+  /** Precio de referencia del catálogo (el regalo se registra a 0). */
+  obsequio_precio?: number | null;
 }
 
 export const productosService = {

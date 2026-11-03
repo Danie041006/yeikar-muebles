@@ -354,6 +354,8 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
         datos["tasa_cambio"] = 1.0
         datos["total_en_moneda_base"] = datos.get("total_estimado", 0)
     _validar_consistencia_detalles(datos.get("moneda_id", MONEDA_BASE_ID), datos.get("total_estimado", 0), detalles_datos)
+    from app.modules.productos.service import validar_regalos_plastico
+    validar_regalos_plastico(db, detalles_datos)
     if usuario is not None:
         datos["creado_por_id"] = usuario.id
         datos["actualizado_por_id"] = usuario.id
@@ -408,6 +410,9 @@ def actualizar_cotizacion(
     # edición desde la UI envía los detalles tal cual quedaron en el formulario.
     # cotizacion_detalle_material cae en cascada al borrar los detalles.
     detalles_nuevos = datos.pop("detalles", None)
+    if detalles_nuevos is not None:
+        from app.modules.productos.service import validar_regalos_plastico
+        validar_regalos_plastico(db, detalles_nuevos)
     for campo, valor in datos.items():
         setattr(db_obj, campo, valor)
     if detalles_nuevos is not None:

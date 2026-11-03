@@ -38,6 +38,10 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { produccionService } from '../services/produccionService';
 
 interface CotizacionItemForm {
+  /** Identificador estable del renglón en el formulario (no viaja a la API). */
+  uid: string;
+  /** Si es un regalo, uid del renglón-colchón al que pertenece. */
+  regaloDeUid?: string;
   producto_id: string;
   material_id: string;
   tipo_item: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
@@ -64,11 +68,14 @@ interface CotizacionItemForm {
   /** El precio del insumo se cargó solo desde su costo real (no lo escribió
    *  el usuario). Si el usuario lo edita, pasa a false y no se vuelve a tocar. */
   precioAuto?: boolean;
-  /** Promo obsequio: renglón del plástico de regalo (precio 0, ligado al colchón). */
+  /** Regalo manual de plástico: renglón a precio 0 ligado a un colchón. */
   es_obsequio?: boolean;
   /** Piezas del juego (opcional): se producen y costean por separado. */
   piezas?: PiezaJuegoForm[];
 }
+
+let itemUidSeq = 0;
+const nuevoItemUid = () => `item-${Date.now().toString(36)}-${++itemUidSeq}`;
 
 /** Piezas del juego listas para la API (el precio NO viaja: es del renglón). */
 function piezasParaPayload(item: CotizacionItemForm) {
@@ -108,6 +115,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
       const cantidadBase = d.cantidad_base ?? d.cantidad;
       const unidadBase = d.material?.unidad_medida?.abreviatura ?? null;
       return {
+        uid: nuevoItemUid(),
         producto_id: '',
         material_id: d.material_id ? String(d.material_id) : '',
         tipo_item: 'INSUMO',
@@ -134,6 +142,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
       };
     }
     return {
+      uid: nuevoItemUid(),
       producto_id: d.producto_id ? String(d.producto_id) : '',
       material_id: '',
       tipo_item: d.tipo_item || 'FABRICADO',
@@ -195,95 +204,10 @@ const ordenarProductosPorTipo = (prods: Product[]): Product[] =>
     return a.nombre.localeCompare(b.nombre);
   });
 
-// ── Promo obsequio (colchón → plástico) ────────────────────────────────────
-// El renglón del obsequio viaja en la cotización a precio 0 y marcado
-// es_obsequio: el backend lo detecta como ya presente y no lo duplica al
-// convertir el pedido; al facturar descuenta el stock del plástico.
+// ── Regalo manual de plástico ──────────────────────────────────────────────
+// Ya no se agrega solo: se elige en la línea del colchón (máximo 1 por
+// unidad). La lista curada sale de promocion_obsequio (6 productos distintos).
 
-type PromosPorColchon = Map<number, PromocionObsequio>;
-
-/** Unidades totales por obsequio según los renglones de colchón con promo. */
-function totalesObsequioPorPromo(
-  items: CotizacionItemForm[],
-  promos: PromosPorColchon,
-): Map<number, number> {
-  const totales = new Map<number, number>();
-  for (const it of items) {
-    if (it.es_obsequio || it.tipo_item !== 'REVENTA' || !it.producto_id) continue;
-    const promo = promos.get(Number(it.producto_id));
-    if (!promo) continue;
-    totales.set(promo.obsequio_id, (totales.get(promo.obsequio_id) || 0) + (it.cantidad || 0));
-  }
-  return totales;
-}
-
-/** Ajusta la cantidad de los renglones de obsequio (o los quita si el colchón
- *  ya no está). NO agrega renglones nuevos: eso ocurre al seleccionar el
- *  colchón (asegurarObsequio). Devuelve el MISMO arreglo si no hubo cambios. */
-function sincronizarCantidadesObsequio(
-  items: CotizacionItemForm[],
-  promos: PromosPorColchon,
-): CotizacionItemForm[] {
-  if (promos.size === 0) return items;
-  const totales = totalesObsequioPorPromo(items, promos);
-  let cambio = false;
-  const next: CotizacionItemForm[] = [];
-  for (const it of items) {
-    if (it.es_obsequio && it.producto_id) {
-      const total = totales.get(Number(it.producto_id)) || 0;
-      if (total <= 0) {
-        cambio = true;
-        continue; // el colchón ya no está: se va el regalo
-      }
-      if (it.cantidad !== total) {
-        next.push({ ...it, cantidad: total });
-        cambio = true;
-        continue;
-      }
-    }
-    next.push(it);
-  }
-  return cambio ? next : items;
-}
-
-/** Al seleccionar un colchón con promo, agrega su renglón de obsequio (una
- *  sola vez, justo después del colchón) y sincroniza cantidades. */
-function asegurarObsequio(
-  items: CotizacionItemForm[],
-  colchonId: number,
-  promos: PromosPorColchon,
-): CotizacionItemForm[] {
-  const promo = promos.get(colchonId);
-  if (!promo) return sincronizarCantidadesObsequio(items, promos);
-  const yaExiste = items.some(
-    (it) => it.es_obsequio && Number(it.producto_id) === promo.obsequio_id,
-  );
-  if (yaExiste) return sincronizarCantidadesObsequio(items, promos);
-  const total = totalesObsequioPorPromo(items, promos).get(promo.obsequio_id) || 0;
-  if (total <= 0) return items;
-  const nuevo: CotizacionItemForm = {
-    producto_id: String(promo.obsequio_id),
-    material_id: '',
-    tipo_item: 'REVENTA',
-    cantidad: total,
-    ancho: '',
-    largo: '',
-    ganancia: '',
-    impuesto: '',
-    descripcion_especifica: 'OBSEQUIO PROMO',
-    observaciones: '',
-    calcResult: null,
-    calcLoading: false,
-    receta_personalizada: null,
-    es_obsequio: true,
-  };
-  let insertAt = items.length;
-  items.forEach((it, i) => {
-    if (!it.es_obsequio && Number(it.producto_id) === colchonId) insertAt = i + 1;
-  });
-  const next = [...items.slice(0, insertAt), nuevo, ...items.slice(insertAt)];
-  return sincronizarCantidadesObsequio(next, promos);
-}
 
 /** Input decimal para cantidades de insumo.
  *
@@ -369,7 +293,8 @@ export default function Cotizaciones() {
   const [products, setProducts] = useState<Product[]>([]);
   const [materiales, setMateriales] = useState<any[]>([]);
 
-  // Promos activas colchón → plástico de regalo (una vez al montar)
+  // Variedad curada de plásticos de regalo (6 productos distintos; la tabla
+  // vieja tiene 8 filas pero repite 13005 y 13014).
   const [promosObsequio, setPromosObsequio] = useState<PromocionObsequio[]>([]);
   useEffect(() => {
     let active = true;
@@ -378,10 +303,14 @@ export default function Cotizaciones() {
       .catch(() => { if (active) setPromosObsequio([]); });
     return () => { active = false; };
   }, []);
-  const promosPorColchon = useMemo<PromosPorColchon>(() => {
-    const m: PromosPorColchon = new Map();
-    for (const p of promosObsequio) m.set(p.colchon_id, p);
-    return m;
+  const plasticosRegalo = useMemo<PromocionObsequio[]>(() => {
+    const unicos = new Map<number, PromocionObsequio>();
+    for (const p of promosObsequio) {
+      if (!unicos.has(p.obsequio_id)) unicos.set(p.obsequio_id, p);
+    }
+    return Array.from(unicos.values()).sort((a, b) =>
+      (a.obsequio_nombre || '').localeCompare(b.obsequio_nombre || ''),
+    );
   }, [promosObsequio]);
   
   const [search, setSearch] = useState('');
@@ -730,15 +659,18 @@ export default function Cotizaciones() {
   };
 
   const updateItemField = (index: number, field: keyof CotizacionItemForm, value: any) => {
-    // El renglón de obsequio es de solo lectura salvo cantidad (que sigue al
-    // colchón): no se le cambia producto, dimensiones, ganancia ni impuestos.
+    // El renglón de regalo es de solo lectura salvo cantidad/observaciones.
     if (items[index]?.es_obsequio && field !== 'cantidad' && field !== 'observaciones') {
       return;
     }
     setItems((prevItems) => {
       const newItems = [...prevItems];
-      newItems[index] = { ...newItems[index], [field]: value };
-      
+      const itemActual = newItems[index];
+      newItems[index] = { ...itemActual, [field]: value };
+
+      const giftIndexDe = (uid?: string) =>
+        newItems.findIndex((it) => it.es_obsequio && it.regaloDeUid === uid);
+
       // Auto-dimensions if product changed (los reventa no tienen dimensiones)
       if (field === 'producto_id') {
         const selectedProd = products.find(p => p.id === Number(value));
@@ -748,19 +680,46 @@ export default function Cotizaciones() {
         }
         newItems[index].receta_personalizada = null;
         newItems[index].piezas = [];
-        // Promo obsequio: si el nuevo producto es un colchón con promo, se
-        // agrega el renglón del plástico; si dejó de serlo, se ajusta/quita.
-        const promo = promosPorColchon.get(Number(value));
-        if (promo) return asegurarObsequio(newItems, Number(value), promosPorColchon);
-        return sincronizarCantidadesObsequio(newItems, promosPorColchon);
+
+        // El regalo solo vive mientras el renglón sea un colchón.
+        const giftIdx = giftIndexDe(itemActual.uid);
+        if (giftIdx >= 0) {
+          if (!selectedProd?.es_colchon) {
+            newItems.splice(giftIdx, 1);
+          } else {
+            const max = Math.max(1, Number(newItems[index].cantidad) || 1);
+            newItems[giftIdx] = {
+              ...newItems[giftIdx],
+              cantidad: Math.min(Number(newItems[giftIdx].cantidad) || 1, max),
+            };
+          }
+        }
       }
 
-      // Cambió la cantidad del colchón (o el tipo): el regalo la sigue.
-      if (field === 'cantidad' || field === 'tipo_item') {
-        if (field === 'tipo_item' && value !== 'FABRICADO') {
-          newItems[index].piezas = [];
+      if (field === 'cantidad') {
+        // Regalo editado: no puede superar las unidades de su colchón.
+        if (itemActual.es_obsequio && itemActual.regaloDeUid) {
+          const colchon = newItems.find((it) => it.uid === itemActual.regaloDeUid);
+          const max = colchon ? Math.max(1, Number(colchon.cantidad) || 1) : 1;
+          newItems[index] = {
+            ...newItems[index],
+            cantidad: Math.max(1, Math.min(Number(value) || 1, max)),
+          };
+        } else {
+          // Colchón editado: el regalo se recorta si quedó por encima.
+          const giftIdx = giftIndexDe(itemActual.uid);
+          if (giftIdx >= 0) {
+            const max = Math.max(1, Number(value) || 1);
+            newItems[giftIdx] = {
+              ...newItems[giftIdx],
+              cantidad: Math.min(Number(newItems[giftIdx].cantidad) || 1, max),
+            };
+          }
         }
-        return sincronizarCantidadesObsequio(newItems, promosPorColchon);
+      }
+
+      if (field === 'tipo_item' && value !== 'FABRICADO') {
+        newItems[index].piezas = [];
       }
 
       return newItems;
@@ -1007,6 +966,7 @@ export default function Cotizaciones() {
     setItems((prev) => [
       ...prev,
       {
+        uid: nuevoItemUid(),
         producto_id: '', material_id: '', tipo_item: 'INSUMO', cantidad: 1,
         ancho: '', largo: '', ganancia: '', impuesto: '0',
         descripcion_especifica: '', observaciones: '',
@@ -1099,6 +1059,7 @@ export default function Cotizaciones() {
   // Reparación: la pieza ya existe (es del cliente), se describe el trabajo y
   // entra al taller (Tapicería, etc.). SERVICIO: cobro libre (flete/instalación).
   const nuevoItemLibre = (tipo_item: 'REPARACION' | 'SERVICIO', descripcion = ''): CotizacionItemForm => ({
+    uid: nuevoItemUid(),
     producto_id: '',
     material_id: '',
     tipo_item,
@@ -1116,6 +1077,60 @@ export default function Cotizaciones() {
 
   const addItemReparacion = () => setItems((prev) => [...prev, nuevoItemLibre('REPARACION')]);
   const addItemServicio = (descripcion = '') => setItems((prev) => [...prev, nuevoItemLibre('SERVICIO', descripcion)]);
+
+  /** Elige (o quita) el plástico de regalo de un colchón. */
+  const agregarRegaloPlastico = (colchonUid: string, obsequioId: number) => {
+    setItems((prev) => {
+      const colchonIdx = prev.findIndex((it) => it.uid === colchonUid);
+      if (colchonIdx < 0) return prev;
+      const colchon = prev[colchonIdx];
+      const giftIdx = prev.findIndex(
+        (it) => it.es_obsequio && it.regaloDeUid === colchonUid,
+      );
+
+      if (!obsequioId) {
+        return giftIdx >= 0 ? prev.filter((_, i) => i !== giftIdx) : prev;
+      }
+
+      const plastico = plasticosRegalo.find((p) => p.obsequio_id === obsequioId);
+      if (!plastico || (plastico.obsequio_stock ?? 0) <= 0) return prev;
+
+      if (giftIdx >= 0) {
+        const next = [...prev];
+        next[giftIdx] = {
+          ...next[giftIdx],
+          producto_id: String(obsequioId),
+          cantidad: Math.min(
+            Number(next[giftIdx].cantidad) || 1,
+            Math.max(1, Number(colchon.cantidad) || 1),
+          ),
+        };
+        return next;
+      }
+
+      const regalo: CotizacionItemForm = {
+        uid: nuevoItemUid(),
+        regaloDeUid: colchonUid,
+        producto_id: String(obsequioId),
+        material_id: '',
+        tipo_item: 'REVENTA',
+        cantidad: Math.max(1, Number(colchon.cantidad) || 1),
+        ancho: '',
+        largo: '',
+        ganancia: '',
+        impuesto: '',
+        descripcion_especifica: 'PLÁSTICO DE REGALO',
+        observaciones: '',
+        calcResult: null,
+        calcLoading: false,
+        receta_personalizada: null,
+        es_obsequio: true,
+      };
+      const next = [...prev];
+      next.splice(colchonIdx + 1, 0, regalo);
+      return next;
+    });
+  };
 
   const handleOpenProductSelector = (index?: number, modo: 'todos' | 'fabricados' | 'reventa' | 'exhibicion' = 'fabricados') => {
     if (index !== undefined) {
@@ -1149,6 +1164,7 @@ export default function Cotizaciones() {
       updateItemField(productSelectorTargetIndex, 'tipo_item', esItemStock(product) ? 'REVENTA' : 'FABRICADO');
     } else {
       const newItem: CotizacionItemForm = {
+        uid: nuevoItemUid(),
         producto_id: String(product.id),
         material_id: '',
         tipo_item: esItemStock(product) ? 'REVENTA' : 'FABRICADO',
@@ -1166,8 +1182,7 @@ export default function Cotizaciones() {
         const next = [...prev, newItem];
         const nextIdx = next.length - 1;
         calculateItemPrice(nextIdx, String(product.id), newItem.ancho, newItem.largo, newItem.ganancia, null, newItem.impuesto);
-        // Colchón con promo: el plástico de regalo entra a la cotización.
-        return asegurarObsequio(next, product.id, promosPorColchon);
+        return next;
       });
     }
     setIsProductSelectorOpen(false);
@@ -1180,6 +1195,7 @@ export default function Cotizaciones() {
     const descripcion = nombre.trim();
     if (!descripcion) return;
     const aMedida: CotizacionItemForm = {
+      uid: nuevoItemUid(),
       producto_id: '',
       material_id: '',
       tipo_item: 'FABRICADO',
@@ -1218,11 +1234,14 @@ export default function Cotizaciones() {
 
   const removeItem = (index: number) => {
     setItems((prev) => {
+      const removed = prev[index];
       const next = prev.filter((_, i) => i !== index);
-      setDesgloseIndex((di) => (di >= next.length ? Math.max(0, next.length - 1) : di));
-      // Si se quitó el colchón, su obsequio se va; si se quitó el obsequio,
-      // queda quitado (no se re-agrega solo).
-      return sincronizarCantidadesObsequio(next, promosPorColchon);
+      // Al quitar un colchón se va su regalo; quitar el regalo no toca el colchón.
+      const filtered = removed && !removed.es_obsequio
+        ? next.filter((it) => !(it.es_obsequio && it.regaloDeUid === removed.uid))
+        : next;
+      setDesgloseIndex((di) => (di >= filtered.length ? Math.max(0, filtered.length - 1) : di));
+      return filtered;
     });
   };
 
@@ -1269,10 +1288,7 @@ export default function Cotizaciones() {
     setSelectedMonedaId(full.moneda_id || 1);
     setTasaCambio(full.tasa_cambio || 1);
     setTasasDia({});
-    setItems(sincronizarCantidadesObsequio(
-      itemsDesdeCotizacion(full, full.moneda?.codigo || 'COP'),
-      promosPorColchon,
-    ));
+    setItems(itemsDesdeCotizacion(full, full.moneda?.codigo || 'COP'));
     setError('');
     setErrorForm('');
     setIsFormOpen(true);
@@ -1301,6 +1317,7 @@ export default function Cotizaciones() {
       if (!prod) return;
       handleOpenCreate();
       const nuevo: CotizacionItemForm = {
+        uid: nuevoItemUid(),
         producto_id: String(prod.id),
         material_id: '',
         tipo_item: esItemStock(prod) ? 'REVENTA' : 'FABRICADO',
@@ -1518,6 +1535,23 @@ export default function Cotizaciones() {
       .find((mensaje) => mensaje !== null);
     if (errorPieza) {
       setErrorForm(errorPieza);
+      return;
+    }
+
+    // Plásticos de regalo: máximo 1 por colchón (el backend también valida).
+    const totalColchones = items.reduce((sum, it) => {
+      if (it.es_obsequio || !it.producto_id) return sum;
+      const prod = products.find((p) => p.id === Number(it.producto_id));
+      return prod?.es_colchon ? sum + (Number(it.cantidad) || 0) : sum;
+    }, 0);
+    const totalRegalos = items.reduce(
+      (sum, it) => (it.es_obsequio ? sum + (Number(it.cantidad) || 0) : sum),
+      0,
+    );
+    if (totalRegalos > totalColchones) {
+      setErrorForm(
+        `Tienes ${totalRegalos} plástico${totalRegalos !== 1 ? 's' : ''} de regalo para ${totalColchones} colchón${totalColchones !== 1 ? 'es' : ''}. Máximo 1 por colchón.`,
+      );
       return;
     }
 
@@ -2611,10 +2645,14 @@ export default function Cotizaciones() {
                 <div className="space-y-4">
                   {items.map((item, index) => {
                     const selectedProd = item.tipo_item !== 'INSUMO' ? products.find((p) => p.id === Number(item.producto_id)) : null;
-                    // Colchón con promo: el plástico que se puede llevar.
-                    const promoColchon = !item.es_obsequio && item.tipo_item !== 'INSUMO' && item.producto_id
-                      ? promosPorColchon.get(Number(item.producto_id))
-                      : undefined;
+                    // Colchón: la pregunta del plástico de regalo se muestra en su línea.
+                    const esColchon = !item.es_obsequio && !!selectedProd?.es_colchon;
+                    const regaloVinculado = item.es_obsequio
+                      ? null
+                      : items.find((it) => it.es_obsequio && it.regaloDeUid === item.uid) ?? null;
+                    const regaloVinculadoIdx = regaloVinculado
+                      ? items.findIndex((it) => it.uid === regaloVinculado.uid)
+                      : -1;
 
                     // ── INSUMO: card simplificado ──
                     if (item.tipo_item === 'INSUMO') {
@@ -2959,15 +2997,15 @@ export default function Cotizaciones() {
                             </span>
                             {item.es_obsequio && (
                               <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
-                                Obsequio promo
+                                Regalo plástico
                               </span>
                             )}
-                            {promoColchon && (
+                            {esColchon && regaloVinculado && (
                               <span
                                 className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-md bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200"
-                                title="Promoción: por este colchón el cliente se lleva el plástico sin costo"
+                                title="Regalo manual: el cliente puede decir que no"
                               >
-                                Incluye obsequio: {promoColchon.obsequio_nombre}
+                                Incluye regalo: {products.find((p) => p.id === Number(regaloVinculado.producto_id))?.nombre || 'plástico'}
                               </span>
                             )}
                               {item.calcResult?.fuente_precio === 'estimado_sin_estructura' && (
@@ -3062,9 +3100,62 @@ export default function Cotizaciones() {
                             piden una por una en cada cotización. */}
                         {item.es_obsequio && (
                           <p className="text-[11px] text-fuchsia-800 bg-fuchsia-50/60 border border-fuchsia-100 rounded-lg px-3 py-1.5">
-                            Obsequio de promoción: va incluido con el colchón, no se cobra.
-                            Al facturar sale del inventario de plásticos.
+                            Regalo de plástico: no se cobra. Al facturar sale del inventario.
                           </p>
+                        )}
+                        {esColchon && (
+                          <div className="rounded-xl border border-fuchsia-200 bg-fuchsia-50/50 px-3 py-2.5 space-y-2">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold text-fuchsia-800">
+                                🎁 ¿Lleva plástico de regalo?
+                              </span>
+                              <select
+                                value={regaloVinculado ? String(regaloVinculado.producto_id) : ''}
+                                onChange={(e) => agregarRegaloPlastico(item.uid, Number(e.target.value) || 0)}
+                                className="rounded-lg border border-fuchsia-200 bg-white px-2 py-1.5 text-xs font-mono text-yeikar-secondary focus:outline-none focus:ring-2 focus:ring-fuchsia-300"
+                              >
+                                <option value="">Sin plástico</option>
+                                {plasticosRegalo.map((p) => {
+                                  const stock = Number(p.obsequio_stock ?? 0);
+                                  return (
+                                    <option
+                                      key={p.obsequio_id}
+                                      value={p.obsequio_id}
+                                      disabled={stock <= 0}
+                                    >
+                                      {p.obsequio_nombre || `Plástico #${p.obsequio_id}`}
+                                      {` · stock ${stock.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              {regaloVinculado && regaloVinculadoIdx >= 0 && (
+                                <>
+                                  <label className="text-[10px] font-bold uppercase tracking-wider text-fuchsia-700/70">
+                                    Cantidad
+                                  </label>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={item.cantidad}
+                                    value={regaloVinculado.cantidad}
+                                    onChange={(e) =>
+                                      updateItemField(
+                                        regaloVinculadoIdx,
+                                        'cantidad',
+                                        parseInt(e.target.value) || 1,
+                                      )
+                                    }
+                                    className="w-16 rounded-lg border border-fuchsia-200 bg-white px-2 py-1.5 text-xs font-mono font-bold text-yeikar-secondary focus:outline-none focus:ring-2 focus:ring-fuchsia-300"
+                                  />
+                                </>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-fuchsia-700/80">
+                              Opcional: el cliente puede decir que no. Máximo 1 por colchón;
+                              el regalo se registra a precio 0.
+                            </p>
+                          </div>
                         )}
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                           <div>

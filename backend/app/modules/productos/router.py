@@ -2,6 +2,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from typing import List, Optional
 
 from app.db.session import get_db
@@ -848,7 +849,17 @@ def recalcular_receta_personalizada(
 # Promoción obsequio (colchón -> plástico de regalo)
 # ------------------------------------------------------------
 def _promo_response(db: Session, promo):
-    """Respuesta con nombres resueltos (la tabla solo guarda ids)."""
+    """Respuesta con nombres, stock y precio de referencia."""
+    from app.modules.inventory.model import ProductoInventario
+
+    stock = (
+        db.query(func.coalesce(func.sum(ProductoInventario.cantidad), 0))
+        .filter(ProductoInventario.producto_id == promo.obsequio_id)
+        .scalar()
+    )
+    precio = None
+    if promo.obsequio is not None and promo.obsequio.precio_venta_base is not None:
+        precio = float(promo.obsequio.precio_venta_base)
     return schemas.PromocionObsequioResponse(
         id=promo.id,
         colchon_id=promo.colchon_id,
@@ -856,6 +867,8 @@ def _promo_response(db: Session, promo):
         activo=promo.activo,
         colchon_nombre=promo.colchon.nombre if promo.colchon else None,
         obsequio_nombre=promo.obsequio.nombre if promo.obsequio else None,
+        obsequio_stock=float(stock or 0),
+        obsequio_precio=precio,
     )
 
 @router.get("/promocion-obsequio", response_model=List[schemas.PromocionObsequioResponse])

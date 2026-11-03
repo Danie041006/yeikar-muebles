@@ -23,6 +23,9 @@ class ProductoBase(BaseModel):
     # Pieza de exhibición: se fabrica, vive en el stock del showroom y su venta
     # descuenta ese stock al facturar (tratada como reventa en la venta).
     es_exhibicion: Optional[bool] = False
+    # Colchón: en Cotizaciones habilita la pregunta del plástico de regalo
+    # (máximo 1 por unidad; el cliente puede decir que no).
+    es_colchon: Optional[bool] = False
     # Moneda de los precios de referencia (COP=1 por defecto). Los productos de
     # reventa suelen crearse en USD.
     moneda_id: Optional[int] = 1
@@ -46,6 +49,7 @@ class ProductoUpdate(BaseModel):
     stock_minimo: Optional[float] = None
     es_reventa: Optional[bool] = None
     es_exhibicion: Optional[bool] = None
+    es_colchon: Optional[bool] = None
     categoria_inventario_id: Optional[int] = None
     moneda_id: Optional[int] = None
     precio_costo_base: Optional[float] = None
@@ -405,6 +409,10 @@ class PromocionObsequioResponse(BaseModel):
     activo: bool
     colchon_nombre: Optional[str] = None
     obsequio_nombre: Optional[str] = None
+    # Stock agregado del plástico (para deshabilitar agotados en el cotizador).
+    obsequio_stock: float = 0.0
+    # Precio de referencia del catálogo (el regalo se registra a precio 0).
+    obsequio_precio: Optional[float] = None
 
     class Config:
         from_attributes = True

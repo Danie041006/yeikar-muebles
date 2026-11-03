@@ -119,6 +119,7 @@ def db():
 # ---------------------------------------------------------------------------
 ORDEN_LIMPIEZA = [
     "adjunto",
+    "promocion_obsequio",
     "devolucion_venta",
     "descuento_venta",
     "pago",
