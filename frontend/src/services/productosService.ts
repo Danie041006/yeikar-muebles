@@ -277,6 +277,12 @@ export const productosService = {
     return response.data;
   },
 
+  /** Elimina un insumo SOLO si su stock total es 0. Si tiene historial, el
+   * backend lo desactiva (deja de aparecer en catálogos) sin borrar el kardex. */
+  eliminarMaterial: async (id: number): Promise<void> => {
+    await api.delete(`/material/${id}`);
+  },
+
   getUnidadesUso: async (materialId: number): Promise<MaterialUnidadUso[]> => {
     const response = await api.get<MaterialUnidadUso[]>(`/material/${materialId}/unidades-uso`);
     return response.data;

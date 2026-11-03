@@ -188,6 +188,7 @@ export default function Inventario() {
   interface FilaUnidadUso { nombre: string; valor: string; invertida: boolean }
   const [unidadesUsoEdit, setUnidadesUsoEdit] = useState<FilaUnidadUso[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [deletingMaterial, setDeletingMaterial] = useState(false);
 
   // ---- Productos (terminados / reventa) ----
   const [invProductos, setInvProductos] = useState<ProductoInventarioItem[]>([]);
@@ -334,9 +335,13 @@ export default function Inventario() {
     precio_venta: '',           // Precio de venta al público (opcional)
     descuento_porcentaje: '',   // % Descuento por pronto pago / al mayor (opcional)
     stock_minimo: '8',
-    cantidad_inicial: '1',
+    // Un producto NUEVO nace sin stock: solo entra si el usuario escribe una
+    // cantidad inicial (compra). Antes venía "1" y todo producto nuevo
+    // aparecía con una unidad fantasma.
+    cantidad_inicial: '0',
     fecha: hoyVE(),     // fecha real de la entrada inicial (por defecto hoy; admite días anteriores)
-    cuenta_pago_id: '', // key "cuentaId:monedaId" — de qué caja salió el dinero (opcional)
+    cuenta_pago_id: '', // key "cuentaId:monedaId" — de qué caja salió el dinero (vacío = fiado)
+    proveedor_nombre: '', // proveedor de la entrada inicial (obligatorio si queda fiada)
     tasa_pago: '',      // 1 [moneda_pago] = X COP (manual, obligatoria si aplica)
     moneda_id: '', // string para SearchSelect; default USD cuando cargan las monedas
   });
@@ -615,6 +620,14 @@ export default function Inventario() {
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
       : (costoBruto > 0 ? costoBruto : undefined);
     const precioVenta = parseFloat(newProducto.precio_venta || '0') || 0;
+    const cantInicial = parseFloat(newProducto.cantidad_inicial || '0') || 0;
+    // "Fiar": entrada inicial sin cuenta de pago → cuenta por pagar con el
+    // proveedor. Solo aplica si hay costo: sin costo no hay deuda que registrar.
+    const fiando = cantInicial > 0 && !pagoModal.cuentaId && costoNeto !== undefined && costoNeto > 0;
+    if (fiando && !newProducto.proveedor_nombre.trim()) {
+      toast.error('Al fiar debes indicar el proveedor de la entrada inicial.');
+      return;
+    }
     const detalleDesc = costoBruto > 0 && pctDesc > 0
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${simboloPrecio}${fmtNumero(costoBruto, 2)} → Neto: ${simboloPrecio}${fmtNumero(costoNeto, 2)})`
       : '';
@@ -655,17 +668,18 @@ export default function Inventario() {
         precio_venta: '',
         descuento_porcentaje: '',
         stock_minimo: '8',
-        cantidad_inicial: '1',
+        cantidad_inicial: '0',
         fecha: hoyVE(),
         cuenta_pago_id: '',
+        proveedor_nombre: '',
         tasa_pago: '',
         moneda_id: idMonedaPorDefecto(),
       });
 
-      // Entrada inicial al inventario: la cantidad la decide el usuario
-      // (default 1); el costo es opcional. Si indica cuenta de pago, se
-      // genera el egreso automático (gasto + salida de caja).
-      const cantInicial = parseFloat(newProducto.cantidad_inicial || '0') || 0;
+      // Entrada inicial al inventario: SOLO si el usuario escribió una
+      // cantidad (un producto nuevo nace en stock 0). Si indica cuenta de
+      // pago, se genera el egreso automático; si no, queda fiada al
+      // proveedor y se registra la cuenta por pagar.
       if (cantInicial > 0 && creado.id) {
         const ubi = ubicaciones[0];
         if (ubi) {
@@ -677,9 +691,15 @@ export default function Inventario() {
             fecha: newProducto.fecha || hoyVE(),
             costo_unitario: costoNeto,
             pagado_desde_metodo_caja_id: pagoModal.cuentaId ?? undefined,
-            moneda_pago_id: pagoModal.monedaId ?? undefined,
+            moneda_pago_id: pagoModal.cuentaId ? (pagoModal.monedaId ?? undefined) : undefined,
             tasa_pago: pagoModal.cuentaId && parseFloat(newProducto.tasa_pago || '0') > 0 ? parseFloat(newProducto.tasa_pago) : undefined,
-            observaciones: [`Carga inicial de producto de ${esPlastico ? 'plástico' : 'reventa'}`, detalleDesc].filter(Boolean).join(' · '),
+            proveedor_nombre: newProducto.proveedor_nombre.trim() || undefined,
+            fiar: fiando || undefined,
+            observaciones: [
+              `Carga inicial de producto de ${esPlastico ? 'plástico' : 'reventa'}`,
+              fiando ? `Fiado a ${newProducto.proveedor_nombre.trim()}` : '',
+              detalleDesc,
+            ].filter(Boolean).join(' · '),
           });
         }
       }
@@ -867,6 +887,32 @@ export default function Inventario() {
     }
   };
 
+  // ---- Eliminar un insumo sin stock (con confirmación) ----
+  const handleDeleteMaterial = async () => {
+    if (!selectedMaterialId || !materialSeleccionado) return;
+    const stock = insumoStock(materialSeleccionado).c;
+    if (stock > 0) {
+      toast.error(`No se puede eliminar: todavía tiene ${stock.toLocaleString('es-ES')} en stock.`);
+      return;
+    }
+    if (!window.confirm(
+      `¿Eliminar el insumo "${materialSeleccionado.nombre}"?\n\n` +
+      `Solo se puede si tiene stock 0. Si tiene historial de compras/movimientos, ` +
+      `se ocultará del catálogo pero el historial queda intacto.`
+    )) return;
+    try {
+      setDeletingMaterial(true);
+      await productosService.eliminarMaterial(selectedMaterialId);
+      setSelectedMaterialId(null);
+      fetchInsumos();
+      toast.success('Insumo eliminado.');
+    } catch (error: any) {
+      toast.error(extractErrorMessage(error, 'No se pudo eliminar el insumo.'));
+    } finally {
+      setDeletingMaterial(false);
+    }
+  };
+
   // Cerrar el modal de detalle con la tecla Escape
   useEffect(() => {
     if (!selectedMaterialId) return;
@@ -890,14 +936,6 @@ export default function Inventario() {
       toast.error(`Indica la tasa de cambio: ${par.label}.`);
       return;
     }
-    // "Fiar": entrada sin cuenta de pago → la deuda queda registrada con el
-    // proveedor (obligatorio). Sin proveedor, no se puede fiar.
-    const fiando = movMaterial.tipo === 'ENTRADA' && !pago.cuentaId;
-    if (fiando && !movMaterial.proveedor_nombre) {
-      toast.error('Al fiar debes indicar el proveedor (campo Proveedor del movimiento).');
-      return;
-    }
-
     // El precio puede venir digitado en la moneda de la cuenta (ej. USD):
     // en ese caso el COP se calcula con la tasa y es el que se guarda.
     const precioEnMoneda = esEntrada ? parseFloat(movMaterial.precio_moneda || '0') || 0 : 0;
@@ -908,6 +946,14 @@ export default function Inventario() {
     const costoNeto = costoBruto !== undefined && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
       : costoBruto;
+    // "Fiar": entrada sin cuenta de pago → la deuda queda registrada con el
+    // proveedor (obligatorio). Solo si hay costo: una entrada sin costo es
+    // una carga de stock y no genera deuda.
+    const fiando = movMaterial.tipo === 'ENTRADA' && !pago.cuentaId && costoNeto !== undefined && costoNeto > 0;
+    if (fiando && !movMaterial.proveedor_nombre) {
+      toast.error('Al fiar debes indicar el proveedor (campo Proveedor del movimiento).');
+      return;
+    }
     const notaDesc = costoBruto !== undefined && pctDesc > 0
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: $${costoBruto.toLocaleString('es-CO')} → Neto: $${costoNeto?.toLocaleString('es-CO')})`
       : '';
@@ -1047,8 +1093,9 @@ export default function Inventario() {
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
       : costoBruto;
     // "Fiar": ENTRADA sin cuenta de pago → la deuda queda registrada con el
-    // proveedor (obligatorio). Igual que en insumos.
-    const fiandoProd = movProducto.tipo === 'ENTRADA' && !pago.cuentaId;
+    // proveedor (obligatorio). Solo si hay costo: sin costo la entrada es una
+    // carga de stock y no hay deuda que registrar.
+    const fiandoProd = movProducto.tipo === 'ENTRADA' && !pago.cuentaId && costoNeto !== undefined && costoNeto > 0;
     if (fiandoProd && !movProducto.proveedor_nombre) {
       toast.error('Al fiar debes indicar el proveedor (campo Proveedor del movimiento).');
       return;
@@ -2507,8 +2554,9 @@ export default function Inventario() {
                         );
                       })()}
 
-                      {/* Pago: cuenta / fiado / tasa */}
-                      {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.costo_unitario || '0') > 0 && cuentasPago.length > 0 && (() => {
+                      {/* Pago: cuenta / fiado / tasa — SIEMPRE se pregunta en
+                          una entrada, aunque el costo aún no esté digitado. */}
+                      {movMaterial.tipo === 'ENTRADA' && parseFloat(movMaterial.cantidad || '0') > 0 && (() => {
                         const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
                         const brutoRef = parseFloat(movMaterial.costo_unitario || '0') || 0;
                         const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
@@ -2528,19 +2576,19 @@ export default function Inventario() {
                           <div className="space-y-3">
                             <div className="space-y-1">
                               <label className="text-xs font-bold text-yeikar-secondary">
-                                ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — vacío = a crédito)</span>
+                                ¿Se pagó esta entrada? <span className="text-yeikar-neutral/40 font-normal">(elige la cuenta; si no, queda fiada)</span>
                               </label>
                               <SearchSelect
                                 value={movMaterial.pago_key}
                                 onChange={(v) => setMovMaterial((p) => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago, precio_moneda: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.precio_moneda }))}
                                 options={[
-                                  { value: '', label: 'Fiar (registrar deuda)' },
-                                  ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
+                                  { value: '', label: 'No se pagó — quedó fiada al proveedor' },
+                                  ...cuentasPago.map((c) => ({ value: c.key, label: `Sí, desde ${c.nombre} · ${c.codigo}` })),
                                 ]}
-                                placeholder="Contado desde..."
+                                placeholder="Elige la cuenta si se pagó..."
                               />
                             </div>
-                            {!cuentaId && parseFloat(movMaterial.cantidad || '0') > 0 && (
+                            {!cuentaId && granTotalRef > 0 && (
                               <div className="space-y-1.5">
                                 <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
                                   Se registrará una deuda de ≈ <b>${granTotalRef.toLocaleString('es-CO')} COP</b>
@@ -2552,6 +2600,11 @@ export default function Inventario() {
                                   </p>
                                 )}
                               </div>
+                            )}
+                            {!cuentaId && granTotalRef <= 0 && (
+                              <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
+                                Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
+                              </p>
                             )}
                             {necesitaTasa && (
                               <div className="space-y-1">
@@ -2794,6 +2847,21 @@ export default function Inventario() {
                         className="w-full py-2.5 bg-yeikar-secondary hover:bg-yeikar-secondary-light text-white rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
                       >
                         {savingEdit ? 'Guardando...' : 'Guardar Cambios'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeleteMaterial}
+                        disabled={deletingMaterial || stockInfo.c > 0}
+                        title={stockInfo.c > 0
+                          ? `Solo se puede eliminar con stock 0 (actual: ${stockInfo.c.toLocaleString('es-ES')})`
+                          : 'Eliminar este insumo del catálogo'}
+                        className="w-full py-2.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {deletingMaterial
+                          ? 'Eliminando...'
+                          : stockInfo.c > 0
+                            ? `No se puede eliminar (stock ${stockInfo.c.toLocaleString('es-ES')})`
+                            : 'Eliminar insumo (stock 0)'}
                       </button>
                     </form>
                   )}
@@ -3254,7 +3322,9 @@ export default function Inventario() {
                     )}
                   </div>
                 )}
-                {movProducto.tipo === 'ENTRADA' && movProducto.costo_unitario && parseFloat(movProducto.costo_unitario) > 0 && cuentasPago.length > 0 && (() => {
+                {/* Pago: SIEMPRE se pregunta en una entrada, aunque el costo
+                    aún no esté digitado (plásticos y reventa usan este form). */}
+                {movProducto.tipo === 'ENTRADA' && parseFloat(movProducto.cantidad || '0') > 0 && (() => {
                   const refMid = Number(productoSeleccionado?.moneda_id ?? MONEDA_BASE_ID);
                   const { cuentaId, monedaId } = parsePagoKey(movProducto.pagado_desde_metodo_caja_id);
                   const pagoMid = monedaId ?? refMid;
@@ -3268,6 +3338,7 @@ export default function Inventario() {
                   const desc = parseFloat(movProducto.descuento_porcentaje || '0') || 0;
                   const costoNetoUnit = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
                   const totalRef = costoNetoUnit * (parseFloat(movProducto.cantidad || '0') || 0);
+                  const totalCompra = totalRef + (parseFloat(movProducto.llevada || '0') || 0);
                   const deduc = !cuentaId ? 0
                     : pagoMid === refMid ? totalRef
                     : convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum);
@@ -3275,22 +3346,22 @@ export default function Inventario() {
                     <>
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">
-                          ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional — vacío = fiado al proveedor)</span>
+                          ¿Se pagó esta entrada? <span className="text-yeikar-neutral/40 font-normal">(elige la cuenta; si no, queda fiada)</span>
                         </label>
                         <SearchSelect
                           value={movProducto.pagado_desde_metodo_caja_id}
                           onChange={(v) => setMovProducto(p => ({ ...p, pagado_desde_metodo_caja_id: String(v), tasa_pago: '' }))}
                           options={[
-                            { value: '', label: 'Fiar (registrar deuda)' },
-                            ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
+                            { value: '', label: 'No se pagó — quedó fiada al proveedor' },
+                            ...cuentasPago.map((c) => ({ value: c.key, label: `Sí, desde ${c.nombre} · ${c.codigo}` })),
                           ]}
-                          placeholder="Contado desde... (vacío = fiado)"
+                          placeholder="Elige la cuenta si se pagó..."
                         />
                       </div>
-                      {!cuentaId && parseFloat(movProducto.cantidad || '0') > 0 && (
+                      {!cuentaId && totalCompra > 0 && (
                         <div className="space-y-1.5">
                           <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
-                            Se registrará una deuda de ≈ <b>${(totalRef + (parseFloat(movProducto.llevada || '0') || 0)).toLocaleString('es-CO')} {refCod}</b>
+                            Se registrará una deuda de ≈ <b>${totalCompra.toLocaleString('es-CO')} {refCod}</b>
                             {' '}(compra + llevada) en <b>Egresos y Gastos → Por Pagar</b>.
                           </p>
                           {!movProducto.proveedor_nombre && (
@@ -3299,6 +3370,11 @@ export default function Inventario() {
                             </p>
                           )}
                         </div>
+                      )}
+                      {!cuentaId && totalCompra <= 0 && (
+                        <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
+                          Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
+                        </p>
                       )}
                       {cuentaId && necesitaTasa && (
                         <div className="space-y-1">
@@ -3874,8 +3950,8 @@ export default function Inventario() {
                   <input type="text" placeholder="Ej. 042-3794-4" value={newProducto.codigo} onChange={(e) => setNewProducto(prev => ({ ...prev, codigo: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad que Entra</label>
-                  <input type="number" min="0" step="1" placeholder="1" value={newProducto.cantidad_inicial} onChange={(e) => setNewProducto(prev => ({ ...prev, cantidad_inicial: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
+                  <label className="block text-xs font-bold text-yeikar-secondary mb-1">Cantidad inicial <span className="text-yeikar-neutral/40 font-normal">(0 = sin stock)</span></label>
+                  <input type="number" min="0" step="1" placeholder="0" value={newProducto.cantidad_inicial} onChange={(e) => setNewProducto(prev => ({ ...prev, cantidad_inicial: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl px-4 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary font-mono" />
                 </div>
               </div>
               <div>
@@ -4056,7 +4132,7 @@ export default function Inventario() {
                   La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
                 </p>
               </div>
-              {parseFloat(newProducto.costo_base || '0') > 0 && cuentasPago.length > 0 && (() => {
+              {parseFloat(newProducto.cantidad_inicial || '0') > 0 && (() => {
                 const refMid = Number(newProducto.moneda_id || MONEDA_BASE_ID);
                 const { cuentaId, monedaId } = parsePagoKey(newProducto.cuenta_pago_id);
                 const pagoMid = monedaId ?? refMid;
@@ -4068,29 +4144,55 @@ export default function Inventario() {
                 const bruto = parseFloat(newProducto.costo_base || '0') || 0;
                 const desc = parseFloat(newProducto.descuento_porcentaje || '0') || 0;
                 const neto = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
-                const totalRef = neto * (parseFloat(newProducto.cantidad_inicial || '0') || 0);
+                const cant = parseFloat(newProducto.cantidad_inicial || '0') || 0;
+                const totalRef = neto * cant;
+                const puedeFiar = neto > 0;
+                const fiado = !cuentaId;
                 const deduc = !cuentaId ? 0
                   : pagoMid === refMid ? totalRef
                   : convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum);
                 return (
-                  <div className="space-y-2">
+                  <div className="space-y-2 rounded-2xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/15 p-4">
                     <div>
                       <label className="block text-xs font-bold text-yeikar-secondary mb-1">
-                        ¿Desde qué cuenta pagaste? <span className="text-yeikar-neutral/40 font-normal">(Opcional)</span>
+                        ¿Se pagó esta entrada? *
                       </label>
                       <SearchSelect
                         value={newProducto.cuenta_pago_id}
                         onChange={(v) => setNewProducto(prev => ({ ...prev, cuenta_pago_id: String(v), tasa_pago: '' }))}
                         options={[
-                          { value: '', label: 'A crédito (no descuenta caja)' },
+                          { value: '', label: 'No se pagó — quedó fiada al proveedor' },
                           ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
                         ]}
-                        placeholder="Contado desde... (vacío = a crédito)"
+                        placeholder="Elige la cuenta si se pagó..."
                       />
                       <p className="text-[10px] text-yeikar-neutral/40 mt-1">
-                        Si eliges una, se registra el egreso de la compra y sale de esa caja automáticamente.
+                        Si eliges una cuenta, se registra la salida de caja de la compra. Si no, la deuda queda en <b>Por Pagar</b>.
                       </p>
                     </div>
+                    {fiado && (
+                      <div>
+                        <label className="block text-xs font-bold text-yeikar-secondary mb-1">
+                          Proveedor {puedeFiar && <span className="text-red-500">*</span>}
+                        </label>
+                        <input
+                          type="text"
+                          value={newProducto.proveedor_nombre}
+                          onChange={(e) => setNewProducto(prev => ({ ...prev, proveedor_nombre: e.target.value }))}
+                          placeholder="¿A quién le quedó fiado?"
+                          className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl px-3 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                        />
+                        {puedeFiar ? (
+                          <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2 mt-1.5">
+                            Se registrará una deuda de ≈ <b>{simboloPrecio}{fmtNumero(totalRef, 2)}</b> ({cant.toLocaleString('es-CO')} × {simboloPrecio}{fmtNumero(neto, 2)}) en <b>Egresos y Gastos → Por Pagar</b>.
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2 mt-1.5">
+                            Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     {cuentaId && necesitaTasa && (
                       <div>
                         <label className="block text-xs font-bold text-yeikar-secondary mb-1">
@@ -4101,7 +4203,7 @@ export default function Inventario() {
                           value={newProducto.tasa_pago}
                           onChange={(e) => setNewProducto(prev => ({ ...prev, tasa_pago: e.target.value }))}
                           placeholder={`Ej: ${par.placeholder}`}
-                          className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm font-mono text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
+                          className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl p-2.5 text-sm font-mono text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
                         />
                       </div>
                     )}
@@ -4114,9 +4216,13 @@ export default function Inventario() {
                   </div>
                 );
               })()}
-              {parseFloat(newProducto.cantidad_inicial || '0') > 0 && (
+              {parseFloat(newProducto.cantidad_inicial || '0') > 0 ? (
                 <p className="text-[11px] text-yeikar-neutral/50 italic bg-yeikar-tertiary/30 border border-yeikar-secondary-light/5 rounded-lg px-3 py-2">
-                  Se registrará una entrada inicial de {newProducto.cantidad_inicial || 1} unidad(es) en {ubicaciones[0]?.nombre || 'Depósito Principal'}{parseFloat(newProducto.costo_base || '0') > 0 ? ` con ese costo (${simboloPrecio}${fmtNumero(parseFloat(newProducto.costo_base), 2)} c/u)` : ''}.
+                  Se registrará una entrada inicial de {newProducto.cantidad_inicial} unidad(es) en {ubicaciones[0]?.nombre || 'Depósito Principal'}{parseFloat(newProducto.costo_base || '0') > 0 ? ` con ese costo (${simboloPrecio}${fmtNumero(parseFloat(newProducto.costo_base), 2)} c/u)` : ''}.
+                </p>
+              ) : (
+                <p className="text-[11px] text-yeikar-neutral/50 italic bg-yeikar-tertiary/30 border border-yeikar-secondary-light/5 rounded-lg px-3 py-2">
+                  El producto se crea en <b>stock 0</b>. Después puedes registrar una entrada desde su detalle.
                 </p>
               )}
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">

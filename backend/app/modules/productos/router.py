@@ -121,11 +121,15 @@ def listar_materiales(
     salto: int = Query(0, ge=0),
     limite: int = Query(100, ge=1, le=1000),
     buscar: Optional[str] = Query(None, description="Buscar por nombre o sinónimo"),
+    incluir_inactivos: bool = Query(False, description="Incluir insumos dados de baja"),
     response: Response = None,
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
-    items, total = service.obtener_materiales(db, salto=salto, limite=limite, buscar=buscar)
+    items, total = service.obtener_materiales(
+        db, salto=salto, limite=limite, buscar=buscar,
+        incluir_inactivos=incluir_inactivos,
+    )
     response.headers["X-Total-Count"] = str(total)
     return items
 
@@ -227,6 +231,8 @@ def eliminar_material(
 ):
     try:
         exito = service.eliminar_material(db, id_material)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except IntegrityError:
         raise HTTPException(
             status_code=409,

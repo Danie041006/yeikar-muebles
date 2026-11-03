@@ -152,7 +152,8 @@ def obtener_material(db: Session, id_material: int):
         selectinload(model.Material.unidades_uso),
     ).filter(model.Material.id == id_material).first()
 
-def obtener_materiales(db: Session, salto: int = 0, limite: int = 100, buscar: str = None):
+def obtener_materiales(db: Session, salto: int = 0, limite: int = 100, buscar: str = None,
+                       incluir_inactivos: bool = False):
     # selectinload: sin esto, serializar 1000+ materiales dispara una query por
     # material (N+1) por unidad_medida/categoria_inventario → el inventario de
     # insumos tardaba segundos en cargar.
@@ -161,6 +162,10 @@ def obtener_materiales(db: Session, salto: int = 0, limite: int = 100, buscar: s
         joinedload(model.Material.categoria_inventario),
         selectinload(model.Material.unidades_uso),
     )
+    # Los insumos dados de baja (soft delete) no se muestran en catálogos ni
+    # selectores. Se pueden consultar con incluir_inactivos=true si hace falta.
+    if not incluir_inactivos:
+        query = query.filter(model.Material.activo.is_(True))
     if buscar:
         term = f"%{buscar}%"
         # Multi-campo: nombre o sinónimo del taller (p.ej. buscar "tabla" y
@@ -243,10 +248,64 @@ def reemplazar_unidades_uso(db: Session, id_material: int, esquema: schemas.Mate
     return obtener_unidades_uso(db, id_material)
 
 def eliminar_material(db: Session, id_material: int):
+    """Elimina un insumo del catálogo SOLO si su stock total es 0.
+
+    - Con stock > 0 se rechaza (primero hay que consumirlo/ajustarlo).
+    - Si está en la receta o estructura de un producto se rechaza: borrarlo
+      rompería el costeo.
+    - Si tiene historial (movimientos, compras, consumos, cotizaciones…), en
+      vez de destruir el kardex se DESACTIVA: desaparece de los catálogos y
+      selectores, pero el historial queda intacto.
+    - Si no tiene referencias, se borra de verdad.
+    """
     db_obj = obtener_material(db, id_material)
     if not db_obj:
         return False
-    db.delete(db_obj)
+
+    from sqlalchemy import text
+    from app.modules.inventory.model import Inventario
+
+    stock = db.query(func.coalesce(func.sum(Inventario.cantidad), 0)).filter(
+        Inventario.material_id == id_material
+    ).scalar()
+    if Decimal(str(stock or 0)) != Decimal("0"):
+        raise ValueError(
+            f"No se puede eliminar el insumo: todavía tiene stock ({stock}). "
+            "Primero registra una salida o un ajuste a 0."
+        )
+
+    # ¿Está en uso en una receta/estructura? Eso sí bloquearía el costeo.
+    en_receta = db.execute(
+        text("SELECT COUNT(*) FROM producto_material WHERE material_id = :m"),
+        {"m": id_material},
+    ).scalar()
+    en_estructura = db.execute(
+        text("SELECT COUNT(*) FROM elemento_seccion WHERE material_id_normalizado = :m"),
+        {"m": id_material},
+    ).scalar()
+    if en_receta or en_estructura:
+        raise ValueError(
+            "No se puede eliminar el insumo: está usado en la receta o estructura "
+            "de un producto. Quítalo de la receta primero."
+        )
+
+    # Las filas de inventario en 0 no aportan nada y bloquean el borrado.
+    db.query(Inventario).filter(Inventario.material_id == id_material).delete(
+        synchronize_session=False
+    )
+    db.flush()
+
+    refs = _referencias_material(db, id_material)
+    # Referencias propias que se pueden borrar en cascada o que no son
+    # historial de negocio.
+    for propia in ("material_sinonimo", "producto_material", "elemento_seccion"):
+        refs.pop(propia, None)
+
+    if refs:
+        # Hay historial: desactivar en vez de romper el kardex.
+        db_obj.activo = False
+    else:
+        db.delete(db_obj)
     db.commit()
     return True
 

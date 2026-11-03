@@ -195,13 +195,17 @@ def test_fiar_producto_crea_cuenta_por_pagar(client, db, cleaner):
         "proveedor_nombre": "TEST PROV FIAR PROD",
     }, headers=ADMIN_HEADERS)
     assert r.status_code == 201, r.text
-    cleaner.registrar("movimiento_producto_inventario", r.json()["id"])
+    movimiento_id = r.json()["id"]
+    cleaner.registrar("movimiento_producto_inventario", movimiento_id)
     registrar_inventario_producto(db, cleaner, prod["id"])
 
     r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
     cxp = next((x for x in r.json() if x.get("descripcion", "").startswith("Compra fiada: TEST REVENTA")), None)
     assert cxp is not None, "fiar debe crear la cuenta por pagar"
     assert float(cxp["monto"]) == 200.0
+    # La deuda queda enlazada al movimiento del kardex (origen_id), no en NULL.
+    assert cxp["origen_tipo"] == "ENTRADA_INVENTARIO"
+    assert cxp["origen_id"] == movimiento_id
     # El proveedor de nombre libre se materializa en el catálogo.
     prov = db.execute(text("SELECT id FROM proveedor WHERE nombre = 'TEST PROV FIAR PROD'")).fetchone()
     assert prov is not None

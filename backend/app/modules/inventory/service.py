@@ -869,6 +869,10 @@ def registrar_movimiento_producto(
         fecha=fecha_mov,
     )
     db.add(db_mov)
+    # Flush explícito: el id debe existir ANTES de crear el gasto o la cuenta
+    # por pagar (origen_id). Sin esto, fiar un producto podía guardar
+    # origen_id=NULL porque el INSERT aún no había tocado la BD.
+    db.flush()
 
     # ── Egreso automático de compra (reventa de contado) ─────────────────
     # ENTRADA con costo + cuenta elegida = dinero que sale de esa caja.
