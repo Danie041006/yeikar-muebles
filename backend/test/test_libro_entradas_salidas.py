@@ -234,7 +234,7 @@ def test_libro_muestra_cuenta_de_pago_y_descuento(client, db, cleaner):
     # ("Gasto #N"): se registran para el teardown.
     gastos = db.execute(text(
         "SELECT id FROM gasto WHERE descripcion LIKE :pat"
-    ), {"pat": f"Compra {material['nombre']}%"}).fetchall()
+    ), {"pat": f"%{material['nombre']}%"}).fetchall()
     assert gastos, "El pago de contado debe generar el gasto de compra"
     for (gasto_id,) in gastos:
         cleaner.registrar("gasto", gasto_id)
@@ -294,3 +294,46 @@ def test_libro_valida_parametros(client):
         headers=ADMIN_HEADERS,
     )
     assert r.status_code == 400, r.text
+
+
+def test_compra_contado_deja_concepto_legible_persona_y_fabrica(client, db, cleaner):
+    """Una entrada de inventario pagada de caja genera un gasto legible:
+    "Compra de material: 15 metros de X", con la persona (proveedor),
+    quién la registró y la clasificación Gastos de Fábrica."""
+    cuenta = db.execute(text("SELECT id FROM metodo_caja ORDER BY id LIMIT 1")).fetchone()
+    if cuenta is None:
+        pytest.skip("No hay cuentas de caja en la BD de pruebas")
+
+    material = crear_material(client, cleaner, costo_base=100.0)  # unidad_medida_id=2 → Metro
+    proveedor = _uniq("prov_legible")
+    _movimiento(
+        client, cleaner, material["id"], "ENTRADA", 15,
+        costo_unitario=18000.0,
+        pagado_desde_metodo_caja_id=cuenta[0],
+        proveedor_nombre=proveedor,
+    )
+    registrar_inventario_de_material(db, cleaner, material["id"])
+
+    fila = db.execute(text(
+        """
+        SELECT g.id, g.descripcion, g.clasificacion, g.creado_por_id,
+               m.concepto, m.persona_entidad, m.usuario_id
+        FROM movimiento_inventario mi
+        JOIN gasto g ON g.id = mi.gasto_id
+        JOIN movimiento_caja m ON m.referencia = 'Gasto #' || g.id
+        WHERE mi.material_id = :mid AND mi.tipo = 'ENTRADA'
+        ORDER BY mi.id DESC
+        LIMIT 1
+        """
+    ), {"mid": material["id"]}).mappings().first()
+    assert fila is not None, "La compra de contado debe generar gasto + salida de caja"
+    cleaner.registrar("gasto", fila["id"])
+    cleaner.registrar_caja_ref(f"Gasto #{fila['id']}")
+
+    esperado = f"Compra de material: 15 metros de {material['nombre']}"
+    assert fila["descripcion"] == esperado, fila["descripcion"]
+    assert fila["concepto"] == esperado
+    assert fila["clasificacion"] == "GASTO_FABRICA"
+    assert fila["persona_entidad"] == proveedor
+    assert fila["usuario_id"] is not None, "Debe quedar quién registró la compra"
+    assert fila["creado_por_id"] is not None

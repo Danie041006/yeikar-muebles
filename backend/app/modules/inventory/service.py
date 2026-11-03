@@ -19,6 +19,131 @@ from app.core.hora_ve import ahora_ve, hoy_ve
 MONEDA_BASE_ID = 1  # COP
 
 
+# ── Textos legibles de las compras de inventario ──────────────────────────
+# El movimiento de caja y el gasto espejo se leen en el libro de caja: en vez
+# de "Compra TELA CUSCO HIELO x15" se escribe
+# "Compra de material: 15 metros de TELA CUSCO HIELO". Las unidades del
+# catálogo son muy dispares (Metro, METROS, m, Lámina, LAMINA, ...): se
+# normalizan a su forma singular/plural y, si no se reconoce, se respeta el
+# nombre tal cual lo cargó el usuario.
+_UNIDADES_SINGULAR_PLURAL: dict[str, tuple[str, str]] = {
+    "unidad": ("unidad", "unidades"),
+    "unidades": ("unidad", "unidades"),
+    "ud": ("unidad", "unidades"),
+    "uds": ("unidad", "unidades"),
+    "un": ("unidad", "unidades"),
+    "und": ("unidad", "unidades"),
+    "uni": ("unidad", "unidades"),
+    "unitario": ("unidad", "unidades"),
+    "unitarios": ("unidad", "unidades"),
+    "metro": ("metro", "metros"),
+    "metros": ("metro", "metros"),
+    "mts": ("metro", "metros"),
+    "m": ("metro", "metros"),
+    "metro cubico": ("metro cúbico", "metros cúbicos"),
+    "metros cubicos": ("metro cúbico", "metros cúbicos"),
+    "m3": ("metro cúbico", "metros cúbicos"),
+    "centimetro": ("centímetro", "centímetros"),
+    "centimetros": ("centímetro", "centímetros"),
+    "cm": ("centímetro", "centímetros"),
+    "cms": ("centímetro", "centímetros"),
+    "kilogramo": ("kilogramo", "kilogramos"),
+    "kilogramos": ("kilogramo", "kilogramos"),
+    "kilo": ("kilo", "kilos"),
+    "kilos": ("kilo", "kilos"),
+    "kg": ("kilogramo", "kilogramos"),
+    "litro": ("litro", "litros"),
+    "litros": ("litro", "litros"),
+    "lt": ("litro", "litros"),
+    "lts": ("litro", "litros"),
+    "l": ("litro", "litros"),
+    "lamina": ("lámina", "láminas"),
+    "laminas": ("lámina", "láminas"),
+    "lam": ("lámina", "láminas"),
+    "galon": ("galón", "galones"),
+    "galones": ("galón", "galones"),
+    "gal": ("galón", "galones"),
+    "caja": ("caja", "cajas"),
+    "cajas": ("caja", "cajas"),
+    "rollo": ("rollo", "rollos"),
+    "rollos": ("rollo", "rollos"),
+    "par": ("par", "pares"),
+    "pares": ("par", "pares"),
+    "tabla": ("tabla", "tablas"),
+    "tablas": ("tabla", "tablas"),
+    "tira": ("tira", "tiras"),
+    "tiras": ("tira", "tiras"),
+    "pistola": ("pistola", "pistolas"),
+    "pistolas": ("pistola", "pistolas"),
+    "pistolada": ("pistolada", "pistoladas"),
+    "pistoladas": ("pistolada", "pistoladas"),
+    "cunete": ("cuñete", "cuñetes"),
+    "cunetes": ("cuñete", "cuñetes"),
+    "juego": ("juego", "juegos"),
+    "juegos": ("juego", "juegos"),
+    "bolsa": ("bolsa", "bolsas"),
+    "bolsas": ("bolsa", "bolsas"),
+}
+
+
+def _clave_unidad(nombre: Optional[str]) -> str:
+    """Normaliza el nombre de la unidad (sin acentos, minúsculas, sin ruido)."""
+    if not nombre:
+        return ""
+    texto = unicodedata.normalize("NFKD", str(nombre))
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = texto.replace("*", " ").replace(".", " ").strip().lower()
+    return " ".join(texto.split())
+
+
+def _texto_cantidad(cantidad) -> str:
+    """Cantidad con separador de miles (.) y decimales (,), como en Colombia."""
+    valor = Decimal(str(cantidad)).normalize()
+    if valor == valor.to_integral_value():
+        return f"{int(valor):,}".replace(",", ".")
+    entero, _, decimales = f"{valor:f}".partition(".")
+    entero = f"{int(entero):,}".replace(",", ".")
+    return f"{entero},{decimales.rstrip('0')}"
+
+
+def _texto_unidad(nombre: Optional[str], cantidad) -> str:
+    """Unidad en singular o plural según la cantidad comprada."""
+    clave = _clave_unidad(nombre)
+    par = _UNIDADES_SINGULAR_PLURAL.get(clave)
+    valor = Decimal(str(cantidad))
+    if par:
+        singular, plural = par
+        return singular if valor == 1 else plural
+    if not nombre:
+        return "unidad" if valor == 1 else "unidades"
+    return str(nombre).strip()
+
+
+def _descripcion_compra_material(nombre: str, cantidad, unidad: Optional[str]) -> str:
+    """Concepto legible de una entrada de inventario.
+
+    Ej: "Compra de material: 15 metros de TELA CUSCO HIELO".
+    """
+    return (
+        f"Compra de material: {_texto_cantidad(cantidad)} "
+        f"{_texto_unidad(unidad, cantidad)} de {nombre}"
+    )
+
+
+def _persona_compra(db: Session, usuario, proveedor_id, proveedor_nombre) -> Optional[str]:
+    """Tercero del movimiento de caja: el proveedor si se indicó; si no, quien
+    registró la compra (así el libro nunca queda con la persona en blanco)."""
+    persona = (proveedor_nombre or "").strip()
+    if not persona and proveedor_id:
+        persona = (
+            db.query(Proveedor.nombre).filter(Proveedor.id == proveedor_id).scalar()
+            or ""
+        ).strip()
+    if not persona and usuario is not None:
+        persona = (getattr(usuario, "nombre", None) or getattr(usuario, "nombre_usuario", "") or "").strip()
+    return persona or None
+
+
 def _resolver_proveedor_cliente(
     db: Session,
     proveedor_id: Optional[int],
@@ -73,6 +198,8 @@ def _gasto_compra_contado(
     tasa_pago: Optional[Decimal] = None,
     fecha: Optional[date] = None,
     usuario=None,
+    persona_entidad: Optional[str] = None,
+    clasificacion: Optional[str] = None,
 ):
     """Compra de contado: registra el gasto + la SALIDA de caja correspondiente.
 
@@ -163,10 +290,12 @@ def _gasto_compra_contado(
             monto=monto.quantize(Decimal("0.01")),
             tasa_cambio=tasa,
             metodo_caja_id=metodo_caja_id,
+            clasificacion=clasificacion,
             observaciones="Generado automáticamente por entrada de inventario",
         ),
         commit=False,
         usuario=usuario,
+        persona_entidad=persona_entidad,
     )
 
 
@@ -370,13 +499,22 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         gasto_compra = _gasto_compra_contado(
             db,
             tipo_gasto_nombre=tipo_gasto_compra,
-            descripcion=f"Compra {material.nombre} x{movimiento.cantidad}",
+            descripcion=_descripcion_compra_material(
+                material.nombre,
+                movimiento.cantidad,
+                material.unidad_medida.nombre if material.unidad_medida else None,
+            ),
             total_ref=(Decimal(str(movimiento.costo_unitario)) * movimiento.cantidad).quantize(Decimal("0.01")),
             ref_moneda_id=MONEDA_BASE_ID,
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
             fecha=fecha_mov.date(),
+            usuario=usuario,
+            persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
+            # Las compras de insumos son gasto de fábrica (oficina tiene su
+            # propia canasta) — decisión de la dueña, 03/11/2026.
+            clasificacion="GASTO_OFICINA" if es_oficina else "GASTO_FABRICA",
         )
         if gasto_compra is not None:
             db_mov.gasto_id = gasto_compra.id
@@ -393,16 +531,24 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         and Decimal(str(llevada)) > 0
     ):
         mat_ll = db.query(Material).filter(Material.id == movimiento.material_id).first()
+        nombre_ll = mat_ll.nombre if mat_ll else "insumo"
+        unidad_ll = mat_ll.unidad_medida.nombre if mat_ll and mat_ll.unidad_medida else None
         _gasto_compra_contado(
             db,
             tipo_gasto_nombre="FLETE / LLEVADA DE INSUMO",
-            descripcion=f"Llevada (flete/aduana) de {mat_ll.nombre if mat_ll else 'insumo'} x{movimiento.cantidad}",
+            descripcion=(
+                f"Llevada (flete/aduana): {_texto_cantidad(movimiento.cantidad)} "
+                f"{_texto_unidad(unidad_ll, movimiento.cantidad)} de {nombre_ll}"
+            ),
             total_ref=Decimal(str(llevada)).quantize(Decimal("0.01")),
             ref_moneda_id=MONEDA_BASE_ID,
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
             fecha=fecha_mov.date(),
+            usuario=usuario,
+            persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
+            clasificacion="GASTO_OFICINA" if es_oficina else "GASTO_FABRICA",
 )
     # ── "Fiar": ENTRADA sin pagar → cuenta por pagar (compra + pasada) ─────
     # El usuario se lleva el insumo hoy y queda debiendo al proveedor. La
@@ -740,7 +886,10 @@ def registrar_movimiento_producto(
         _gasto_compra_contado(
             db,
             tipo_gasto_nombre="COMPRA INVENTARIO REVENTA",
-            descripcion=f"Compra inventario reventa — {producto.nombre} x{movimiento.cantidad}",
+            descripcion=(
+                f"Compra de producto: {_texto_cantidad(movimiento.cantidad)} "
+                f"{_texto_unidad(None, movimiento.cantidad)} de {producto.nombre}"
+            ),
             total_ref=costo_total,
             ref_moneda_id=producto.moneda_id or 1,
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
@@ -748,6 +897,7 @@ def registrar_movimiento_producto(
             tasa_pago=getattr(movimiento, "tasa_pago", None),
             fecha=fecha_mov.date(),
             usuario=usuario,
+            persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
         )
 
     # ── "La llevada" (flete/aduana) de productos de reventa ───────────────
@@ -762,7 +912,10 @@ def registrar_movimiento_producto(
         _gasto_compra_contado(
             db,
             tipo_gasto_nombre="FLETE / LLEVADA REVENTA",
-            descripcion=f"Llevada (flete/aduana) de reventa — {producto.nombre} x{movimiento.cantidad}",
+            descripcion=(
+                f"Llevada (flete/aduana) de producto: {_texto_cantidad(movimiento.cantidad)} "
+                f"{_texto_unidad(None, movimiento.cantidad)} de {producto.nombre}"
+            ),
             total_ref=Decimal(str(llevada)).quantize(Decimal("0.01")),
             ref_moneda_id=producto.moneda_id or 1,
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
@@ -770,6 +923,7 @@ def registrar_movimiento_producto(
             tasa_pago=getattr(movimiento, "tasa_pago", None),
             fecha=fecha_mov.date(),
             usuario=usuario,
+            persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
         )
 
     # ── "Fiar": ENTRADA sin pagar → cuenta por pagar (igual que insumos) ───

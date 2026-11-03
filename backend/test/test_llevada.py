@@ -55,7 +55,7 @@ def test_entrada_insumo_con_llevada_genera_gasto_aparte(client, cleaner, db):
     assert float(mov["llevada"]) == 5000.0
     from conftest import registrar_inventario_de_material
     registrar_inventario_de_material(db, cleaner, mat["id"])
-    cleaner.registrar_gastos_like(db, "Llevada (flete/aduana) de ")
+    cleaner.registrar_gastos_like(db, "Llevada (flete/aduana)")
     cleaner.registrar_gastos_like(db, "Compra ")
 
     # Dos gastos: la compra (50.000) y la llevada (5.000), ambos del material
@@ -109,8 +109,8 @@ def test_entrada_reventa_con_llevada(client, cleaner, db):
         "SELECT id FROM producto_inventario WHERE producto_id = :p"
     ), {"p": prod["id"]}).fetchall():
         cleaner.registrar("producto_inventario", int(iid))
-    cleaner.registrar_gastos_like(db, "Llevada (flete/aduana) de reventa")
+    cleaner.registrar_gastos_like(db, "Llevada (flete/aduana) de producto")
 
-    llevada = _gastos_llevada(db, "Llevada (flete/aduana) de reventa")
+    llevada = _gastos_llevada(db, "Llevada (flete/aduana) de producto")
     assert llevada, "Debe existir el gasto FLETE / LLEVADA REVENTA"
     assert float(llevada[0][1]) == 20000.0

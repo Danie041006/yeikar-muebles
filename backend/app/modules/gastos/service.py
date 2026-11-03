@@ -275,7 +275,13 @@ def obtener_gastos(
     gastos = query.order_by(model.Gasto.fecha.desc()).offset(skip).limit(limit).all()
     return _adjuntar_metodo_caja(db, gastos)
 
-def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None = None, commit: bool = True):
+def crear_gasto(
+    db: Session,
+    gasto: schemas.GastoCreate,
+    usuario: Usuario | None = None,
+    commit: bool = True,
+    persona_entidad: str | None = None,
+):
     _validar_area(db, gasto.area_id)
     moneda = _validar_fks(db, gasto.tipo_gasto_id, gasto.moneda_id)
     tasa = _resolver_tasa(db, moneda, gasto.fecha, gasto.tasa_cambio)
@@ -314,6 +320,7 @@ def crear_gasto(db: Session, gasto: schemas.GastoCreate, usuario: Usuario | None
             fecha=gasto.fecha,
             referencia=f"Gasto #{db_gasto.id}",
             concepto=gasto.descripcion or f"Gasto #{db_gasto.id}",
+            persona_entidad=(persona_entidad or "").strip() or None,
             usuario_id=usuario.id if usuario is not None else None,
         )
 
