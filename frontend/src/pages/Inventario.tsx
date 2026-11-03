@@ -891,7 +891,7 @@ export default function Inventario() {
   const handleDeleteMaterial = async () => {
     if (!selectedMaterialId || !materialSeleccionado) return;
     const stock = insumoStock(materialSeleccionado).c;
-    if (stock > 0) {
+    if (Math.abs(stock) > 1e-9) {
       toast.error(`No se puede eliminar: todavía tiene ${stock.toLocaleString('es-ES')} en stock.`);
       return;
     }
@@ -2175,6 +2175,7 @@ export default function Inventario() {
         {/* ================= MODAL DETALLE DE INSUMO (movimiento + editar + historial) ================= */}
         {tab === 'insumos' && selectedMaterialId && materialSeleccionado && (() => {
           const stockInfo = insumoStock(materialSeleccionado);
+          const sinStockMaterial = Math.abs(stockInfo.c) <= 1e-9;
           const esEntradaMov = movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION';
           const deptoLabel = DEPARTAMENTOS.find((d) => d.valor === materialSeleccionado.departamento)?.label || 'General';
           const tabs = [
@@ -2851,15 +2852,15 @@ export default function Inventario() {
                       <button
                         type="button"
                         onClick={handleDeleteMaterial}
-                        disabled={deletingMaterial || stockInfo.c > 0}
-                        title={stockInfo.c > 0
+                        disabled={deletingMaterial || !sinStockMaterial}
+                        title={!sinStockMaterial
                           ? `Solo se puede eliminar con stock 0 (actual: ${stockInfo.c.toLocaleString('es-ES')})`
                           : 'Eliminar este insumo del catálogo'}
                         className="w-full py-2.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         {deletingMaterial
                           ? 'Eliminando...'
-                          : stockInfo.c > 0
+                          : !sinStockMaterial
                             ? `No se puede eliminar (stock ${stockInfo.c.toLocaleString('es-ES')})`
                             : 'Eliminar insumo (stock 0)'}
                       </button>
