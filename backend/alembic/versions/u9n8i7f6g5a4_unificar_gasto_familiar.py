@@ -13,14 +13,14 @@ Familiar").
 El código "G C" del libro se sigue aceptando al importar, pero se guarda como
 GASTO_FAMILIAR (ver `normalizar_clasificacion`).
 
-Revision ID: d5e6f7a8b9c0
+Revision ID: u9n8i7f6g5a4
 Revises: b2c3d4e5f6a7
 Create Date: 2026-11-03
 """
 from alembic import op
 from sqlalchemy import text
 
-revision = "d5e6f7a8b9c0"
+revision = "u9n8i7f6g5a4"
 down_revision = "b2c3d4e5f6a7"
 branch_labels = None
 depends_on = None
