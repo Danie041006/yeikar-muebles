@@ -90,7 +90,9 @@ export default function Nomina() {
   }, []);
 
   const cargarCuentas = useCallback(async () => {
-    const data = await cuentasService.getResumen();
+    // Sin permiso de `cuentas` el resumen devuelve 403: la página sigue
+    // funcionando y solo se queda sin el selector de cuenta de pago.
+    const data = await cuentasService.getResumen().catch(() => []);
     setCuentas(data);
   }, []);
 

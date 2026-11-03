@@ -122,7 +122,7 @@ export default function Gastos() {
     const [tipos, monedasData, cuentasData, areasData] = await Promise.all([
       getTiposGasto(),
       getMonedas(),
-      cuentasService.getResumen(),
+      cuentasService.getResumen().catch(() => []),
       getAreas(),
     ]);
     setTiposGasto(tipos);
