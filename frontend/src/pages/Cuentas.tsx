@@ -1004,7 +1004,10 @@ export default function Cuentas() {
             </Field>
           </div>
           {!editMov && movForm.tipo === 'ENTRADA' && (
-            <Field label="¿De qué es la entrada?">
+            <Field
+              label="¿De qué es la entrada?"
+              hint="Para cobrar una venta usa Ventas y cobros: allí sí baja la deuda del cliente. Aquí solo entra el dinero."
+            >
               <Select
                 value={movForm.motivo_entrada}
                 onChange={(e) => setMovForm((prev) => ({
@@ -1014,8 +1017,8 @@ export default function Cuentas() {
                   tasa_conversion: '',
                 }))}
               >
-                <option value="INGRESO">Dinero normal (venta, abono, otro)</option>
-                <option value="PRESTAMO">Me están pagando un préstamo</option>
+                <option value="INGRESO">Por ingreso</option>
+                <option value="PRESTAMO">Pago de préstamo</option>
               </Select>
             </Field>
           )}
@@ -1178,7 +1181,7 @@ export default function Cuentas() {
               rows={2}
               value={movForm.concepto}
               onChange={(e) => setMovForm({ ...movForm, concepto: e.target.value })}
-              placeholder="Ej: pago de mercado, compra de madera, abono de cliente..."
+              placeholder="Ej: pago de mercado, compra de madera, venta de contado..."
             />
           </Field>
         </div>
