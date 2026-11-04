@@ -23,7 +23,7 @@ import {
   type DescuentoCreate,
   type MetodoPagoOption,
 } from '../services/ventaService';
-import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, redondearEquivalenteMoneda, extractErrorMessage, fmtConversionTasa } from '../utils/format';
+import { formatCurrency, nombreMoneda, fmtMoneda, tasaNaturalAAlmacenada, convertirConTasaNatural, resolverParMonedas, convertirMonedaHumana, calcularTasaAlmacenadaPago, tasaHumanaDesdeAlmacenada, redondearEquivalenteMoneda, extractErrorMessage, fmtConversionTasa } from '../utils/format';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { fmtFechaVE, fmtFechaHoraVE, hoyVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
@@ -554,6 +554,8 @@ function ModalDetalle({
   const [pagoEditando, setPagoEditando] = useState<Pago | null>(null);
   const [editFecha, setEditFecha] = useState(hoyVE());
   const [editMonto, setEditMonto] = useState('');
+  const [editMetodoPago, setEditMetodoPago] = useState('');
+  const [editTasaInput, setEditTasaInput] = useState('');
   const [editMotivo, setEditMotivo] = useState('');
   const [editReferencia, setEditReferencia] = useState('');
   const [editObservaciones, setEditObservaciones] = useState('');
@@ -724,6 +726,13 @@ function ModalDetalle({
     setPagoEditando(p);
     setEditFecha(p.fecha ? String(p.fecha).slice(0, 10) : hoyVE());
     setEditMonto(String(Number(p.monto)));
+    setEditMetodoPago(p.metodo_pago ?? '');
+    const esMultimonedaPago = !!detalle && p.moneda_id !== detalle.moneda_id;
+    setEditTasaInput(
+      esMultimonedaPago
+        ? String(tasaHumanaDesdeAlmacenada(p.moneda?.codigo, detalle?.moneda?.codigo, Number(p.tasa_cambio)))
+        : '',
+    );
     setEditMotivo('');
     setEditReferencia(p.referencia ?? '');
     setEditObservaciones(p.observaciones ?? '');
@@ -754,12 +763,34 @@ function ModalDetalle({
         referencia: editReferencia.trim() || null,
         observaciones: editObservaciones.trim() || null,
       };
+      // La cuenta se corrige solo si cambió. El backend valida que sea de la
+      // misma moneda del pago.
+      if (editMetodoPago && editMetodoPago !== pagoEditando.metodo_pago) {
+        payload.metodo_pago = editMetodoPago;
+      }
+      // Tasa: solo si el pago está en una moneda distinta a la de la venta.
+      const esMultimonedaEdit = !!detalle && pagoEditando.moneda_id !== detalle.moneda_id;
+      if (esMultimonedaEdit) {
+        const tasaHum = parseFloat(editTasaInput);
+        if (!editTasaInput || isNaN(tasaHum) || tasaHum <= 0) {
+          setEditError(`Ingresa la tasa de cambio del cobro (${resolverParMonedas(pagoEditando.moneda?.codigo, detalle?.moneda?.codigo).label}).`);
+          return;
+        }
+        const tasaNueva = calcularTasaAlmacenadaPago(
+          pagoEditando.moneda?.codigo,
+          detalle?.moneda?.codigo,
+          tasaHum,
+        );
+        if (Math.abs(tasaNueva - Number(pagoEditando.tasa_cambio)) > 1e-9) {
+          payload.tasa_cambio = tasaNueva;
+        }
+      }
       // Solo se envía el monto si cambió: así una simple corrección de fecha
       // o referencia no queda marcada como "monto corregido".
       if (Math.abs(montoEditado - Number(pagoEditando.monto)) > 0.0001) {
         payload.monto = montoEditado;
-        if (editMotivo.trim()) payload.motivo_correccion = editMotivo.trim();
       }
+      if (editMotivo.trim()) payload.motivo_correccion = editMotivo.trim();
       await pagoService.actualizar(pagoEditando.id, payload);
       setPagoEditando(null);
       await cargar();
@@ -1302,6 +1333,50 @@ function ModalDetalle({
                                     Queda visible en el historial de abonos de Ventas y Cobros.
                                   </p>
                                 </div>
+                              </div>
+                              <div className="mt-3 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
+                                <div>
+                                  <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                                    Cuenta de caja
+                                  </label>
+                                  <select
+                                    value={editMetodoPago}
+                                    onChange={(e) => setEditMetodoPago(e.target.value)}
+                                    className="w-full px-3 py-2 text-sm border border-yeikar-secondary-light/20 rounded-lg focus:outline-none focus:ring-2 focus:ring-yeikar-primary bg-white"
+                                  >
+                                    {metodosPago
+                                      .filter((m) => m.moneda === (p.moneda?.codigo ?? detalle.moneda?.codigo))
+                                      .map((m) => (
+                                        <option key={m.value} value={m.value}>
+                                          {m.label} · {m.moneda}
+                                        </option>
+                                      ))}
+                                  </select>
+                                  <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+                                    Solo cuentas en {p.moneda?.codigo ?? detalle.moneda?.codigo}. La entrada de caja se mueve a esa cuenta.
+                                  </p>
+                                </div>
+                                {p.moneda_id !== detalle.moneda_id ? (
+                                  <div>
+                                    <label className="text-xs font-bold text-amber-600 block mb-1">
+                                      Tasa: {resolverParMonedas(p.moneda?.codigo, detalle.moneda?.codigo).label}
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      value={editTasaInput}
+                                      onChange={(e) => setEditTasaInput(e.target.value)}
+                                      placeholder={`Ej: ${resolverParMonedas(p.moneda?.codigo, detalle.moneda?.codigo).placeholder}`}
+                                      className="w-full px-3 py-2 text-sm border border-amber-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 bg-amber-50"
+                                    />
+                                    <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+                                      Se recalcula el equivalente en {detalle.moneda?.codigo} y el saldo de la venta.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div />
+                                )}
                               </div>
                               <div className="mt-3 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                                 <div>

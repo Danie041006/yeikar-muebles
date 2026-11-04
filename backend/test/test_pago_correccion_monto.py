@@ -272,3 +272,135 @@ def test_monto_cero_o_negativo_se_rechaza(client, cleaner, db):
         "SELECT monto FROM pago WHERE id = :pid"
     ), {"pid": pago["id"]}).scalar_one()
     assert float(pago_db) == 30000.0
+
+
+# ---------------------------------------------------------------------------
+# 7. Corregir la CUENTA de caja del cobro.
+# ---------------------------------------------------------------------------
+def test_corregir_cuenta_actualiza_pago_y_movimiento(client, cleaner, db):
+    cliente = crear_cliente(client, cleaner)
+    prod = crear_producto(client, cleaner)
+    venta = _crear_venta_pendiente(client, cleaner, cliente["id"], prod["id"])
+    pago = _registrar_pago(client, cleaner, venta, 30000, metodo_pago="EFECTIVO_COP")
+
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"metodo_pago": "BANCOLOMBIA"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, f"corregir cuenta → {r.status_code}: {r.text}"
+    assert r.json()["metodo_pago"] == "BANCOLOMBIA"
+    # La cuenta no toca el monto: no debe aparecer como "monto corregido".
+    assert r.json()["correcciones"] == []
+
+    movs = _movimientos_del_pago(db, pago["id"])
+    assert len(movs) == 1
+    mov = db.execute(text(
+        "SELECT metodo_caja_id, concepto, monto FROM movimiento_caja WHERE id = :id"
+    ), {"id": movs[0][0]}).fetchone()
+    cuenta = db.execute(text(
+        "SELECT id, nombre FROM metodo_caja WHERE codigo = 'BANCOLOMBIA'"
+    )).fetchone()
+    assert mov[0] == cuenta[0], "el movimiento debe quedar en la cuenta nueva"
+    assert cuenta[1] in (mov[1] or ""), "el concepto debe nombrar la cuenta nueva"
+    assert float(mov[2]) == 30000.0
+
+
+def test_corregir_cuenta_de_otra_moneda_se_rechaza(client, cleaner):
+    cliente = crear_cliente(client, cleaner)
+    prod = crear_producto(client, cleaner)
+    venta = _crear_venta_pendiente(client, cleaner, cliente["id"], prod["id"], precio=400000)
+    pago = _registrar_pago(
+        client, cleaner, venta, 50, moneda_id=2,
+        metodo_pago="EFECTIVO_USD", tasa_cambio=4000,
+    )
+
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"metodo_pago": "EFECTIVO_COP"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 400, r.text
+    assert "moneda" in r.text.lower()
+
+    # El pago sigue intacto.
+    detalle = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
+    pago_actual = next(p for p in detalle["pagos"] if p["id"] == pago["id"])
+    assert pago_actual["metodo_pago"] == "EFECTIVO_USD"
+
+
+# ---------------------------------------------------------------------------
+# 8. Corregir la TASA de un cobro multimoneda.
+# ---------------------------------------------------------------------------
+def test_corregir_tasa_multimoneda_recalcula_base_y_caja(client, cleaner, db):
+    cliente = crear_cliente(client, cleaner)
+    prod = crear_producto(client, cleaner)
+    venta = _crear_venta_pendiente(client, cleaner, cliente["id"], prod["id"], precio=400000)
+    pago = _registrar_pago(
+        client, cleaner, venta, 50, moneda_id=2,
+        metodo_pago="EFECTIVO_USD", tasa_cambio=4000,
+    )
+    assert float(pago["monto_en_moneda_base"]) == 200000.0
+
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"tasa_cambio": 4200, "motivo_correccion": "La TRM era 4.200, no 4.000"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, f"corregir tasa → {r.status_code}: {r.text}"
+    corregido = r.json()
+    assert float(corregido["monto"]) == 50.0
+    assert float(corregido["tasa_cambio"]) == 4200.0
+    # 50 USD × 4.200 = 210.000 COP.
+    assert float(corregido["monto_en_moneda_base"]) == 210000.0
+    # Solo cambió la tasa: no se marca como corrección de monto.
+    assert corregido["correcciones"] == []
+
+    movs = _movimientos_del_pago(db, pago["id"])
+    assert len(movs) == 1
+    assert float(movs[0][1]) == 50.0
+    assert float(movs[0][2]) == 210000.0
+
+    detalle = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
+    assert float(detalle["total_pagado"]) == 210000.0
+    assert float(detalle["saldo_pendiente"]) == 190000.0
+
+
+def test_corregir_tasa_en_misma_moneda_se_rechaza(client, cleaner):
+    cliente = crear_cliente(client, cleaner)
+    prod = crear_producto(client, cleaner)
+    venta = _crear_venta_pendiente(client, cleaner, cliente["id"], prod["id"])
+    pago = _registrar_pago(client, cleaner, venta, 30000)
+
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"tasa_cambio": 4000},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 400, r.text
+    assert "moneda" in r.text.lower()
+
+
+def test_corregir_tasa_que_excede_el_saldo_se_rechaza(client, cleaner):
+    """Subir la tasa no puede dejar el abono por encima de lo que vale la
+    factura: el saldo se valida sin contar el propio cobro."""
+    cliente = crear_cliente(client, cleaner)
+    prod = crear_producto(client, cleaner)
+    venta = _crear_venta_pendiente(client, cleaner, cliente["id"], prod["id"], precio=100000)
+    pago = _registrar_pago(
+        client, cleaner, venta, 25, moneda_id=2,
+        metodo_pago="EFECTIVO_USD", tasa_cambio=4000,
+    )  # 25 USD × 4.000 = 100.000 COP (paga toda la factura)
+
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"tasa_cambio": 4200},  # 25 × 4.200 = 105.000 > 100.000
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 400, r.text
+    assert "saldo" in r.text.lower()
+
+    detalle = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
+    pago_actual = next(p for p in detalle["pagos"] if p["id"] == pago["id"])
+    assert float(pago_actual["tasa_cambio"]) == 4000.0
+    assert float(pago_actual["monto_en_moneda_base"]) == 100000.0

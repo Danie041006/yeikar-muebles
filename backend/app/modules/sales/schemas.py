@@ -91,14 +91,20 @@ class PagoCreate(PagoBase):
 class PagoUpdate(BaseModel):
     """Corrección de un cobro ya registrado.
 
-    La fecha, la referencia y las observaciones siempre se pueden ajustar.
-    El MONTO también se corrige aquí (con su motivo opcional): el servicio
-    recalcula el equivalente en moneda de la venta, actualiza el movimiento
-    de caja y deja el antes/después en el historial de correcciones.
-    Moneda, método y tasa no se cambian desde este endpoint.
+    Se pueden ajustar fecha, monto, cuenta de caja (`metodo_pago`), tasa de
+    cambio (solo si la moneda del pago difiere de la de la venta), referencia
+    y observaciones. El servicio recalcula el equivalente en moneda de la
+    venta, actualiza el movimiento de caja y deja el antes/después en la
+    auditoría. La moneda del pago NO se cambia desde aquí.
     """
     fecha: Optional[datetime] = None
     monto: Optional[float] = Field(None, gt=0)
+    # Código de la cuenta de caja (metodo_caja.codigo). Debe ser una cuenta
+    # activa de la MISMA moneda del pago.
+    metodo_pago: Optional[str] = None
+    # Tasa de conversión pago → moneda de la venta. Solo aplica si la moneda
+    # del pago es distinta a la de la venta.
+    tasa_cambio: Optional[float] = Field(None, gt=0)
     motivo_correccion: Optional[str] = Field(None, max_length=500)
     referencia: Optional[str] = None
     observaciones: Optional[str] = None

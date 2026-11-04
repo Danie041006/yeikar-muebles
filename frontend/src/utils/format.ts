@@ -239,6 +239,29 @@ export function calcularTasaAlmacenadaPago(
 }
 
 /**
+ * Inversa de `calcularTasaAlmacenadaPago`: convierte la tasa guardada en
+ * `Pago.tasa_cambio` a la tasa humana "1 [base] = X [quote]" que se digita
+ * en el formulario al corregir un cobro multimoneda.
+ */
+export function tasaHumanaDesdeAlmacenada(
+  monedaPagoCod: string | undefined | null,
+  monedaVentaCod: string | undefined | null,
+  tasaAlmacenada: number | undefined | null
+): number {
+  const pago = (monedaPagoCod || 'COP').toUpperCase();
+  const venta = (monedaVentaCod || 'COP').toUpperCase();
+  const t = Number(tasaAlmacenada) || 0;
+
+  if (pago === venta || t <= 0) return 1;
+
+  const { baseCod, quoteCod } = resolverParMonedas(pago, venta);
+  // Pago en la moneda débil (quote) sobre una venta en la fuerte (base):
+  // la tasa guardada es 1/t y la humana es t.
+  if (pago === quoteCod && venta === baseCod) return 1 / t;
+  return t;
+}
+
+/**
  * Arma la conversión de un pago/descuento multimoneda como la escribe el
  * taller en el comprobante: "1.075.680 COP ÷ 3320 = 324 USD" (pago en la
  * moneda débil, p. ej. COP → USD) o "350 USD × 3320 = 1.162.000 COP" (pago

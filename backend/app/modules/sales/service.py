@@ -498,6 +498,39 @@ def _normalizar_fecha_pago(fecha: datetime | None) -> datetime:
     return base.replace(hour=12, minute=0, second=0, microsecond=0)
 
 
+METODO_MONEDA_LEGACY = {
+    "EFECTIVO_COP": 1, "BANCOLOMBIA": 1,
+    "EFECTIVO_USD": 2, "ZELLE": 2, "BINANCE": 2,
+    "EFECTIVO_VES": 3, "BANCARIBE": 3,
+}
+CODIGO_MONEDA = {1: "COP", 2: "USD", 3: "VES", 4: "EUR"}
+
+
+def _resolver_cuenta_pago(db: Session, metodo_pago: str, moneda_id: int):
+    """Cuenta de caja del cobro, validando existencia, estado y moneda.
+
+    Un pago en USD no puede entrar a una cuenta en pesos (el arqueo nunca
+    cuadraría). Se usa al crear y al corregir un cobro para que ambas vías
+    apliquen exactamente la misma regla.
+    """
+    from app.modules.reports.model import MetodoCaja
+
+    cuenta = db.query(MetodoCaja).filter(MetodoCaja.codigo == metodo_pago).first()
+    if not cuenta or not cuenta.activo:
+        raise ValueError(
+            f"El método de pago '{metodo_pago}' no corresponde a ninguna cuenta activa. "
+            "Verifica las cuentas en Cuentas y Medios de Pago."
+        )
+    moneda_esperada = cuenta.moneda_id or METODO_MONEDA_LEGACY.get(metodo_pago)
+    if moneda_esperada is not None and moneda_id != moneda_esperada:
+        raise ValueError(
+            f"El método de pago '{cuenta.nombre}' es una cuenta en "
+            f"{CODIGO_MONEDA.get(moneda_esperada, f'moneda {moneda_esperada}')}, pero el pago "
+            "se registró en otra moneda. Usa un método compatible con la moneda del pago."
+        )
+    return cuenta
+
+
 def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: Usuario | None = None):
     # 1. Obtener la venta con FOR UPDATE para serializar pagos concurrentes:
     #    dos abonos simultáneos no pueden validar el saldo al mismo tiempo.
@@ -525,30 +558,7 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
     #    y todas sirven para cobrar. Un pago en USD no puede entrar a la caja
     #    de pesos: el arqueo físico jamás cuadraría. La moneda esperada es la
     #    moneda propia de la cuenta.
-    from app.modules.reports.model import MetodoCaja
-    cuenta_metodo = (
-        db.query(MetodoCaja)
-        .filter(MetodoCaja.codigo == esquema.metodo_pago)
-        .first()
-    )
-    if not cuenta_metodo or not cuenta_metodo.activo:
-        raise ValueError(
-            f"El método de pago '{esquema.metodo_pago}' no corresponde a ninguna cuenta activa. "
-            "Verifica las cuentas en Cuentas y Medios de Pago."
-        )
-    METODO_MONEDA_LEGACY = {
-        "EFECTIVO_COP": 1, "BANCOLOMBIA": 1,
-        "EFECTIVO_USD": 2, "ZELLE": 2, "BINANCE": 2,
-        "EFECTIVO_VES": 3, "BANCARIBE": 3,
-    }
-    moneda_esperada = cuenta_metodo.moneda_id or METODO_MONEDA_LEGACY.get(esquema.metodo_pago)
-    if moneda_esperada is not None and esquema.moneda_id != moneda_esperada:
-        codigos = {1: "COP", 2: "USD", 3: "VES", 4: "EUR"}
-        raise ValueError(
-            f"El método de pago '{cuenta_metodo.nombre}' es una cuenta en "
-            f"{codigos.get(moneda_esperada, f'moneda {moneda_esperada}')}, pero el pago "
-            "se registró en otra moneda. Usa un método compatible con la moneda del pago."
-        )
+    cuenta_metodo = _resolver_cuenta_pago(db, esquema.metodo_pago, esquema.moneda_id)
 
     # 4b. (validación de tasa absurda y ±50% contra la registrada: ya aplicada
     #     dentro de _convertir_a_moneda_venta para pagos y descuentos por igual)
@@ -614,22 +624,32 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
 
 
 def _base_monto_corregido(
-    db: Session, db_pago: Pago, venta: Venta, nuevo_monto: float
-) -> tuple[float, float]:
-    """Valida el nuevo monto y devuelve (base nueva, base anterior).
+    db: Session,
+    db_pago: Pago,
+    venta: Venta,
+    nuevo_monto: float,
+    nueva_tasa: float | None = None,
+) -> tuple[float, float, float]:
+    """Valida el nuevo monto y/o tasa y devuelve (base nueva, base anterior, tasa).
 
     El saldo disponible se calcula SIN este pago, para que corregir hacia
     arriba o hacia abajo no choque con el propio cobro. Un exceso de saldo
     lanza ValueError y la transacción no deja rastro.
     """
     monto_base_anterior = float(db_pago.monto_en_moneda_base)
-    monto_base_nuevo, margen_saldo = _monto_base_para_cobro(
-        venta, db_pago.moneda_id, nuevo_monto, db_pago.tasa_cambio
-    )
+    if nueva_tasa is not None:
+        tasa, monto_base_nuevo, margen_saldo = _convertir_a_moneda_venta(
+            db, db_pago.moneda_id, nuevo_monto, nueva_tasa, venta
+        )
+    else:
+        tasa = float(db_pago.tasa_cambio or 1.0)
+        monto_base_nuevo, margen_saldo = _monto_base_para_cobro(
+            venta, db_pago.moneda_id, nuevo_monto, tasa
+        )
     if round(monto_base_nuevo, 2) <= 0:
         raise ValueError(
             "El monto en moneda base queda en 0 con la tasa del pago. "
-            "Revisa el monto."
+            "Revisa el monto o la tasa."
         )
     total_pagado, total_descontado = _totales_cobro(db, venta.id)
     saldo_sin_actual = (
@@ -641,9 +661,9 @@ def _base_monto_corregido(
         raise ValueError(
             f"El monto corregido ({monto_base_nuevo:,.2f} en moneda base) "
             f"excede el saldo disponible de la factura "
-            f"({saldo_sin_actual:,.2f}). Revisa el monto."
+            f"({saldo_sin_actual:,.2f}). Revisa el monto o la tasa."
         )
-    return monto_base_nuevo, monto_base_anterior
+    return monto_base_nuevo, monto_base_anterior, tasa
 
 
 def _aplicar_correccion_monto(
@@ -653,35 +673,52 @@ def _aplicar_correccion_monto(
     nuevo_monto: float,
     motivo: str | None,
     usuario_id: int | None,
+    nueva_tasa: float | None = None,
 ) -> None:
-    """Aplica el nuevo monto y deja la huella en `pago_correccion`."""
+    """Aplica el nuevo monto y/o tasa y deja la huella en `pago_correccion`.
+
+    El historial `pago_correccion` se usa para correcciones de MONTO (la UI
+    las muestra como "monto anterior → monto nuevo"). Si solo cambia la tasa,
+    no se agrega una fila con montos iguales: el antes/después queda en la
+    auditoría del sistema.
+    """
     if nuevo_monto <= 0:
         raise ValueError("El monto del pago debe ser mayor a 0.")
     monto_anterior = float(db_pago.monto)
-    if abs(nuevo_monto - monto_anterior) <= 0.0001:
-        return  # mismo monto: no es una corrección
-    monto_base_nuevo, monto_base_anterior = _base_monto_corregido(
-        db, db_pago, venta, nuevo_monto
+    monto_cambio = abs(nuevo_monto - monto_anterior) > 0.0001
+    tasa_anterior = float(db_pago.tasa_cambio or 1.0)
+    tasa_cambio = nueva_tasa is not None and abs(nueva_tasa - tasa_anterior) > 1e-9
+    if not monto_cambio and not tasa_cambio:
+        return  # nada que corregir: no se ensucia la auditoría
+    monto_base_nuevo, monto_base_anterior, tasa_aplicada = _base_monto_corregido(
+        db, db_pago, venta, nuevo_monto, nueva_tasa
     )
     db_pago.monto = nuevo_monto
+    db_pago.tasa_cambio = tasa_aplicada
     db_pago.monto_en_moneda_base = monto_base_nuevo
-    db.add(PagoCorreccion(
-        pago_id=db_pago.id,
-        usuario_id=usuario_id,
-        monto_anterior=monto_anterior,
-        monto_nuevo=nuevo_monto,
-        monto_base_anterior=monto_base_anterior,
-        monto_base_nuevo=monto_base_nuevo,
-        motivo=motivo,
-        created_at=ahora_ve(),
-    ))
+    if monto_cambio:
+        db.add(PagoCorreccion(
+            pago_id=db_pago.id,
+            usuario_id=usuario_id,
+            monto_anterior=monto_anterior,
+            monto_nuevo=nuevo_monto,
+            monto_base_anterior=monto_base_anterior,
+            monto_base_nuevo=monto_base_nuevo,
+            motivo=motivo,
+            created_at=ahora_ve(),
+        ))
 
 
 def _sincronizar_movimiento_caja_pago(
     db: Session, db_pago: Pago, venta: Venta
 ) -> None:
-    """Actualiza EN SITIO la entrada de caja del cobro (sin duplicarla)."""
-    from app.modules.reports.model import MovimientoCaja
+    """Actualiza EN SITIO la entrada de caja del cobro (sin duplicarla).
+
+    Sincroniza monto, fecha, moneda y tasa; también la CUENTA y el concepto
+    cuando el cobro se corrige a otra cuenta de caja.
+    """
+    from app.modules.reports.model import MetodoCaja, MovimientoCaja
+
     movimientos = (
         db.query(MovimientoCaja)
         .filter(MovimientoCaja.pago_id == db_pago.id)
@@ -689,6 +726,13 @@ def _sincronizar_movimiento_caja_pago(
     )
     if not movimientos:
         return  # cobro conciliado sin movimiento (el dinero ya estaba en caja)
+    cuenta = None
+    if db_pago.metodo_pago:
+        cuenta = (
+            db.query(MetodoCaja)
+            .filter(MetodoCaja.codigo == db_pago.metodo_pago)
+            .first()
+        )
     tasa_caja, monto_cop = _monto_movimiento_caja_pago(db_pago, venta)
     for mov in movimientos:
         if db_pago.fecha is not None:
@@ -700,6 +744,12 @@ def _sincronizar_movimiento_caja_pago(
         mov.referencia = f"Pago #{db_pago.id}" + (
             f" · {db_pago.referencia}" if db_pago.referencia else ""
         )
+        if cuenta is not None:
+            mov.metodo_caja_id = cuenta.id
+            cliente_nombre = venta.cliente.nombre if venta.cliente else "cliente"
+            mov.concepto = (
+                f"Cobro de {cliente_nombre} · Venta #{venta.id} · {cuenta.nombre}"
+            )
 
 
 def actualizar_pago(
@@ -757,15 +807,28 @@ def actualizar_pago(
         "observaciones": db_pago.observaciones,
     }
 
+    metodo_solicitado = datos.get("metodo_pago")
+    if metodo_solicitado is not None:
+        metodo_solicitado = (metodo_solicitado or "").strip()
+        if metodo_solicitado != (db_pago.metodo_pago or ""):
+            cuenta = _resolver_cuenta_pago(db, metodo_solicitado, db_pago.moneda_id)
+            db_pago.metodo_pago = cuenta.codigo
+
     monto_solicitado = datos.get("monto")
-    if monto_solicitado is not None:
+    tasa_solicitada = datos.get("tasa_cambio")
+    if tasa_solicitada is not None and db_pago.moneda_id == venta.moneda_id:
+        raise ValueError(
+            "El cobro está en la misma moneda de la venta; no lleva tasa de cambio."
+        )
+    if monto_solicitado is not None or tasa_solicitada is not None:
         _aplicar_correccion_monto(
             db,
             db_pago,
             venta,
-            float(monto_solicitado),
+            float(monto_solicitado) if monto_solicitado is not None else float(db_pago.monto),
             motivo_correccion,
             usuario.id if usuario is not None else None,
+            nueva_tasa=float(tasa_solicitada) if tasa_solicitada is not None else None,
         )
 
     if datos.get("fecha") is not None:
@@ -801,6 +864,7 @@ def actualizar_pago(
             "metodo_pago": db_pago.metodo_pago,
             "referencia": db_pago.referencia,
             "observaciones": db_pago.observaciones,
+            "motivo_correccion": motivo_correccion,
         },
     )
 

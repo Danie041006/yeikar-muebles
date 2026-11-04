@@ -192,11 +192,15 @@ export interface PagoCreate {
   tasa_cambio?: number;
 }
 
-/** Corrección de un cobro ya registrado: fecha, monto, referencia y observaciones. */
+/** Corrección de un cobro ya registrado: monto, cuenta, tasa, fecha, referencia y observaciones. */
 export interface PagoUpdate {
   fecha?: string;
   /** Nuevo monto del abono (en la moneda del pago). */
   monto?: number;
+  /** Código de la cuenta de caja (metodo_caja.codigo); misma moneda del pago. */
+  metodo_pago?: string;
+  /** Tasa pago → moneda de la venta. Solo si las monedas son distintas. */
+  tasa_cambio?: number;
   /** Motivo opcional de la corrección (queda en el historial). */
   motivo_correccion?: string | null;
   referencia?: string | null;
