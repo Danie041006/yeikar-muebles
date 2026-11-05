@@ -34,8 +34,14 @@ export interface DetalleDocumento {
   /** Fotos del producto EN ORDEN DE SUBIDA (la primera es la portada). El
    * documento muestra hasta 2; las demás solo salen en la Hoja de Trabajo. */
   fotos?: string[] | null;
-  /** Piezas del juego (sin precio): se listan como "Incluye: …". */
-  piezas?: { nombre: string; cantidad: number }[] | null;
+  /** Piezas del juego: se listan como "Incluye: …" (con su precio si lo traen). */
+  piezas?: {
+    nombre: string;
+    cantidad: number;
+    precio?: number | null;
+    precio_modificacion?: number | null;
+    requiere_retrabajo?: boolean;
+  }[] | null;
 }
 
 /**
@@ -52,7 +58,7 @@ function FotosRenglon({ urls, alt }: { urls: string[]; alt: string }) {
           key={i}
           src={u}
           alt={doble ? `${alt} (vista ${i + 1})` : alt}
-          className={`${doble ? 'h-14 w-14' : 'h-16 w-16'} rounded-lg object-cover border border-stone-300 shrink-0`}
+          className={`${doble ? 'h-14 w-14' : 'h-24 w-24'} rounded-lg object-cover border border-stone-300 shrink-0`}
           loading="lazy"
         />
       ))}
@@ -142,20 +148,20 @@ export default function DocumentoCotizacion({
           <div className="flex justify-between items-start pb-3 border-b border-stone-300">
             <div className="space-y-1.5 max-w-[60%]">
               <img src="/Logo-yeikar.png" alt="Yeikar" className="h-14 object-contain" />
-              <div className="font-serif font-bold text-stone-955 text-[11.5px] tracking-widest uppercase mt-1">
+              <div className="font-serif font-bold text-stone-955 text-[12.5px] tracking-widest uppercase mt-1">
                 Comercializadora Yeikar
               </div>
-              <div className="text-[8px] text-stone-600 font-mono font-semibold">RIF: {rif}</div>
-              <div className="text-[8px] text-stone-650 font-medium leading-snug">DIRECCIÓN: {direccion}</div>
-              <div className="text-[8px] text-stone-600 font-mono font-semibold">TELÉFONO: {telefono}</div>
+              <div className="text-[9px] text-stone-600 font-mono font-semibold">RIF: {rif}</div>
+              <div className="text-[9px] text-stone-650 font-medium leading-snug">DIRECCIÓN: {direccion}</div>
+              <div className="text-[9px] text-stone-600 font-mono font-semibold">TELÉFONO: {telefono}</div>
             </div>
 
             <div className="text-right border border-stone-300 rounded-lg p-3 bg-stone-50 min-w-[170px] shadow-sm">
-              <div className="text-[8.5px] font-bold text-stone-700 uppercase tracking-[0.15em]">Cotización Inicial </div>
-              <div className="text-sm font-bold text-amber-800 font-mono tracking-widest mt-0.5">
+              <div className="text-[9px] font-bold text-stone-700 uppercase tracking-[0.15em]">Cotización Inicial </div>
+              <div className="text-base font-bold text-amber-800 font-mono tracking-widest mt-0.5">
                 N°: 00 – {String(cotizacion.id).padStart(5, '0')}
               </div>
-              <div className="text-[8px] text-stone-600 font-mono font-bold mt-1 uppercase tracking-wider">
+              <div className="text-[9px] text-stone-600 font-mono font-bold mt-1 uppercase tracking-wider">
                 Fecha: {cotizacion.fecha || '—'}
               </div>
             </div>
@@ -170,20 +176,29 @@ export default function DocumentoCotizacion({
               { label: 'CEDULA', value: cotizacion.cliente?.cedula || '—' },
             ].map(({ label, value }) => (
               <div key={label} className="min-w-0">
-                <div className="text-[7.5px] uppercase tracking-[0.14em] text-stone-550 font-bold mb-1">{label}</div>
-                <div className="text-[10px] text-stone-950 font-extrabold leading-relaxed whitespace-pre-wrap break-words" title={value || '—'}>{value}</div>
+                <div className="text-[8px] uppercase tracking-[0.14em] text-stone-550 font-bold mb-1">{label}</div>
+                <div className="text-[11px] text-stone-950 font-extrabold leading-relaxed whitespace-pre-wrap break-words" title={value || '—'}>{value}</div>
               </div>
             ))}
           </div>
 
           {/* ── Items Table ── */}
           <div className="border border-stone-300 rounded-lg overflow-hidden shadow-sm">
-            <table className="w-full border-collapse text-[9.5px]">
+            <table className="w-full border-collapse text-[11px]" style={{ tableLayout: 'fixed' }}>
+              {/* La columna Modelo es ancha a propósito: el nombre del mueble
+                  debe leerse a lo HORIZONTAL junto a la foto, no en 5 renglones. */}
+              <colgroup>
+                <col style={{ width: '34%' }} />
+                <col style={{ width: '7%' }} />
+                <col style={{ width: '29%' }} />
+                <col style={{ width: '15%' }} />
+                <col style={{ width: '15%' }} />
+              </colgroup>
               <thead>
                 <tr className="bg-stone-900 text-stone-100">
-                  {['Modelo', 'Cant.', 'Descripción / Medidas', 'P. Unitario', 'Total'].map((h, i) => (
-                    <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[8px]
-                      ${i === 0 ? 'text-left w-[20%]' : i === 1 ? 'text-center w-[8%]' : i === 2 ? 'text-left' : 'text-right w-[13%]'}`}>{h}</th>
+                  {['Modelo', 'Cant.', 'Descripción', 'P. Unitario', 'Total'].map((h, i) => (
+                    <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[9px]
+                      ${i === 0 ? 'text-left' : i === 1 ? 'text-center' : i === 2 ? 'text-left' : 'text-right'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -210,7 +225,19 @@ export default function DocumentoCotizacion({
                       : null;
                     const modelName = det.producto_nombre
                       || (det.material_id ? `Insumo #${det.material_id}` : 'Ítem a medida');
-                    const dims = sinAsociar || esInsumo ? null : `${det.ancho ?? 1.0}×${det.largo ?? 1.0} m`;
+                    // Las medidas solo se imprimen si las escribieron de verdad.
+                    // El 1×1 por defecto del formulario NO es una medida: ya
+                    // no se capturan medidas y no debe salir en el documento.
+                    const anchoNum = Number(det.ancho);
+                    const largoNum = Number(det.largo);
+                    const tieneMedidas = !sinAsociar
+                      && !esInsumo
+                      && det.ancho != null
+                      && det.largo != null
+                      && anchoNum > 0
+                      && largoNum > 0
+                      && !(anchoNum === 1 && largoNum === 1);
+                    const dims = tieneMedidas ? `${det.ancho}×${det.largo} m` : null;
                     // Unidad vendida del insumo: cm/m capturados o la unidad
                     // base del material. En la cotización se muestra lo que
                     // ve el cliente (1128 cm), no la equivalencia interna.
@@ -229,7 +256,18 @@ export default function DocumentoCotizacion({
                       : null;
                     const piezasTxt = (det.piezas?.length ?? 0) > 0
                       ? `Incluye: ${det.piezas!
-                          .map((p) => `${p.nombre}${Number(p.cantidad) > 1 ? ` × ${Number(p.cantidad).toLocaleString('es-CO')}` : ''}`)
+                          .map((p) => {
+                            const extra = p.requiere_retrabajo
+                              ? Number(p.precio_modificacion) || 0
+                              : 0;
+                            const precioTxt = p.precio != null
+                              ? ` (${formatCurrency(Number(p.precio) + extra, moneda)})`
+                              : '';
+                            const cantTxt = Number(p.cantidad) > 1
+                              ? ` × ${Number(p.cantidad).toLocaleString('es-CO')}`
+                              : '';
+                            return `${p.nombre}${cantTxt}${precioTxt}`;
+                          })
                           .join(', ')}`
                       : null;
                     const desc = [
@@ -258,9 +296,9 @@ export default function DocumentoCotizacion({
                       <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                         {sinAsociar ? (
                           <td colSpan={3} className="px-3 py-2 font-serif font-bold text-stone-950">
-                            <div className={fotosDet.length > 1 ? 'flex flex-col gap-1' : 'flex items-start gap-2'}>
+                            <div className="flex items-center gap-2.5">
                               <FotosRenglon urls={fotosDet} alt={textoItem} />
-                              <span>
+                              <span className="min-w-0 flex-1 leading-snug">
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
                                 {notaItem && (
@@ -272,17 +310,10 @@ export default function DocumentoCotizacion({
                         ) : (
                           <>
                             <td className="px-3 py-2 font-serif font-bold text-stone-950">
-                              {fotosDet.length > 1 ? (
-                                <div className="flex flex-col gap-1">
-                                  <FotosRenglon urls={fotosDet} alt={modelName} />
-                                  <span>{modelName}</span>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <FotosRenglon urls={fotosDet} alt={modelName} />
-                                  <span>{modelName}</span>
-                                </div>
-                              )}
+                              <div className="flex items-center gap-2.5">
+                                <FotosRenglon urls={fotosDet} alt={modelName} />
+                                <span className="min-w-0 flex-1 leading-snug">{modelName}</span>
+                              </div>
                             </td>
                             <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
                             <td className="px-3 py-2 text-stone-700 italic font-medium">{desc}</td>
@@ -308,9 +339,9 @@ export default function DocumentoCotizacion({
                 <span className="font-mono text-stone-600 font-normal">({venta.pagos.length} registros)</span>
               </div>
               <div className="border border-stone-300 rounded-lg overflow-hidden shadow-sm">
-                <table className="w-full border-collapse text-[8.5px]">
+                <table className="w-full border-collapse text-[10px]">
                   <thead>
-                    <tr className="bg-stone-100 text-stone-800 font-bold uppercase text-[7.5px] tracking-wider border-b border-stone-300">
+                    <tr className="bg-stone-100 text-stone-800 font-bold uppercase text-[8.5px] tracking-wider border-b border-stone-300">
                       <th className="px-2 py-1 text-left">Fecha</th>
                       <th className="px-2 py-1 text-left">Método</th>
                       <th className="px-2 py-1 text-left">Ref.</th>
@@ -355,7 +386,7 @@ export default function DocumentoCotizacion({
           {/* ── Totals: Left=breakdown, Right=grand total card ── */}
           <div className="grid grid-cols-2 gap-4 pt-1">
             {/* Left — subtotal breakdown */}
-            <div className="space-y-1 text-[9.5px] text-stone-700 pr-2">
+            <div className="space-y-1.5 text-[11px] text-stone-700 pr-2">
               {[
                 { label: 'Sub-Total', value: subTotal, color: 'text-stone-900 font-bold' },
                 ...(Number(descuentoPct) > 0 ? [{ label: `Descuento (${descuentoPct}%)`, value: -discountVal, color: 'text-emerald-800 font-bold' }] : []),
@@ -363,7 +394,7 @@ export default function DocumentoCotizacion({
                 ...(Number(ivaPct) > 0 ? [{ label: `IVA (${ivaPct}%)`, value: ivaVal, color: 'text-stone-900 font-bold' }] : []),
               ].map(({ label, value, color }, i, arr) => (
                 <div key={label} className={`flex justify-between items-center ${i === arr.length - 1 ? 'border-t border-stone-300 pt-1' : ''}`}>
-                  <span className="text-[7.5px] uppercase tracking-wider font-bold text-stone-500">{label}</span>
+                  <span className="text-[8.5px] uppercase tracking-wider font-bold text-stone-500">{label}</span>
                   <span className={`font-mono font-extrabold ${color}`}>
                     {value < 0 ? '-' : ''}{formatCurrency(Math.abs(value), moneda)}
                   </span>
@@ -372,24 +403,24 @@ export default function DocumentoCotizacion({
             </div>
 
             {/* Right — grand total card */}
-            <div className="bg-amber-50/60 rounded-xl p-3 flex flex-col gap-1.5 border border-amber-300/80 shadow-sm">
-              <div className="flex justify-between items-baseline">
-                <span className="text-[8px] tracking-[0.15em] font-bold text-stone-700 uppercase">Total Cotización</span>
-                <span className="text-base font-black text-amber-900 font-mono">
+            <div className="bg-amber-50/60 rounded-xl p-4 flex flex-col gap-1.5 border border-amber-300/80 shadow-sm">
+              <div className="flex justify-between items-baseline gap-3">
+                <span className="text-[10px] tracking-[0.15em] font-bold text-stone-700 uppercase">Total Cotización</span>
+                <span className="text-xl font-black text-amber-900 font-mono">
                   {formatCurrency(grandTotal, moneda)}
                 </span>
               </div>
 
               {venta && Number(venta.total_pagado) > 0 && (
-                <div className="flex justify-between items-baseline text-[8.5px] text-emerald-800 font-mono font-extrabold border-t border-amber-200/60 pt-1">
+                <div className="flex justify-between items-baseline text-[10px] text-emerald-800 font-mono font-extrabold border-t border-amber-200/60 pt-1">
                   <span>TOTAL ABONADO:</span>
                   <span>-{formatCurrency(Number(venta.total_pagado), moneda)}</span>
                 </div>
               )}
 
-              <div className="border-t border-amber-200/80 pt-1.5 space-y-0.5 text-[8.5px]">
+              <div className="border-t border-amber-200/80 pt-1.5 space-y-0.5 text-[10px]">
                 {venta && (
-                  <div className="flex justify-between text-amber-900 font-mono font-black text-[9.5px]">
+                  <div className="flex justify-between text-amber-900 font-mono font-black text-[11px]">
                     <span>SALDO PENDIENTE:</span>
                     <span>{formatCurrency(Number(venta.saldo_pendiente), moneda)}</span>
                   </div>
@@ -399,8 +430,8 @@ export default function DocumentoCotizacion({
           </div>
 
           {/* ── Terms ── */}
-          <div className="border border-stone-300 rounded-lg px-3 py-2 bg-stone-55/40 text-[10.5px] text-stone-750 leading-relaxed font-medium">
-            <span className="font-bold text-stone-900 text-[10px] uppercase tracking-wider mr-1">Términos y Condiciones:</span>
+          <div className="border border-stone-300 rounded-lg px-4 py-3 bg-stone-55/40 text-[12px] text-stone-750 leading-relaxed font-medium">
+            <span className="font-bold text-stone-900 text-[11px] uppercase tracking-wider mr-1">Términos y Condiciones:</span>
             Una vez aceptado el pedido y firmado este comprobante se procederá con la fabricación personalizada. Debido a que el producto entra en proceso de corte e insumos a la medida,{' '}
             <strong className="text-stone-950 font-bold">no se aceptan cambios a último minuto</strong>.
           </div>
@@ -410,9 +441,9 @@ export default function DocumentoCotizacion({
         <div className="grid grid-cols-2 gap-10 pt-8 mt-auto">
           {['FIRMA DEL CLIENTE', 'FIRMA DEL EMISOR'].map((label) => (
             <div key={label} className="text-center">
-              <div className="w-36 border-t border-stone-400 mx-auto mb-1" />
-              <div className="text-[8px] font-serif font-bold uppercase tracking-wider text-stone-800">{label}</div>
-              <div className="text-[7px] text-stone-500 font-medium mt-0.5">
+              <div className="w-40 border-t border-stone-400 mx-auto mb-1" />
+              <div className="text-[10px] font-serif font-bold uppercase tracking-wider text-stone-800">{label}</div>
+              <div className="text-[9px] text-stone-500 font-medium mt-0.5">
                 {label.includes('CLIENTE') ? 'Acepto Conforme' : 'Autorizado'}
               </div>
             </div>
