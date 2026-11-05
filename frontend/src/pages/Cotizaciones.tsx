@@ -3856,7 +3856,10 @@ export default function Cotizaciones() {
                           // descripción ES el nombre — fusionados en un solo campo.
                           producto_nombre: (d.tipo_item === 'REPARACION' || d.tipo_item === 'SERVICIO')
                           ? (d.descripcion_especifica || d.observaciones || (d.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
-                          : (prod?.nombre ?? mat?.nombre ?? d.descripcion_especifica ?? d.observaciones ?? 'Ítem a medida'),
+                          // `d.material` viene en la respuesta de la API: la
+                          // lista local de materiales está paginada (100) y
+                          // puede no traer el insumo de una cotización vieja.
+                          : (prod?.nombre ?? mat?.nombre ?? d.material?.nombre ?? d.descripcion_especifica ?? d.observaciones ?? 'Ítem a medida'),
                           // Unidad vendida del insumo + equivalencia en la
                           // unidad del inventario (para la columna Cant.).
                           unidad_captura: d.unidad_captura ?? null,
