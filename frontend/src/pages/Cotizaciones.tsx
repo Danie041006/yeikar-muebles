@@ -7,6 +7,7 @@ import { clienteService, Client } from '../services/clienteService';
 import { pedidoService } from '../services/pedidoService';
 import { ventaService, VentaDetalle, METODOS_PAGO, cargarMetodosPago, labelMetodoPago, type MetodoPagoOption } from '../services/ventaService';
 import { formatCurrency, nombreMoneda, resolverParMonedas, convertirMonedaHumana, redondearEquivalenteMoneda, extractErrorMessage } from '../utils/format';
+import PagosMixtosEditor, { pagosCompletos, type PagoMixtoRow } from '../components/Inventario/PagosMixtosEditor';
 import { normalizarEstructuraCostos } from '../utils/estructuraCostos';
 import { hoyVE } from '../utils/fechas';
 import {
@@ -366,6 +367,8 @@ export default function Cotizaciones() {
   // Fecha del abono inicial: el cliente pudo abonar ANTES de convertir.
   // Por defecto hoy (VE); si se deja vacía, el servidor guarda hoy.
   const [fechaAdelanto, setFechaAdelanto] = useState(hoyVE());
+  // Abono inicial pagado de VARIAS maneras: filas extra (cuenta/tasa/monto/fecha).
+  const [adelantosExtra, setAdelantosExtra] = useState<PagoMixtoRow[]>([]);
   // Métodos de pago: cuentas reales (metodo_caja) con fallback al estático.
   const [metodosPago, setMetodosPago] = useState<MetodoPagoOption[]>(METODOS_PAGO.map((m) => ({ ...m })));
 
@@ -1817,6 +1820,7 @@ export default function Cotizaciones() {
     setAdelantoTrm('');
     setAdelantoMetodo('');
     setFechaAdelanto(hoyVE());
+    setAdelantosExtra([]);
     setConvertError('');
     setIsConvertOpen(true);
   };
@@ -1977,16 +1981,61 @@ export default function Cotizaciones() {
       const monedaPagoDifiere = adelantoMonedaId !== selectedQuoteForConvert.moneda_id;
       const tasaVenta = Number(selectedQuoteForConvert.tasa_cambio) || 1;
       const factorPago = abonoMontoPago > 0 ? abonoEnMonedaCotizacion / abonoMontoPago : 1.0;
+      const cuentasConv = metodosPago.map((m) => ({
+        key: m.value,
+        label: m.label,
+        monedaId: currencies.find((c) => c.codigo === m.moneda)?.id ?? 1,
+        codigo: m.moneda,
+      }));
+      // Abono inicial mixto: N pagos con su cuenta/moneda/tasa/fecha opcional.
+      const adelantos = adelantosExtra.length > 0
+        ? [
+            {
+              metodo_pago: adelantoMetodo,
+              moneda_id: adelantoMonedaId,
+              monto: abonoMontoPago,
+              tasa_cambio: monedaPagoDifiere ? factorPago * tasaVenta : undefined,
+              fecha: fechaAdelanto || undefined,
+            },
+            ...adelantosExtra.map((r) => {
+              const codRow = cuentasConv.find((c) => c.key === r.key)?.codigo ?? quoteCod;
+              const monedaIdRow = cuentasConv.find((c) => c.key === r.key)?.monedaId ?? adelantoMonedaId;
+              const misma = monedaIdRow === selectedQuoteForConvert.moneda_id;
+              const factorRow = misma
+                ? 1
+                : convertirMonedaHumana(1, codRow, quoteCod, Number(r.tasa) || 0);
+              return {
+                metodo_pago: r.key,
+                moneda_id: monedaIdRow,
+                monto: Number(r.monto),
+                tasa_cambio: misma ? undefined : factorRow * tasaVenta,
+                fecha: r.fecha || undefined,
+              };
+            }),
+          ]
+        : undefined;
+      if (adelantos && (!abonoActivo || !adelantoMetodo)) {
+        setConvertError('Para dividir el abono indica primero el monto y la cuenta del abono principal.');
+        return;
+      }
+      if (adelantos && !pagosCompletos(adelantosExtra, cuentasConv, quoteCod)) {
+        setConvertError('Completa las cuentas extra del abono: cuenta, monto y tasa si su moneda no es la de la cotización.');
+        return;
+      }
       await pedidoService.convertQuote(selectedQuoteForConvert.id, {
         detalles: convertDetails,
         fecha_entrega_estimada: deliveryDate || undefined,
-        adelanto: abonoActivo ? abonoMontoPago : undefined,
-        moneda_adelanto_id: adelantoMonedaId,
-        tasa_cambio_adelanto:
-          abonoActivo && monedaPagoDifiere ? factorPago * tasaVenta : undefined,
-        metodo_pago: abonoActivo ? adelantoMetodo : undefined,
-        // Fecha real del abono (pudo ser días antes); vacía → hoy (servidor).
-        fecha_adelanto: abonoActivo && fechaAdelanto ? fechaAdelanto : undefined,
+        ...(adelantos
+          ? { adelantos }
+          : {
+              adelanto: abonoActivo ? abonoMontoPago : undefined,
+              moneda_adelanto_id: adelantoMonedaId,
+              tasa_cambio_adelanto:
+                abonoActivo && monedaPagoDifiere ? factorPago * tasaVenta : undefined,
+              metodo_pago: abonoActivo ? adelantoMetodo : undefined,
+              // Fecha real del abono (pudo ser días antes); vacía → hoy (servidor).
+              fecha_adelanto: abonoActivo && fechaAdelanto ? fechaAdelanto : undefined,
+            }),
       });
       setIsConvertOpen(false);
       const avisoAbono =
@@ -3612,6 +3661,31 @@ export default function Cotizaciones() {
                   <p className="mt-2 text-xs font-semibold text-red-600">
                     El abono ({fmtAbonoEquivalente(abonoEnMonedaCotizacion, quoteMoneda?.codigo)}) excede el total del pedido ({formatCurrency(quoteTotal, quoteMoneda?.codigo ?? 'COP')}).
                   </p>
+                )}
+
+                {/* Abono inicial pagado de dos maneras: cada fila es un pago
+                    con su cuenta, su moneda, su tasa y su fecha opcional. */}
+                {abonoActivo && (
+                  <div className="mt-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => setAdelantosExtra((prev) => (prev.length ? prev : [{ key: '', monto: '', tasa: '', fecha: '' }]))}
+                      className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                    >
+                      + Se pagó parte con otra cuenta / método
+                    </button>
+                    <PagosMixtosEditor
+                      filas={adelantosExtra}
+                      cuentas={metodosPago.map((m) => ({
+                        key: m.value,
+                        label: m.label,
+                        monedaId: currencies.find((c) => c.codigo === m.moneda)?.id ?? 1,
+                        codigo: m.moneda,
+                      }))}
+                      codigoDestino={quoteCod}
+                      onChange={setAdelantosExtra}
+                    />
+                  </div>
                 )}
               </div>
 

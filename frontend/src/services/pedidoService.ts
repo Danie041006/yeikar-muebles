@@ -122,6 +122,18 @@ export interface RentabilidadPedido {
   por_pieza?: RentabilidadPieza[];
 }
 
+export interface AdelantoPagoBody {
+  /** Codigo de la cuenta de caja (metodo_caja). */
+  metodo_pago: string;
+  moneda_id: number;
+  /** Monto pagado EN LA MONEDA del abono. */
+  monto: number;
+  /** COP por unidad de la moneda del abono (cuando difiere de la cotización). */
+  tasa_cambio?: number;
+  /** Fecha del pago (YYYY-MM-DD); sin ella, HOY en hora Venezuela. */
+  fecha?: string;
+}
+
 export interface ConvertQuoteBody {
   detalles: ConvertDetail[];
   fecha_entrega_estimada?: string;
@@ -131,6 +143,8 @@ export interface ConvertQuoteBody {
   metodo_pago?: string;
   /** Fecha del abono inicial (YYYY-MM-DD); sin ella, HOY en hora Venezuela. */
   fecha_adelanto?: string;
+  /** Abono inicial pagado de VARIAS maneras (reemplaza a `adelanto`). */
+  adelantos?: AdelantoPagoBody[];
 }
 
 export const pedidoService = {

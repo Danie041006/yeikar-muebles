@@ -165,3 +165,55 @@ class MovimientoProductoInventario(Base):
     ubicacion = relationship("Ubicacion")
     proveedor = relationship("Proveedor")
     cliente = relationship("Client")
+
+class EntradaCompraPago(Base):
+    """Un pago de una compra de inventario (una ENTRADA puede pagarse en
+    varias cuentas/monedas: la mitad en efectivo COP y el resto por Zelle).
+
+    Espejo del dinero que salió: cada fila es un Gasto + salida de caja al
+    "1 [moneda del pago] = X COP" congelado del momento. La primera también
+    queda en `movimiento_inventario.pago_*` para no romper el kardex viejo.
+    """
+
+    __tablename__ = "entrada_compra_pago"
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    movimiento_inventario_id = Column(
+        BigInteger,
+        ForeignKey("movimiento_inventario.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # Entradas de PRODUCTO (reventa/plásticos) pagadas de varias cuentas.
+    movimiento_producto_id = Column(
+        BigInteger,
+        ForeignKey("movimiento_producto_inventario.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    gasto_id = Column(
+        BigInteger,
+        ForeignKey("gasto.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    metodo_caja_id = Column(
+        BigInteger,
+        ForeignKey("metodo_caja.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    moneda_id = Column(
+        BigInteger,
+        ForeignKey("moneda.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    # Monto pagado EN LA MONEDA de esa cuenta.
+    monto = Column(Numeric(15, 2), nullable=False)
+    # "1 [moneda del pago] = X COP" congelada en el momento.
+    tasa_cambio = Column(Numeric(15, 6), nullable=False, server_default="1")
+    # Equivalente en COP (monto × tasa).
+    monto_en_moneda_base = Column(Numeric(15, 2), nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    moneda = relationship("Moneda")
+    metodo_caja = relationship("MetodoCaja")

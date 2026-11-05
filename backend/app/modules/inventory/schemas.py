@@ -89,6 +89,12 @@ class MovimientoCreate(BaseModel):
     # se conserva la hora real; cuando es anterior se ancla al mediodía para
     # que el día no se corra por zona horaria.
     fecha: Optional[date] = None
+    # Pago(s) de la compra. Si falta, se usan los campos clásicos
+    # (pagado_desde_metodo_caja_id + moneda_pago_id + tasa_pago) = UN pago.
+    # Con N pagos (compra pagada de dos maneras) se genera un gasto/salida
+    # por cada uno y la suma de sus equivalentes en COP debe cuadrar con la
+    # compra.
+    pagos: Optional[List["PagoEntradaCreate"]] = None
 
     @field_validator("departamento")
     @classmethod
@@ -99,6 +105,18 @@ class MovimientoCreate(BaseModel):
         if v not in DEPARTAMENTOS_VALIDOS:
             raise ValueError(f"Departamento inválido: {v}")
         return v
+
+class PagoEntradaCreate(BaseModel):
+    """Un pago de una entrada de inventario desde una cuenta de caja.
+
+    `monto` es lo pagado EN LA MONEDA de esa cuenta; `tasa_pago` es
+    "1 [moneda del pago] = X COP" (obligatoria si la moneda no es COP).
+    """
+    metodo_caja_id: int
+    moneda_id: int
+    monto: Decimal = Field(..., gt=0)
+    tasa_pago: Optional[Decimal] = Field(None, gt=0)
+
 
 class MovimientoResponse(BaseModel):
     """Salida del kardex: SIN las validaciones de entrada (gt/pattern).
@@ -206,6 +224,10 @@ class MovimientoProductoCreate(BaseModel):
     # Fecha real del movimiento (entrada de un día anterior). Opcional: sin
     # ella se usa HOY en hora VE. No admite fechas futuras.
     fecha: Optional[date] = None
+    # Pago(s) de la compra (reventa/plásticos). Si falta, se usan los campos
+    # clásicos de arriba (un solo pago). Con N pagos se genera un gasto por
+    # cada uno y la suma de lo pagado debe cuadrar con la compra.
+    pagos: Optional[List[PagoEntradaCreate]] = None
 
 
 class MovimientoProductoResponse(BaseModel):
@@ -276,6 +298,8 @@ class LibroFilaResponse(BaseModel):
     # Registro de la compra (solo insumos)
     descuento: Optional[float] = None
     pagado_desde: Optional[str] = None
+    # Pago mixto: [{cuenta, moneda, simbolo, monto, tasa, monto_cop}]
+    pagos: List[dict] = []
     fiado: bool = False
     fiado_a: Optional[str] = None
     fiado_estado: Optional[str] = None

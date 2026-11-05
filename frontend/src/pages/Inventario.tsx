@@ -10,6 +10,7 @@ import { useToast } from '../context/ToastContext';
 import { motion } from 'framer-motion';
 import { SearchSelect, ResponsiveDataTable, MontoInput, type DataColumn } from '../components/ui';
 import AdjuntoImagen from '../components/AdjuntoImagen';
+import PagosMixtosEditor, { equivalenteTotal, pagosCompletos, type PagoMixtoRow } from '../components/Inventario/PagosMixtosEditor';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage, fmtNumero } from '../utils/format';
 import { hoyVE } from '../utils/fechas';
 
@@ -144,6 +145,11 @@ export default function Inventario() {
   const [filtroCatProducto, setFiltroCatProducto] = useState<number | null>(null);
   // Departamento del taller activo en el tab Insumos (null = todos, 'GENERAL' = sin departamento)
   const [filtroDepto, setFiltroDepto] = useState<string | null>(null);
+
+  // Pagos mixtos: cuentas adicionales con las que pagó una misma entrada
+  const [pagosExtraMaterial, setPagosExtraMaterial] = useState<PagoMixtoRow[]>([]);
+  // Ídem para las entradas de plásticos/reventa y demás productos
+  const [pagosExtraProducto, setPagosExtraProducto] = useState<PagoMixtoRow[]>([]);
 
   // Formulario de movimiento de MATERIAL (dentro del panel)
   const [movMaterial, setMovMaterial] = useState({
@@ -985,6 +991,51 @@ export default function Inventario() {
       ? parseFloat((llevadaUnidad * cantMov).toFixed(2))
       : undefined;
 
+    // ── Pagos mixtos: la cuenta principal absorbe lo que sobra ───────────
+    const cuentasEditor = cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }));
+    const filasExtraMaterial = esEntrada && pago.cuentaId
+      ? pagosExtraMaterial.filter((r) => !!parsePagoKey(r.key).cuentaId)
+      : [];
+    const totalNetoMaterial = Math.round((costoNeto ?? 0) * cantMov * 100) / 100;
+    let pagosMaterial: { metodo_caja_id: number; moneda_id: number; monto: number; tasa_pago?: number }[] | undefined;
+    if (filasExtraMaterial.length > 0) {
+      if (!pagosCompletos(filasExtraMaterial, cuentasEditor, 'COP')) {
+        toast.error('Completa los pagos extra: cuenta, monto y tasa si su moneda no es COP.');
+        return;
+      }
+      const equivExtra = equivalenteTotal(filasExtraMaterial, cuentasEditor, 'COP');
+      const restante = Math.round((totalNetoMaterial - equivExtra) * 100) / 100;
+      if (restante < -0.01) {
+        toast.error(`Los pagos extra suman $${equivExtra.toLocaleString('es-CO')} COP y la compra es $${totalNetoMaterial.toLocaleString('es-CO')} COP. Ajusta los montos.`);
+        return;
+      }
+      if (restante <= 0.01) {
+        toast.error('Los pagos extra cubren toda la compra: deja el resto en la cuenta principal (o usa una sola cuenta).');
+        return;
+      }
+      const pagoCod = codMonedaDe(pago.monedaId);
+      const montoPrincipal = (pago.monedaId ?? MONEDA_BASE_ID) === MONEDA_BASE_ID
+        ? restante
+        : Math.round(convertirMonedaHumana(restante, 'COP', pagoCod, tasaNum) * 100) / 100;
+      pagosMaterial = [
+        {
+          metodo_caja_id: pago.cuentaId as number,
+          moneda_id: pago.monedaId ?? MONEDA_BASE_ID,
+          monto: montoPrincipal,
+          tasa_pago: (pago.monedaId ?? MONEDA_BASE_ID) !== MONEDA_BASE_ID ? tasaNum : undefined,
+        },
+        ...filasExtraMaterial.map((r) => {
+          const c = parsePagoKey(r.key);
+          return {
+            metodo_caja_id: c.cuentaId as number,
+            moneda_id: c.monedaId ?? MONEDA_BASE_ID,
+            monto: Number(r.monto),
+            tasa_pago: (c.monedaId ?? MONEDA_BASE_ID) !== MONEDA_BASE_ID ? Number(r.tasa) : undefined,
+          };
+        }),
+      ];
+    }
+
     try {
       setSavingMov(true);
       await inventarioService.crearMovimiento({
@@ -998,6 +1049,8 @@ export default function Inventario() {
         pagado_desde_metodo_caja_id: esEntrada && pago.cuentaId ? pago.cuentaId : undefined,
         moneda_pago_id: esEntrada && pago.cuentaId ? pago.monedaId ?? undefined : undefined,
         tasa_pago: esEntrada && pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID ? tasaNum : undefined,
+        // Compra pagada de dos maneras: un gasto/salida por cuenta.
+        pagos: pagosMaterial,
         // "La llevada": flete/aduana por unidad → se envía el total × cantidad
         llevada: llevadaTotal,
         descuento_porcentaje: pctDesc > 0 ? pctDesc : undefined,
@@ -1011,6 +1064,7 @@ export default function Inventario() {
       });
 
       setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
+      setPagosExtraMaterial([]);
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -1125,6 +1179,54 @@ export default function Inventario() {
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${codMonedaDe(productoSeleccionado?.moneda_id)} ${costoBruto.toLocaleString('es-CO')} → Neto: ${costoNeto?.toLocaleString('es-CO')})`
       : '';
 
+    // ── Pagos mixtos (plásticos/reventa): todo se cuadra en la moneda del
+    // producto; la cuenta principal absorbe lo que no cubran las extra. ──
+    const refCod = codMonedaDe(refMid);
+    const cuentasEditor = cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }));
+    const filasExtraProducto = esEntrada && pago.cuentaId
+      ? pagosExtraProducto.filter((r) => !!parsePagoKey(r.key).cuentaId)
+      : [];
+    const cantProd = parseFloat(movProducto.cantidad || '0') || 0;
+    const totalRefProd = Math.round((costoNeto ?? 0) * cantProd * 100) / 100;
+    let pagosProducto: { metodo_caja_id: number; moneda_id: number; monto: number; tasa_pago?: number }[] | undefined;
+    if (filasExtraProducto.length > 0) {
+      if (!pagosCompletos(filasExtraProducto, cuentasEditor, refCod)) {
+        toast.error(`Completa los pagos extra: cuenta, monto y tasa si su moneda no es ${refCod}.`);
+        return;
+      }
+      const equivExtra = equivalenteTotal(filasExtraProducto, cuentasEditor, refCod);
+      const restante = Math.round((totalRefProd - equivExtra) * 100) / 100;
+      if (restante < -0.01) {
+        toast.error(`Los pagos extra suman ${equivExtra.toLocaleString('es-CO')} ${refCod} y la compra es ${totalRefProd.toLocaleString('es-CO')} ${refCod}. Ajusta los montos.`);
+        return;
+      }
+      if (restante <= 0.01) {
+        toast.error('Los pagos extra cubren toda la compra: deja el resto en la cuenta principal.');
+        return;
+      }
+      const pagoCod = codMonedaDe(pagoMid);
+      const montoPrincipal = pagoMid === refMid
+        ? restante
+        : Math.round(convertirMonedaHumana(restante, refCod, pagoCod, tasaNum) * 100) / 100;
+      pagosProducto = [
+        {
+          metodo_caja_id: pago.cuentaId as number,
+          moneda_id: pagoMid,
+          monto: montoPrincipal,
+          tasa_pago: pagoMid !== refMid ? tasaNum : undefined,
+        },
+        ...filasExtraProducto.map((r) => {
+          const c = parsePagoKey(r.key);
+          return {
+            metodo_caja_id: c.cuentaId as number,
+            moneda_id: c.monedaId ?? MONEDA_BASE_ID,
+            monto: Number(r.monto),
+            tasa_pago: (c.monedaId ?? MONEDA_BASE_ID) !== refMid ? Number(r.tasa) : undefined,
+          };
+        }),
+      ];
+    }
+
     try {
       setSavingMovProd(true);
       await inventarioService.crearMovimientoProducto({
@@ -1140,6 +1242,8 @@ export default function Inventario() {
           movProducto.tipo === 'ENTRADA' && pago.cuentaId ? (pago.monedaId ?? undefined) : undefined,
         tasa_pago:
           movProducto.tipo === 'ENTRADA' && pago.cuentaId && tasaNum > 0 ? tasaNum : undefined,
+        // Compra pagada de dos maneras (plásticos/reventa).
+        pagos: pagosProducto,
         // "La llevada": flete/aduana (solo en compras de contado)
         llevada: movProducto.tipo === 'ENTRADA' && movProducto.llevada ? parseFloat(movProducto.llevada) : undefined,
         descuento_porcentaje: pctDesc > 0 ? pctDesc : undefined,
@@ -1150,6 +1254,7 @@ export default function Inventario() {
       });
 
       setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+      setPagosExtraProducto([]);
       fetchProductos();
       refrescarKardexProducto(selectedProductoId);
     } catch (error: any) {
@@ -2681,6 +2786,37 @@ export default function Inventario() {
                         );
                       })()}
 
+                      {/* Pagos mixtos (insumos): las cuentas extra cubren su
+                          parte y la cuenta principal absorbe el resto. */}
+                      {movMaterial.tipo === 'ENTRADA' && (() => {
+                        const pagoPrincipal = parsePagoKey(movMaterial.pago_key)
+                        if (!pagoPrincipal.cuentaId) return null;
+                        const bruto = parseFloat(movMaterial.costo_unitario || '0') || 0;
+                        const desc = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
+                        const netoUnit = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
+                        const cant = parseFloat(movMaterial.cantidad || '0') || 0;
+                        const totalNeto = Math.round(cant * netoUnit * 100) / 100;
+                        return (
+                          <div className="space-y-2">
+                            <button
+                              type="button"
+                              onClick={() => setPagosExtraMaterial((prev) => (prev.length ? prev : [{ key: '', monto: '', tasa: '', fecha: '' }]))}
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                            >
+                              + Se pagó parte con otra cuenta / método
+                            </button>
+                            <PagosMixtosEditor
+                              filas={pagosExtraMaterial}
+                              cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
+                              codigoDestino="COP"
+                              totalDestino={totalNeto}
+                              exigirCuadre
+                              onChange={setPagosExtraMaterial}
+                            />
+                          </div>
+                        );
+                      })()}
+
                       {/* Observaciones */}
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
@@ -3426,6 +3562,25 @@ export default function Inventario() {
                           Se descontarán ≈ <b>{deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movProducto.pagado_desde_metodo_caja_id)?.nombre}</b>
                           {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
                         </p>
+                      )}
+                      {!!cuentaId && (
+                        <div className="space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => setPagosExtraProducto((prev) => (prev.length ? prev : [{ key: '', monto: '', tasa: '', fecha: '' }]))}
+                            className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                          >
+                            + Se pagó parte con otra cuenta / método
+                          </button>
+                          <PagosMixtosEditor
+                            filas={pagosExtraProducto}
+                            cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
+                            codigoDestino={refCod}
+                            totalDestino={totalRef}
+                            exigirCuadre
+                            onChange={setPagosExtraProducto}
+                          />
+                        </div>
                       )}
                     </>
                   );

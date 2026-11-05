@@ -431,6 +431,7 @@ def convertir_cotizacion_a_pedido(
     metodo_pago: str = None,
     fecha_adelanto=None,
     usuario: Usuario | None = None,
+    adelantos: list | None = None,  # abono inicial pagado de VARIAS maneras
 ):
     # Buscar la cotización con FOR UPDATE: dos conversiones simultáneas quedan
     # serializadas; la segunda detecta el pedido ya creado en vez de lanzar 500.
@@ -531,43 +532,65 @@ def convertir_cotizacion_a_pedido(
     validar_regalos_plastico(db, detalles)
 
     # ── Abono inicial (opcional) ──────────────────────────────────────────
+    # Una conversión tiene abono inicial si traen `adelantos` (pago mixto:
+    # varias cuentas/monedas) o el `adelanto` clásico (un solo pago).
     adelanto_monto = float(adelanto or 0.0)
     if adelanto_monto < 0:
         raise ValueError("El adelanto no puede ser negativo.")
     if adelanto_monto > 0 and not metodo_pago:
         raise ValueError("Debes indicar el método de pago del adelanto.")
+    if adelantos and adelanto_monto > 0:
+        raise ValueError(
+            "Usa el abono de una manera: `adelantos` (varias cuentas) o `adelanto` "
+            "(una sola), no ambos."
+        )
+    adelantos = [
+        a if isinstance(a, dict) else a.model_dump()
+        for a in (adelantos or [])
+    ]
+    if adelantos:
+        for i, a in enumerate(adelantos, start=1):
+            if not (a.get("metodo_pago") or "").strip():
+                raise ValueError(f"El abono {i} necesita la cuenta de caja (método de pago).")
+            if float(a.get("monto") or 0) <= 0:
+                raise ValueError(f"El monto del abono {i} debe ser mayor que 0.")
 
     # Validar la tasa del abono ANTES de tocar cualquier registro:
     # así una conversión inválida no deja pedidos/facturas a medias.
+    def _tasa_para_abono(moneda_pago_id: int, tasa_explicita: float) -> float:
+        """Tasa en UNIDADES DE LA FACTURA por 1 unidad del abono.
+
+        La TRM explícita (COP por unidad del abono) SIEMPRE manda: el cliente
+        pagó ese día y la tasa congelada de la cotización puede ya no aplicar.
+        """
+        if moneda_pago_id == db_cotizacion.moneda_id:
+            return 1.0
+        venta_cop = float(db_cotizacion.tasa_cambio or 1.0)
+        if tasa_explicita > 0:
+            # La TRM indicada es COP por unidad del abono (1 USD = 4000 COP) y
+            # SIEMPRE manda: el cliente pagó ese día y la tasa congelada de la
+            # cotización puede ya no corresponder.
+            if venta_cop <= 0:
+                raise ValueError(
+                    "La cotización no tiene una tasa de cambio válida para convertir la tasa del abono."
+                )
+            return float(tasa_explicita) / venta_cop
+        # Solo pares deducibles de la tasa congelada de la cotización.
+        derivada, ok = _derivar_tasa_pago(
+            db, db_cotizacion.moneda_id, moneda_pago_id, db_cotizacion.tasa_cambio
+        )
+        if not ok or derivada is None:
+            raise ValueError(
+                "La moneda del abono difiere de la moneda de la cotización. "
+                "Indica la tasa de cambio del abono."
+            )
+        return float(derivada)
+
     moneda_pago = moneda_adelanto_id or db_cotizacion.moneda_id
     tasa_pago = None
     if adelanto_monto > 0:
-        misma_moneda = moneda_pago == db_cotizacion.moneda_id
-        if misma_moneda:
-            # Misma moneda que la factura: tasa 1:1, no requiere TRM.
-            tasa_pago = 1.0
-        else:
-            tasa_explicita = float(tasa_cambio_adelanto) if tasa_cambio_adelanto else 0.0
-            if tasa_explicita > 0:
-                # La TRM indicada es COP por unidad de moneda del abono (p.ej. 1 USD = 4000 COP).
-                # Convertirla a "unidades de la moneda de la venta" usando la tasa congelada de la
-                # cotización (COP por unidad de la moneda de la venta): tasa_pago = TRM / tasa_venta.
-                # La TRM explícita SIEMPRE tiene prioridad: el cliente paga días después y la
-                # tasa congelada en la cotización puede ya no corresponder.
-                tasa_venta = float(db_cotizacion.tasa_cambio or 1.0)
-                if tasa_venta <= 0:
-                    raise ValueError(
-                        "La cotización no tiene una tasa de cambio válida para convertir la tasa del abono."
-                    )
-                tasa_pago = tasa_explicita / tasa_venta
-            else:
-                # Fallback: solo pares deducibles de la tasa de la cotización (venta USD ← pago COP).
-                tasa_pago, derivada = _derivar_tasa_pago(db, db_cotizacion.moneda_id, moneda_pago, db_cotizacion.tasa_cambio)
-                if not derivada or tasa_pago is None:
-                    raise ValueError(
-                        "La moneda del abono difiere de la moneda de la cotización. "
-                        "Indica la tasa de cambio del abono."
-                    )
+        explicita = float(tasa_cambio_adelanto) if tasa_cambio_adelanto else 0.0
+        tasa_pago = _tasa_para_abono(moneda_pago, explicita)
 
     # Cambiar estado de la cotización a APROBADA
     estado_cotizacion_anterior = db_cotizacion.estado
@@ -732,7 +755,40 @@ def convertir_cotizacion_a_pedido(
     )
 
     # ── Registrar el adelanto como primer pago de la factura (opcional) ───
-    if adelanto_monto > 0:
+    # Puede ser UN pago (vía clásica) o VARIOS (abono inicial pagado de dos
+    # maneras: cada entrada de `adelantos` genera su propio pago de factura,
+    # con su cuenta, su moneda, su tasa y su fecha — esta última opcional,
+    # por defecto HOY en hora Venezuela).
+    if adelantos:
+        total_abonos = len(adelantos)
+        for i, abono in enumerate(adelantos, start=1):
+            fecha_abono = None
+            if abono.get("fecha"):
+                from datetime import datetime as _datetime
+                from datetime import time as _hora
+                fecha_abono = _datetime.combine(abono["fecha"], _hora(12, 0))
+            venta_service.crear_pago(
+                db,
+                PagoCreate(
+                    venta_id=db_venta.id,
+                    moneda_id=int(abono["moneda_id"]),
+                    # Fecha del abono opcional: el cliente pudo abonar antes de
+                    # convertir; sin fecha → HOY en hora Venezuela (mediodía).
+                    fecha=fecha_abono,
+                    monto=float(abono["monto"]),
+                    tasa_cambio=_tasa_para_abono(
+                        int(abono["moneda_id"]), float(abono.get("tasa_cambio") or 0.0)
+                    ),
+                    metodo_pago=(abono.get("metodo_pago") or "").strip(),
+                    referencia=(
+                        f"Adelanto conversión cotización #{id_cotizacion}"
+                        + (f" · abono {i} de {total_abonos}" if total_abonos > 1 else "")
+                    ),
+                ),
+                commit=False,  # la conversión commitea atómicamente al final
+                usuario=usuario,
+            )
+    elif adelanto_monto > 0:
         venta_service.crear_pago(
             db,
             PagoCreate(

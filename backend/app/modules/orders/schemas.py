@@ -174,6 +174,15 @@ class PedidoListaConEntregasResponse(PedidoConEntregasResponse):
     """Listado de pedidos: mismo contrato sin las fotos de las piezas."""
     detalles: List[DetallePedidoListaResponse] = []
 
+class AdelantoPagoIn(BaseModel):
+    """Un pago del abono inicial de un pedido (modo mixto)."""
+    metodo_pago: str                      # codigo de la cuenta de caja (metodo_caja)
+    moneda_id: int
+    monto: float = Field(..., gt=0)
+    tasa_cambio: Optional[float] = None   # COP por unidad de la moneda del pago
+    # Fecha del pago (opcional): si no se envía, HOY VE. Admite días pasados.
+    fecha: Optional[date] = None
+
 class ConvertirCotizacionBody(BaseModel):
     detalles: List[DetallePedidoCreate]
     fecha_entrega_estimada: Optional[str] = None
@@ -190,6 +199,12 @@ class ConvertirCotizacionBody(BaseModel):
     # Fecha del abono inicial (YYYY-MM-DD): a veces el cliente abonó ANTES de
     # convertir. Si se omite, se usa HOY en hora Venezuela.
     fecha_adelanto: Optional[date] = None
+    # Abono inicial pagado de VARIAS maneras: cada item es un pago completo
+    # (cuenta de caja + moneda + monto en esa moneda + tasa opcional + fecha
+    # opcional que por defecto es HOY VE). Si viene, remplaza a `adelanto`.
+    adelantos: Optional[List[AdelantoPagoIn]] = None
+
+
 
 
 class RentabilidadPieza(BaseModel):

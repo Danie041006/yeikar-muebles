@@ -44,6 +44,15 @@ export interface AlertaStock {
   ubicacion_nombre: string;
 }
 
+export interface PagoEntradaCreate {
+  metodo_caja_id: number;
+  moneda_id: number;
+  /** Monto pagado EN LA MONEDA de esa cuenta. */
+  monto: number;
+  /** Tasa humana del par (solo si la moneda del pago difiere de la compra). */
+  tasa_pago?: number;
+}
+
 export interface MovimientoCreate {
   material_id: number;
   /** Opcional: sin ubicación, el backend registra el movimiento en el depósito principal. */
@@ -62,6 +71,9 @@ export interface MovimientoCreate {
   moneda_pago_id?: number;
   /** Tasa manual "1 [moneda_pago] = X COP". Obligatoria si moneda_pago ≠ COP. */
   tasa_pago?: number;
+  /** Compra pagada de VARIAS maneras: un pago por cuenta/moneda. La suma
+   * debe cuadrar con la compra. Si viene, manda sobre el pago clásico. */
+  pagos?: PagoEntradaCreate[];
   /** Proveedor (dónde se compró) — opcional, solo entradas. */
   proveedor_id?: number;
   /** Nombre libre del proveedor: si coincide con un registro se linkea; si no, queda como texto. */
@@ -146,6 +158,8 @@ export interface MovimientoProductoCreate {
   pagado_desde_metodo_caja_id?: number;
   moneda_pago_id?: number;
   tasa_pago?: number;
+  /** Compra pagada de VARIAS maneras (plásticos/reventa). */
+  pagos?: PagoEntradaCreate[];
   /** Proveedor (dónde se compró) — opcional, solo entradas. */
   proveedor_id?: number;
   /** Nombre libre del proveedor (se linkea si coincide con un registro). */

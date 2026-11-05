@@ -186,6 +186,37 @@ def _fecha_movimiento(fecha: Optional[date]) -> datetime:
     return datetime.combine(fecha, time(12, 0))
 
 
+_PRIORIDAD_MONEDA = ["EUR", "USD", "VES", "COP"]
+
+
+def _par_monedas(cod_a: str, cod_b: str) -> tuple[str, str]:
+    """(base, quote) del par: la tasa humana SIEMPRE se escribe 1 base = X quote."""
+    a = (cod_a or "").upper()
+    b = (cod_b or "").upper()
+    ia = _PRIORIDAD_MONEDA.index(a) if a in _PRIORIDAD_MONEDA else 99
+    ib = _PRIORIDAD_MONEDA.index(b) if b in _PRIORIDAD_MONEDA else 99
+    if ia <= ib:
+        return a, b
+    return b, a
+
+
+def _monto_en_moneda(monto: Decimal, cod_origen: str, cod_destino: str, tasa: Decimal) -> Decimal:
+    """Convierte con la tasa humana del par (1 base = X quote)."""
+    if cod_origen == cod_destino:
+        return monto
+    base, quote = _par_monedas(cod_origen, cod_destino)
+    if cod_origen == base and cod_destino == quote:
+        return monto * tasa
+    if cod_origen == quote and cod_destino == base:
+        if tasa <= 0:
+            raise ValueError(
+                f"La moneda de pago difiere de la moneda de la compra. Indica la tasa del pago "
+                f"({cod_origen} ≡ {cod_destino})."
+            )
+        return monto / tasa
+    return monto
+
+
 def _gasto_compra_contado(
     db: Session,
     *,
@@ -490,7 +521,150 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     # (ADMINISTRATIVO) para que el gasto caiga en la línea correcta del P&L.
     es_oficina = (getattr(movimiento, "departamento", None) or "").strip().upper() == "OFICINA"
     tipo_gasto_compra = "PAPELERIA DE OFICINA" if es_oficina else "COMPRA DE INSUMOS"
-    if (
+    persona_compra = _persona_compra(db, usuario, proveedor_id, proveedor_nombre)
+    total_compra = (
+        (Decimal(str(movimiento.costo_unitario)) * movimiento.cantidad).quantize(Decimal("0.01"))
+        if movimiento.costo_unitario is not None
+        else Decimal("0.00")
+    )
+
+    # ── Pago de la compra: UNA cuenta (compatibilidad) o VARIAS ────────────
+    # La compra puede pagarse de dos maneras (la mitad en efectivo COP y el
+    # resto por Zelle, p. ej.). Cada pago genera su propio gasto + salida de
+    # caja y queda en `entrada_compra_pago` para el desglose del libro.
+    pagos = list(getattr(movimiento, "pagos", None) or [])
+    if movimiento.tipo == "ENTRADA" and pagos and getattr(movimiento, "fiar", False):
+        raise ValueError("Elige entre pagar (una o varias cuentas) o fiar, no ambos.")
+    if movimiento.tipo == "ENTRADA" and pagos and total_compra <= 0:
+        raise ValueError("Para registrar pagos indica el costo unitario de la entrada.")
+
+    if movimiento.tipo == "ENTRADA" and pagos and total_compra > 0:
+        from app.modules.reports.model import MetodoCaja
+        from app.modules.catalogos.model import Moneda
+
+        if getattr(movimiento, "pagado_desde_metodo_caja_id", None):
+            # El frontend manda el pago principal por los dos caminos: si
+            # apuntan a la MISMA cuenta es telefonía vieja y se ignora el
+            # campo clásico; si difieren, hay algo mal y no adivinamos.
+            coincide = (
+                getattr(movimiento, "pagado_desde_metodo_caja_id", None)
+                == pagos[0].metodo_caja_id
+            )
+            if not coincide:
+                raise ValueError(
+                    "Envía el pago por `pagos` o por pagado_desde_metodo_caja_id, "
+                    "no con valores distintos."
+                )
+            movimiento.pagado_desde_metodo_caja_id = None
+            movimiento.moneda_pago_id = None
+            movimiento.tasa_pago = None
+
+        cuentas_pago: dict[int, object] = {}
+        codigos_moneda: dict[int, str] = {}
+        resumen: list[tuple[object, Decimal, Decimal, Decimal]] = []
+        acumulado = Decimal("0.00")
+        for indice, pago in enumerate(pagos, start=1):
+            cuenta = cuentas_pago.get(pago.metodo_caja_id)
+            if cuenta is None:
+                cuenta = (
+                    db.query(MetodoCaja)
+                    .filter(MetodoCaja.id == pago.metodo_caja_id)
+                    .first()
+                )
+                cuentas_pago[pago.metodo_caja_id] = cuenta
+            if cuenta is None or not cuenta.activo:
+                raise ValueError(
+                    f"El pago {indice} apunta a una cuenta de caja inexistente o inactiva."
+                )
+            moneda_pago_cod = codigos_moneda.get(pago.moneda_id)
+            if moneda_pago_cod is None:
+                moneda_pago_cod = (
+                    db.query(Moneda.codigo).filter(Moneda.id == pago.moneda_id).scalar()
+                )
+                codigos_moneda[pago.moneda_id] = moneda_pago_cod or f"#{pago.moneda_id}"
+            if cuenta.moneda_id and cuenta.moneda_id != pago.moneda_id:
+                raise ValueError(
+                    f"El pago {indice} pagó en {moneda_pago_cod} pero eligió la cuenta "
+                    f"'{cuenta.nombre}', que es de otra moneda. Usa una cuenta en "
+                    f"{moneda_pago_cod}."
+                )
+            monto = Decimal(str(pago.monto)).quantize(Decimal("0.01"))
+            if monto <= 0:
+                raise ValueError(f"El pago {indice} debe ser mayor que 0.")
+            if pago.moneda_id != MONEDA_BASE_ID:
+                if not pago.tasa_pago or Decimal(str(pago.tasa_pago)) <= 0:
+                    raise ValueError(
+                        f"El pago {indice} (en {moneda_pago_cod}) necesita la tasa de "
+                        f"cambio: 1 {moneda_pago_cod} = ? COP."
+                    )
+                tasa = Decimal(str(pago.tasa_pago))
+            else:
+                tasa = Decimal("1")
+            monto_cop = (monto * tasa).quantize(Decimal("0.01"))
+            if monto_cop <= 0:
+                raise ValueError(
+                    f"El pago {indice} queda en 0 COP con la tasa indicada. Revisa la tasa."
+                )
+            acumulado += monto_cop
+            resumen.append((pago, monto, tasa, monto_cop))
+
+        diferencia = (acumulado - total_compra).quantize(Decimal("0.01"))
+        if abs(diferencia) > Decimal("1.00"):
+            raise ValueError(
+                f"Los pagos suman ${acumulado:,.2f} COP y la compra ${total_compra:,.2f} COP: "
+                f"{'faltan' if diferencia < 0 else 'sobran'} ${abs(diferencia):,.2f} COP. "
+                "Ajusta los montos para que cuadren con la compra."
+            )
+
+        descripcion_compra = _descripcion_compra_material(
+            material.nombre,
+            movimiento.cantidad,
+            material.unidad_medida.nombre if material.unidad_medida else None,
+        )
+        total_pagos = len(pagos)
+        for indice, (pago, monto, tasa, monto_cop) in enumerate(resumen, start=1):
+            cuenta = cuentas_pago[pago.metodo_caja_id]
+            gasto_i = _gasto_compra_contado(
+                db,
+                tipo_gasto_nombre=tipo_gasto_compra,
+                descripcion=(
+                    descripcion_compra
+                    + (f" · pago {indice} de {total_pagos} en {cuenta.nombre}" if total_pagos > 1 else "")
+                ),
+                total_ref=monto_cop,
+                ref_moneda_id=MONEDA_BASE_ID,
+                metodo_caja_id=pago.metodo_caja_id,
+                moneda_pago_id=pago.moneda_id,
+                tasa_pago=pago.tasa_pago,
+                fecha=fecha_mov.date(),
+                usuario=usuario,
+                persona_entidad=persona_compra,
+                # Las compras de insumos son gasto de fábrica (oficina tiene su
+                # propia canasta) — decisión de la dueña, 03/11/2026.
+                clasificacion="GASTO_OFICINA" if es_oficina else "GASTO_FABRICA",
+            )
+            db.add(model.EntradaCompraPago(
+                movimiento_inventario_id=db_mov.id,
+                gasto_id=gasto_i.id,
+                metodo_caja_id=pago.metodo_caja_id,
+                moneda_id=pago.moneda_id,
+                monto=monto,
+                tasa_cambio=tasa,
+                monto_en_moneda_base=monto_cop,
+            ))
+            if indice == 1:
+                gasto_primero = gasto_i
+                # Compatibilidad con el kardex/libro: los campos clásicos del
+                # movimiento apuntan al PRIMER pago.
+                db_mov.pagado_desde_metodo_caja_id = pago.metodo_caja_id
+                db_mov.moneda_pago_id = pago.moneda_id
+                db_mov.tasa_pago = pago.tasa_pago
+                movimiento.pagado_desde_metodo_caja_id = pago.metodo_caja_id
+                movimiento.moneda_pago_id = pago.moneda_id
+                movimiento.tasa_pago = pago.tasa_pago
+        db_mov.gasto_id = gasto_primero.id
+        db.flush()
+    elif (
         movimiento.tipo == "ENTRADA"
         and getattr(movimiento, "pagado_desde_metodo_caja_id", None)
         and movimiento.costo_unitario is not None
@@ -504,14 +678,14 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
                 movimiento.cantidad,
                 material.unidad_medida.nombre if material.unidad_medida else None,
             ),
-            total_ref=(Decimal(str(movimiento.costo_unitario)) * movimiento.cantidad).quantize(Decimal("0.01")),
+            total_ref=total_compra,
             ref_moneda_id=MONEDA_BASE_ID,
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
             tasa_pago=getattr(movimiento, "tasa_pago", None),
             fecha=fecha_mov.date(),
             usuario=usuario,
-            persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
+            persona_entidad=persona_compra,
             # Las compras de insumos son gasto de fábrica (oficina tiene su
             # propia canasta) — decisión de la dueña, 03/11/2026.
             clasificacion="GASTO_OFICINA" if es_oficina else "GASTO_FABRICA",
@@ -879,7 +1053,140 @@ def registrar_movimiento_producto(
     # Genera el gasto "COMPRA INVENTARIO REVENTA" en la MISMA transacción
     # (el router commitea al final) para que la utilidad bruta sea real:
     # la venta ya ingresa a caja; sin esto el costo nunca aparecería.
+    # Puede pagarse de VARIAS cuentas/monedas: cada `pagos[i]` genera su
+    # propio gasto + salida de caja y la suma debe cuadrar con la compra.
+    ref_moneda = producto.moneda_id or 1
+    costo_total = (
+        (Decimal(str(movimiento.costo_unitario)) * movimiento.cantidad).quantize(Decimal("0.01"))
+        if movimiento.costo_unitario is not None and Decimal(str(movimiento.costo_unitario)) > 0
+        else Decimal("0.00")
+    )
+    pagos = list(getattr(movimiento, "pagos", None) or [])
+    if (movimiento.tipo == "ENTRADA" and pagos and getattr(movimiento, "fiar", False)):
+        raise ValueError("Elige entre pagar (una o varias cuentas) o fiar, no ambos.")
+    if (movimiento.tipo == "ENTRADA" and pagos and costo_total <= 0):
+        raise ValueError("Para registrar pagos indica el costo unitario de la entrada.")
+
     if (
+        movimiento.tipo == "ENTRADA"
+        and pagos
+        and costo_total > 0
+        and producto.es_reventa
+    ):
+        from app.modules.reports.model import MetodoCaja
+        from app.modules.catalogos.model import Moneda
+
+        if getattr(movimiento, "pagado_desde_metodo_caja_id", None):
+            coincide = (
+                getattr(movimiento, "pagado_desde_metodo_caja_id", None)
+                == pagos[0].metodo_caja_id
+            )
+            if not coincide:
+                raise ValueError(
+                    "Envía el pago por `pagos` o por pagado_desde_metodo_caja_id, "
+                    "no con valores distintos."
+                )
+            movimiento.pagado_desde_metodo_caja_id = None
+            movimiento.moneda_pago_id = None
+            movimiento.tasa_pago = None
+
+        cod_ref = (
+            db.query(Moneda.codigo).filter(Moneda.id == ref_moneda).scalar() or "COP"
+        )
+        cuentas_pago: dict[int, object] = {}
+        resumen: list[tuple[object, Decimal, Decimal, Decimal, Decimal]] = []
+        acumulado = Decimal("0.00")
+        for indice, pago in enumerate(pagos, start=1):
+            cuenta = cuentas_pago.get(pago.metodo_caja_id)
+            if cuenta is None:
+                cuenta = (
+                    db.query(MetodoCaja)
+                    .filter(MetodoCaja.id == pago.metodo_caja_id)
+                    .first()
+                )
+                cuentas_pago[pago.metodo_caja_id] = cuenta
+            if cuenta is None or not cuenta.activo:
+                raise ValueError(
+                    f"El pago {indice} apunta a una cuenta de caja inexistente o inactiva."
+                )
+            moneda_pago_cod = (
+                db.query(Moneda.codigo).filter(Moneda.id == pago.moneda_id).scalar() or f"#{pago.moneda_id}"
+            )
+            if cuenta.moneda_id and cuenta.moneda_id != pago.moneda_id:
+                raise ValueError(
+                    f"El pago {indice} pagó en {moneda_pago_cod} pero eligió la cuenta "
+                    f"'{cuenta.nombre}', que es de otra moneda."
+                )
+            monto = Decimal(str(pago.monto)).quantize(Decimal("0.01"))
+            if monto <= 0:
+                raise ValueError(f"El pago {indice} debe ser mayor que 0.")
+            tasa = Decimal(str(pago.tasa_pago)) if pago.tasa_pago else None
+            contribucion = _monto_en_moneda(monto, moneda_pago_cod, cod_ref, tasa).quantize(Decimal("0.01"))
+            if contribucion <= 0:
+                raise ValueError(
+                    f"El pago {indice} queda en 0 {cod_ref} con la tasa indicada. Revisa la tasa."
+                )
+            acumulado += contribucion
+            resumen.append((pago, monto, tasa, contribucion, moneda_pago_cod))
+
+        tolerancia = Decimal("1.00") if ref_moneda == MONEDA_BASE_ID else Decimal("0.05")
+        diferencia = (acumulado - costo_total).quantize(Decimal("0.01"))
+        if abs(diferencia) > tolerancia:
+            raise ValueError(
+                f"Los pagos suman {acumulado:,.2f} {cod_ref} y la compra "
+                f"{costo_total:,.2f} {cod_ref}: "
+                f"{'faltan' if diferencia < 0 else 'sobran'} {abs(diferencia):,.2f} {cod_ref}. "
+                "Ajusta los montos para que cuadren con la compra."
+            )
+
+        descripcion_compra = (
+            f"Compra de producto: {_texto_cantidad(movimiento.cantidad)} "
+            f"{_texto_unidad(None, movimiento.cantidad)} de {producto.nombre}"
+        )
+        total_pagos = len(pagos)
+        primero = None
+        for indice, (pago, monto, tasa, contribucion, moneda_pago_cod) in enumerate(resumen, start=1):
+            cuenta = cuentas_pago[pago.metodo_caja_id]
+            gasto_i = _gasto_compra_contado(
+                db,
+                tipo_gasto_nombre="COMPRA INVENTARIO REVENTA",
+                descripcion=(
+                    descripcion_compra
+                    + (f" · pago {indice} de {total_pagos} en {cuenta.nombre}" if total_pagos > 1 else "")
+                ),
+                total_ref=contribucion,
+                ref_moneda_id=ref_moneda,
+                metodo_caja_id=pago.metodo_caja_id,
+                moneda_pago_id=pago.moneda_id,
+                tasa_pago=pago.tasa_pago,
+                fecha=fecha_mov.date(),
+                usuario=usuario,
+                persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
+            )
+            monto_base = Decimal(str(gasto_i.monto_en_moneda_base or 0)).quantize(Decimal("0.01"))
+            tasa_cop = (monto_base / monto) if monto > 0 else Decimal("1")
+            db.add(model.EntradaCompraPago(
+                movimiento_producto_id=db_mov.id,
+                gasto_id=gasto_i.id,
+                metodo_caja_id=pago.metodo_caja_id,
+                moneda_id=pago.moneda_id,
+                monto=monto,
+                tasa_cambio=tasa_cop.quantize(Decimal("0.000001")),
+                monto_en_moneda_base=monto_base,
+            ))
+            if indice == 1:
+                primero = gasto_i
+                # Compatibilidad con el libro/kardex: el movimiento clásico
+                # apunta al PRIMER pago.
+                db_mov.pagado_desde_metodo_caja_id = pago.metodo_caja_id
+                db_mov.moneda_pago_id = pago.moneda_id
+                db_mov.tasa_pago = pago.tasa_pago
+                movimiento.pagado_desde_metodo_caja_id = pago.metodo_caja_id
+                movimiento.moneda_pago_id = pago.moneda_id
+                movimiento.tasa_pago = pago.tasa_pago
+        db_mov.gasto_id = primero.id if primero else None
+        db.flush()
+    elif (
         movimiento.tipo == "ENTRADA"
         and movimiento.pagado_desde_metodo_caja_id
         and movimiento.costo_unitario is not None
@@ -1233,6 +1540,9 @@ class _FilaLibro:
     # Registro de la compra (solo insumos; None/False en productos y crudo)
     descuento: Optional[float | Decimal] = None
     pagado_desde: Optional[str] = None
+    # Pago mixto de la compra: [{cuenta, moneda, monto, tasa}] (vacía si pagó
+    # de una sola cuenta; el desglose vive en entrada_compra_pago).
+    pagos: Optional[list[dict]] = None
     fiado: bool = False
     fiado_a: Optional[str] = None
     fiado_estado: Optional[str] = None
@@ -1265,10 +1575,54 @@ class _FilaLibro:
             "observaciones": self.observaciones,
             "descuento": descuento,
             "pagado_desde": self.pagado_desde,
+            "pagos": self.pagos or [],
             "fiado": self.fiado,
             "fiado_a": self.fiado_a,
             "fiado_estado": self.fiado_estado,
         }
+
+
+def _pagos_de_compras(
+    db: Session, ids_movimientos: list[int], por_producto: bool = False
+) -> dict[int, list[dict]]:
+    """Desglose de pagos mixtos de compras (entrada_compra_pago) por movimiento.
+
+    Devuelve {id_movimiento: [{cuenta, moneda, monto, tasa}]}. Sirve para el
+    libro de entradas de INSUMOS (movimiento_inventario_id) y de PRODUCTOS
+    (reventa/plásticos, movimiento_producto_id) cuando una compra se pagó de
+    más de una cuenta.
+    """
+    if not ids_movimientos:
+        return {}
+    from app.modules.reports.model import MetodoCaja
+    from app.modules.catalogos.model import Moneda
+
+    columna = (
+        model.EntradaCompraPago.movimiento_producto_id
+        if por_producto
+        else model.EntradaCompraPago.movimiento_inventario_id
+    )
+    filas = (
+        db.query(model.EntradaCompraPago, MetodoCaja, Moneda)
+        .join(MetodoCaja, MetodoCaja.id == model.EntradaCompraPago.metodo_caja_id)
+        .join(Moneda, Moneda.id == model.EntradaCompraPago.moneda_id)
+        .filter(columna.in_(ids_movimientos))
+        .order_by(model.EntradaCompraPago.id)
+        .all()
+    )
+    pagos: dict[int, list[dict]] = {}
+    for pago, cuenta, moneda in filas:
+        clave = pago.movimiento_producto_id if por_producto else pago.movimiento_inventario_id
+        pagos.setdefault(clave, []).append({
+            "id": pago.id,
+            "cuenta": cuenta.nombre if cuenta else None,
+            "moneda": moneda.codigo if moneda else None,
+            "simbolo": moneda.simbolo if moneda else None,
+            "monto": float(pago.monto or 0),
+            "tasa": float(pago.tasa_cambio or 1),
+            "monto_cop": float(pago.monto_en_moneda_base or 0),
+        })
+    return pagos
 
 
 def _costo_y_zona_material(mov, departamento_material, datos_consumos: dict, costos_compras: dict) -> tuple:
@@ -1352,6 +1706,9 @@ def _filas_materiales(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
         db, [m.pagado_desde_metodo_caja_id for m, *_ in movimientos if m.pagado_desde_metodo_caja_id],
     )
     deudas = _deudas_de_movimientos(db, [m.id for m, *_ in movimientos])
+    pagosPorMov = _pagos_de_compras(
+        db, [m.id for m, *_ in movimientos if m.tipo == "ENTRADA"],
+    )
 
     filas: List[dict] = []
     for mov, nombre, departamento, unidad, ubicacion_nombre, categoria in movimientos:
@@ -1381,6 +1738,7 @@ def _filas_materiales(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
             observaciones=mov.observaciones,
             descuento=mov.descuento_porcentaje,
             pagado_desde=cuenta_pago.get(mov.pagado_desde_metodo_caja_id),
+            pagos=pagosPorMov.get(mov.id),
             fiado=bool(mov.fiar),
             fiado_a=deuda["proveedor"] if deuda else (mov.proveedor_nombre if mov.fiar else None),
             fiado_estado=deuda["estado"] if deuda else None,
@@ -1420,6 +1778,9 @@ def _filas_productos(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
         db, [m.pagado_desde_metodo_caja_id for m, *_ in movimientos if m.pagado_desde_metodo_caja_id],
     )
     deudas = _deudas_de_movimientos(db, [m.id for m, *_ in movimientos])
+    pagos_producto = _pagos_de_compras(
+        db, [m.id for m, *_ in movimientos if m.tipo == "ENTRADA"], por_producto=True,
+    )
 
     filas: List[dict] = []
     for mov, nombre, ubicacion_nombre, categoria in movimientos:
@@ -1448,6 +1809,7 @@ def _filas_productos(db: Session, ctx: _ConsultaResuelta) -> List[dict]:
             observaciones=mov.observaciones,
             descuento=mov.descuento_porcentaje,
             pagado_desde=cuenta_pago.get(mov.pagado_desde_metodo_caja_id),
+            pagos=pagos_producto.get(mov.id),
             fiado=bool(mov.fiar),
             fiado_a=deuda["proveedor"] if deuda else (mov.proveedor_nombre if mov.fiar else None),
             fiado_estado=deuda["estado"] if deuda else None,
