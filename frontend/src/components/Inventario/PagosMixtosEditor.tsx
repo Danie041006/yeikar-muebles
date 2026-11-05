@@ -180,6 +180,13 @@ export default function PagosMixtosEditor({
           </div>
         );
       })}
+      <button
+        type="button"
+        onClick={() => onChange([...filas, { key: '', monto: '', tasa: '', fecha: '' }])}
+        className="inline-flex items-center gap-1 rounded-full border border-dashed border-amber-400 bg-white/60 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+      >
+        + Agregar otro pago
+      </button>
       {faltante != null && (
         <div className={`space-y-0.5 text-[11px] rounded-lg px-3 py-2 border ${cuadreOk ? 'text-emerald-900 bg-emerald-50/70 border-emerald-100' : 'text-red-700 bg-red-50/80 border-red-200 font-bold'}`}>
           {exigirCuadre ? (
