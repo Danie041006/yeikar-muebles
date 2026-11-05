@@ -93,6 +93,9 @@ class MovimientoInventario(Base):
     # Gasto generado automáticamente por esta entrada (compra de contado).
     # Permite bloquear su borrado y saber que la entrada quedó sin pago.
     gasto_id = Column(BigInteger, ForeignKey("gasto.id", ondelete="SET NULL"), nullable=True)
+    # Gasto del flete/llevada (si se pagó aparte). Se guarda el vínculo para
+    # poder editar o anular la entrada sin adivinar cuál gasto es el flete.
+    llevada_gasto_id = Column(BigInteger, ForeignKey("gasto.id", ondelete="SET NULL"), nullable=True)
     descuento_porcentaje = Column(Numeric(5, 2), nullable=True)
     fiar = Column(Boolean, nullable=False, server_default="false")
     fecha = Column(DateTime, server_default=func.now(), index=True)

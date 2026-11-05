@@ -707,7 +707,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         mat_ll = db.query(Material).filter(Material.id == movimiento.material_id).first()
         nombre_ll = mat_ll.nombre if mat_ll else "insumo"
         unidad_ll = mat_ll.unidad_medida.nombre if mat_ll and mat_ll.unidad_medida else None
-        _gasto_compra_contado(
+        gasto_llevada = _gasto_compra_contado(
             db,
             tipo_gasto_nombre="FLETE / LLEVADA DE INSUMO",
             descripcion=(
@@ -723,7 +723,10 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             usuario=usuario,
             persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
             clasificacion="GASTO_OFICINA" if es_oficina else "GASTO_FABRICA",
-)
+        )
+        if gasto_llevada is not None:
+            db_mov.llevada_gasto_id = gasto_llevada.id
+            db.flush()
     # ── "Fiar": ENTRADA sin pagar → cuenta por pagar (compra + pasada) ─────
     # El usuario se lleva el insumo hoy y queda debiendo al proveedor. La
     # deuda nace solo con el flag explícito; sin él (crédito histórico) no se
@@ -802,6 +805,7 @@ def _snapshot_movimiento_inventario(m: model.MovimientoInventario) -> dict:
         "moneda_pago_id": m.moneda_pago_id,
         "tasa_pago": float(m.tasa_pago) if m.tasa_pago is not None else None,
         "gasto_id": m.gasto_id,
+        "llevada_gasto_id": m.llevada_gasto_id,
         "descuento_porcentaje": float(m.descuento_porcentaje) if m.descuento_porcentaje is not None else None,
         "fiar": bool(m.fiar),
         "referencia_tipo": m.referencia_tipo,
@@ -891,57 +895,19 @@ def _pagos_de_entrada(db: Session, m: model.MovimientoInventario):
     return []
 
 
-def _exigir_permiso_correccion_entrada(db: Session, m: model.MovimientoInventario, usuario) -> None:
-    if usuario is None:
-        return
-    from app.modules.users.deps import tiene_alcance_total
-
-    if tiene_alcance_total(usuario):
-        return
-
-    from app.modules.gastos.model import Gasto
-
-    gastos = []
-    if m.gasto_id:
-        gasto = db.query(Gasto).filter(Gasto.id == m.gasto_id).first()
-        if gasto is not None:
-            gastos.append(gasto)
-    for fila in (
-        db.query(model.EntradaCompraPago)
-        .filter(model.EntradaCompraPago.movimiento_inventario_id == m.id)
-        .all()
-    ):
-        if fila.gasto_id:
-            gasto = db.query(Gasto).filter(Gasto.id == fila.gasto_id).first()
-            if gasto is not None:
-                gastos.append(gasto)
-
-    if not gastos:
-        # Entrada sin pago (carga de stock): basta el permiso del módulo.
-        return
-    if any(g.creado_por_id == usuario.id for g in gastos):
-        return
-    raise ValueError(
-        "Solo el autor de la entrada o Dueño/Administrador puede corregirla o anularla."
-    )
-
-
 def _validar_entrada_corregible(db: Session, m: model.MovimientoInventario, usuario) -> None:
-    _exigir_permiso_correccion_entrada(db, m, usuario)
+    """Solo entradas manuales.
+
+    El permiso de ESCRITURA del módulo Inventario lo exige el router
+    (`require_module('inventario')`). Por eso cualquier usuario con Inventario
+    en modo gestionar puede corregir/anular, incluida Paola; no se limita al
+    autor del gasto. La auditoría registra quién lo hizo.
+    """
     if m.tipo != "ENTRADA":
         raise ValueError("Solo se pueden editar o anular entradas de inventario.")
     if m.referencia_tipo:
         raise ValueError(
             f"Esta entrada viene de {m.referencia_tipo}; no se corrige desde el kardex."
-        )
-    if m.fiar:
-        raise ValueError(
-            "Esta entrada está fiada a un proveedor. Anula primero la cuenta por pagar."
-        )
-    if m.llevada is not None and Decimal(str(m.llevada)) > 0:
-        raise ValueError(
-            "Esta entrada tiene flete/llevada. Corrígela manualmente para no "
-            "descuadrar el gasto del flete."
         )
 
 
@@ -960,7 +926,7 @@ def _ultima_entrada(db: Session, material_id: int):
     )
 
 
-def _tipo_gasto_compra_editado(db: Session, es_oficina: bool) -> tuple[int, str]:
+def _tipo_gasto_compra_editado(db: Session, es_oficina: bool) -> tuple[int, str, str]:
     from app.modules.catalogos.model import TipoGasto
 
     nombre = "PAPELERIA DE OFICINA" if es_oficina else "COMPRA DE INSUMOS"
@@ -969,7 +935,7 @@ def _tipo_gasto_compra_editado(db: Session, es_oficina: bool) -> tuple[int, str]
         tipo = TipoGasto(nombre=nombre, categoria="OPERATIVO")
         db.add(tipo)
         db.flush()
-    return tipo.id, ("GASTO_OFICINA" if es_oficina else "GASTO_FABRICA")
+    return tipo.id, ("GASTO_OFICINA" if es_oficina else "GASTO_FABRICA"), nombre
 
 
 def _monto_en_moneda_de_pago(monto_cop: Decimal, moneda_id, tasa) -> Decimal:
@@ -1016,13 +982,566 @@ def _actualizar_gasto_y_caja(
     return monto_gasto
 
 
+def _snapshot_cxp(cxp) -> dict:
+    if cxp is None:
+        return {}
+    return {
+        "id": cxp.id,
+        "proveedor_id": cxp.proveedor_id,
+        "gasto_id": cxp.gasto_id,
+        "tipo_gasto_id": cxp.tipo_gasto_id,
+        "moneda_id": cxp.moneda_id,
+        "fecha": cxp.fecha.isoformat() if cxp.fecha else None,
+        "descripcion": cxp.descripcion,
+        "monto": float(cxp.monto),
+        "monto_en_moneda_base": float(cxp.monto_en_moneda_base),
+        "monto_pagado": float(cxp.monto_pagado or 0),
+        "estado": cxp.estado,
+        "origen_tipo": cxp.origen_tipo,
+        "origen_id": cxp.origen_id,
+    }
+
+
+def _cxp_de_entrada(db: Session, m: model.MovimientoInventario):
+    from app.modules.cuentas_por_pagar.model import CuentaPorPagar
+
+    return (
+        db.query(CuentaPorPagar)
+        .filter(
+            CuentaPorPagar.origen_tipo == "ENTRADA_INVENTARIO",
+            CuentaPorPagar.origen_id == m.id,
+        )
+        .first()
+    )
+
+
+def _validar_cxp_sin_abonos(db: Session, cxp) -> None:
+    if cxp is None:
+        return
+    from app.modules.cuentas_por_pagar.model import PagoCuentaPorPagar
+
+    abonos = (
+        db.query(PagoCuentaPorPagar)
+        .filter(PagoCuentaPorPagar.cuenta_por_pagar_id == cxp.id)
+        .count()
+    )
+    if Decimal(str(cxp.monto_pagado or 0)) > 0 or abonos:
+        raise ValueError(
+            "La cuenta por pagar de esta entrada ya tiene abonos. "
+            "No se puede editar ni anular; corrige primero los abonos."
+        )
+
+
+def _gasto_de_cxp(db: Session, cxp):
+    from app.modules.gastos.model import Gasto
+
+    if cxp is None or cxp.gasto_id is None:
+        return None
+    return db.query(Gasto).filter(Gasto.id == cxp.gasto_id).first()
+
+
+def _eliminar_cxp_entrada(db: Session, cxp, usuario, motivo=None) -> None:
+    from app.modules.auditoria.service import record_event
+    from app.modules.reports.model import MovimientoCaja
+
+    _validar_cxp_sin_abonos(db, cxp)
+    gasto = _gasto_de_cxp(db, cxp)
+    antes_cxp = _snapshot_cxp(cxp)
+
+    # Una deuda no debería tener salida de caja; si alguien la creó, se limpia.
+    if gasto is not None:
+        caja = (
+            db.query(MovimientoCaja)
+            .filter(MovimientoCaja.referencia == f"Gasto #{gasto.id}")
+            .first()
+        )
+        if caja is not None:
+            record_event(
+                db,
+                actor=usuario,
+                action="DELETE",
+                entity_type="movimiento_caja",
+                entity_id=caja.id,
+                before=_snapshot_movimiento_caja(caja),
+            )
+            db.delete(caja)
+        record_event(
+            db,
+            actor=usuario,
+            action="DELETE",
+            entity_type="gasto",
+            entity_id=gasto.id,
+            before=_snapshot_gasto(gasto),
+        )
+        db.delete(gasto)
+
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="cuenta_por_pagar",
+        entity_id=cxp.id,
+        before=antes_cxp,
+        after={"motivo": motivo} if motivo else None,
+    )
+    db.delete(cxp)
+    db.flush()
+
+
+def _actualizar_cxp_entrada(
+    db: Session,
+    cxp,
+    *,
+    proveedor_id: int,
+    material,
+    cantidad: Decimal,
+    costo: Decimal,
+    llevada: Decimal,
+    fecha,
+    tipo_gasto_id: int,
+    clasificacion: str,
+    cliente_id,
+    cliente_nombre,
+    usuario,
+) -> None:
+    from app.modules.cuentas_por_pagar.model import DetalleCuentaPorPagar
+
+    _validar_cxp_sin_abonos(db, cxp)
+    monto = (cantidad * costo + llevada).quantize(Decimal("0.01"))
+    descripcion = f"Compra fiada: {material.nombre} x{cantidad:g}"
+
+    cxp.proveedor_id = proveedor_id
+    cxp.tipo_gasto_id = tipo_gasto_id
+    cxp.moneda_id = MONEDA_BASE_ID
+    cxp.tasa_cambio = Decimal("1.0")
+    cxp.fecha = fecha
+    cxp.descripcion = descripcion
+    cxp.monto = monto
+    cxp.monto_en_moneda_base = monto
+    cxp.estado = "PENDIENTE"
+
+    if len(cxp.detalles) > 1:
+        raise ValueError(
+            "La cuenta por pagar de esta entrada tiene varios renglones; "
+            "no se puede corregir automáticamente."
+        )
+    if not cxp.detalles:
+        cxp.detalles.append(DetalleCuentaPorPagar(
+            orden=0,
+            descripcion=material.nombre,
+            material_id=material.id,
+            cantidad=cantidad,
+            precio_unitario=costo,
+            cliente_id=cliente_id,
+            cliente_nombre=cliente_nombre,
+        ))
+    else:
+        detalle = cxp.detalles[0]
+        detalle.descripcion = material.nombre
+        detalle.material_id = material.id
+        detalle.cantidad = cantidad
+        detalle.precio_unitario = costo
+        detalle.cliente_id = cliente_id
+        detalle.cliente_nombre = cliente_nombre
+
+    gasto = _gasto_de_cxp(db, cxp)
+    if gasto is not None:
+        gasto.tipo_gasto_id = tipo_gasto_id
+        gasto.moneda_id = MONEDA_BASE_ID
+        gasto.fecha = fecha
+        gasto.descripcion = descripcion
+        gasto.monto = monto
+        gasto.tasa_cambio = Decimal("1.0")
+        gasto.monto_en_moneda_base = monto
+        gasto.clasificacion = clasificacion
+        if usuario is not None:
+            gasto.actualizado_por_id = usuario.id
+
+
+def _crear_cxp_entrada(
+    db: Session,
+    m: model.MovimientoInventario,
+    *,
+    proveedor_id: int,
+    material,
+    cantidad: Decimal,
+    costo: Decimal,
+    llevada: Decimal,
+    fecha,
+    tipo_gasto_id: int,
+    clasificacion: str,
+    cliente_id,
+    cliente_nombre,
+    usuario,
+):
+    from app.modules.cuentas_por_pagar.service import crear_cuenta_desde_entrada
+
+    cxp = crear_cuenta_desde_entrada(
+        db,
+        proveedor_id=proveedor_id,
+        material_id=material.id,
+        material_nombre=material.nombre,
+        cantidad=cantidad,
+        costo_unitario=costo,
+        llevada=llevada,
+        fecha=fecha,
+        movimiento_id=m.id,
+        tipo_gasto_id=tipo_gasto_id,
+        cliente_id=cliente_id,
+        cliente_nombre=cliente_nombre,
+        usuario=usuario,
+    )
+    gasto = _gasto_de_cxp(db, cxp)
+    if gasto is not None:
+        gasto.clasificacion = clasificacion
+        gasto.tipo_gasto_id = tipo_gasto_id
+        if usuario is not None:
+            gasto.actualizado_por_id = usuario.id
+    return cxp
+
+
+def _gasto_llevada_de_entrada(db: Session, m: model.MovimientoInventario):
+    from app.modules.gastos.model import Gasto
+
+    if m.llevada is None or Decimal(str(m.llevada)) <= 0:
+        return None
+    if m.llevada_gasto_id:
+        return db.query(Gasto).filter(Gasto.id == m.llevada_gasto_id).first()
+
+    # Entradas históricas (antes de `llevada_gasto_id`): se busca por la
+    # descripción, fecha y monto. Si hay ambigüedad se bloquea para no borrar
+    # el flete equivocado.
+    consulta = db.query(Gasto).filter(
+        Gasto.descripcion.like("Llevada (flete/aduana):%"),
+        Gasto.monto_en_moneda_base == Decimal(str(m.llevada)),
+    )
+    if m.fecha is not None:
+        consulta = consulta.filter(Gasto.fecha == m.fecha.date())
+    candidatos = consulta.all()
+    if len(candidatos) == 1:
+        return candidatos[0]
+    raise ValueError(
+        "No se pudo identificar con certeza el gasto del flete/llevada de esta "
+        "entrada. Corrige o elimina ese gasto manualmente antes de continuar."
+    )
+
+
+def _eliminar_gasto_llevada(db: Session, gasto, usuario, motivo=None) -> None:
+    from app.modules.auditoria.service import record_event
+    from app.modules.reports.model import MovimientoCaja
+
+    if gasto is None:
+        return
+    caja = (
+        db.query(MovimientoCaja)
+        .filter(MovimientoCaja.referencia == f"Gasto #{gasto.id}")
+        .first()
+    )
+    if caja is not None:
+        record_event(
+            db,
+            actor=usuario,
+            action="DELETE",
+            entity_type="movimiento_caja",
+            entity_id=caja.id,
+            before=_snapshot_movimiento_caja(caja),
+        )
+        db.delete(caja)
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="gasto",
+        entity_id=gasto.id,
+        before=_snapshot_gasto(gasto),
+        after={"motivo": motivo} if motivo else None,
+    )
+    db.delete(gasto)
+    db.flush()
+
+
+def _normalizar_pagos_edicion(db: Session, pagos, total_compra: Decimal):
+    """Valida los pagos y devuelve [{pago, cuenta, monto, tasa, monto_cop}]."""
+    from app.modules.reports.model import MetodoCaja
+
+    resumen = []
+    acumulado = Decimal("0")
+    for indice, pago in enumerate(pagos or [], start=1):
+        datos_pago = pago.model_dump() if hasattr(pago, "model_dump") else dict(pago)
+        metodo_caja_id = int(datos_pago["metodo_caja_id"])
+        moneda_id = int(datos_pago["moneda_id"])
+        monto = Decimal(str(datos_pago["monto"])).quantize(Decimal("0.01"))
+        if monto <= 0:
+            raise ValueError(f"El pago {indice} debe ser mayor que cero.")
+        cuenta = (
+            db.query(MetodoCaja)
+            .filter(MetodoCaja.id == metodo_caja_id)
+            .first()
+        )
+        if cuenta is None or not cuenta.activo:
+            raise ValueError(f"El pago {indice} apunta a una cuenta inexistente o inactiva.")
+        if cuenta.moneda_id and cuenta.moneda_id != moneda_id:
+            raise ValueError(
+                f"El pago {indice} está en una moneda distinta a la de la cuenta "
+                f"'{cuenta.nombre}'."
+            )
+        if moneda_id != MONEDA_BASE_ID:
+            tasa_pago = datos_pago.get("tasa_pago")
+            tasa = Decimal(str(tasa_pago or 0))
+            if tasa <= 0:
+                raise ValueError(
+                    f"El pago {indice} necesita la tasa de cambio "
+                    f"(1 moneda del pago = X COP)."
+                )
+        else:
+            tasa_pago = None
+            tasa = Decimal("1")
+        monto_cop = (monto * tasa).quantize(Decimal("0.01"))
+        if monto_cop <= 0:
+            raise ValueError(f"El pago {indice} queda en 0 COP. Revisa el monto/tasa.")
+        acumulado += monto_cop
+        resumen.append({
+            "pago": pago,
+            "metodo_caja_id": metodo_caja_id,
+            "moneda_id": moneda_id,
+            "monto": monto,
+            "tasa_pago": tasa_pago,
+            "tasa": tasa,
+            "monto_cop": monto_cop,
+            "cuenta": cuenta,
+        })
+
+    diferencia = (acumulado - total_compra).quantize(Decimal("0.01"))
+    if abs(diferencia) > Decimal("1.00"):
+        raise ValueError(
+            f"Los pagos suman ${acumulado:,.2f} COP y la compra ${total_compra:,.2f} COP: "
+            f"{'faltan' if diferencia < 0 else 'sobran'} ${abs(diferencia):,.2f} COP. "
+            "Ajusta los montos para que cuadren."
+        )
+    return resumen
+
+
+def _pagos_existentes_a_payload(db: Session, m: model.MovimientoInventario, pagos, nuevo_total: Decimal):
+    """Reescala los pagos actuales al nuevo total conservando cuentas/monedas."""
+    if not pagos:
+        return []
+    filas = []
+    old_total = Decimal("0")
+    for fila, gasto, caja in pagos:
+        if fila is not None:
+            cop = Decimal(str(fila.monto_en_moneda_base))
+            metodo = fila.metodo_caja_id
+            moneda = fila.moneda_id
+            tasa = Decimal(str(fila.tasa_cambio or 1))
+        else:
+            cop = Decimal(str(
+                caja.monto_en_moneda_base if caja is not None else gasto.monto_en_moneda_base
+            ))
+            metodo = m.pagado_desde_metodo_caja_id
+            moneda = gasto.moneda_id or m.moneda_pago_id or MONEDA_BASE_ID
+            tasa = Decimal(str(gasto.tasa_cambio or m.tasa_pago or 1))
+        if metodo is None:
+            raise ValueError("Uno de los pagos actuales no tiene cuenta de caja.")
+        old_total += cop
+        filas.append((metodo, moneda, tasa, cop))
+
+    if old_total <= 0:
+        raise ValueError(
+            "Los pagos actuales no tienen equivalente en COP; no se pueden reescalar."
+        )
+
+    resultado = []
+    acumulado = Decimal("0")
+    for indice, (metodo, moneda, tasa, cop) in enumerate(filas):
+        nuevo_cop = (cop * nuevo_total / old_total).quantize(Decimal("0.01"))
+        if indice == len(filas) - 1:
+            nuevo_cop = nuevo_total - acumulado
+        acumulado += nuevo_cop
+        monto = _monto_en_moneda_de_pago(nuevo_cop, moneda, tasa)
+        if monto <= 0:
+            raise ValueError("El nuevo total deja un pago en cero; revisa cantidad/precio.")
+        resultado.append({
+            "metodo_caja_id": int(metodo),
+            "moneda_id": int(moneda),
+            "monto": monto,
+            "tasa_pago": (tasa if moneda != MONEDA_BASE_ID else None),
+        })
+    return resultado
+
+
+def _eliminar_pagos_entrada(db: Session, m: model.MovimientoInventario, pagos, usuario, motivo=None) -> None:
+    from app.modules.auditoria.service import record_event
+    from app.modules.cuentas_por_pagar.model import CuentaPorPagar
+
+    for fila, gasto, caja in pagos:
+        if gasto is not None:
+            if db.query(CuentaPorPagar).filter(CuentaPorPagar.gasto_id == gasto.id).first():
+                raise ValueError(
+                    "El gasto de esta entrada está ligado a una cuenta por pagar."
+                )
+            otro = (
+                db.query(model.MovimientoInventario)
+                .filter(
+                    model.MovimientoInventario.gasto_id == gasto.id,
+                    model.MovimientoInventario.id != m.id,
+                )
+                .first()
+            )
+            if otro is not None:
+                raise ValueError(
+                    f"El gasto #{gasto.id} también está ligado a la entrada #{otro.id}."
+                )
+        if caja is not None:
+            record_event(
+                db,
+                actor=usuario,
+                action="DELETE",
+                entity_type="movimiento_caja",
+                entity_id=caja.id,
+                before=_snapshot_movimiento_caja(caja),
+            )
+            db.delete(caja)
+        if gasto is not None:
+            record_event(
+                db,
+                actor=usuario,
+                action="DELETE",
+                entity_type="gasto",
+                entity_id=gasto.id,
+                before=_snapshot_gasto(gasto),
+                after={"motivo": motivo} if motivo else None,
+            )
+            db.delete(gasto)
+        if fila is not None:
+            db.delete(fila)
+    db.flush()
+    m.gasto_id = None
+    m.pagado_desde_metodo_caja_id = None
+    m.moneda_pago_id = None
+    m.tasa_pago = None
+
+
+def _crear_pagos_entrada(
+    db: Session,
+    m: model.MovimientoInventario,
+    *,
+    material,
+    resumen,
+    descripcion_base: str,
+    fecha,
+    usuario,
+    tipo_gasto_nombre: str,
+    clasificacion: str,
+    proveedor_nombre,
+) -> None:
+    total_pagos = len(resumen)
+    primero = None
+    for indice, item in enumerate(resumen, start=1):
+        descripcion = descripcion_base
+        if total_pagos > 1:
+            descripcion += (
+                f" · pago {indice} de {total_pagos} en {item['cuenta'].nombre}"
+            )
+        gasto = _gasto_compra_contado(
+            db,
+            tipo_gasto_nombre=tipo_gasto_nombre,
+            descripcion=descripcion,
+            total_ref=item["monto_cop"],
+            ref_moneda_id=MONEDA_BASE_ID,
+            metodo_caja_id=item["metodo_caja_id"],
+            moneda_pago_id=item["moneda_id"],
+            tasa_pago=item["tasa_pago"],
+            fecha=fecha,
+            usuario=usuario,
+            persona_entidad=proveedor_nombre,
+            clasificacion=clasificacion,
+        )
+        db.add(model.EntradaCompraPago(
+            movimiento_inventario_id=m.id,
+            gasto_id=gasto.id,
+            metodo_caja_id=item["metodo_caja_id"],
+            moneda_id=item["moneda_id"],
+            monto=item["monto"],
+            tasa_cambio=item["tasa"],
+            monto_en_moneda_base=item["monto_cop"],
+        ))
+        if indice == 1:
+            primero = gasto
+    db.flush()
+    if primero is not None:
+        m.gasto_id = primero.id
+        m.pagado_desde_metodo_caja_id = resumen[0]["metodo_caja_id"]
+        m.moneda_pago_id = resumen[0]["moneda_id"]
+        m.tasa_pago = resumen[0]["tasa_pago"]
+    else:
+        m.gasto_id = None
+        m.pagado_desde_metodo_caja_id = None
+        m.moneda_pago_id = None
+        m.tasa_pago = None
+
+
+def _aplicar_llevada_entrada(
+    db: Session,
+    m: model.MovimientoInventario,
+    *,
+    material,
+    cantidad: Decimal,
+    nueva_llevada: Decimal,
+    fecha,
+    usuario,
+    cuenta_id,
+    moneda_id,
+    tasa_pago,
+    proveedor_nombre,
+    clasificacion: str,
+    nuevo_fiar: bool,
+) -> None:
+    if nuevo_fiar or nueva_llevada <= 0:
+        m.llevada_gasto_id = None
+        m.llevada = nueva_llevada if nueva_llevada > 0 else None
+        return
+
+    if cuenta_id is None:
+        raise ValueError(
+            "El flete/llevada necesita una cuenta de pago. Elige una cuenta o marca Fiar."
+        )
+
+    nombre_unidad = material.unidad_medida.nombre if material.unidad_medida else None
+    descripcion = (
+        f"Llevada (flete/aduana): {_texto_cantidad(cantidad)} "
+        f"{_texto_unidad(nombre_unidad, cantidad)} de {material.nombre}"
+    )
+    gasto = _gasto_compra_contado(
+        db,
+        tipo_gasto_nombre="FLETE / LLEVADA DE INSUMO",
+        descripcion=descripcion,
+        total_ref=nueva_llevada,
+        ref_moneda_id=MONEDA_BASE_ID,
+        metodo_caja_id=cuenta_id,
+        moneda_pago_id=moneda_id,
+        tasa_pago=tasa_pago,
+        fecha=fecha,
+        usuario=usuario,
+        persona_entidad=proveedor_nombre,
+        clasificacion=clasificacion,
+    )
+    m.llevada_gasto_id = gasto.id if gasto is not None else None
+    m.llevada = nueva_llevada
+
+
 def actualizar_movimiento_inventario(
     db: Session,
     movimiento_id: int,
     esquema: schemas.MovimientoUpdate,
     usuario=None,
 ):
-    """Corrige una ENTRADA manual y todas sus caras (stock, gasto y caja)."""
+    """Corrige una ENTRADA manual y todas sus caras (stock, gasto y caja).
+
+    Cubre los campos del formulario de entrada: cantidad, precio, fecha,
+    proveedor/cliente, zona, quién trajo, observaciones, descuento, cuenta(s)
+    de pago, pagos mixtos, flete/llevada y fiar. El material y el tipo no se
+    cambian; para eso se anula y se crea una entrada nueva.
+    """
     from app.modules.auditoria.service import record_event
 
     m = (
@@ -1054,62 +1573,14 @@ def actualizar_movimiento_inventario(
         raise ValueError("El costo unitario no puede ser negativo.")
     fecha_mov = _fecha_movimiento(datos["fecha"]) if "fecha" in datos else m.fecha
 
-    pagos = _pagos_de_entrada(db, m)
-    if pagos and nuevo_costo <= 0:
-        raise ValueError("Una entrada pagada debe tener un precio unitario mayor que cero.")
-    if not pagos and datos.get("pagado_desde_metodo_caja_id"):
-        raise ValueError(
-            "Esta entrada no tiene pago registrado. Anúlala y créala de nuevo con la cuenta de pago."
-        )
-    if "pagado_desde_metodo_caja_id" in datos:
-        nueva_cuenta = datos["pagado_desde_metodo_caja_id"]
-        if nueva_cuenta is None and pagos:
-            raise ValueError(
-                "No se puede quitar el pago de una entrada. Anúlala y créala de nuevo sin pago."
-            )
-        if len(pagos) > 1 and nueva_cuenta != m.pagado_desde_metodo_caja_id:
-            raise ValueError(
-                "Esta entrada tiene pagos mixtos: no se puede cambiar la cuenta. "
-                "Anúlala y créala de nuevo."
-            )
-    else:
-        nueva_cuenta = None
+    nuevo_fiar = bool(datos.get("fiar", m.fiar))
+    nueva_llevada = Decimal(str(datos.get("llevada", m.llevada if m.llevada is not None else 0)))
+    if nueva_llevada < 0:
+        raise ValueError("El flete/llevada no puede ser negativo.")
+    nuevo_total = (nueva_cantidad * nuevo_costo).quantize(Decimal("0.01"))
 
-    if nueva_cuenta is not None and pagos:
-        from app.modules.reports.model import MetodoCaja
-
-        cuenta = db.query(MetodoCaja).filter(MetodoCaja.id == nueva_cuenta).first()
-        if cuenta is None or not cuenta.activo:
-            raise ValueError("La cuenta de caja indicada no existe o está inactiva.")
-        if cuenta.moneda_id and cuenta.moneda_id != pagos[0][1].moneda_id:
-            raise ValueError(
-                "La cuenta nueva es de otra moneda. Para cambiarla, anula y recrea la entrada."
-            )
-
-    inventario = (
-        db.query(model.Inventario)
-        .filter(
-            model.Inventario.material_id == m.material_id,
-            model.Inventario.ubicacion_id == m.ubicacion_id,
-        )
-        .with_for_update()
-        .first()
-    )
-    if inventario is None:
-        raise ValueError("No se encontró el stock del material en esa ubicación.")
-
-    delta = nueva_cantidad - Decimal(str(m.cantidad))
-    if delta < 0 and Decimal(str(inventario.cantidad)) < -delta:
-        raise ValueError(
-            f"No se puede reducir la entrada: hay {inventario.cantidad} en stock y "
-            f"se intentan quitar {abs(delta)}."
-        )
-
-    # Proveedor / cliente: si cambia el nombre se vuelve a resolver contra el
-    # catálogo; si no coincide, queda como texto libre (igual que al crear).
-    proveedor_cambiado = False
+    # Proveedor / cliente.
     if "proveedor_nombre" in datos or "proveedor_id" in datos:
-        proveedor_cambiado = True
         pid = datos.get("proveedor_id") if "proveedor_id" in datos else None
         pnom = datos.get("proveedor_nombre") if "proveedor_nombre" in datos else None
         if pid is not None:
@@ -1135,11 +1606,111 @@ def actualizar_movimiento_inventario(
     else:
         cid, cnom = m.cliente_id, m.cliente_nombre
 
-    # Snapshot de las caras de pago antes de tocar montos.
-    snapshots_pagos = [
-        (fila, gasto, caja, _snapshot_gasto(gasto), _snapshot_movimiento_caja(caja))
-        for fila, gasto, caja in pagos
-    ]
+    nuevo_departamento = datos.get("departamento", m.departamento)
+    es_oficina = (nuevo_departamento or "").strip().upper() == "OFICINA"
+    tipo_gasto_id, clasificacion, tipo_gasto_nombre = _tipo_gasto_compra_editado(db, es_oficina)
+
+    if nuevo_fiar:
+        if datos.get("pagos"):
+            raise ValueError("Elige entre pagar (una o varias cuentas) o fiar, no ambos.")
+        if datos.get("pagado_desde_metodo_caja_id"):
+            raise ValueError("Elige entre pagar de una cuenta o fiar, no ambos.")
+        if not pid and pnom:
+            # Misma regla que al crear: un nombre libre de proveedor se
+            # materializa en el catálogo porque la deuda necesita el FK.
+            proveedor = Proveedor(nombre=pnom)
+            db.add(proveedor)
+            db.flush()
+            pid = proveedor.id
+        if not pid:
+            raise ValueError("Para fiar debes indicar el proveedor.")
+        if nuevo_costo <= 0:
+            raise ValueError("Para fiar debes indicar el costo unitario del insumo.")
+
+    # Stock: validar antes de tocar cualquier registro.
+    inventario = (
+        db.query(model.Inventario)
+        .filter(
+            model.Inventario.material_id == m.material_id,
+            model.Inventario.ubicacion_id == m.ubicacion_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if inventario is None:
+        raise ValueError("No se encontró el stock del material en esa ubicación.")
+    delta = nueva_cantidad - Decimal(str(m.cantidad))
+    if delta < 0 and Decimal(str(inventario.cantidad)) < -delta:
+        raise ValueError(
+            f"No se puede reducir la entrada: hay {inventario.cantidad} en stock y "
+            f"se intentan quitar {abs(delta)}."
+        )
+
+    pagos_existentes = _pagos_de_entrada(db, m)
+    cxp = _cxp_de_entrada(db, m)
+    if cxp is not None:
+        _validar_cxp_sin_abonos(db, cxp)
+
+    # Flete histórico: se resuelve ANTES de borrar nada; si es ambiguo, se
+    # bloquea sin dejar la entrada a medias.
+    flete_existente = (
+        None
+        if (m.fiar or not pagos_existentes)
+        else _gasto_llevada_de_entrada(db, m)
+    )
+
+    resumen = []
+    if not nuevo_fiar:
+        if "pagos" in datos and datos["pagos"] is not None:
+            resumen = _normalizar_pagos_edicion(db, datos["pagos"], nuevo_total)
+        elif datos.get("pagado_desde_metodo_caja_id") is not None:
+            moneda_id = int(datos.get("moneda_pago_id") or m.moneda_pago_id or MONEDA_BASE_ID)
+            tasa_pago = datos.get("tasa_pago", m.tasa_pago)
+            if moneda_id != MONEDA_BASE_ID:
+                if not tasa_pago or Decimal(str(tasa_pago)) <= 0:
+                    raise ValueError(
+                        "Para pagar en otra moneda indica la tasa de cambio "
+                        "(1 moneda del pago = X COP)."
+                    )
+                monto = _monto_en_moneda_de_pago(nuevo_total, moneda_id, tasa_pago)
+            else:
+                monto = nuevo_total
+                tasa_pago = None
+            if monto <= 0:
+                raise ValueError("El pago no puede quedar en cero.")
+            resumen = _normalizar_pagos_edicion(db, [{
+                "metodo_caja_id": datos["pagado_desde_metodo_caja_id"],
+                "moneda_id": moneda_id,
+                "monto": monto,
+                "tasa_pago": tasa_pago,
+            }], nuevo_total)
+        elif pagos_existentes:
+            resumen = _normalizar_pagos_edicion(
+                db,
+                _pagos_existentes_a_payload(db, m, pagos_existentes, nuevo_total),
+                nuevo_total,
+            )
+        elif nuevo_costo > 0:
+            raise ValueError(
+                "Indica la cuenta de pago (una o varias) o marca la entrada como fiada."
+            )
+
+        if nuevo_costo > 0 and not resumen:
+            raise ValueError(
+                "Indica la cuenta de pago (una o varias) o marca la entrada como fiada."
+            )
+
+    # A partir de aquí ya está todo validado. Se reemplazan las caras.
+    if pagos_existentes:
+        _eliminar_pagos_entrada(db, m, pagos_existentes, usuario, motivo)
+    if cxp is not None and not nuevo_fiar:
+        _eliminar_cxp_entrada(db, cxp, usuario, motivo)
+        cxp = None
+
+    if flete_existente is not None:
+        _eliminar_gasto_llevada(db, flete_existente, usuario, motivo)
+        m.llevada_gasto_id = None
+        flete_existente = None
 
     m.cantidad = nueva_cantidad
     m.costo_unitario = nuevo_costo
@@ -1148,102 +1719,105 @@ def actualizar_movimiento_inventario(
     m.proveedor_nombre = pnom
     m.cliente_id = cid
     m.cliente_nombre = cnom
-    if "departamento" in datos:
-        m.departamento = datos["departamento"]
+    m.departamento = nuevo_departamento
     if "recibido_por" in datos:
         m.recibido_por = datos["recibido_por"]
     if "observaciones" in datos:
         m.observaciones = datos["observaciones"]
     if "descuento_porcentaje" in datos:
         m.descuento_porcentaje = datos["descuento_porcentaje"]
-    if nueva_cuenta is not None:
-        m.pagado_desde_metodo_caja_id = nueva_cuenta
+    m.fiar = nuevo_fiar
+    m.llevada = nueva_llevada if nueva_llevada > 0 else None
 
-    inventario.cantidad = Decimal(str(inventario.cantidad)) + delta
-
-    nuevo_total = (nueva_cantidad * nuevo_costo).quantize(Decimal("0.01"))
-    es_oficina = (m.departamento or "").strip().upper() == "OFICINA"
-    tipo_gasto_id, clasificacion = _tipo_gasto_compra_editado(db, es_oficina)
-    descripcion = _descripcion_compra_material(
-        material.nombre,
-        nueva_cantidad,
-        material.unidad_medida.nombre if material.unidad_medida else None,
-    )
-
-    if len(pagos) == 1:
-        fila, gasto, caja = pagos[0]
-        if caja is None:
-            raise ValueError("No se encontró la salida de caja del gasto de la entrada.")
-        monto_moneda = _actualizar_gasto_y_caja(
-            db,
-            gasto,
-            caja,
-            monto_cop=nuevo_total,
-            descripcion=descripcion,
-            fecha=fecha_mov.date(),
-            metodo_caja_id=nueva_cuenta,
-            tipo_gasto_id=tipo_gasto_id,
-            clasificacion=clasificacion,
-            usuario=usuario,
-        )
-        if proveedor_cambiado:
-            caja.persona_entidad = pnom or None
-        if fila is not None:
-            fila.monto = monto_moneda
-            fila.monto_en_moneda_base = nuevo_total
-            fila.metodo_caja_id = caja.metodo_caja_id
-            fila.moneda_id = gasto.moneda_id
-            fila.tasa_cambio = gasto.tasa_cambio
-
-    elif len(pagos) > 1:
-        total_anterior = sum(
-            Decimal(str(fila.monto_en_moneda_base)) for fila, _, _ in pagos
-        )
-        if total_anterior <= 0:
-            raise ValueError("Los pagos de la entrada no tienen monto; no se pueden reescalar.")
-        from app.modules.reports.model import MetodoCaja
-
-        acumulado = Decimal("0.00")
-        for indice, (fila, gasto, caja) in enumerate(pagos):
-            if caja is None:
-                raise ValueError("No se encontró la salida de caja de uno de los pagos.")
-            nuevo_cop = (
-                Decimal(str(fila.monto_en_moneda_base)) * nuevo_total / total_anterior
-            ).quantize(Decimal("0.01"))
-            if indice == len(pagos) - 1:
-                nuevo_cop = nuevo_total - acumulado
-            acumulado += nuevo_cop
-            cuenta = db.query(MetodoCaja).filter(MetodoCaja.id == fila.metodo_caja_id).first()
-            descripcion_pago = (
-                descripcion
-                + f" · pago {indice + 1} de {len(pagos)} en "
-                + (cuenta.nombre if cuenta else "cuenta")
-            )
-            monto_moneda = _actualizar_gasto_y_caja(
+    if nuevo_fiar:
+        if cxp is not None:
+            _actualizar_cxp_entrada(
                 db,
-                gasto,
-                caja,
-                monto_cop=nuevo_cop,
-                descripcion=descripcion_pago,
+                cxp,
+                proveedor_id=pid,
+                material=material,
+                cantidad=nueva_cantidad,
+                costo=nuevo_costo,
+                llevada=nueva_llevada,
                 fecha=fecha_mov.date(),
-                metodo_caja_id=None,
                 tipo_gasto_id=tipo_gasto_id,
                 clasificacion=clasificacion,
+                cliente_id=cid,
+                cliente_nombre=cnom,
                 usuario=usuario,
             )
-            if proveedor_cambiado:
-                caja.persona_entidad = pnom or None
-            fila.monto = monto_moneda
-            fila.monto_en_moneda_base = nuevo_cop
-            fila.metodo_caja_id = caja.metodo_caja_id
-            fila.moneda_id = gasto.moneda_id
-            fila.tasa_cambio = gasto.tasa_cambio
+        else:
+            _crear_cxp_entrada(
+                db,
+                m,
+                proveedor_id=pid,
+                material=material,
+                cantidad=nueva_cantidad,
+                costo=nuevo_costo,
+                llevada=nueva_llevada,
+                fecha=fecha_mov.date(),
+                tipo_gasto_id=tipo_gasto_id,
+                clasificacion=clasificacion,
+                cliente_id=cid,
+                cliente_nombre=cnom,
+                usuario=usuario,
+            )
+        m.gasto_id = None
+        m.pagado_desde_metodo_caja_id = None
+        m.moneda_pago_id = None
+        m.tasa_pago = None
+        m.llevada_gasto_id = None
+    else:
+        descripcion_base = _descripcion_compra_material(
+            material.nombre,
+            nueva_cantidad,
+            material.unidad_medida.nombre if material.unidad_medida else None,
+        )
+        if resumen:
+            _crear_pagos_entrada(
+                db,
+                m,
+                material=material,
+                resumen=resumen,
+                descripcion_base=descripcion_base,
+                fecha=fecha_mov.date(),
+                usuario=usuario,
+                tipo_gasto_nombre=tipo_gasto_nombre,
+                clasificacion=clasificacion,
+                proveedor_nombre=pnom,
+            )
+        else:
+            m.gasto_id = None
+            m.pagado_desde_metodo_caja_id = None
+            m.moneda_pago_id = None
+            m.tasa_pago = None
 
+        # Flete/llevada: se recrea con la cuenta principal (primera cuenta).
+        if nueva_llevada > 0 and resumen:
+            principal = resumen[0]
+            _aplicar_llevada_entrada(
+                db,
+                m,
+                material=material,
+                cantidad=nueva_cantidad,
+                nueva_llevada=nueva_llevada,
+                fecha=fecha_mov.date(),
+                usuario=usuario,
+                cuenta_id=principal["metodo_caja_id"],
+                moneda_id=principal["moneda_id"],
+                tasa_pago=principal["tasa_pago"],
+                proveedor_nombre=pnom,
+                clasificacion=clasificacion,
+                nuevo_fiar=False,
+            )
+        else:
+            m.llevada_gasto_id = None
+
+    inventario.cantidad = Decimal(str(inventario.cantidad)) + delta
     db.flush()
 
-    # El costo_base del catálogo sigue al último precio de entrada. Solo se
-    # recalcula si esta entrada era la última o si, al cambiar la fecha, pasó a
-    # serlo; así no se pisa un costo editado a mano por una entrada vieja.
+    # Costo_base: sigue al último precio de entrada, pero solo se toca si esta
+    # entrada era la última o si, al cambiar la fecha, pasó a serlo.
     nueva_ultima = _ultima_entrada(db, m.material_id)
     if (ultima_antes is not None and ultima_antes.id == m.id) or (
         nueva_ultima is not None and nueva_ultima.id == m.id
@@ -1266,26 +1840,6 @@ def actualizar_movimiento_inventario(
         before=antes_mov,
         after=despues_mov,
     )
-    for fila, gasto, caja, antes_gasto, antes_caja in snapshots_pagos:
-        record_event(
-            db,
-            actor=usuario,
-            action="UPDATE",
-            entity_type="gasto",
-            entity_id=gasto.id,
-            before=antes_gasto,
-            after=_snapshot_gasto(gasto),
-        )
-        if caja is not None:
-            record_event(
-                db,
-                actor=usuario,
-                action="UPDATE",
-                entity_type="movimiento_caja",
-                entity_id=caja.id,
-                before=antes_caja,
-                after=_snapshot_movimiento_caja(caja),
-            )
 
     db.commit()
     db.refresh(m)
@@ -1298,7 +1852,7 @@ def anular_movimiento_inventario(
     usuario=None,
     motivo: Optional[str] = None,
 ) -> bool:
-    """Anula (elimina) una ENTRADA manual y revierte stock, gasto y caja."""
+    """Anula (elimina) una ENTRADA manual y revierte stock, gasto, caja y deuda."""
     from app.modules.auditoria.service import record_event
 
     m = (
@@ -1332,64 +1886,24 @@ def anular_movimiento_inventario(
             f"entrada fue de {m.cantidad}. Parte del material ya se consumió o vendió."
         )
 
-    # Una entrada fiada o con flete se bloquea arriba, pero por seguridad no
-    # borramos gastos que estén ligados a una deuda del proveedor.
-    from app.modules.cuentas_por_pagar.model import CuentaPorPagar
-    from app.modules.gastos.model import Gasto
-    from app.modules.reports.model import MovimientoCaja
+    pagos_existentes = _pagos_de_entrada(db, m)
+    cxp = _cxp_de_entrada(db, m)
+    if cxp is not None:
+        _validar_cxp_sin_abonos(db, cxp)
+    flete_existente = (
+        None
+        if (m.fiar or not pagos_existentes)
+        else _gasto_llevada_de_entrada(db, m)
+    )
 
-    pagos = _pagos_de_entrada(db, m)
-    for fila, gasto, caja in pagos:
-        if gasto is not None:
-            if db.query(CuentaPorPagar).filter(CuentaPorPagar.gasto_id == gasto.id).first():
-                raise ValueError(
-                    "El gasto de esta entrada está ligado a una cuenta por pagar. "
-                    "Anula primero la deuda."
-                )
-            otro = (
-                db.query(model.MovimientoInventario)
-                .filter(
-                    model.MovimientoInventario.gasto_id == gasto.id,
-                    model.MovimientoInventario.id != m.id,
-                )
-                .first()
-            )
-            if otro is not None:
-                raise ValueError(
-                    f"El gasto #{gasto.id} también está ligado a la entrada #{otro.id}."
-                )
-
-    snapshots_pagos = [
-        (fila, gasto, caja, _snapshot_gasto(gasto), _snapshot_movimiento_caja(caja))
-        for fila, gasto, caja in pagos
-    ]
+    if pagos_existentes:
+        _eliminar_pagos_entrada(db, m, pagos_existentes, usuario, motivo)
+    if cxp is not None:
+        _eliminar_cxp_entrada(db, cxp, usuario, motivo)
+    if flete_existente is not None:
+        _eliminar_gasto_llevada(db, flete_existente, usuario, motivo)
 
     inventario.cantidad = Decimal(str(inventario.cantidad)) - Decimal(str(m.cantidad))
-
-    for fila, gasto, caja, antes_gasto, antes_caja in snapshots_pagos:
-        if caja is not None:
-            record_event(
-                db,
-                actor=usuario,
-                action="DELETE",
-                entity_type="movimiento_caja",
-                entity_id=caja.id,
-                before=antes_caja,
-            )
-            db.delete(caja)
-        if gasto is not None:
-            record_event(
-                db,
-                actor=usuario,
-                action="DELETE",
-                entity_type="gasto",
-                entity_id=gasto.id,
-                before=antes_gasto,
-            )
-            db.delete(gasto)
-        if fila is not None:
-            db.delete(fila)
-
     db.delete(m)
     db.flush()
 
@@ -1415,6 +1929,62 @@ def anular_movimiento_inventario(
     )
     db.commit()
     return True
+
+
+def obtener_movimiento_inventario(db: Session, movimiento_id: int):
+    return (
+        db.query(model.MovimientoInventario)
+        .filter(model.MovimientoInventario.id == movimiento_id)
+        .first()
+    )
+
+
+def pagos_de_entrada_para_detalle(db: Session, m: model.MovimientoInventario):
+    """Desglose de pagos para precargar el formulario de edición."""
+    from app.modules.gastos.model import Gasto
+    from app.modules.reports.model import MovimientoCaja
+
+    if m.fiar:
+        return []
+
+    salida = []
+    filas = (
+        db.query(model.EntradaCompraPago)
+        .filter(model.EntradaCompraPago.movimiento_inventario_id == m.id)
+        .order_by(model.EntradaCompraPago.id)
+        .all()
+    )
+    if filas:
+        for fila in filas:
+            salida.append(schemas.PagoEntradaResponse(
+                metodo_caja_id=fila.metodo_caja_id or m.pagado_desde_metodo_caja_id,
+                moneda_id=fila.moneda_id,
+                monto=fila.monto,
+                tasa_pago=(
+                    fila.tasa_cambio if fila.moneda_id != MONEDA_BASE_ID else None
+                ),
+                monto_en_moneda_base=fila.monto_en_moneda_base,
+            ))
+        return salida
+
+    if m.gasto_id:
+        gasto = db.query(Gasto).filter(Gasto.id == m.gasto_id).first()
+        caja = (
+            db.query(MovimientoCaja)
+            .filter(MovimientoCaja.referencia == f"Gasto #{m.gasto_id}")
+            .first()
+        )
+        if gasto is not None and caja is not None:
+            salida.append(schemas.PagoEntradaResponse(
+                metodo_caja_id=m.pagado_desde_metodo_caja_id or caja.metodo_caja_id,
+                moneda_id=gasto.moneda_id,
+                monto=caja.monto,
+                tasa_pago=(
+                    gasto.tasa_cambio if gasto.moneda_id != MONEDA_BASE_ID else None
+                ),
+                monto_en_moneda_base=caja.monto_en_moneda_base,
+            ))
+    return salida
 
 
 def obtener_movimientos_por_material(

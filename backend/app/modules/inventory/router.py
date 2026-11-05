@@ -56,6 +56,21 @@ def crear_movimiento(
         raise HTTPException(status_code=409, detail="El movimiento de inventario entró en conflicto con otra operación simultánea")
 
 
+@router.get("/movimiento/{movimiento_id}", response_model=schemas.MovimientoDetalleResponse)
+def ver_movimiento(
+    movimiento_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Entrada + desglose de pagos, para el formulario de corrección."""
+    mov = service.obtener_movimiento_inventario(db, movimiento_id)
+    if mov is None:
+        raise HTTPException(status_code=404, detail="Movimiento de inventario no encontrado")
+    respuesta = schemas.MovimientoDetalleResponse.model_validate(mov)
+    respuesta.pagos = service.pagos_de_entrada_para_detalle(db, mov)
+    return respuesta
+
+
 @router.put("/movimiento/{movimiento_id}", response_model=schemas.MovimientoResponse)
 def actualizar_movimiento(
     movimiento_id: int,

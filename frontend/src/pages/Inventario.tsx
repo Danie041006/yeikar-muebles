@@ -145,12 +145,19 @@ export default function Inventario() {
     costo_unitario: string;
     fecha: string;
     proveedor_nombre: string;
+    cliente_nombre: string;
     departamento: string;
     recibido_por: string;
     observaciones: string;
+    descuento_porcentaje: string;
+    llevada_unidad: string;
     pago_key: string;
+    tasa_pago: string;
+    monto_principal: string;
     motivo_correccion: string;
   } | null>(null);
+  const [pagosEdicion, setPagosEdicion] = useState<PagoMixtoRow[]>([]);
+  const [cargandoDetalleMov, setCargandoDetalleMov] = useState(false);
   const [guardandoEdicionMov, setGuardandoEdicionMov] = useState(false);
   const [movimientoAnulando, setMovimientoAnulando] = useState<MovimientoResponse | null>(null);
   const [motivoAnulacion, setMotivoAnulacion] = useState('');
@@ -901,27 +908,72 @@ export default function Inventario() {
     await fetchInsumos();
   };
 
-  const abrirEdicionMovimiento = (mov: MovimientoResponse) => {
+  const abrirEdicionMovimiento = async (mov: MovimientoResponse) => {
     setMovimientoEditando(mov);
+    setPagosEdicion([]);
     setFormEditarMov({
       cantidad: String(mov.cantidad ?? ''),
       costo_unitario: mov.costo_unitario != null ? String(mov.costo_unitario) : '',
       fecha: mov.fecha ? String(mov.fecha).slice(0, 10) : hoyVE(),
       proveedor_nombre: mov.proveedor_nombre ?? '',
+      cliente_nombre: mov.cliente_nombre ?? '',
       departamento: mov.departamento ?? '',
       recibido_por: mov.recibido_por ?? '',
       observaciones: mov.observaciones ?? '',
-      pago_key: mov.pagado_desde_metodo_caja_id
-        ? `${mov.pagado_desde_metodo_caja_id}:${mov.moneda_pago_id ?? MONEDA_BASE_ID}`
-        : '',
+      descuento_porcentaje: mov.descuento_porcentaje != null ? String(mov.descuento_porcentaje) : '',
+      llevada_unidad: '',
+      pago_key: '',
+      tasa_pago: '',
+      monto_principal: '',
       motivo_correccion: '',
     });
+    setCargandoDetalleMov(true);
+    try {
+      const detalle = await inventarioService.getMovimientoDetalle(mov.id);
+      const pagos = detalle.pagos ?? [];
+      const primero = pagos[0];
+      const extras: PagoMixtoRow[] = pagos.slice(1).map((p) => ({
+        key: `${p.metodo_caja_id}:${p.moneda_id}`,
+        monto: String(p.monto),
+        tasa: p.tasa_pago != null ? String(p.tasa_pago) : '',
+        fecha: '',
+      }));
+      setPagosEdicion(extras);
+      setFormEditarMov({
+        cantidad: String(detalle.cantidad ?? ''),
+        costo_unitario: detalle.costo_unitario != null ? String(detalle.costo_unitario) : '',
+        fecha: detalle.fecha ? String(detalle.fecha).slice(0, 10) : hoyVE(),
+        proveedor_nombre: detalle.proveedor_nombre ?? '',
+        cliente_nombre: detalle.cliente_nombre ?? '',
+        departamento: detalle.departamento ?? '',
+        recibido_por: detalle.recibido_por ?? '',
+        observaciones: detalle.observaciones ?? '',
+        descuento_porcentaje: detalle.descuento_porcentaje != null ? String(detalle.descuento_porcentaje) : '',
+        llevada_unidad: detalle.llevada != null && Number(detalle.cantidad) > 0
+          ? String(Number(detalle.llevada) / Number(detalle.cantidad))
+          : '',
+        pago_key: primero ? `${primero.metodo_caja_id}:${primero.moneda_id}` : '',
+        tasa_pago: primero && primero.moneda_id !== MONEDA_BASE_ID && primero.tasa_pago != null
+          ? String(primero.tasa_pago)
+          : '',
+        monto_principal: primero ? String(primero.monto) : '',
+        motivo_correccion: '',
+      });
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'No se pudieron cargar los pagos de la entrada.'));
+      setMovimientoEditando(null);
+      setFormEditarMov(null);
+    } finally {
+      setCargandoDetalleMov(false);
+    }
   };
 
   const cerrarEdicionMovimiento = () => {
     if (guardandoEdicionMov) return;
     setMovimientoEditando(null);
     setFormEditarMov(null);
+    setPagosEdicion([]);
+    setCargandoDetalleMov(false);
   };
 
   const guardarEdicionMovimiento = async (e: React.FormEvent) => {
@@ -937,25 +989,95 @@ export default function Inventario() {
       toast.error('El precio unitario no puede ser negativo.');
       return;
     }
+    const descuento = Number(formEditarMov.descuento_porcentaje || '0') || 0;
+    const llevadaUnidad = Number(formEditarMov.llevada_unidad || '0') || 0;
+    const totalCompra = Math.round(cantidad * costo * 100) / 100;
+    const llevadaTotal = Math.round(llevadaUnidad * cantidad * 100) / 100;
+    const { cuentaId, monedaId } = parsePagoKey(formEditarMov.pago_key);
+    const pagoCod = codMonedaDe(monedaId);
+    const tasaPago = Number(formEditarMov.tasa_pago || '0') || 0;
+
     const payload: MovimientoUpdate = {
       cantidad,
       costo_unitario: costo,
       fecha: formEditarMov.fecha || undefined,
       proveedor_nombre: formEditarMov.proveedor_nombre.trim() || null,
+      cliente_nombre: formEditarMov.cliente_nombre.trim() || null,
       departamento: formEditarMov.departamento || null,
       recibido_por: formEditarMov.recibido_por.trim() || null,
       observaciones: formEditarMov.observaciones.trim() || null,
+      descuento_porcentaje: descuento > 0 ? descuento : null,
+      llevada: llevadaTotal,
       motivo_correccion: formEditarMov.motivo_correccion.trim() || undefined,
     };
-    // La cuenta solo se envía si cambió: en pagos mixtos el backend rechaza
-    // cambiar una cuenta (hay que anular y recrear).
-    const pagoOriginal = movimientoEditando.pagado_desde_metodo_caja_id
-      ? `${movimientoEditando.pagado_desde_metodo_caja_id}:${movimientoEditando.moneda_pago_id ?? MONEDA_BASE_ID}`
-      : '';
-    if (formEditarMov.pago_key && formEditarMov.pago_key !== pagoOriginal) {
-      const { cuentaId } = parsePagoKey(formEditarMov.pago_key);
-      if (cuentaId) payload.pagado_desde_metodo_caja_id = cuentaId;
+
+    if (!cuentaId) {
+      // Sin cuenta: si hay costo, la regla del formulario es que queda fiada.
+      payload.fiar = totalCompra > 0;
+      payload.pagos = null;
+    } else {
+      if (pagoCod !== 'COP' && !(tasaPago > 0)) {
+        toast.error(`Indica la tasa de cambio: 1 ${pagoCod} = ? COP.`);
+        return;
+      }
+      const cuentasEditor = cuentasPago.map((c) => ({
+        key: c.key,
+        label: c.nombre,
+        monedaId: c.monedaId ?? 1,
+        codigo: c.codigo,
+      }));
+      let pagosPayload: NonNullable<MovimientoUpdate['pagos']> = [];
+      let montoPrincipal = 0;
+      if (pagosEdicion.length > 0) {
+        if (!pagosCompletos(pagosEdicion, cuentasEditor, 'COP')) {
+          toast.error('Completa los pagos extra: cuenta, monto y tasa si su moneda no es COP.');
+          return;
+        }
+        montoPrincipal = Number(formEditarMov.monto_principal || '0') || 0;
+        if (!(montoPrincipal > 0)) {
+          toast.error('Indica cuánto sale de la cuenta principal.');
+          return;
+        }
+        const equivPrincipal = pagoCod === 'COP'
+          ? montoPrincipal
+          : convertirMonedaHumana(montoPrincipal, 'COP', pagoCod, tasaPago);
+        const equivExtras = equivalenteTotal(pagosEdicion, cuentasEditor, 'COP');
+        if (Math.abs(equivPrincipal + equivExtras - totalCompra) > 1.0) {
+          toast.error(
+            `Los pagos suman $${(equivPrincipal + equivExtras).toLocaleString('es-CO')} COP y la compra es $${totalCompra.toLocaleString('es-CO')} COP. Ajusta los montos.`,
+          );
+          return;
+        }
+      } else {
+        montoPrincipal = pagoCod === 'COP'
+          ? totalCompra
+          : convertirMonedaHumana(totalCompra, 'COP', pagoCod, tasaPago);
+      }
+      if (!(montoPrincipal > 0) && totalCompra > 0) {
+        toast.error('El monto de la cuenta principal no puede quedar en cero.');
+        return;
+      }
+      pagosPayload = [{
+        metodo_caja_id: cuentaId,
+        moneda_id: monedaId ?? MONEDA_BASE_ID,
+        monto: Math.round(montoPrincipal * 100) / 100,
+        ...(pagoCod !== 'COP' ? { tasa_pago: tasaPago } : {}),
+      }];
+      for (const fila of pagosEdicion) {
+        const pagoFila = parsePagoKey(fila.key);
+        if (!pagoFila.cuentaId) continue;
+        const codFila = codMonedaDe(pagoFila.monedaId);
+        pagosPayload.push({
+          metodo_caja_id: pagoFila.cuentaId,
+          moneda_id: pagoFila.monedaId ?? MONEDA_BASE_ID,
+          monto: Number(fila.monto),
+          ...(codFila !== 'COP' ? { tasa_pago: Number(fila.tasa) || 0 } : {}),
+        });
+      }
+      payload.fiar = false;
+      payload.pagos = pagosPayload;
     }
+
     try {
       setGuardandoEdicionMov(true);
       await inventarioService.actualizarMovimiento(movimientoEditando.id, payload);
@@ -963,6 +1085,7 @@ export default function Inventario() {
       const materialId = movimientoEditando.material_id;
       setMovimientoEditando(null);
       setFormEditarMov(null);
+      setPagosEdicion([]);
       await recargarKardexMaterial(materialId);
     } catch (error) {
       toast.error(extractErrorMessage(error, 'Error al actualizar la entrada.'));
@@ -5054,30 +5177,43 @@ export default function Inventario() {
         </div>
       )}
 
-      {/* Modal: corregir una ENTRADA manual (stock + gasto + caja) */}
+      {/* Modal: corregir una ENTRADA manual (todos los campos del formulario) */}
       {movimientoEditando && formEditarMov && (() => {
-        const monedaPago = movimientoEditando.moneda_pago_id ?? MONEDA_BASE_ID;
-        const opcionesCuenta = cuentasPago
-          .filter((c) => (c.monedaId ?? MONEDA_BASE_ID) === monedaPago)
-          .map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` }));
-        if (
-          formEditarMov.pago_key &&
-          !opcionesCuenta.some((o) => o.value === formEditarMov.pago_key)
-        ) {
-          opcionesCuenta.unshift({
-            value: formEditarMov.pago_key,
-            label: `Cuenta #${movimientoEditando.pagado_desde_metodo_caja_id ?? ''}`,
-          });
-        }
-        const nuevoTotal =
-          Number(formEditarMov.cantidad || 0) * Number(formEditarMov.costo_unitario || 0);
+        const cuentaPrincipal = parsePagoKey(formEditarMov.pago_key);
+        const cantidad = Number(formEditarMov.cantidad || '0') || 0;
+        const costoUnitario = Number(formEditarMov.costo_unitario || '0') || 0;
+        const totalCompra = Math.round(cantidad * costoUnitario * 100) / 100;
+        const fleteUnidad = Number(formEditarMov.llevada_unidad || '0') || 0;
+        const fleteTotal = Math.round(fleteUnidad * cantidad * 100) / 100;
+        const totalConFlete = Math.round((totalCompra + fleteTotal) * 100) / 100;
+        const pagoCod = codMonedaDe(cuentaPrincipal.monedaId);
+        const tasaPago = Number(formEditarMov.tasa_pago || '0') || 0;
+        const necesitaTasa = !!cuentaPrincipal.cuentaId && pagoCod !== 'COP';
+        const cuentasEditor = cuentasPago.map((c) => ({
+          key: c.key,
+          label: c.nombre,
+          monedaId: c.monedaId ?? 1,
+          codigo: c.codigo,
+        }));
+        const montoPrincipalNum = Number(formEditarMov.monto_principal || '0') || 0;
+        const equivPrincipal = pagoCod === 'COP'
+          ? montoPrincipalNum
+          : (tasaPago > 0 ? convertirMonedaHumana(montoPrincipalNum, 'COP', pagoCod, tasaPago) : 0);
+        const pagoPrincipalAuto = pagoCod === 'COP'
+          ? totalCompra
+          : (tasaPago > 0 ? convertirMonedaHumana(totalCompra, 'COP', pagoCod, tasaPago) : 0);
+        const totalCaja = pagoCod === 'COP'
+          ? totalConFlete
+          : (tasaPago > 0 ? convertirMonedaHumana(totalConFlete, 'COP', pagoCod, tasaPago) : 0);
+        const cuentaPrincipalNombre =
+          cuentasPago.find((c) => c.key === formEditarMov.pago_key)?.nombre ?? 'la cuenta principal';
         return (
           <div
             className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
             onClick={cerrarEdicionMovimiento}
           >
             <div
-              className="bg-white rounded-3xl shadow-xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10"
+              className="bg-white rounded-3xl shadow-xl max-w-xl w-full max-h-[92vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
@@ -5088,145 +5224,345 @@ export default function Inventario() {
                   {materialSeleccionado?.nombre ?? 'Insumo'}
                 </h3>
                 <p className="text-xs text-white/70 mt-1">
-                  Se ajustan stock, gasto y salida de caja en una sola operación.
+                  Se ajustan stock, gasto, caja y deuda en una sola operación.
                 </p>
               </div>
               <form onSubmit={guardarEdicionMovimiento} className="p-6 space-y-4 overflow-y-auto font-body">
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
-                    <input
-                      type="number"
-                      min="0.0001"
-                      step="any"
-                      value={formEditarMov.cantidad}
-                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, cantidad: e.target.value } : f)}
-                      className={inputCls}
-                      required
-                    />
+                {cargandoDetalleMov ? (
+                  <div className="flex flex-col items-center justify-center py-10 space-y-3">
+                    <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
+                    <p className="text-xs text-yeikar-neutral/50 font-mono">Cargando pagos de la entrada...</p>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">
-                      Precio unitario <span className="text-yeikar-neutral/40 font-normal">(COP)</span>
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={formEditarMov.costo_unitario}
-                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, costo_unitario: e.target.value } : f)}
-                      className={inputCls}
-                      required
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Fecha</label>
-                    <input
-                      type="date"
-                      max={hoyVE()}
-                      value={formEditarMov.fecha}
-                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, fecha: e.target.value } : f)}
-                      className={inputCls}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Proveedor</label>
-                    <input
-                      type="text"
-                      value={formEditarMov.proveedor_nombre}
-                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, proveedor_nombre: e.target.value } : f)}
-                      placeholder="Ej. pintutecnicas"
-                      className={inputCls.replace('font-mono', '')}
-                    />
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Zona / Departamento</label>
-                    <SearchSelect
-                      value={formEditarMov.departamento}
-                      onChange={(v) => setFormEditarMov((f) => f ? { ...f, departamento: v === '' ? '' : String(v) } : f)}
-                      options={[
-                        { value: '', label: 'General (sin zona)' },
-                        ...DEPARTAMENTOS.map((d) => ({ value: d.valor, label: d.label })),
-                      ]}
-                      placeholder="General..."
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Quién trajo</label>
-                    <input
-                      type="text"
-                      value={formEditarMov.recibido_por}
-                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, recibido_por: e.target.value } : f)}
-                      placeholder="Ej. andres"
-                      className={inputCls.replace('font-mono', '')}
-                    />
-                  </div>
-                </div>
-                {movimientoEditando.pagado_desde_metodo_caja_id && (
-                  <div className="space-y-1">
-                    <label className="text-xs font-bold text-yeikar-secondary">Cuenta de pago</label>
-                    <SearchSelect
-                      value={formEditarMov.pago_key}
-                      onChange={(v) => setFormEditarMov((f) => f ? { ...f, pago_key: String(v) } : f)}
-                      options={opcionesCuenta}
-                      placeholder="Seleccione la cuenta..."
-                    />
-                    <p className="text-[10px] text-yeikar-neutral/45">
-                      Solo cuentas de la misma moneda. Para cambiar de moneda, anula y recrea la entrada.
-                    </p>
-                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
+                        <input
+                          type="number"
+                          min="0.0001"
+                          step="any"
+                          value={formEditarMov.cantidad}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, cantidad: e.target.value } : f)}
+                          className={inputCls}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          Precio unitario neto <span className="text-yeikar-neutral/40 font-normal">(COP)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={formEditarMov.costo_unitario}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, costo_unitario: e.target.value } : f)}
+                          className={inputCls}
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Fecha</label>
+                        <input
+                          type="date"
+                          max={hoyVE()}
+                          value={formEditarMov.fecha}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, fecha: e.target.value } : f)}
+                          className={inputCls}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Proveedor</label>
+                        <input
+                          type="text"
+                          value={formEditarMov.proveedor_nombre}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, proveedor_nombre: e.target.value } : f)}
+                          placeholder="Ej. pintutecnicas"
+                          className={inputCls.replace('font-mono', '')}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          Cliente <span className="text-yeikar-neutral/40 font-normal">(comprado para)</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formEditarMov.cliente_nombre}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, cliente_nombre: e.target.value } : f)}
+                          placeholder="Opcional"
+                          className={inputCls.replace('font-mono', '')}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          Descuento <span className="text-yeikar-neutral/40 font-normal">(%)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={formEditarMov.descuento_porcentaje}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, descuento_porcentaje: e.target.value } : f)}
+                          placeholder="0"
+                          className={inputCls}
+                        />
+                        <p className="text-[10px] text-yeikar-neutral/45">
+                          El precio unitario de arriba ya es el neto; este % es informativo.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Zona / Departamento</label>
+                        <SearchSelect
+                          value={formEditarMov.departamento}
+                          onChange={(v) => setFormEditarMov((f) => f ? { ...f, departamento: v === '' ? '' : String(v) } : f)}
+                          options={[
+                            { value: '', label: 'General (sin zona)' },
+                            ...DEPARTAMENTOS.map((d) => ({ value: d.valor, label: d.label })),
+                          ]}
+                          placeholder="General..."
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Quién trajo</label>
+                        <input
+                          type="text"
+                          value={formEditarMov.recibido_por}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, recibido_por: e.target.value } : f)}
+                          placeholder="Ej. andres"
+                          className={inputCls.replace('font-mono', '')}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          Flete / llevada <span className="text-yeikar-neutral/40 font-normal">(por unidad)</span>
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          value={formEditarMov.llevada_unidad}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, llevada_unidad: e.target.value } : f)}
+                          placeholder="0"
+                          className={inputCls}
+                        />
+                        {fleteTotal > 0 && (
+                          <p className="text-[10px] text-yeikar-neutral/50">
+                            Flete total: <span className="font-mono">${fleteTotal.toLocaleString('es-CO')}</span>
+                          </p>
+                        )}
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
+                        <textarea
+                          rows={2}
+                          value={formEditarMov.observaciones}
+                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, observaciones: e.target.value } : f)}
+                          className={inputCls.replace('font-mono', '')}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Pago: misma lógica del formulario de creación. */}
+                    <div className="space-y-3 pt-2 border-t border-yeikar-secondary-light/10">
+                      <div className="space-y-1">
+                        <label className="text-xs font-bold text-yeikar-secondary">
+                          ¿Se pagó esta entrada? <span className="text-yeikar-neutral/40 font-normal">(si no, queda fiada)</span>
+                        </label>
+                        <SearchSelect
+                          value={formEditarMov.pago_key}
+                          onChange={(v) => {
+                            const key = String(v);
+                            const cuenta = parsePagoKey(key);
+                            setFormEditarMov((f) => f ? {
+                              ...f,
+                              pago_key: key,
+                              tasa_pago: cuenta.monedaId === MONEDA_BASE_ID ? '' : f.tasa_pago,
+                              monto_principal: '',
+                            } : f);
+                            if (!cuenta.cuentaId) {
+                              setPagosEdicion([]);
+                            }
+                          }}
+                          options={[
+                            {
+                              value: '',
+                              label: totalCompra > 0
+                                ? 'No se pagó — quedó fiada al proveedor'
+                                : 'Sin pago (solo suma stock)',
+                            },
+                            ...cuentasPago.map((c) => ({ value: c.key, label: `Sí, desde ${c.nombre} · ${c.codigo}` })),
+                          ]}
+                          placeholder="Elige la cuenta si se pagó..."
+                        />
+                      </div>
+
+                      {!cuentaPrincipal.cuentaId && totalCompra > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
+                            Se registrará una deuda de ≈{' '}
+                            <b>${totalConFlete.toLocaleString('es-CO')} COP</b> en{' '}
+                            <b>Egresos y Gastos → Por Pagar</b>.
+                          </p>
+                          {!formEditarMov.proveedor_nombre.trim() && (
+                            <p className="text-[11px] font-bold text-red-600">
+                              Al fiar es obligatorio indicar el proveedor.
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      {!cuentaPrincipal.cuentaId && totalCompra === 0 && (
+                        <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
+                          Sin costo unitario no hay deuda: la entrada solo suma stock.
+                        </p>
+                      )}
+
+                      {necesitaTasa && (
+                        <div className="space-y-1">
+                          <label className="text-xs font-bold text-yeikar-secondary">
+                            Tasa de cambio <span className="text-yeikar-neutral/40 font-normal">(1 {pagoCod} = ? COP)</span>
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={formEditarMov.tasa_pago}
+                            onChange={(e) => setFormEditarMov((f) => f ? { ...f, tasa_pago: e.target.value } : f)}
+                            placeholder="Ej. 4000"
+                            className={inputCls}
+                            required={necesitaTasa}
+                          />
+                        </div>
+                      )}
+
+                      {!!cuentaPrincipal.cuentaId && pagosEdicion.length === 0 && (
+                        <div className="text-[11px] text-emerald-900 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                          Se descontarán ≈{' '}
+                          <b>${totalCaja.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b>{' '}
+                          desde <b>{cuentaPrincipalNombre}</b>
+                          {fleteTotal > 0 && (
+                            <span className="text-[10px] text-emerald-700/80">
+                              {' '}· compra ${totalCompra.toLocaleString('es-CO')} + flete ${fleteTotal.toLocaleString('es-CO')}
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {!!cuentaPrincipal.cuentaId && (
+                        <div className="space-y-2">
+                          {pagosEdicion.length === 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormEditarMov((f) => f ? {
+                                  ...f,
+                                  monto_principal: String(pagoPrincipalAuto.toFixed(2)),
+                                } : f);
+                                setPagosEdicion([{ key: '', monto: '', tasa: '', fecha: '' }]);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                            >
+                              + Se pagó parte con otra cuenta / método
+                            </button>
+                          ) : (
+                            <>
+                              <div className="rounded-xl border border-yeikar-secondary-light/15 bg-white/70 p-3 space-y-1">
+                                <label className="text-[10px] font-bold text-yeikar-neutral/60 uppercase tracking-wider">
+                                  ¿Cuánto sale de {cuentaPrincipalNombre}? ({pagoCod})
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={formEditarMov.monto_principal}
+                                  onChange={(e) => setFormEditarMov((f) => f ? { ...f, monto_principal: e.target.value } : f)}
+                                  placeholder="0.00"
+                                  className={inputCls}
+                                />
+                                {pagoCod !== 'COP' && (
+                                  <p className="text-[10px] font-mono text-yeikar-neutral/50">
+                                    ≈ {equivPrincipal.toLocaleString('es-CO', { maximumFractionDigits: 2 })} COP
+                                    {tasaPago > 0 ? ` · tasa ${tasaPago.toLocaleString('es-CO')}` : ' · falta la tasa'}
+                                  </p>
+                                )}
+                              </div>
+                              <PagosMixtosEditor
+                                filas={pagosEdicion}
+                                cuentas={cuentasEditor}
+                                codigoDestino="COP"
+                                totalDestino={totalCompra}
+                                exigirCuadre
+                                equivalentePrincipal={equivPrincipal}
+                                onChange={setPagosEdicion}
+                              />
+                            </>
+                          )}
+                          {fleteTotal > 0 && (
+                            <p className="text-[10px] text-yeikar-neutral/50">
+                              El flete/llevada (${fleteTotal.toLocaleString('es-CO')} COP) se paga aparte desde la cuenta principal.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-xs font-bold text-yeikar-secondary">
+                        Motivo de la corrección <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formEditarMov.motivo_correccion}
+                        onChange={(e) => setFormEditarMov((f) => f ? { ...f, motivo_correccion: e.target.value } : f)}
+                        placeholder="Ej. La factura traía otro precio"
+                        className={inputCls.replace('font-mono', '')}
+                      />
+                    </div>
+
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-[11px] text-amber-900">
+                      <p>
+                        Compra: <b>${totalCompra.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b>
+                        {fleteTotal > 0 && <> · Flete: <b>${fleteTotal.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></>}
+                        {' '}· Total: <b>${totalConFlete.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b>
+                      </p>
+                      <p className="mt-1">
+                        Si cambias cantidad o precio, el stock, el gasto y la caja se ajustan por la diferencia.
+                        No se permite dejar stock negativo.
+                      </p>
+                    </div>
+
+                    <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                      <button
+                        type="button"
+                        onClick={cerrarEdicionMovimiento}
+                        className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={guardandoEdicionMov || cargandoDetalleMov}
+                        className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50"
+                      >
+                        {guardandoEdicionMov ? 'Guardando...' : 'Guardar corrección'}
+                      </button>
+                    </div>
+                  </>
                 )}
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
-                  <textarea
-                    rows={2}
-                    value={formEditarMov.observaciones}
-                    onChange={(e) => setFormEditarMov((f) => f ? { ...f, observaciones: e.target.value } : f)}
-                    className={inputCls.replace('font-mono', '')}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-yeikar-secondary">
-                    Motivo de la corrección <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formEditarMov.motivo_correccion}
-                    onChange={(e) => setFormEditarMov((f) => f ? { ...f, motivo_correccion: e.target.value } : f)}
-                    placeholder="Ej. La factura traía otro precio"
-                    className={inputCls.replace('font-mono', '')}
-                  />
-                </div>
-                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-[11px] text-amber-900">
-                  <p>
-                    Total de la compra:{' '}
-                    <b>${nuevoTotal.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b>
-                  </p>
-                  <p className="mt-1">
-                    El gasto y la salida de caja se ajustan a ese total. Si cambias la cantidad,
-                    el stock se mueve por la diferencia. No se permite dejar stock negativo.
-                  </p>
-                </div>
-                <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
-                  <button
-                    type="button"
-                    onClick={cerrarEdicionMovimiento}
-                    className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={guardandoEdicionMov}
-                    className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50"
-                  >
-                    {guardandoEdicionMov ? 'Guardando...' : 'Guardar corrección'}
-                  </button>
-                </div>
               </form>
             </div>
           </div>
@@ -5237,6 +5573,8 @@ export default function Inventario() {
       {movimientoAnulando && (() => {
         const cantidad = Number(movimientoAnulando.cantidad) || 0;
         const total = cantidad * (Number(movimientoAnulando.costo_unitario) || 0);
+        const flete = Number(movimientoAnulando.llevada) || 0;
+        const totalConFlete = total + flete;
         return (
           <div
             className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
@@ -5260,8 +5598,17 @@ export default function Inventario() {
                 </p>
                 <ul className="text-xs text-yeikar-neutral/60 list-disc pl-4 space-y-1">
                   <li>Stock: <b>−{cantidad.toLocaleString('es-ES')}</b></li>
-                  <li>Gasto: <b>${total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></li>
-                  <li>Salida de caja: <b>${total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></li>
+                  {movimientoAnulando.fiar ? (
+                    <li>Cuenta por pagar: <b>${totalConFlete.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></li>
+                  ) : (
+                    <>
+                      <li>Gasto: <b>${total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></li>
+                      <li>Salida de caja: <b>${totalConFlete.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b>{flete > 0 ? ' (compra + flete)' : ''}</li>
+                    </>
+                  )}
+                  {flete > 0 && (
+                    <li>Flete/llevada: <b>${flete.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></li>
+                  )}
                 </ul>
                 <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-[11px] text-red-800">
                   Esta acción no se puede deshacer. Si el material ya se consumió o vendió, el

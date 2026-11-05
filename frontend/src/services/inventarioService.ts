@@ -138,8 +138,25 @@ export interface MovimientoUpdate {
   recibido_por?: string | null;
   observaciones?: string | null;
   pagado_desde_metodo_caja_id?: number | null;
+  moneda_pago_id?: number | null;
+  tasa_pago?: number | null;
   descuento_porcentaje?: number | null;
+  llevada?: number | null;
+  fiar?: boolean;
+  pagos?: PagoEntradaCreate[] | null;
   motivo_correccion?: string;
+}
+
+export interface PagoEntradaResponse {
+  metodo_caja_id: number;
+  moneda_id: number;
+  monto: number;
+  tasa_pago?: number | null;
+  monto_en_moneda_base: number;
+}
+
+export interface MovimientoDetalleResponse extends MovimientoResponse {
+  pagos: PagoEntradaResponse[];
 }
 
 export interface ProductoInventarioItem {
@@ -325,6 +342,13 @@ export const inventarioService = {
     const response = await api.get<MovimientoResponse[]>(`/inventario/movimientos/material/${materialId}`, {
       params: { limit },
     });
+    return response.data;
+  },
+
+  getMovimientoDetalle: async (movimientoId: number): Promise<MovimientoDetalleResponse> => {
+    const response = await api.get<MovimientoDetalleResponse>(
+      `/inventario/movimiento/${movimientoId}`,
+    );
     return response.data;
   },
 

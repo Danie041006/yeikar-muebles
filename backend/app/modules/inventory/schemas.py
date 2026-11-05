@@ -121,10 +121,11 @@ class PagoEntradaCreate(BaseModel):
 class MovimientoUpdate(BaseModel):
     """Corrección de una ENTRADA manual ya registrada.
 
-    Solo campos "seguros": cantidad, precio, fecha, proveedor/cliente, zona,
-    quién trajo, observaciones y cuenta de pago. NO se permite cambiar el
-    material, el tipo, `fiar`, `llevada` ni la composición de pagos mixtos
-    (esos casos se anulan y se crean de nuevo).
+    Cubre los mismos campos del formulario de entrada: cantidad, precio,
+    fecha, proveedor/cliente, zona, quién trajo, observaciones, descuento,
+    cuenta(s) de pago, pagos mixtos, flete/llevada y fiar. El material y el
+    tipo (ENTRADA) no se cambian: para mover la entrada a otro material se
+    anula y se crea de nuevo.
     """
 
     cantidad: Optional[Decimal] = Field(None, gt=0)
@@ -138,7 +139,12 @@ class MovimientoUpdate(BaseModel):
     recibido_por: Optional[str] = Field(None, max_length=150)
     observaciones: Optional[str] = None
     pagado_desde_metodo_caja_id: Optional[int] = None
+    moneda_pago_id: Optional[int] = None
+    tasa_pago: Optional[Decimal] = Field(None, gt=0)
     descuento_porcentaje: Optional[Decimal] = Field(None, ge=0, le=100)
+    llevada: Optional[Decimal] = Field(None, ge=0)
+    fiar: Optional[bool] = None
+    pagos: Optional[List["PagoEntradaCreate"]] = None
     motivo_correccion: Optional[str] = Field(None, max_length=500)
 
     @field_validator("departamento")
@@ -174,6 +180,7 @@ class MovimientoResponse(BaseModel):
     moneda_pago_id: Optional[int] = None
     tasa_pago: Optional[Decimal] = None
     gasto_id: Optional[int] = None
+    llevada_gasto_id: Optional[int] = None
     proveedor_id: Optional[int] = None
     cliente_id: Optional[int] = None
     proveedor_nombre: Optional[str] = None
@@ -181,6 +188,7 @@ class MovimientoResponse(BaseModel):
     departamento: Optional[str] = None
     recibido_por: Optional[str] = None
     consumido_por: Optional[str] = None
+    descuento_porcentaje: Optional[Decimal] = None
     fiar: Optional[bool] = False
     fecha: Optional[datetime] = None
     created_at: datetime
@@ -188,6 +196,21 @@ class MovimientoResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class PagoEntradaResponse(BaseModel):
+    """Un pago (cuenta/moneda/monto) de una entrada de inventario."""
+    metodo_caja_id: int
+    moneda_id: int
+    monto: Decimal
+    tasa_pago: Optional[Decimal] = None
+    monto_en_moneda_base: Decimal
+
+
+class MovimientoDetalleResponse(MovimientoResponse):
+    """Entrada + desglose de pagos, para precargar el formulario de edición."""
+    pagos: List[PagoEntradaResponse] = []
+
 
 # clase para dar un aviso de que hay productos que tiene stock bajo
 
