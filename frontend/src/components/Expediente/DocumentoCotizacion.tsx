@@ -195,7 +195,7 @@ export default function DocumentoCotizacion({
               </colgroup>
               <thead>
                 <tr className="bg-stone-900 text-stone-100">
-                  {['Modelo / Descripción', 'Cant.', 'P. Unitario', 'Total'].map((h, i) => (
+                  {['Descripción', 'Cant.', 'P. Unitario', 'Total'].map((h, i) => (
                     <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[9px]
                       ${i === 0 ? 'text-left' : i === 1 ? 'text-center' : 'text-right'}`}>{h}</th>
                   ))}
