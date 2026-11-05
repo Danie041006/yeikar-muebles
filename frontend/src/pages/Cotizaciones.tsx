@@ -3683,6 +3683,8 @@ export default function Cotizaciones() {
                         codigo: m.moneda,
                       }))}
                       codigoDestino={quoteCod}
+                      totalDestino={quoteTotal}
+                      equivalentePrincipal={abonoEnMonedaCotizacion}
                       onChange={setAdelantosExtra}
                     />
                   </div>

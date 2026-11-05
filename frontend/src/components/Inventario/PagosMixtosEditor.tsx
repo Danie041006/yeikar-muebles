@@ -65,18 +65,20 @@ interface Props {
   totalDestino?: number;
   /** Si true, marca faltante/sobrante para exigir el cuadre exacto. */
   exigirCuadre?: boolean;
+  /** Equivalente ya pagado con la CUENTA PRINCIPAL (fila 0, fuera del editor). */
+  equivalentePrincipal?: number;
   onChange: (filas: PagoMixtoRow[]) => void;
   titulo?: string;
 }
 
 export default function PagosMixtosEditor({
-  filas, cuentas, codigoDestino, totalDestino, exigirCuadre, onChange,
+  filas, cuentas, codigoDestino, totalDestino, exigirCuadre, equivalentePrincipal, onChange,
 }: Props) {
   const inputCls =
     'w-full bg-white border border-yeikar-secondary-light/20 rounded-lg px-2.5 py-1.5 text-sm text-yeikar-neutral focus:outline-none focus:ring-2 focus:ring-yeikar-primary font-mono';
   if (filas.length === 0) return null;
 
-  const equivTotal = equivalenteTotal(filas, cuentas, codigoDestino);
+  const equivTotal = equivalenteTotal(filas, cuentas, codigoDestino) + (equivalentePrincipal || 0);
   const faltante = totalDestino != null
     ? Math.round(((totalDestino || 0) - equivTotal) * 100) / 100
     : null;
@@ -99,7 +101,7 @@ export default function PagosMixtosEditor({
         return (
           <div key={i} className="grid grid-cols-1 min-[480px]:grid-cols-12 gap-2 items-end">
             <div className="min-[480px]:col-span-5 space-y-1">
-              <label className="text-[10px] font-bold text-yeikar-neutral/60">Cuenta / método {i + 1}</label>
+              <label className="text-[10px] font-bold text-yeikar-neutral/60">Cuenta extra {i + 1}</label>
               <select
                 value={row.key}
                 onChange={(e) => {

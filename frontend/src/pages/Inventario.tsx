@@ -150,6 +150,9 @@ export default function Inventario() {
   const [pagosExtraMaterial, setPagosExtraMaterial] = useState<PagoMixtoRow[]>([]);
   // Ídem para las entradas de plásticos/reventa y demás productos
   const [pagosExtraProducto, setPagosExtraProducto] = useState<PagoMixtoRow[]>([]);
+  // Monto explícito de la PRIMERA cuenta cuando la compra se paga de varias
+  const [montoPrincipalMaterial, setMontoPrincipalMaterial] = useState('');
+  const [montoPrincipalProducto, setMontoPrincipalProducto] = useState('');
 
   // Formulario de movimiento de MATERIAL (dentro del panel)
   const [movMaterial, setMovMaterial] = useState({
@@ -1004,24 +1007,32 @@ export default function Inventario() {
         return;
       }
       const equivExtra = equivalenteTotal(filasExtraMaterial, cuentasEditor, 'COP');
-      const restante = Math.round((totalNetoMaterial - equivExtra) * 100) / 100;
-      if (restante < -0.01) {
-        toast.error(`Los pagos extra suman $${equivExtra.toLocaleString('es-CO')} COP y la compra es $${totalNetoMaterial.toLocaleString('es-CO')} COP. Ajusta los montos.`);
-        return;
-      }
-      if (restante <= 0.01) {
-        toast.error('Los pagos extra cubren toda la compra: deja el resto en la cuenta principal (o usa una sola cuenta).');
-        return;
-      }
       const pagoCod = codMonedaDe(pago.monedaId);
-      const montoPrincipal = (pago.monedaId ?? MONEDA_BASE_ID) === MONEDA_BASE_ID
-        ? restante
-        : Math.round(convertirMonedaHumana(restante, 'COP', pagoCod, tasaNum) * 100) / 100;
+      const principalNum = parseFloat(montoPrincipalMaterial || '0') || 0;
+      if (!(principalNum > 0)) {
+        toast.error('Indica cuánto sale de la cuenta principal para dividir el pago.');
+        return;
+      }
+      const equivPrincipal = (pago.monedaId ?? MONEDA_BASE_ID) === MONEDA_BASE_ID
+        ? principalNum
+        : (tasaNum > 0 ? convertirMonedaHumana(principalNum, 'COP', pagoCod, tasaNum) : 0);
+      if (equivPrincipal <= 0) {
+        toast.error('Falta la tasa de la cuenta principal para calcular su parte.');
+        return;
+      }
+      const totalPagado = Math.round((equivPrincipal + equivExtra) * 100) / 100;
+      if (Math.abs(totalPagado - totalNetoMaterial) > 1) {
+        const dif = Math.round((totalNetoMaterial - totalPagado) * 100) / 100;
+        toast.error(dif > 0
+          ? `Faltan $${dif.toLocaleString('es-CO')} COP para cuadrar la compra (pagado ${totalPagado.toLocaleString('es-CO')} de ${totalNetoMaterial.toLocaleString('es-CO')}).`
+          : `Sobran $${Math.abs(dif).toLocaleString('es-CO')} COP: pagado ${totalPagado.toLocaleString('es-CO')} de ${totalNetoMaterial.toLocaleString('es-CO')}.`);
+        return;
+      }
       pagosMaterial = [
         {
           metodo_caja_id: pago.cuentaId as number,
           moneda_id: pago.monedaId ?? MONEDA_BASE_ID,
-          monto: montoPrincipal,
+          monto: principalNum,
           tasa_pago: (pago.monedaId ?? MONEDA_BASE_ID) !== MONEDA_BASE_ID ? tasaNum : undefined,
         },
         ...filasExtraMaterial.map((r) => {
@@ -1065,6 +1076,7 @@ export default function Inventario() {
 
       setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
       setPagosExtraMaterial([]);
+      setMontoPrincipalMaterial('');
       fetchInsumos();
       const mat = materiales.find(m => m.id === selectedMaterialId);
       if (mat) handleOpenMaterial(mat);
@@ -1195,24 +1207,32 @@ export default function Inventario() {
         return;
       }
       const equivExtra = equivalenteTotal(filasExtraProducto, cuentasEditor, refCod);
-      const restante = Math.round((totalRefProd - equivExtra) * 100) / 100;
-      if (restante < -0.01) {
-        toast.error(`Los pagos extra suman ${equivExtra.toLocaleString('es-CO')} ${refCod} y la compra es ${totalRefProd.toLocaleString('es-CO')} ${refCod}. Ajusta los montos.`);
-        return;
-      }
-      if (restante <= 0.01) {
-        toast.error('Los pagos extra cubren toda la compra: deja el resto en la cuenta principal.');
-        return;
-      }
       const pagoCod = codMonedaDe(pagoMid);
-      const montoPrincipal = pagoMid === refMid
-        ? restante
-        : Math.round(convertirMonedaHumana(restante, refCod, pagoCod, tasaNum) * 100) / 100;
+      const principalNum = parseFloat(montoPrincipalProducto || '0') || 0;
+      if (!(principalNum > 0)) {
+        toast.error('Indica cuánto sale de la cuenta principal para dividir el pago.');
+        return;
+      }
+      const equivPrincipal = pagoMid === refMid
+        ? principalNum
+        : (tasaNum > 0 ? convertirMonedaHumana(principalNum, pagoCod, refCod, tasaNum) : 0);
+      if (equivPrincipal <= 0) {
+        toast.error('Falta la tasa de la cuenta principal para calcular su parte.');
+        return;
+      }
+      const totalPagado = Math.round((equivPrincipal + equivExtra) * 100) / 100;
+      if (Math.abs(totalPagado - totalRefProd) > 0.05) {
+        const dif = Math.round((totalRefProd - totalPagado) * 100) / 100;
+        toast.error(dif > 0
+          ? `Faltan ${dif.toLocaleString('es-CO')} ${refCod} para cuadrar la compra.`
+          : `Sobran ${Math.abs(dif).toLocaleString('es-CO')} ${refCod} — ajusta los montos.`);
+        return;
+      }
       pagosProducto = [
         {
           metodo_caja_id: pago.cuentaId as number,
           moneda_id: pagoMid,
-          monto: montoPrincipal,
+          monto: principalNum,
           tasa_pago: pagoMid !== refMid ? tasaNum : undefined,
         },
         ...filasExtraProducto.map((r) => {
@@ -1255,6 +1275,7 @@ export default function Inventario() {
 
       setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
       setPagosExtraProducto([]);
+      setMontoPrincipalProducto('');
       fetchProductos();
       refrescarKardexProducto(selectedProductoId);
     } catch (error: any) {
@@ -2786,8 +2807,8 @@ export default function Inventario() {
                         );
                       })()}
 
-                      {/* Pagos mixtos (insumos): las cuentas extra cubren su
-                          parte y la cuenta principal absorbe el resto. */}
+                      {/* Pagos mixtos (insumos): primero CUÁNTO sale de la
+                          cuenta principal y luego cuánto de la(s) extra(s). */}
                       {movMaterial.tipo === 'ENTRADA' && (() => {
                         const pagoPrincipal = parsePagoKey(movMaterial.pago_key)
                         if (!pagoPrincipal.cuentaId) return null;
@@ -2796,23 +2817,57 @@ export default function Inventario() {
                         const netoUnit = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
                         const cant = parseFloat(movMaterial.cantidad || '0') || 0;
                         const totalNeto = Math.round(cant * netoUnit * 100) / 100;
+                        const pagoCod = codMonedaDe(pagoPrincipal.monedaId);
+                        const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
+                        const principalNum = parseFloat(montoPrincipalMaterial || '0') || 0;
+                        const equivPrincipal = pagoCod === 'COP'
+                          ? principalNum
+                          : (tasaNum > 0 ? convertirMonedaHumana(principalNum, 'COP', pagoCod, tasaNum) : 0);
+                        const cuentaPrincipal = cuentasPago.find((c) => c.key === movMaterial.pago_key);
                         return (
                           <div className="space-y-2">
-                            <button
-                              type="button"
-                              onClick={() => setPagosExtraMaterial((prev) => (prev.length ? prev : [{ key: '', monto: '', tasa: '', fecha: '' }]))}
-                              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
-                            >
-                              + Se pagó parte con otra cuenta / método
-                            </button>
-                            <PagosMixtosEditor
-                              filas={pagosExtraMaterial}
-                              cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
-                              codigoDestino="COP"
-                              totalDestino={totalNeto}
-                              exigirCuadre
-                              onChange={setPagosExtraMaterial}
-                            />
+                            {pagosExtraMaterial.length === 0 ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMontoPrincipalMaterial(String(totalNeto));
+                                  setPagosExtraMaterial([{ key: '', monto: '', tasa: '', fecha: '' }]);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                              >
+                                + Se pagó parte con otra cuenta / método
+                              </button>
+                            ) : (
+                              <>
+                                <div className="rounded-xl border border-yeikar-secondary-light/15 bg-white/70 p-3 space-y-1">
+                                  <label className="text-[10px] font-bold text-yeikar-neutral/60 uppercase tracking-wider">
+                                    ¿Cuánto sale de {cuentaPrincipal?.nombre ?? 'la cuenta principal'}? ({pagoCod})
+                                  </label>
+                                  <input
+                                    type="number" step="0.01" min="0"
+                                    value={montoPrincipalMaterial}
+                                    onChange={(e) => setMontoPrincipalMaterial(e.target.value)}
+                                    placeholder="0.00"
+                                    className={inputCls}
+                                  />
+                                  {pagoCod !== 'COP' && (
+                                    <p className="text-[10px] font-mono text-yeikar-neutral/50">
+                                      ≈ {equivPrincipal.toLocaleString('es-CO', { maximumFractionDigits: 2 })} COP
+                                      {tasaNum > 0 ? ` · tasa ${tasaNum.toLocaleString('es-CO')}` : ' · falta la tasa'}
+                                    </p>
+                                  )}
+                                </div>
+                                <PagosMixtosEditor
+                                  filas={pagosExtraMaterial}
+                                  cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
+                                  codigoDestino="COP"
+                                  totalDestino={totalNeto}
+                                  exigirCuadre
+                                  equivalentePrincipal={equivPrincipal}
+                                  onChange={setPagosExtraMaterial}
+                                />
+                              </>
+                            )}
                           </div>
                         );
                       })()}
@@ -3565,21 +3620,57 @@ export default function Inventario() {
                       )}
                       {!!cuentaId && (
                         <div className="space-y-2">
-                          <button
-                            type="button"
-                            onClick={() => setPagosExtraProducto((prev) => (prev.length ? prev : [{ key: '', monto: '', tasa: '', fecha: '' }]))}
-                            className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
-                          >
-                            + Se pagó parte con otra cuenta / método
-                          </button>
-                          <PagosMixtosEditor
-                            filas={pagosExtraProducto}
-                            cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
-                            codigoDestino={refCod}
-                            totalDestino={totalRef}
-                            exigirCuadre
-                            onChange={setPagosExtraProducto}
-                          />
+                          {pagosExtraProducto.length === 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const inicial = pagoMid === refMid
+                                  ? totalRef
+                                  : (tasaNum > 0 ? convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum) : 0);
+                                setMontoPrincipalProducto(String(Math.round(inicial * 100) / 100));
+                                setPagosExtraProducto([{ key: '', monto: '', tasa: '', fecha: '' }]);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
+                            >
+                              + Se pagó parte con otra cuenta / método
+                            </button>
+                          ) : (() => {
+                            const principalNum = parseFloat(montoPrincipalProducto || '0') || 0;
+                            const equivPrincipal = pagoMid === refMid
+                              ? principalNum
+                              : (tasaNum > 0 ? convertirMonedaHumana(principalNum, pagoCod, refCod, tasaNum) : 0);
+                            return (
+                              <>
+                                <div className="rounded-xl border border-yeikar-secondary-light/15 bg-white/70 p-3 space-y-1">
+                                  <label className="text-[10px] font-bold text-yeikar-neutral/60 uppercase tracking-wider">
+                                    ¿Cuánto sale de {cuentasPago.find((c) => c.key === movProducto.pagado_desde_metodo_caja_id)?.nombre ?? 'la cuenta principal'}? ({pagoCod})
+                                  </label>
+                                  <input
+                                    type="number" step="0.01" min="0"
+                                    value={montoPrincipalProducto}
+                                    onChange={(e) => setMontoPrincipalProducto(e.target.value)}
+                                    placeholder="0.00"
+                                    className={inputCls}
+                                  />
+                                  {pagoMid !== refMid && (
+                                    <p className="text-[10px] font-mono text-yeikar-neutral/50">
+                                      ≈ {equivPrincipal.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {refCod}
+                                      {tasaNum > 0 ? ` · tasa ${tasaNum.toLocaleString('es-CO')}` : ' · falta la tasa'}
+                                    </p>
+                                  )}
+                                </div>
+                                <PagosMixtosEditor
+                                  filas={pagosExtraProducto}
+                                  cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
+                                  codigoDestino={refCod}
+                                  totalDestino={totalRef}
+                                  exigirCuadre
+                                  equivalentePrincipal={equivPrincipal}
+                                  onChange={setPagosExtraProducto}
+                                />
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
                     </>
