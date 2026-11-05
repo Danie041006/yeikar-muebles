@@ -58,7 +58,7 @@ function FotosRenglon({ urls, alt }: { urls: string[]; alt: string }) {
           key={i}
           src={u}
           alt={doble ? `${alt} (vista ${i + 1})` : alt}
-          className={`${doble ? 'h-14 w-14' : 'h-[88px] w-[88px]'} rounded-lg object-cover border border-stone-300 shrink-0`}
+          className={`${doble ? 'h-14 w-14' : 'h-[84px] w-[84px]'} rounded-lg object-cover border border-stone-300 shrink-0`}
           loading="lazy"
         />
       ))}
@@ -188,16 +188,16 @@ export default function DocumentoCotizacion({
               {/* Modelo y Descripción van en UNA sola columna ancha: el nombre
                   del mueble debe leerse en una línea horizontal junto a la foto. */}
               <colgroup>
-                <col style={{ width: '63%' }} />
-                <col style={{ width: '7%' }} />
-                <col style={{ width: '15%' }} />
-                <col style={{ width: '15%' }} />
+                <col style={{ width: '67.5%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '13%' }} />
+                <col style={{ width: '13.5%' }} />
               </colgroup>
               <thead>
                 <tr className="bg-stone-900 text-stone-100">
                   {['Descripción', 'Cant.', 'P. Unitario', 'Total'].map((h, i) => (
-                    <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[9px]
-                      ${i === 0 ? 'text-left' : i === 1 ? 'text-center' : 'text-right'}`}>{h}</th>
+                    <th key={h} className={`py-2 font-serif font-bold uppercase tracking-[0.12em] text-[9px]
+                      ${i === 0 ? 'px-2.5 text-left' : i === 1 ? 'px-1 text-center' : 'px-1.5 text-right'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -297,7 +297,7 @@ export default function DocumentoCotizacion({
                           <td colSpan={2} className="px-3 py-2 font-serif font-bold text-stone-950">
                             <div className="flex items-center gap-2.5">
                               <FotosRenglon urls={fotosDet} alt={textoItem} />
-                              <span className="min-w-0 flex-1 whitespace-nowrap text-[10.5px] leading-normal">
+                              <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] leading-normal">
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
                                 {notaItem && (
@@ -308,12 +308,12 @@ export default function DocumentoCotizacion({
                           </td>
                         ) : (
                           <>
-                            <td className="px-3 py-2 font-serif font-bold text-stone-950">
+                            <td className="px-2.5 py-2 font-serif font-bold text-stone-950">
                               <div className="flex items-center gap-2.5">
                                 <FotosRenglon urls={fotosDet} alt={modelName} />
                                 {/* Una sola línea: el nombre manda; la descripción
                                     (medidas/notas/piezas) va inline en menor tamaño. */}
-                                <span className="min-w-0 flex-1 whitespace-nowrap text-[10.5px] leading-normal">
+                                <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] leading-normal">
                                   <span className="font-serif font-extrabold">{modelName}</span>
                                   {desc && (
                                     <span className="ml-2 text-[9px] font-medium italic text-stone-600">
@@ -323,11 +323,11 @@ export default function DocumentoCotizacion({
                                 </span>
                               </div>
                             </td>
-                            <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
+                            <td className="px-1 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
                           </>
                         )}
-                        <td className="px-3 py-2 text-right font-mono text-stone-850 font-medium">{formatCurrency(Number(det.precio), moneda)}</td>
-                        <td className="px-3 py-2 text-right font-mono font-extrabold text-stone-950">{formatCurrency(rowTotal, moneda)}</td>
+                        <td className="px-1.5 py-2 text-right font-mono text-stone-850 font-medium">{formatCurrency(Number(det.precio), moneda)}</td>
+                        <td className="px-1.5 py-2 text-right font-mono font-extrabold text-stone-950">{formatCurrency(rowTotal, moneda)}</td>
                       </tr>
                     );
                   })
