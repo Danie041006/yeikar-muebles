@@ -107,6 +107,12 @@ export interface MovimientoResponse {
   referencia_id?: number;
   observaciones?: string;
   llevada?: number;
+  pagado_desde_metodo_caja_id?: number | null;
+  moneda_pago_id?: number | null;
+  tasa_pago?: number | null;
+  gasto_id?: number | null;
+  fiar?: boolean;
+  descuento_porcentaje?: number | null;
   proveedor_id?: number;
   proveedor_nombre?: string;
   cliente_id?: number;
@@ -117,6 +123,23 @@ export interface MovimientoResponse {
   fecha?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Corrección de una ENTRADA manual. Los campos no enviados se conservan. */
+export interface MovimientoUpdate {
+  cantidad?: number;
+  costo_unitario?: number;
+  fecha?: string;
+  proveedor_id?: number | null;
+  proveedor_nombre?: string | null;
+  cliente_id?: number | null;
+  cliente_nombre?: string | null;
+  departamento?: string | null;
+  recibido_por?: string | null;
+  observaciones?: string | null;
+  pagado_desde_metodo_caja_id?: number | null;
+  descuento_porcentaje?: number | null;
+  motivo_correccion?: string;
 }
 
 export interface ProductoInventarioItem {
@@ -279,6 +302,23 @@ export const inventarioService = {
   crearMovimiento: async (movimiento: MovimientoCreate): Promise<MovimientoResponse> => {
     const response = await api.post<MovimientoResponse>('/inventario/movimiento', movimiento);
     return response.data;
+  },
+
+  actualizarMovimiento: async (
+    movimientoId: number,
+    movimiento: MovimientoUpdate,
+  ): Promise<MovimientoResponse> => {
+    const response = await api.put<MovimientoResponse>(
+      `/inventario/movimiento/${movimientoId}`,
+      movimiento,
+    );
+    return response.data;
+  },
+
+  anularMovimiento: async (movimientoId: number, motivo?: string): Promise<void> => {
+    await api.delete(`/inventario/movimiento/${movimientoId}`, {
+      params: motivo ? { motivo } : undefined,
+    });
   },
 
   getKardex: async (materialId: number, limit: number = 100): Promise<MovimientoResponse[]> => {

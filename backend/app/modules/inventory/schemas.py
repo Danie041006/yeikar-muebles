@@ -118,6 +118,40 @@ class PagoEntradaCreate(BaseModel):
     tasa_pago: Optional[Decimal] = Field(None, gt=0)
 
 
+class MovimientoUpdate(BaseModel):
+    """Corrección de una ENTRADA manual ya registrada.
+
+    Solo campos "seguros": cantidad, precio, fecha, proveedor/cliente, zona,
+    quién trajo, observaciones y cuenta de pago. NO se permite cambiar el
+    material, el tipo, `fiar`, `llevada` ni la composición de pagos mixtos
+    (esos casos se anulan y se crean de nuevo).
+    """
+
+    cantidad: Optional[Decimal] = Field(None, gt=0)
+    costo_unitario: Optional[Decimal] = Field(None, ge=0)
+    fecha: Optional[date] = None
+    proveedor_id: Optional[int] = None
+    proveedor_nombre: Optional[str] = None
+    cliente_id: Optional[int] = None
+    cliente_nombre: Optional[str] = None
+    departamento: Optional[str] = None
+    recibido_por: Optional[str] = Field(None, max_length=150)
+    observaciones: Optional[str] = None
+    pagado_desde_metodo_caja_id: Optional[int] = None
+    descuento_porcentaje: Optional[Decimal] = Field(None, ge=0, le=100)
+    motivo_correccion: Optional[str] = Field(None, max_length=500)
+
+    @field_validator("departamento")
+    @classmethod
+    def _validar_departamento(cls, v: Optional[str]) -> Optional[str]:
+        if v in (None, ""):
+            return None
+        v = v.upper().strip()
+        if v not in DEPARTAMENTOS_VALIDOS:
+            raise ValueError(f"Departamento inválido: {v}")
+        return v
+
+
 class MovimientoResponse(BaseModel):
     """Salida del kardex: SIN las validaciones de entrada (gt/pattern).
 

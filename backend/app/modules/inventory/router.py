@@ -56,6 +56,44 @@ def crear_movimiento(
         raise HTTPException(status_code=409, detail="El movimiento de inventario entró en conflicto con otra operación simultánea")
 
 
+@router.put("/movimiento/{movimiento_id}", response_model=schemas.MovimientoResponse)
+def actualizar_movimiento(
+    movimiento_id: int,
+    movimiento: schemas.MovimientoUpdate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Corrige una ENTRADA manual: stock, gasto y salida de caja en una sola transacción."""
+    try:
+        mov = service.actualizar_movimiento_inventario(
+            db, movimiento_id, movimiento, usuario=current_user
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if mov is None:
+        raise HTTPException(status_code=404, detail="Movimiento de inventario no encontrado")
+    return mov
+
+
+@router.delete("/movimiento/{movimiento_id}", status_code=204)
+def anular_movimiento(
+    movimiento_id: int,
+    motivo: Optional[str] = Query(None, max_length=500),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Anula una ENTRADA manual y revierte stock, gasto y salida de caja."""
+    try:
+        exito = service.anular_movimiento_inventario(
+            db, movimiento_id, usuario=current_user, motivo=motivo
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not exito:
+        raise HTTPException(status_code=404, detail="Movimiento de inventario no encontrado")
+    return None
+
+
 @router.get("/movimientos/material/{material_id}", response_model=List[schemas.MovimientoResponse])
 def movimientos_por_material(
     material_id: int,

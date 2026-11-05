@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, CategoriaInventario } from '../services/inventarioService';
+import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, MovimientoUpdate, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, CategoriaInventario } from '../services/inventarioService';
 import { productosService, type MonedaInfo } from '../services/productosService';
 import { crudoService, produccionService, type Crudo, type CrudoMovimiento, type RetrabajoAbierto } from '../services/produccionService';
 import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO, type AdjuntoInfo } from '../services/adjuntosService';
@@ -138,6 +138,23 @@ export default function Inventario() {
   const [detalleTab, setDetalleTab] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
   const [kardex, setKardex] = useState<MovimientoResponse[]>([]);
   const [loadingKardex, setLoadingKardex] = useState(false);
+  // Corrección / anulación de una ENTRADA manual (stock + gasto + caja).
+  const [movimientoEditando, setMovimientoEditando] = useState<MovimientoResponse | null>(null);
+  const [formEditarMov, setFormEditarMov] = useState<{
+    cantidad: string;
+    costo_unitario: string;
+    fecha: string;
+    proveedor_nombre: string;
+    departamento: string;
+    recibido_por: string;
+    observaciones: string;
+    pago_key: string;
+    motivo_correccion: string;
+  } | null>(null);
+  const [guardandoEdicionMov, setGuardandoEdicionMov] = useState(false);
+  const [movimientoAnulando, setMovimientoAnulando] = useState<MovimientoResponse | null>(null);
+  const [motivoAnulacion, setMotivoAnulacion] = useState('');
+  const [anulandoMov, setAnulandoMov] = useState(false);
   // Categorías de inventario (desglose: LÁMINAS MDF, ESPUMA, PINTURA...)
   const [categoriasMaterial, setCategoriasMaterial] = useState<CategoriaInventario[]>([]);
   const [categoriasProducto, setCategoriasProducto] = useState<CategoriaInventario[]>([]);
@@ -867,6 +884,115 @@ export default function Inventario() {
       console.error('Error fetching kardex:', error);
     } finally {
       setLoadingKardex(false);
+    }
+  };
+
+  // ---- Editar / anular una ENTRADA manual (stock + gasto + caja) ----
+  const recargarKardexMaterial = async (materialId: number) => {
+    try {
+      setLoadingKardex(true);
+      setKardex(await inventarioService.getKardex(materialId));
+      setDetalleTab('historial');
+    } catch (error) {
+      console.error('Error al recargar el kardex:', error);
+    } finally {
+      setLoadingKardex(false);
+    }
+    await fetchInsumos();
+  };
+
+  const abrirEdicionMovimiento = (mov: MovimientoResponse) => {
+    setMovimientoEditando(mov);
+    setFormEditarMov({
+      cantidad: String(mov.cantidad ?? ''),
+      costo_unitario: mov.costo_unitario != null ? String(mov.costo_unitario) : '',
+      fecha: mov.fecha ? String(mov.fecha).slice(0, 10) : hoyVE(),
+      proveedor_nombre: mov.proveedor_nombre ?? '',
+      departamento: mov.departamento ?? '',
+      recibido_por: mov.recibido_por ?? '',
+      observaciones: mov.observaciones ?? '',
+      pago_key: mov.pagado_desde_metodo_caja_id
+        ? `${mov.pagado_desde_metodo_caja_id}:${mov.moneda_pago_id ?? MONEDA_BASE_ID}`
+        : '',
+      motivo_correccion: '',
+    });
+  };
+
+  const cerrarEdicionMovimiento = () => {
+    if (guardandoEdicionMov) return;
+    setMovimientoEditando(null);
+    setFormEditarMov(null);
+  };
+
+  const guardarEdicionMovimiento = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!movimientoEditando || !formEditarMov) return;
+    const cantidad = Number(formEditarMov.cantidad);
+    const costo = Number(formEditarMov.costo_unitario);
+    if (!Number.isFinite(cantidad) || cantidad <= 0) {
+      toast.error('La cantidad debe ser mayor que cero.');
+      return;
+    }
+    if (!Number.isFinite(costo) || costo < 0) {
+      toast.error('El precio unitario no puede ser negativo.');
+      return;
+    }
+    const payload: MovimientoUpdate = {
+      cantidad,
+      costo_unitario: costo,
+      fecha: formEditarMov.fecha || undefined,
+      proveedor_nombre: formEditarMov.proveedor_nombre.trim() || null,
+      departamento: formEditarMov.departamento || null,
+      recibido_por: formEditarMov.recibido_por.trim() || null,
+      observaciones: formEditarMov.observaciones.trim() || null,
+      motivo_correccion: formEditarMov.motivo_correccion.trim() || undefined,
+    };
+    // La cuenta solo se envía si cambió: en pagos mixtos el backend rechaza
+    // cambiar una cuenta (hay que anular y recrear).
+    const pagoOriginal = movimientoEditando.pagado_desde_metodo_caja_id
+      ? `${movimientoEditando.pagado_desde_metodo_caja_id}:${movimientoEditando.moneda_pago_id ?? MONEDA_BASE_ID}`
+      : '';
+    if (formEditarMov.pago_key && formEditarMov.pago_key !== pagoOriginal) {
+      const { cuentaId } = parsePagoKey(formEditarMov.pago_key);
+      if (cuentaId) payload.pagado_desde_metodo_caja_id = cuentaId;
+    }
+    try {
+      setGuardandoEdicionMov(true);
+      await inventarioService.actualizarMovimiento(movimientoEditando.id, payload);
+      toast.success('Entrada actualizada: stock, gasto y caja quedaron cuadrados.');
+      const materialId = movimientoEditando.material_id;
+      setMovimientoEditando(null);
+      setFormEditarMov(null);
+      await recargarKardexMaterial(materialId);
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Error al actualizar la entrada.'));
+    } finally {
+      setGuardandoEdicionMov(false);
+    }
+  };
+
+  const abrirAnulacionMovimiento = (mov: MovimientoResponse) => {
+    setMovimientoAnulando(mov);
+    setMotivoAnulacion('');
+  };
+
+  const confirmarAnulacionMovimiento = async () => {
+    if (!movimientoAnulando) return;
+    try {
+      setAnulandoMov(true);
+      await inventarioService.anularMovimiento(
+        movimientoAnulando.id,
+        motivoAnulacion.trim() || undefined,
+      );
+      toast.success('Entrada anulada: se devolvió el stock y se eliminó el gasto/salida de caja.');
+      const materialId = movimientoAnulando.material_id;
+      setMovimientoAnulando(null);
+      setMotivoAnulacion('');
+      await recargarKardexMaterial(materialId);
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'Error al anular la entrada.'));
+    } finally {
+      setAnulandoMov(false);
     }
   };
 
@@ -3168,6 +3294,24 @@ export default function Inventario() {
                                       {mov.observaciones}
                                     </p>
                                   )}
+                                  {mov.tipo === 'ENTRADA' && !mov.referencia_tipo && !mov.fiar && !(Number(mov.llevada) > 0) && (
+                                    <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-yeikar-secondary-light/10">
+                                      <button
+                                        type="button"
+                                        onClick={() => abrirEdicionMovimiento(mov)}
+                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide text-yeikar-secondary bg-yeikar-tertiary/50 hover:bg-yeikar-tertiary transition-colors"
+                                      >
+                                        Editar
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => abrirAnulacionMovimiento(mov)}
+                                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wide text-red-600 bg-red-50 hover:bg-red-100 transition-colors"
+                                      >
+                                        Anular
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })
@@ -4909,6 +5053,255 @@ export default function Inventario() {
           </div>
         </div>
       )}
+
+      {/* Modal: corregir una ENTRADA manual (stock + gasto + caja) */}
+      {movimientoEditando && formEditarMov && (() => {
+        const monedaPago = movimientoEditando.moneda_pago_id ?? MONEDA_BASE_ID;
+        const opcionesCuenta = cuentasPago
+          .filter((c) => (c.monedaId ?? MONEDA_BASE_ID) === monedaPago)
+          .map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` }));
+        if (
+          formEditarMov.pago_key &&
+          !opcionesCuenta.some((o) => o.value === formEditarMov.pago_key)
+        ) {
+          opcionesCuenta.unshift({
+            value: formEditarMov.pago_key,
+            label: `Cuenta #${movimientoEditando.pagado_desde_metodo_caja_id ?? ''}`,
+          });
+        }
+        const nuevoTotal =
+          Number(formEditarMov.cantidad || 0) * Number(formEditarMov.costo_unitario || 0);
+        return (
+          <div
+            className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+            onClick={cerrarEdicionMovimiento}
+          >
+            <div
+              className="bg-white rounded-3xl shadow-xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden border border-yeikar-secondary-light/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-gradient-to-r from-yeikar-secondary to-yeikar-secondary-light text-white px-6 py-5">
+                <p className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-white/60">
+                  Corregir entrada
+                </p>
+                <h3 className="font-headline font-black text-lg truncate">
+                  {materialSeleccionado?.nombre ?? 'Insumo'}
+                </h3>
+                <p className="text-xs text-white/70 mt-1">
+                  Se ajustan stock, gasto y salida de caja en una sola operación.
+                </p>
+              </div>
+              <form onSubmit={guardarEdicionMovimiento} className="p-6 space-y-4 overflow-y-auto font-body">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
+                    <input
+                      type="number"
+                      min="0.0001"
+                      step="any"
+                      value={formEditarMov.cantidad}
+                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, cantidad: e.target.value } : f)}
+                      className={inputCls}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">
+                      Precio unitario <span className="text-yeikar-neutral/40 font-normal">(COP)</span>
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={formEditarMov.costo_unitario}
+                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, costo_unitario: e.target.value } : f)}
+                      className={inputCls}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Fecha</label>
+                    <input
+                      type="date"
+                      max={hoyVE()}
+                      value={formEditarMov.fecha}
+                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, fecha: e.target.value } : f)}
+                      className={inputCls}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Proveedor</label>
+                    <input
+                      type="text"
+                      value={formEditarMov.proveedor_nombre}
+                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, proveedor_nombre: e.target.value } : f)}
+                      placeholder="Ej. pintutecnicas"
+                      className={inputCls.replace('font-mono', '')}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Zona / Departamento</label>
+                    <SearchSelect
+                      value={formEditarMov.departamento}
+                      onChange={(v) => setFormEditarMov((f) => f ? { ...f, departamento: v === '' ? '' : String(v) } : f)}
+                      options={[
+                        { value: '', label: 'General (sin zona)' },
+                        ...DEPARTAMENTOS.map((d) => ({ value: d.valor, label: d.label })),
+                      ]}
+                      placeholder="General..."
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Quién trajo</label>
+                    <input
+                      type="text"
+                      value={formEditarMov.recibido_por}
+                      onChange={(e) => setFormEditarMov((f) => f ? { ...f, recibido_por: e.target.value } : f)}
+                      placeholder="Ej. andres"
+                      className={inputCls.replace('font-mono', '')}
+                    />
+                  </div>
+                </div>
+                {movimientoEditando.pagado_desde_metodo_caja_id && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-yeikar-secondary">Cuenta de pago</label>
+                    <SearchSelect
+                      value={formEditarMov.pago_key}
+                      onChange={(v) => setFormEditarMov((f) => f ? { ...f, pago_key: String(v) } : f)}
+                      options={opcionesCuenta}
+                      placeholder="Seleccione la cuenta..."
+                    />
+                    <p className="text-[10px] text-yeikar-neutral/45">
+                      Solo cuentas de la misma moneda. Para cambiar de moneda, anula y recrea la entrada.
+                    </p>
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
+                  <textarea
+                    rows={2}
+                    value={formEditarMov.observaciones}
+                    onChange={(e) => setFormEditarMov((f) => f ? { ...f, observaciones: e.target.value } : f)}
+                    className={inputCls.replace('font-mono', '')}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">
+                    Motivo de la corrección <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formEditarMov.motivo_correccion}
+                    onChange={(e) => setFormEditarMov((f) => f ? { ...f, motivo_correccion: e.target.value } : f)}
+                    placeholder="Ej. La factura traía otro precio"
+                    className={inputCls.replace('font-mono', '')}
+                  />
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-[11px] text-amber-900">
+                  <p>
+                    Total de la compra:{' '}
+                    <b>${nuevoTotal.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b>
+                  </p>
+                  <p className="mt-1">
+                    El gasto y la salida de caja se ajustan a ese total. Si cambias la cantidad,
+                    el stock se mueve por la diferencia. No se permite dejar stock negativo.
+                  </p>
+                </div>
+                <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                  <button
+                    type="button"
+                    onClick={cerrarEdicionMovimiento}
+                    className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={guardandoEdicionMov}
+                    className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50"
+                  >
+                    {guardandoEdicionMov ? 'Guardando...' : 'Guardar corrección'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Modal: anular una ENTRADA manual */}
+      {movimientoAnulando && (() => {
+        const cantidad = Number(movimientoAnulando.cantidad) || 0;
+        const total = cantidad * (Number(movimientoAnulando.costo_unitario) || 0);
+        return (
+          <div
+            className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[80] flex items-center justify-center p-4"
+            onClick={() => { if (!anulandoMov) setMovimientoAnulando(null); }}
+          >
+            <div
+              className="bg-white rounded-3xl shadow-xl max-w-md w-full overflow-hidden border border-yeikar-secondary-light/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-gradient-to-r from-red-600 to-red-500 text-white px-6 py-5">
+                <p className="text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-white/60">
+                  Anular entrada
+                </p>
+                <h3 className="font-headline font-black text-lg truncate">
+                  {materialSeleccionado?.nombre ?? 'Insumo'}
+                </h3>
+              </div>
+              <div className="p-6 space-y-4 font-body">
+                <p className="text-sm text-yeikar-neutral/70">
+                  Se eliminará la entrada y se revertirán sus efectos:
+                </p>
+                <ul className="text-xs text-yeikar-neutral/60 list-disc pl-4 space-y-1">
+                  <li>Stock: <b>−{cantidad.toLocaleString('es-ES')}</b></li>
+                  <li>Gasto: <b>${total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></li>
+                  <li>Salida de caja: <b>${total.toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b></li>
+                </ul>
+                <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-[11px] text-red-800">
+                  Esta acción no se puede deshacer. Si el material ya se consumió o vendió, el
+                  sistema no permitirá bajar el stock a negativo.
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-yeikar-secondary">
+                    Motivo <span className="text-yeikar-neutral/40 font-normal">(opcional)</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={motivoAnulacion}
+                    onChange={(e) => setMotivoAnulacion(e.target.value)}
+                    placeholder="Ej. Entrada duplicada / precio equivocado"
+                    className={inputCls.replace('font-mono', '')}
+                  />
+                </div>
+                <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
+                  <button
+                    type="button"
+                    onClick={() => setMovimientoAnulando(null)}
+                    disabled={anulandoMov}
+                    className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmarAnulacionMovimiento}
+                    disabled={anulandoMov}
+                    className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50"
+                  >
+                    {anulandoMov ? 'Anulando...' : 'Anular entrada'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
