@@ -188,10 +188,10 @@ export default function DocumentoCotizacion({
               {/* Modelo y Descripción van en UNA sola columna ancha: el nombre
                   del mueble debe leerse en una línea horizontal junto a la foto. */}
               <colgroup>
-                <col style={{ width: '67.5%' }} />
-                <col style={{ width: '6%' }} />
-                <col style={{ width: '13%' }} />
-                <col style={{ width: '13.5%' }} />
+                <col style={{ width: '70%' }} />
+                <col style={{ width: '5.5%' }} />
+                <col style={{ width: '12.5%' }} />
+                <col style={{ width: '12%' }} />
               </colgroup>
               <thead>
                 <tr className="bg-stone-900 text-stone-100">
@@ -297,7 +297,7 @@ export default function DocumentoCotizacion({
                           <td colSpan={2} className="px-3 py-2 font-serif font-bold text-stone-950">
                             <div className="flex items-center gap-2.5">
                               <FotosRenglon urls={fotosDet} alt={textoItem} />
-                              <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] leading-normal">
+                              <span className="min-w-0 flex-1 whitespace-nowrap text-[10px] leading-normal">
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
                                 {notaItem && (
@@ -313,7 +313,7 @@ export default function DocumentoCotizacion({
                                 <FotosRenglon urls={fotosDet} alt={modelName} />
                                 {/* Una sola línea: el nombre manda; la descripción
                                     (medidas/notas/piezas) va inline en menor tamaño. */}
-                                <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10px] leading-normal">
+                                <span className="min-w-0 flex-1 whitespace-nowrap text-[10px] leading-normal">
                                   <span className="font-serif font-extrabold">{modelName}</span>
                                   {desc && (
                                     <span className="ml-2 text-[9px] font-medium italic text-stone-600">
@@ -323,11 +323,11 @@ export default function DocumentoCotizacion({
                                 </span>
                               </div>
                             </td>
-                            <td className="px-1 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
+                            <td className="px-1 py-2 text-center font-mono font-extrabold text-[10px] text-stone-900">{cantTexto}</td>
                           </>
                         )}
-                        <td className="px-1.5 py-2 text-right font-mono text-stone-850 font-medium">{formatCurrency(Number(det.precio), moneda)}</td>
-                        <td className="px-1.5 py-2 text-right font-mono font-extrabold text-stone-950">{formatCurrency(rowTotal, moneda)}</td>
+                        <td className="px-1.5 py-2 text-right font-mono text-stone-850 font-medium text-[10px]">{formatCurrency(Number(det.precio), moneda)}</td>
+                        <td className="px-1.5 py-2 text-right font-mono font-extrabold text-[10px] text-stone-950">{formatCurrency(rowTotal, moneda)}</td>
                       </tr>
                     );
                   })
