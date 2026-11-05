@@ -324,15 +324,25 @@ def _agregar_piezas_cotizacion(db_detalle, piezas) -> None:
     """Crea las piezas del juego dentro de un renglón de cotización.
 
     El schema ya validó nombres/cantidades; aquí solo se normaliza el formato
-    (Create trae modelos y Update trae dicts por model_dump).
+    (Create trae modelos y Update trae dicts por model_dump) y se copian los
+    campos de la composición comercial.
     """
+    from app.modules.quotes.piezas import datos_pieza
+
     for orden, pieza in enumerate(piezas or []):
-        datos = pieza if isinstance(pieza, dict) else pieza.model_dump()
+        datos = datos_pieza(pieza)
         db_detalle.piezas.append(model.DetalleCotizacionPieza(
-            nombre=(datos.get("nombre") or "").strip(),
-            cantidad=datos.get("cantidad") or 1,
-            notas=(datos.get("notas") or "").strip() or None,
-            foto=datos.get("foto") or None,
+            nombre=datos["nombre"],
+            cantidad=datos["cantidad"],
+            notas=datos["notas"],
+            foto=datos["foto"],
+            producto_id=datos["producto_id"],
+            precio=datos["precio"],
+            origen=datos["origen"],
+            conjunto_origen_id=datos["conjunto_origen_id"],
+            modificacion=datos["modificacion"],
+            requiere_retrabajo=datos["requiere_retrabajo"],
+            precio_modificacion=datos["precio_modificacion"],
             orden=orden,
         ))
 
@@ -344,6 +354,15 @@ def crear_cotizacion(db: Session, esquema: schemas.CotizacionCreate, usuario: Us
     # Sin fecha (o null) se guarda HOY en hora Venezuela: la columna es NOT NULL
     # por diseño y ningún cliente debe poder crear una cotización sin fecha.
     datos["fecha"] = datos.get("fecha") or hoy_ve()
+
+    # Composición de piezas: el backend es la fuente de verdad del precio del
+    # renglón (Σ piezas) y de su costo estimado. Si algún renglón es compuesto,
+    # el total de la cotización se recalcula desde sus subtotales.
+    from app.modules.quotes.piezas import aplicar_composicion_detalles, total_desde_detalles
+    if aplicar_composicion_detalles(db, detalles_datos):
+        total = total_desde_detalles(detalles_datos)
+        if total is not None:
+            datos["total_estimado"] = total
 
     if datos.get("moneda_id", MONEDA_BASE_ID) != MONEDA_BASE_ID:
         datos["tasa_cambio"] = _trm_cotizacion(
@@ -412,7 +431,12 @@ def actualizar_cotizacion(
     detalles_nuevos = datos.pop("detalles", None)
     if detalles_nuevos is not None:
         from app.modules.productos.service import validar_regalos_plastico
+        from app.modules.quotes.piezas import aplicar_composicion_detalles, total_desde_detalles
         validar_regalos_plastico(db, detalles_nuevos)
+        if aplicar_composicion_detalles(db, detalles_nuevos):
+            total = total_desde_detalles(detalles_nuevos)
+            if total is not None:
+                datos["total_estimado"] = total
     for campo, valor in datos.items():
         setattr(db_obj, campo, valor)
     if detalles_nuevos is not None:

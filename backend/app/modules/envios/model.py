@@ -91,12 +91,24 @@ class EnvioDetalle(Base):
         nullable=True,
         index=True,
     )
+    # Pieza del juego SIN orden de producción (exhibición ya lista): permite
+    # distinguir varias piezas del mismo renglón en un despacho.
+    detalle_pieza_id = Column(
+        BigInteger,
+        ForeignKey("detalle_pedido_pieza.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     cantidad = Column(Numeric(14, 4), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
     envio = relationship("Envio", back_populates="detalles")
     detalle_pedido = relationship("DetallePedido")
     orden = relationship("OrdenProduccion")
+    detalle_pieza = relationship(
+        "DetallePedidoPieza",
+        foreign_keys=[detalle_pieza_id],
+    )
 
     __table_args__ = (
         # Una misma pieza no puede repetirse dentro del mismo envío.
@@ -106,21 +118,39 @@ class EnvioDetalle(Base):
             "orden_produccion_id",
             name="uq_envio_detalle_item",
         ),
-        # El UNIQUE anterior permite varios NULL (renglones sin pieza); este
-        # índice parcial garantiza una sola fila por renglón cuando no hay orden.
+        # El UNIQUE anterior permite varios NULL (renglones sin pieza). Para
+        # un renglón normal (sin orden ni pieza) sigue habiendo una sola fila.
         Index(
             "uq_envio_detalle_sin_orden",
             "envio_id",
             "detalle_pedido_id",
             unique=True,
-            postgresql_where=text("orden_produccion_id IS NULL"),
+            postgresql_where=text(
+                "orden_produccion_id IS NULL AND detalle_pieza_id IS NULL"
+            ),
+        ),
+        # Un renglón compuesto puede llevar VARIAS piezas de exhibición sin
+        # orden: cada una es una fila distinta (mesa + sillas en el mismo envío).
+        Index(
+            "uq_envio_detalle_sin_orden_pieza",
+            "envio_id",
+            "detalle_pedido_id",
+            "detalle_pieza_id",
+            unique=True,
+            postgresql_where=text(
+                "orden_produccion_id IS NULL AND detalle_pieza_id IS NOT NULL"
+            ),
         ),
         CheckConstraint("cantidad > 0", name="ck_envio_detalle_cantidad_positiva"),
     )
 
     @property
     def pieza_nombre(self):
-        return self.orden.pieza_nombre if self.orden else None
+        if self.orden is not None:
+            return self.orden.pieza_nombre
+        if self.detalle_pieza is not None:
+            return self.detalle_pieza.nombre
+        return None
 
     @property
     def tipo_item(self):
@@ -145,8 +175,9 @@ class EnvioDetalle(Base):
         elif det.material is not None:
             base = det.material.nombre
         base = base or det.descripcion_especifica or det.observaciones or "Servicio"
-        if self.orden and self.orden.pieza_nombre:
-            return f"{base} — {self.orden.pieza_nombre}"
+        nombre_pieza = self.pieza_nombre
+        if nombre_pieza:
+            return f"{base} — {nombre_pieza}"
         return base
 
 

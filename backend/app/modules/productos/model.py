@@ -36,6 +36,14 @@ class Producto(Base):
     # regalo?" y permite agregar UNA unidad de plástico por unidad vendida.
     # No todos los clientes quieren el plástico: es una selección manual.
     es_colchon          = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
+    # True = conjunto: el mueble se compone de piezas (un comedor = mesa ×1 +
+    # sillas ×6). Lo mantiene el endpoint de composición según tenga piezas o
+    # no; no se edita a mano en el formulario del producto.
+    es_conjunto         = Column(Boolean, default=False, nullable=False, server_default="false")
+    # True = pieza: producto que es (o fue) parte de un conjunto. Es una marca
+    # comercial/de catálogo, no cambia cómo se fabrica ni cómo se vende: una
+    # pieza suelta en el showroom se puede cotizar sola o combinar con otras.
+    es_pieza            = Column(Boolean, default=False, nullable=False, server_default="false", index=True)
     # Moneda de los precios de referencia (costo/venta). Base del ERP: COP (id=1).
     # Los productos de reventa suelen comprarse en USD; la conversión a COP se
     # hace con la tasa vigente al USAR el precio, nunca congelada.
@@ -51,6 +59,16 @@ class Producto(Base):
     categoria_inventario = relationship("CategoriaInventario")
     materiales      = relationship("ProductoMaterial", back_populates="producto", cascade="all, delete-orphan")
     secciones       = relationship("SeccionProducto", back_populates="producto", cascade="all, delete-orphan")
+    # Composición del conjunto (solo si es_conjunto): las piezas que lo forman,
+    # en orden de aparición. NO es la receta de materiales: es el desglose
+    # comercial y de costo del mueble (mesa, sillas, sillones…).
+    composicion     = relationship(
+        "ProductoPieza",
+        foreign_keys="ProductoPieza.producto_id",
+        back_populates="conjunto",
+        cascade="all, delete-orphan",
+        order_by="ProductoPieza.orden",
+    )
 
     @property
     def fotos(self):
@@ -71,6 +89,39 @@ class Producto(Base):
         if s is None:
             return []
         return adjuntos_info(s, "PRODUCTO", self.id, orden="asc")
+
+
+class ProductoPieza(Base):
+    """Pieza que compone un conjunto (un comedor = mesa ×1 + sillas ×6).
+
+    La pieza es ella misma un `Producto` del catálogo: su costo y su precio de
+    venta viven ahí (`precio_costo_base` / `precio_venta_base`), NO se
+    duplican en esta tabla. Así la misma pieza sirve para armar el conjunto,
+    para cotizarse sola y para quedar como sobrante vendible en el showroom.
+
+    Esto NO toca la receta de materiales (`producto_material` / secciones):
+    es el desglose comercial y de costo del mueble, no su fabricación.
+    """
+
+    __tablename__ = "producto_pieza"
+    __table_args__ = (
+        UniqueConstraint("producto_id", "pieza_producto_id", name="uq_producto_pieza_conjunto_pieza"),
+    )
+
+    id = Column(BigInteger, primary_key=True, index=True)
+    # Conjunto al que pertenece la pieza.
+    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="CASCADE"), nullable=False, index=True)
+    # Producto que ES la pieza (mesa, silla…). RESTRICT: no se puede borrar un
+    # producto mientras sea pieza de un conjunto.
+    pieza_producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="RESTRICT"), nullable=False)
+    # Cuántas unidades de la pieza lleva UNA unidad del conjunto (6 sillas).
+    cantidad = Column(Numeric(10, 2), nullable=False, server_default="1", default=1)
+    orden = Column(BigInteger, nullable=False, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, onupdate=func.now())
+
+    conjunto = relationship("Producto", foreign_keys=[producto_id], back_populates="composicion")
+    pieza = relationship("Producto", foreign_keys=[pieza_producto_id])
 
 
 class Material(Base):

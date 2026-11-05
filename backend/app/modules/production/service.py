@@ -236,7 +236,11 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
     _detalle = detalle_query.first()
     if not _detalle:
         raise ValueError("El detalle de pedido no existe o no está disponible para este usuario.")
-    if _detalle.producto is not None and (_detalle.producto.es_reventa or _detalle.producto.es_exhibicion):
+    if (
+        _detalle.producto is not None
+        and (_detalle.producto.es_reventa or _detalle.producto.es_exhibicion)
+        and not _detalle.piezas
+    ):
         raise ValueError(
             f"El producto '{_detalle.producto.nombre}' no entra a producción desde un pedido. "
             "Su venta descuenta stock del inventario al facturar."
@@ -253,6 +257,11 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
         pieza = next((p for p in _detalle.piezas if p.id == esquema.detalle_pieza_id), None)
         if not pieza:
             raise ValueError("La pieza indicada no pertenece a este renglón del pedido.")
+        if not _pieza_requiere_orden(pieza):
+            raise ValueError(
+                f"La pieza '{pieza.nombre}' es de exhibición y no requiere retrabajo: "
+                "ya está lista para entregar, no necesita una orden de producción."
+            )
         db_orden = _crear_orden_desde_pieza(
             db,
             _detalle,
@@ -291,6 +300,21 @@ def crear_orden_produccion(db: Session, esquema: OrdenProduccionCreate, usuario:
     return db_orden
 
 
+def _pieza_requiere_orden(pieza) -> bool:
+    """True si la pieza necesita trabajo de producción.
+
+    Una pieza FABRICADO siempre se produce. Una pieza EXHIBICION ya está
+    fabricada: solo entra al taller si el cliente pidió un retrabajo (recolor,
+    retapizado, ajuste).
+    """
+    origen = (getattr(pieza, "origen", None) or "FABRICADO")
+    if isinstance(origen, str):
+        origen = origen.strip().upper()
+    if origen != TIPO_EXHIBICION:
+        return True
+    return bool(getattr(pieza, "requiere_retrabajo", False))
+
+
 def _crear_orden_desde_pieza(
     db: Session,
     detalle: DetallePedido,
@@ -300,10 +324,17 @@ def _crear_orden_desde_pieza(
     estado: str = "PENDIENTE",
     fecha_inicio=None,
 ) -> OrdenProduccion:
-    """Crea UNA orden interna. Con `pieza` queda ligada a esa pieza del juego."""
+    """Crea UNA orden interna. Con `pieza` queda ligada a esa pieza del juego.
+
+    Las piezas de exhibición SIN retrabajo no generan orden (ya están listas);
+    las que sí lo piden generan una orden RETRABAJO ligada al pedido.
+    """
     cantidad = Decimal(str(detalle.cantidad or 1))
     if pieza is not None:
         cantidad *= Decimal(str(pieza.cantidad or 1))
+    tipo = TIPO_PEDIDO
+    if pieza is not None and (getattr(pieza, "origen", None) or "FABRICADO") == TIPO_EXHIBICION:
+        tipo = TIPO_RETRABAJO
     orden = OrdenProduccion(
         detalle_pedido_id=detalle.id,
         detalle_pieza_id=pieza.id if pieza is not None else None,
@@ -313,7 +344,7 @@ def _crear_orden_desde_pieza(
         fecha_inicio=fecha_inicio,
         fecha_fin=None,
         es_stock=False,
-        tipo=TIPO_PEDIDO,
+        tipo=tipo,
         creado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
         actualizado_por_id=usuario.id if usuario is not None else (detalle.pedido.creado_por_id if detalle.pedido else None),
     )
@@ -334,6 +365,8 @@ def _crear_ordenes_de_piezas(
     creadas = []
     for pieza in detalle.piezas or []:
         if pieza.id in ya_por_pieza:
+            continue
+        if not _pieza_requiere_orden(pieza):
             continue
         creadas.append(_crear_orden_desde_pieza(
             db, detalle, pieza=pieza, usuario=usuario, estado=estado, fecha_inicio=fecha_inicio
@@ -362,7 +395,11 @@ def crear_ordenes_desde_detalle_pedido(
     `commit=False` permite reutilizarla dentro de una transacción mayor
     (conversión de cotización o cambio de estado del pedido).
     """
-    if detalle.producto is not None and (detalle.producto.es_reventa or detalle.producto.es_exhibicion):
+    if (
+        detalle.producto is not None
+        and (detalle.producto.es_reventa or detalle.producto.es_exhibicion)
+        and not detalle.piezas
+    ):
         raise ValueError(
             f"El producto '{detalle.producto.nombre}' no entra a producción desde un pedido. "
             "Su venta descuenta stock del inventario al facturar."
@@ -379,6 +416,8 @@ def crear_ordenes_desde_detalle_pedido(
 
     piezas = list(detalle.piezas or [])
     if piezas:
+        # Si TODAS las piezas ya están listas en exhibición (sin retrabajo),
+        # el renglón no genera ninguna orden: se entrega de inmediato.
         creadas = _crear_ordenes_de_piezas(db, detalle, existentes, usuario, estado, fecha_inicio)
     elif existentes:
         return existentes
@@ -399,16 +438,41 @@ def crear_ordenes_desde_detalle_pedido(
 
 
 def _detalle_fabricable_finalizado(db: Session, detalle: DetallePedido) -> bool:
-    """True si el renglón tiene órdenes y TODAS están FINALIZADA."""
+    """True si todo lo que el renglón necesita producir ya terminó.
+
+    - Renglón normal: tiene órdenes y TODAS están FINALIZADA.
+    - Renglón con piezas: cada pieza FABRICADO debe tener su orden FINALIZADA;
+      cada pieza de EXHIBICION con retrabajo, su orden RETRABAJO resuelta
+      (FINALIZADA o CANCELADA). Las piezas de exhibición sin retrabajo ya
+      están listas y no requieren orden.
+    """
     ordenes = (
         db.query(OrdenProduccion)
-        .filter(
-            OrdenProduccion.detalle_pedido_id == detalle.id,
-            OrdenProduccion.tipo != TIPO_RETRABAJO,
-        )
+        .filter(OrdenProduccion.detalle_pedido_id == detalle.id)
         .all()
     )
-    return bool(ordenes) and all(orden.estado == "FINALIZADA" for orden in ordenes)
+    piezas = list(detalle.piezas or [])
+    # Si hay una orden "general" histórica (sin pieza), manda el criterio
+    # clásico: esa orden cubre todo el renglón.
+    if piezas and not any(o.detalle_pieza_id is None for o in ordenes):
+        for pieza in piezas:
+            if not _pieza_requiere_orden(pieza):
+                continue
+            ordenes_pieza = [o for o in ordenes if o.detalle_pieza_id == pieza.id]
+            if not ordenes_pieza:
+                return False
+            for orden in ordenes_pieza:
+                if orden.tipo == TIPO_RETRABAJO:
+                    if orden.estado not in ("FINALIZADA", "CANCELADA"):
+                        return False
+                elif orden.estado != "FINALIZADA":
+                    return False
+        return True
+
+    ordenes_normales = [o for o in ordenes if o.tipo != TIPO_RETRABAJO]
+    return bool(ordenes_normales) and all(
+        orden.estado == "FINALIZADA" for orden in ordenes_normales
+    )
 
 
 def pedido_produccion_finalizada(db: Session, pedido_id: int) -> bool:
@@ -461,7 +525,12 @@ def crear_orden_desde_detalle_pedido(db: Session, detalle_pedido_id: int, usuari
     # por pieza. El endpoint devuelve la primera; el tablero recarga y muestra
     # todas las cards del juego.
     ordenes = crear_ordenes_desde_detalle_pedido(db, detalle, usuario, commit=True)
-    return ordenes[0] if ordenes else None
+    if not ordenes:
+        raise ValueError(
+            "El renglón no tiene piezas fabricables: sus piezas de exhibición ya "
+            "están listas para entregar y no necesitan una orden de producción."
+        )
+    return ordenes[0]
 # ------------------------------------------------------------
 # Retrabajo de piezas de exhibición (tipo RETRABAJO)
 # ------------------------------------------------------------

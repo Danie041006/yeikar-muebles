@@ -24,6 +24,7 @@ export interface Product {
   id: number;
   codigo: string;
   nombre: string;
+  activo?: boolean;
   descripcion?: string;
   precio_venta_base?: number;
   precio_costo_base?: number;
@@ -54,6 +55,21 @@ export interface PiezaJuego {
   /** Foto opcional de la pieza (data URL comprimida). */
   foto?: string | null;
   orden?: number;
+  /** Composición comercial: producto del catálogo que ES la pieza. */
+  producto_id?: number | null;
+  /** Precio unitario en la moneda de la cotización (opcional). */
+  precio?: number | null;
+  /** FABRICADO (se produce) o EXHIBICION (sale del showroom). */
+  origen?: 'FABRICADO' | 'EXHIBICION' | null;
+  /** Conjunto de exhibición del que se despieza la pieza. */
+  conjunto_origen_id?: number | null;
+  /** Retoque pedido sobre una pieza de exhibición. */
+  modificacion?: string | null;
+  requiere_retrabajo?: boolean;
+  /** Cobro adicional por el retoque, por unidad de la pieza. */
+  precio_modificacion?: number | null;
+  /** Costo real congelado al despiezar (COP). Solo lectura. */
+  costo_unitario?: number | null;
 }
 
 export interface QuoteDetail {
@@ -279,11 +295,23 @@ export const cotizacionService = {
   },
 
   // Products list
-  getProducts: async (search?: string): Promise<Product[]> => {
+  getProducts: async (
+    search?: string,
+    options?: { es_exhibicion?: boolean; es_reventa?: boolean; limite?: number },
+  ): Promise<Product[]> => {
     const response = await api.get<Product[]>('/producto/', {
       // limite=1000: el default del backend (100, ordenado por id) dejaba
       // fuera los productos más nuevos (ej. piezas de exhibición).
-      params: { buscar: search, limite: 1000 },
+      params: {
+        buscar: search,
+        limite: options?.limite ?? 1000,
+        ...(options?.es_exhibicion !== undefined
+          ? { es_exhibicion: options.es_exhibicion }
+          : {}),
+        ...(options?.es_reventa !== undefined
+          ? { es_reventa: options.es_reventa }
+          : {}),
+      },
     });
     return response.data;
   },

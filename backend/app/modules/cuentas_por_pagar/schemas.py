@@ -9,7 +9,7 @@ from app.modules.proveedores.schemas import ProveedorResponse
 
 class AbonoBase(BaseModel):
     fecha: date
-    # Monto del abono EN LA MONEDA DE LA DEUDA.
+    # Dinero que sale de caja, EN LA MONEDA DE LA DEUDA (neto de descuento).
     monto: Decimal = Field(..., gt=0)
     metodo_caja_id: int
     # Tasa "1 [moneda de la cuenta] = X COP" (obligatoria si la cuenta no es COP).
@@ -17,16 +17,26 @@ class AbonoBase(BaseModel):
 
 
 class AbonoCreate(AbonoBase):
-    pass
+    # Descuento del proveedor, en la misma moneda de la deuda. Se suma al
+    # `monto` para cerrar la deuda, pero no sale de caja ni toca el gasto.
+    descuento: Optional[Decimal] = Field(None, ge=0)
+    # Porcentaje del descuento (0-100), solo informativo para el historial.
+    descuento_porcentaje: Optional[Decimal] = Field(None, ge=0, lt=100)
 
 
 class AbonoResponse(AbonoBase):
     id: int
+    # Parte del abono condonada por el proveedor (moneda de la deuda).
+    descuento: Decimal = Decimal("0.00")
+    descuento_porcentaje: Optional[Decimal] = None
+    # Total que bajó la deuda: monto + descuento.
+    monto_aplicado: Decimal = Decimal("0.00")
     tasa_cambio: Decimal = Decimal("1.0")
     monto_en_moneda_base: Decimal
     creado_por_id: Optional[int] = None
     creador_nombre: Optional[str] = None
     metodo_caja_nombre: Optional[str] = None
+    metodo_caja_moneda_codigo: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -74,6 +84,7 @@ class CuentaPorPagarResponse(CuentaPorPagarBase):
     gasto_id: Optional[int] = None
     monto_en_moneda_base: Decimal
     monto_pagado: Decimal
+    monto_descontado: Decimal = Decimal("0.00")
     saldo: Decimal
     estado: str
     origen_tipo: Optional[str] = None

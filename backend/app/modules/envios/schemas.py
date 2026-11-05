@@ -26,6 +26,9 @@ class EnvioDetalleCreate(BaseModel):
 
     detalle_pedido_id: int
     orden_produccion_id: Optional[int] = None
+    # Pieza sin orden de producción (exhibición ya lista); distingue varias
+    # piezas del mismo renglón. Para piezas con orden basta la orden.
+    detalle_pieza_id: Optional[int] = None
     cantidad: float = Field(gt=0)
 
 
@@ -53,6 +56,7 @@ class EnvioDetalleResponse(BaseModel):
     id: int
     detalle_pedido_id: int
     orden_produccion_id: Optional[int] = None
+    detalle_pieza_id: Optional[int] = None
     cantidad: float
     descripcion: Optional[str] = None
     pieza_nombre: Optional[str] = None
@@ -155,6 +159,7 @@ class PendienteEntregaItem(BaseModel):
 
     detalle_pedido_id: int
     orden_produccion_id: Optional[int] = None
+    detalle_pieza_id: Optional[int] = None
     pieza_nombre: Optional[str] = None
     descripcion: str
     tipo_item: Optional[str] = None

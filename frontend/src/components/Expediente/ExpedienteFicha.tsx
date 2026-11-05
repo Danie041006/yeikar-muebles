@@ -352,7 +352,7 @@ function PagoRow({ pago }: { pago: PagoExp }) {
           </span>
         )}
         {pago.recibos.map((r) => (
-          <AdjuntoImagen key={r.id} adjunto={r} alt={r.nombre} className="h-9 w-9 rounded-lg border border-yeikar-secondary-light/15" />
+          <AdjuntoImagen key={r.id} adjunto={r} alt={r.nombre} fit="contain" className="h-9 w-9 rounded-lg bg-white border border-yeikar-secondary-light/15" />
         ))}
       </div>
     </div>

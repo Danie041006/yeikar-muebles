@@ -32,7 +32,12 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ProductSelectorModal from '../components/ProductSelectorModal';
-import PiezasJuegoEditor, { validarPiezasJuego, type PiezaJuegoForm } from '../components/Cotizaciones/PiezasJuegoEditor';
+import PiezasJuegoEditor, {
+  composicionActiva,
+  totalPiezasEnMoneda,
+  validarPiezasJuego,
+  type PiezaJuegoForm,
+} from '../components/Cotizaciones/PiezasJuegoEditor';
 import { Package, Plus, Loader2, Wrench, Truck } from 'lucide-react';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { produccionService } from '../services/produccionService';
@@ -77,15 +82,42 @@ interface CotizacionItemForm {
 let itemUidSeq = 0;
 const nuevoItemUid = () => `item-${Date.now().toString(36)}-${++itemUidSeq}`;
 
-/** Piezas del juego listas para la API (el precio NO viaja: es del renglón). */
+/** Piezas del juego listas para la API.
+ *
+ *  El modo clásico viaja igual que siempre (nombre/cantidad/nota/foto). La
+ *  composición comercial agrega producto, precio, origen y retrabajo; el
+ *  backend recalcula el precio del renglón desde estos datos.
+ */
 function piezasParaPayload(item: CotizacionItemForm) {
-  return (item.piezas ?? []).map((p) => ({
-    nombre: p.nombre.trim(),
-    cantidad: p.cantidad,
-    notas: p.notas.trim() || null,
-    // Foto opcional (data URL comprimida en el navegador).
-    foto: p.foto || null,
-  }));
+  return (item.piezas ?? []).map((p) => {
+    const comercial = composicionActiva([p]);
+    return {
+      nombre: p.nombre.trim(),
+      cantidad: p.cantidad,
+      notas: p.notas.trim() || null,
+      // Foto opcional (data URL comprimida en el navegador).
+      foto: p.foto || null,
+      ...(comercial
+        ? {
+            producto_id: p.producto_id ?? null,
+            precio: p.precio ?? null,
+            origen: p.origen ?? 'FABRICADO',
+            conjunto_origen_id:
+              p.origen === 'EXHIBICION' ? (p.conjunto_origen_id ?? null) : null,
+            modificacion: p.requiere_retrabajo ? (p.modificacion?.trim() || null) : null,
+            requiere_retrabajo: !!p.requiere_retrabajo,
+            precio_modificacion: p.requiere_retrabajo
+              ? (p.precio_modificacion ?? null)
+              : null,
+          }
+        : {}),
+    };
+  });
+}
+
+/** Precio de UNA unidad del renglón cuando todas las piezas tienen precio. */
+function precioComposicion(item: CotizacionItemForm): number | null {
+  return totalPiezasEnMoneda(item.piezas ?? []);
 }
 
 /** Convierte los detalles de una cotización guardada al estado del formulario
@@ -161,6 +193,14 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
         cantidad: Number(p.cantidad) || 1,
         notas: p.notas || '',
         foto: p.foto ?? null,
+        producto_id: p.producto_id ?? null,
+        precio: p.precio != null ? Number(p.precio) : null,
+        origen: (p.origen as 'FABRICADO' | 'EXHIBICION' | null) ?? 'FABRICADO',
+        conjunto_origen_id: p.conjunto_origen_id ?? null,
+        modificacion: p.modificacion ?? '',
+        requiere_retrabajo: !!p.requiere_retrabajo,
+        precio_modificacion:
+          p.precio_modificacion != null ? Number(p.precio_modificacion) : null,
       })),
       es_obsequio: d.es_obsequio || false,
     };
@@ -527,15 +567,29 @@ export default function Cotizaciones() {
 
   const fetchInitialData = async () => {
     try {
-      const [cls, prds, mats, currs, metodos] = await Promise.all([
+      const [cls, prds, exh, mats, currs, metodos] = await Promise.all([
         clienteService.getAll(),
         cotizacionService.getProducts(),
+        // El catálogo general viene paginado (1000 más nuevos). Las piezas de
+        // exhibición son más viejas y quedaban fuera de esa página; se piden
+        // aparte para que el catálogo de exhibición no salga vacío.
+        cotizacionService
+          .getProducts(undefined, { es_exhibicion: true, limite: 1000 })
+          .catch(() => [] as Product[]),
         productosService.getMateriales(),
         cotizacionService.fetchCurrencies(),
         cargarMetodosPago().catch(() => [] as MetodoPagoOption[]),
       ]);
+      const vistos = new Set(prds.map((p) => p.id));
+      const todos = [...prds];
+      for (const p of exh) {
+        if (!vistos.has(p.id)) {
+          todos.push(p);
+          vistos.add(p.id);
+        }
+      }
       setClients(cls);
-      setProducts(ordenarProductosPorTipo(prds));
+      setProducts(ordenarProductosPorTipo(todos));
       setMateriales(mats);
       setCurrencies(currs);
       if (metodos.length > 0) setMetodosPago(metodos);
@@ -1613,7 +1667,15 @@ export default function Cotizaciones() {
       // precio manual. El costo estimado es opcional (solo referencia).
       if (item.tipo_item === 'FABRICADO' && !item.producto_id) {
         const r = item.calcResult;
-        const precioMoneda = Math.round(convertirAPrecioCotizacion(Number(r?.precio_venta) || 0, r?.moneda_codigo || currencyCode) * 100) / 100;
+        const precioPiezas = precioComposicion(item);
+        const precioMoneda =
+          precioPiezas ??
+          Math.round(
+            convertirAPrecioCotizacion(
+              Number(r?.precio_venta) || 0,
+              r?.moneda_codigo || currencyCode,
+            ) * 100,
+          ) / 100;
         const subtotal = precioMoneda * item.cantidad;
         globalTotal += subtotal;
         const costoEstimado = Number(r?.costo_total) || 0;
@@ -1684,7 +1746,8 @@ export default function Cotizaciones() {
         const c = convertirAPrecioCotizacion(Number(v), r?.moneda_codigo);
         return Math.round(c * 100) / 100;
       };
-      const precioMoneda = conv(r ? r.precio_venta : 0.0);
+      const precioPiezas = item.tipo_item === 'FABRICADO' ? precioComposicion(item) : null;
+      const precioMoneda = precioPiezas ?? conv(r ? r.precio_venta : 0.0);
       const subtotal = precioMoneda * item.cantidad;
       globalTotal += subtotal;
       const esObsequio = !!item.es_obsequio;
@@ -1943,6 +2006,16 @@ export default function Cotizaciones() {
               nombre: p.nombre,
               cantidad: Number(p.cantidad) || 1,
               notas: p.notas || null,
+              producto_id: p.producto_id ?? null,
+              precio: p.precio != null ? Number(p.precio) : null,
+              origen: (p.origen as 'FABRICADO' | 'EXHIBICION' | null) ?? 'FABRICADO',
+              conjunto_origen_id:
+                p.origen === 'EXHIBICION' ? (p.conjunto_origen_id ?? null) : null,
+              modificacion: p.requiere_retrabajo ? (p.modificacion ?? null) : null,
+              requiere_retrabajo: !!p.requiere_retrabajo,
+              precio_modificacion: p.requiere_retrabajo
+                ? (p.precio_modificacion ?? null)
+                : null,
             })),
           };
         });
@@ -2031,11 +2104,15 @@ export default function Cotizaciones() {
     return selectedMonedaId === 1 ? precioCop : precioCop / (tasaCambio || 1);
   };
 
-  /** Precio unitario del renglón ya en la moneda de la cotización (NaN si falta tasa). */
-  const precioRenglonEnMoneda = (item: { calcResult: CalculationResult | null }): number =>
-    item.calcResult
+  /** Precio unitario del renglón ya en la moneda de la cotización (NaN si falta tasa).
+   *  Si todas las piezas traen precio, manda la suma de la composición. */
+  const precioRenglonEnMoneda = (item: CotizacionItemForm): number => {
+    const compuesto = precioComposicion(item);
+    if (compuesto != null) return compuesto;
+    return item.calcResult
       ? convertirAPrecioCotizacion(Number(item.calcResult.precio_venta), item.calcResult.moneda_codigo)
       : NaN;
+  };
 
   // Monedas extranjeras presentes en los renglones y distintas de la moneda de
   // la cotización: para esas se requiere la tasa del día. Se detecta desde el
@@ -2914,7 +2991,9 @@ export default function Cotizaciones() {
                     // Así entra un juego completo de la nota de papel: un renglón,
                     // un precio global, y el taller recibe las piezas detectadas.
                     if (item.tipo_item === 'FABRICADO' && !item.producto_id) {
-                      const precioManual = Number(item.calcResult?.precio_venta) || 0;
+                      const precioPiezas = precioComposicion(item);
+                      const precioManual =
+                        precioPiezas ?? (Number(item.calcResult?.precio_venta) || 0);
                       const subtotal = precioManual * item.cantidad;
                       const aplicarLibre = (precio: number, costo: number) => {
                         updateItemField(index, 'calcResult', {
@@ -2961,10 +3040,17 @@ export default function Cotizaciones() {
                                 className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
                             </div>
                             <div>
-                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Precio de venta *</label>
-                              <MontoInput min="0" value={precioManual > 0 ? String(precioManual) : ''} placeholder={`${currencyCode}`}
+                              <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">
+                                {precioPiezas != null ? 'Precio de las piezas' : 'Precio de venta *'}
+                              </label>
+                              <MontoInput
+                                min="0"
+                                value={precioManual > 0 ? String(precioManual) : ''}
+                                placeholder={`${currencyCode}`}
+                                disabled={precioPiezas != null}
                                 onChange={(v) => aplicarLibre(parseFloat(v) || 0, Number(item.calcResult?.costo_total) || 0)}
-                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold" />
+                                className="w-full p-2 border border-stone-200 rounded-lg focus:ring-2 focus:ring-yeikar-primary focus:outline-none bg-white text-xs font-mono font-bold disabled:bg-stone-50"
+                              />
                             </div>
                             <div>
                               <label className="block text-[10px] uppercase font-bold text-yeikar-neutral/60 mb-1">Costo estimado (COP)</label>
@@ -2981,6 +3067,17 @@ export default function Cotizaciones() {
                           <PiezasJuegoEditor
                             piezas={item.piezas ?? []}
                             onChange={(piezas) => updateItemField(index, 'piezas', piezas)}
+                            productos={products}
+                            precioSugerido={(p) => {
+                              const convertido = convertirAPrecioCotizacion(
+                                Number(p.precio_venta_base ?? 0),
+                                p.moneda?.codigo || 'COP',
+                              );
+                              return Number.isFinite(convertido)
+                                ? Math.round(convertido * 100) / 100
+                                : null;
+                            }}
+                            monedaCodigo={currencyCode}
                           />
                           <p className="text-[11px] text-sky-900/80 bg-sky-50/60 border border-sky-100 rounded-lg px-3 py-1.5">
                             Se fabrica a medida. Si agregas las piezas del juego, cada una se produce y
@@ -3217,6 +3314,17 @@ export default function Cotizaciones() {
                           <PiezasJuegoEditor
                             piezas={item.piezas ?? []}
                             onChange={(piezas) => updateItemField(index, 'piezas', piezas)}
+                            productos={products}
+                            precioSugerido={(p) => {
+                              const convertido = convertirAPrecioCotizacion(
+                                Number(p.precio_venta_base ?? 0),
+                                p.moneda?.codigo || 'COP',
+                              );
+                              return Number.isFinite(convertido)
+                                ? Math.round(convertido * 100) / 100
+                                : null;
+                            }}
+                            monedaCodigo={currencyCode}
                           />
                         )}
                       </div>

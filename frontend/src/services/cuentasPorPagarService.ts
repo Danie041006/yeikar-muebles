@@ -11,9 +11,16 @@ export interface Proveedor {
 export interface Abono {
   id: number;
   fecha: string;
+  /** Dinero que salió de caja (en la moneda de la deuda). */
   monto: number;
+  /** Parte condonada por el proveedor (misma moneda de la deuda). */
+  descuento: number;
+  descuento_porcentaje?: number | null;
+  /** Total que bajó la deuda: monto + descuento. */
+  monto_aplicado: number;
   metodo_caja_id: number;
   metodo_caja_nombre?: string | null;
+  metodo_caja_moneda_codigo?: string | null;
   tasa_cambio: number;
   monto_en_moneda_base: number;
   creado_por_id?: number | null;
@@ -48,6 +55,7 @@ export interface CuentaPorPagar {
   tasa_cambio: number;
   monto_en_moneda_base: number;
   monto_pagado: number;
+  monto_descontado: number;
   saldo: number;
   estado: 'PENDIENTE' | 'PAGADA';
   origen_tipo?: string | null;
@@ -86,7 +94,12 @@ export interface CuentaPorPagarCreate {
 
 export interface AbonoCreate {
   fecha: string;
+  /** Dinero que sale de caja (neto de descuento), en moneda de la deuda. */
   monto: number;
+  /** Descuento del proveedor en moneda de la deuda (no sale de caja). */
+  descuento?: number;
+  /** Porcentaje del descuento (informativo para el historial). */
+  descuento_porcentaje?: number;
   metodo_caja_id: number;
   tasa_cambio?: number;
 }

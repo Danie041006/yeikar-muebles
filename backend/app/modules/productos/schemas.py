@@ -26,6 +26,9 @@ class ProductoBase(BaseModel):
     # Colchón: en Cotizaciones habilita la pregunta del plástico de regalo
     # (máximo 1 por unidad; el cliente puede decir que no).
     es_colchon: Optional[bool] = False
+    # Pieza de un conjunto (mesa, silla…): se puede cotizar sola o combinar.
+    # Es solo una marca de catálogo; no cambia fabricación ni venta.
+    es_pieza: Optional[bool] = False
     # Moneda de los precios de referencia (COP=1 por defecto). Los productos de
     # reventa suelen crearse en USD.
     moneda_id: Optional[int] = 1
@@ -50,6 +53,7 @@ class ProductoUpdate(BaseModel):
     es_reventa: Optional[bool] = None
     es_exhibicion: Optional[bool] = None
     es_colchon: Optional[bool] = None
+    es_pieza: Optional[bool] = None
     categoria_inventario_id: Optional[int] = None
     moneda_id: Optional[int] = None
     precio_costo_base: Optional[float] = None
@@ -57,6 +61,9 @@ class ProductoUpdate(BaseModel):
 
 class ProductoResponse(ProductoBase):
     id: int
+    # Conjunto = tiene piezas declaradas. Lo mantiene el endpoint de
+    # composición; por eso solo se expone en la respuesta, no en el formulario.
+    es_conjunto: Optional[bool] = False
     precio_costo_base: Optional[float] = None
     precio_venta_base: Optional[float] = None
     created_at: Optional[datetime] = None
@@ -72,6 +79,82 @@ class ProductoResponse(ProductoBase):
 
     class Config:
         from_attributes = True
+
+# ------------------------------------------------------------
+# Composición de un conjunto (producto_pieza)
+# ------------------------------------------------------------
+class ProductoPiezaIn(BaseModel):
+    """Una pieza del conjunto: el producto que la representa y cuántas lleva."""
+    pieza_producto_id: int
+    cantidad: float = Field(1.0, gt=0)
+    orden: Optional[int] = 0
+
+
+class ProductoPiezaResumen(BaseModel):
+    """Datos de la pieza necesarios para el desglose (sin fotos ni receta)."""
+    id: int
+    nombre: str
+    codigo: Optional[str] = None
+    es_pieza: Optional[bool] = False
+    es_exhibicion: Optional[bool] = False
+    es_reventa: Optional[bool] = False
+    moneda_id: Optional[int] = None
+    precio_costo_base: Optional[float] = None
+    precio_venta_base: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProductoPiezaResponse(BaseModel):
+    id: int
+    producto_id: int
+    pieza_producto_id: int
+    cantidad: float
+    orden: Optional[int] = 0
+    pieza: Optional[ProductoPiezaResumen] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ProductoComposicionReplace(BaseModel):
+    """Contrato de lista completa (igual que los detalles de una cotización):
+    lo que llega ES la composición; [] deja el producto sin piezas."""
+    piezas: List[ProductoPiezaIn] = []
+
+    @model_validator(mode="after")
+    def _sin_duplicados(self):
+        ids = [p.pieza_producto_id for p in self.piezas]
+        if len(ids) != len(set(ids)):
+            raise ValueError("La misma pieza aparece dos veces en la composición.")
+        return self
+
+
+class ProductoComposicionResumen(BaseModel):
+    """Conciliación del conjunto contra la suma de sus piezas.
+
+    Las diferencias NO se corrigen solas: se muestran para que la dueña decida
+    si el precio del conjunto es un precio de combo o si falta ajustar una
+    pieza. Los importes están en la moneda de cada producto (normalmente COP).
+    """
+    costo_piezas: float = 0.0
+    precio_piezas: float = 0.0
+    costo_conjunto: Optional[float] = None
+    precio_conjunto: Optional[float] = None
+    diferencia_costo: Optional[float] = None
+    diferencia_precio: Optional[float] = None
+    piezas_sin_costo: int = 0
+    piezas_sin_precio: int = 0
+    advertencia_moneda: Optional[str] = None
+
+
+class ProductoComposicionResponse(BaseModel):
+    producto_id: int
+    es_conjunto: bool = False
+    piezas: List[ProductoPiezaResponse] = []
+    resumen: ProductoComposicionResumen
+
 
 # ------------------------------------------------------------
 # Material (DEFINIR ANTES de ProductoMaterialResponse)

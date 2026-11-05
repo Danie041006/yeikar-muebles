@@ -162,6 +162,7 @@ ORDEN_LIMPIEZA = [
     "movimiento_producto_inventario",
     "producto_inventario",
     "precio_produccion",
+    "producto_pieza",
     "producto",
     "material",
     "cuenta_por_pagar",
@@ -238,6 +239,15 @@ class Cleaner:
                 continue
             ids_str = ",".join(str(i) for i in ids)
             try:
+                # La composición de un conjunto liga productos entre sí
+                # (pieza_producto_id es RESTRICT): hay que soltar esas filas
+                # antes de borrar los productos del test, en cualquier orden.
+                if tabla == "producto":
+                    db.execute(text(
+                        f"DELETE FROM producto_pieza WHERE producto_id IN ({ids_str}) "
+                        f"OR pieza_producto_id IN ({ids_str})"
+                    ))
+                    db.commit()
                 # La conversión de cotización a pedido auto-genera las órdenes
                 # de producción de las líneas FABRICADO (PENDIENTE). Si el test
                 # no las registró (p.ej. porque no creó etapas), su FK

@@ -559,6 +559,9 @@ function ModalDetalle({
   const [editMotivo, setEditMotivo] = useState('');
   const [editReferencia, setEditReferencia] = useState('');
   const [editObservaciones, setEditObservaciones] = useState('');
+  // Recibo que se agrega al cobro desde la corrección (el cobro puede tener ya otros).
+  const [editReciboArchivo, setEditReciboArchivo] = useState<File | null>(null);
+  const [editReciboPreview, setEditReciboPreview] = useState<string | null>(null);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editError, setEditError] = useState('');
   const [tasaNaturalInput, setTasaNaturalInput] = useState('');      // tasa en sentido natural: 1 [V] = X [P]
@@ -722,6 +725,12 @@ function ModalDetalle({
     }
   };
 
+  const limpiarReciboEdicion = () => {
+    if (editReciboPreview) URL.revokeObjectURL(editReciboPreview);
+    setEditReciboPreview(null);
+    setEditReciboArchivo(null);
+  };
+
   const abrirEdicionPago = (p: Pago) => {
     setPagoEditando(p);
     setEditFecha(p.fecha ? String(p.fecha).slice(0, 10) : hoyVE());
@@ -736,6 +745,7 @@ function ModalDetalle({
     setEditMotivo('');
     setEditReferencia(p.referencia ?? '');
     setEditObservaciones(p.observaciones ?? '');
+    limpiarReciboEdicion();
     setEditError('');
     setTab('cobranza');
   };
@@ -758,6 +768,18 @@ function ModalDetalle({
     }
     try {
       setEditSubmitting(true);
+      // El comprobante se sube primero: si falla, la corrección no se aplica
+      // y el cobro no queda a medias. Se limpia enseguida para que reintentar
+      // (si la corrección falla después) no lo suba dos veces.
+      if (editReciboArchivo) {
+        try {
+          await subirAdjunto(editReciboArchivo, TIPO_ADJUNTO.PAGO, pagoEditando.id);
+        } catch (err: any) {
+          setEditError(`No se pudo subir el recibo: ${extractErrorMessage(err, 'error desconocido')}`);
+          return;
+        }
+        limpiarReciboEdicion();
+      }
       const payload: PagoUpdate = {
         fecha: `${editFecha}T12:00:00`,
         referencia: editReferencia.trim() || null,
@@ -1258,7 +1280,8 @@ function ModalDetalle({
                                       key={r.id}
                                       adjunto={r}
                                       alt="recibo"
-                                      className="h-12 w-12 rounded-lg border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
+                                      fit="contain"
+                                      className="h-12 w-12 rounded-lg border border-yeikar-secondary-light/20 bg-white hover:border-yeikar-primary/50 transition-colors"
                                       onClick={() => setReciboVer({ id: r.id, mime: r.mime })}
                                     />
                                   ))}
@@ -1409,6 +1432,50 @@ function ModalDetalle({
                               </div>
                               <div className="mt-2">
                                 <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
+                                  Recibo / comprobante (opcional)
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  {editReciboPreview && (
+                                    <img
+                                      src={editReciboPreview}
+                                      alt="recibo"
+                                      className="h-12 w-12 rounded-lg object-contain bg-white border border-yeikar-secondary-light/20"
+                                    />
+                                  )}
+                                  <label className="flex items-center justify-center gap-1.5 h-12 px-3 rounded-lg border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-[11px] font-bold text-yeikar-neutral/50 transition-colors flex-1">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    {editReciboArchivo ? editReciboArchivo.name : 'Adjuntar imagen'}
+                                    <input
+                                      type="file"
+                                      accept="image/jpeg,image/png,image/webp,image/heic"
+                                      className="hidden"
+                                      onChange={(e) => {
+                                        const f = e.target.files?.[0];
+                                        if (!f) return;
+                                        setEditReciboArchivo(f);
+                                        if (editReciboPreview) URL.revokeObjectURL(editReciboPreview);
+                                        setEditReciboPreview(URL.createObjectURL(f));
+                                      }}
+                                    />
+                                  </label>
+                                  {editReciboArchivo && (
+                                    <button
+                                      type="button"
+                                      onClick={limpiarReciboEdicion}
+                                      className="text-[11px] font-bold text-red-500 hover:underline"
+                                    >
+                                      Quitar
+                                    </button>
+                                  )}
+                                </div>
+                                <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+                                  Se suma a los comprobantes ya guardados de este cobro.
+                                </p>
+                              </div>
+                              <div className="mt-2">
+                                <label className="text-xs font-bold text-yeikar-neutral/60 block mb-1">
                                   Observaciones
                                 </label>
                                 <textarea
@@ -1426,7 +1493,7 @@ function ModalDetalle({
                               <div className="mt-3 flex gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => { setPagoEditando(null); setEditError(''); }}
+                                  onClick={() => { setPagoEditando(null); setEditError(''); limpiarReciboEdicion(); }}
                                   className="flex-1 py-2 text-sm font-bold text-yeikar-neutral/70 border border-yeikar-secondary-light/20 rounded-xl hover:bg-yeikar-tertiary/20 transition-all"
                                 >
                                   Cancelar
@@ -1713,7 +1780,7 @@ function ModalDetalle({
                             <img
                               src={reciboPreview}
                               alt="recibo"
-                              className="h-12 w-12 rounded-lg object-cover border border-yeikar-secondary-light/20"
+                              className="h-12 w-12 rounded-lg object-contain bg-white border border-yeikar-secondary-light/20"
                             />
                           )}
                           <label className="flex items-center justify-center gap-1.5 h-12 px-3 rounded-lg border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-[11px] font-bold text-yeikar-neutral/50 transition-colors flex-1">
@@ -1945,7 +2012,8 @@ function ModalDetalle({
             <AdjuntoImagen
               adjunto={{ id: reciboVer.id, mime: reciboVer.mime }}
               alt="recibo"
-              className="w-full max-h-[85vh] object-contain"
+              fit="contain"
+              className="w-full max-h-[85vh]"
             />
           </div>
         </div>

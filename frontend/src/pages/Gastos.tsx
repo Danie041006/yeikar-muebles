@@ -87,6 +87,9 @@ export default function Gastos() {
     monto: 0,
     metodo_caja_id: 0,
     tasa_cambio: 1,
+    // Descuento del proveedor en % (vacío = sin descuento). El monto de
+    // arriba es lo que se aplica a la deuda; el % reduce lo que sale de caja.
+    descuento_pct: '',
   });
 
   const [form, setForm] = useState<GastoCreate>({
@@ -270,19 +273,36 @@ export default function Gastos() {
     if (!abonarDeuda || !abonoForm.metodo_caja_id) return;
     const monto = Number(abonoForm.monto);
     if (!(monto > 0)) return;
+    const pct = Math.min(99.99, Math.max(0, Number(abonoForm.descuento_pct) || 0));
+    // El descuento del proveedor se calcula sobre la DEUDA ORIGINAL (lo que
+    // se debía), no sobre el monto que se está abonando ahora.
+    const baseDescuento = Number(abonarDeuda.monto) || 0;
+    const descuento = pct > 0 ? Math.round(baseDescuento * pct) / 100 : 0;
+    const netoCaja = Number((monto - descuento).toFixed(2));
+    if (netoCaja <= 0) {
+      toast.error('El descuento no puede cubrir el 100% del abono.');
+      return;
+    }
     try {
       const cuentaAbono = cuentas.find((c) => c.metodo_caja.id === Number(abonoForm.metodo_caja_id));
       await cuentasPorPagarService.abonar(abonarDeuda.id, {
         fecha: abonoForm.fecha,
-        monto,
+        // `monto` es lo que sale de caja; la deuda baja monto + descuento.
+        monto: netoCaja,
+        descuento: descuento > 0 ? descuento : undefined,
+        descuento_porcentaje: descuento > 0 ? pct : undefined,
         metodo_caja_id: Number(abonoForm.metodo_caja_id),
         tasa_cambio: cuentaAbono && cuentaAbono.metodo_caja.moneda_id !== 1 ? Number(abonoForm.tasa_cambio) : undefined,
       });
       const saldoCubierto = monto >= Number(abonarDeuda.saldo) - 0.005;
       setAbonarDeuda(null);
-      setAbonoForm({ fecha: hoy(), monto: 0, metodo_caja_id: abonoForm.metodo_caja_id, tasa_cambio: 1 });
+      setAbonoForm({ fecha: hoy(), monto: 0, metodo_caja_id: abonoForm.metodo_caja_id, tasa_cambio: 1, descuento_pct: '' });
       cargarPorPagar();
-      toast.success(saldoCubierto ? 'Deuda pagada por completo.' : 'Abono registrado.');
+      toast.success(
+        descuento > 0
+          ? `${saldoCubierto ? 'Deuda pagada por completo' : 'Abono registrado'} con ${pct}% de descuento.`
+          : saldoCubierto ? 'Deuda pagada por completo.' : 'Abono registrado.'
+      );
     } catch (e: any) {
       toast.error(e?.response?.data?.detail || 'No se pudo registrar el abono.');
     }
@@ -315,6 +335,21 @@ export default function Gastos() {
 
   const monedaSeleccionada = monedas.find((m) => m.id === form.moneda_id);
   const esCOP = monedaSeleccionada?.codigo === 'COP';
+
+  // La deuda guarda SU moneda. Algunos objetos (creados offline o cacheados)
+  // pueden venir sin la relación `moneda`; se deduce por `moneda_id` para no
+  // mostrar "Pesos" en una deuda en dólares.
+  const codigoMonedaDe = (
+    d?: { moneda?: { codigo?: string | null } | null; moneda_id?: number | null } | null,
+  ): string => {
+    const directo = d?.moneda?.codigo;
+    if (directo) return directo;
+    const porId = d?.moneda_id != null
+      ? monedas.find((m) => m.id === d.moneda_id)?.codigo
+      : null;
+    return porId || 'COP';
+  };
+  const codigoMonedaDeudaForm = monedas.find((m) => m.id === deudaForm.moneda_id)?.codigo || 'COP';
   const montoEnCOP = esCOP
     ? Number(form.monto) || 0
     : (Number(form.monto) || 0) * (Number(form.tasa_cambio) || 0);
@@ -357,21 +392,33 @@ export default function Gastos() {
   const cuentaAbonoSel = cuentas.find((c) => c.metodo_caja.id === Number(abonoForm.metodo_caja_id));
   const necesitaTasaAbono = !!cuentaAbonoSel && cuentaAbonoSel.metodo_caja.moneda_id !== 1;
   const abonoExcede = deudaAbonoSel ? Number(abonoForm.monto) > Number(deudaAbonoSel.saldo) + 0.005 : false;
+  // Descuento del proveedor: se calcula sobre la DEUDA ORIGINAL (lo que se
+  // debía), no sobre el monto que se abona. El monto escrito sigue siendo lo
+  // que baja la deuda; el descuento solo reduce el dinero que sale de caja.
+  const descuentoPctAbono = Math.min(99.99, Math.max(0, Number(abonoForm.descuento_pct) || 0));
+  const baseDescuentoAbono = Number(deudaAbonoSel?.monto || 0);
+  const descuentoAbono = descuentoPctAbono > 0
+    ? Math.round(baseDescuentoAbono * descuentoPctAbono) / 100
+    : 0;
+  const montoCajaAbono = Math.max(0, Number((Number(abonoForm.monto) - descuentoAbono).toFixed(2)));
   const deducAbono = (() => {
-    if (!deudaAbonoSel || !cuentaAbonoSel || !(Number(abonoForm.monto) > 0)) return 0;
-    const montoCop = Number(abonoForm.monto) * Number(deudaAbonoSel.tasa_cambio || 1);
+    if (!deudaAbonoSel || !cuentaAbonoSel || !(montoCajaAbono > 0)) return 0;
+    const montoCop = montoCajaAbono * Number(deudaAbonoSel.tasa_cambio || 1);
     const tasa = necesitaTasaAbono ? Number(abonoForm.tasa_cambio) || 0 : 1;
     if (necesitaTasaAbono && !(tasa > 0)) return 0;
     return necesitaTasaAbono ? montoCop / tasa : montoCop;
   })();
 
+  // Progreso de la deuda: efectivo abonado + descuentos del proveedor.
+  const totalAplicadoDeuda = (d: CuentaPorPagar) =>
+    Number(d.monto_pagado) + Number(d.monto_descontado || 0);
   const pctAbonado = (d: CuentaPorPagar) =>
-    Number(d.monto) > 0 ? Math.min(100, (Number(d.monto_pagado) / Number(d.monto)) * 100) : 0;
+    Number(d.monto) > 0 ? Math.min(100, (totalAplicadoDeuda(d) / Number(d.monto)) * 100) : 0;
 
   // Abrir el modal de abono (desde la fila, el detalle o la tarjeta del proveedor).
   const abrirAbonoDeuda = (d: CuentaPorPagar) => {
     setAbonarDeuda(d);
-    setAbonoForm((prev) => ({ ...prev, monto: Number(d.saldo), metodo_caja_id: prev.metodo_caja_id }));
+    setAbonoForm((prev) => ({ ...prev, monto: Number(d.saldo), metodo_caja_id: prev.metodo_caja_id, descuento_pct: '' }));
   };
 
   // Abrir el modal de abono desde la tarjeta del proveedor: usa la deuda
@@ -437,17 +484,20 @@ export default function Gastos() {
     {
       key: 'monto',
       header: 'Debía',
-      render: (d) => <span className="font-mono font-bold">{d.moneda?.simbolo} {Number(d.monto).toLocaleString('es-CO', { maximumFractionDigits: 2 })}</span>,
+      render: (d) => <span className="font-mono font-bold">{fmtMoneda(Number(d.monto), codigoMonedaDe(d))}</span>,
       mobileLabel: 'Debía',
       align: 'right',
     },
     {
       key: 'progreso',
-      header: 'Abonado',
+      header: 'Aplicado',
       render: (d) => (
-        <div className="min-w-[110px]">
+        <div
+          className="min-w-[110px]"
+          title="Efectivo abonado + descuentos del proveedor"
+        >
           <div className="flex justify-between text-[10px] font-mono text-yeikar-neutral/50 mb-0.5">
-            <span>{fmtMoneda(Number(d.monto_pagado), d.moneda?.codigo || 'COP')}</span>
+            <span>{fmtMoneda(totalAplicadoDeuda(d), codigoMonedaDe(d))}</span>
             <span>{pctAbonado(d).toFixed(0)}%</span>
           </div>
           <div className="h-1.5 rounded-full bg-yeikar-secondary-light/10 overflow-hidden">
@@ -456,14 +506,14 @@ export default function Gastos() {
           </div>
         </div>
       ),
-      mobileLabel: 'Abonado',
+      mobileLabel: 'Aplicado',
     },
     {
       key: 'saldo',
       header: 'Saldo',
       render: (d) => (
         <span className={`font-mono font-bold ${Number(d.saldo) > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-          {d.moneda?.simbolo} {Number(d.saldo).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
+          {fmtMoneda(Number(d.saldo), codigoMonedaDe(d))}
         </span>
       ),
       mobileLabel: 'Saldo',
@@ -562,7 +612,8 @@ export default function Gastos() {
                 key={c.id}
                 adjunto={c}
                 alt="comprobante"
-                className="h-9 w-9 rounded-lg border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
+                fit="contain"
+                className="h-9 w-9 rounded-lg bg-white border border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 transition-colors"
                 onClick={() => setComprobanteVer({ id: c.id, mime: c.mime })}
               />
             ))}
@@ -1108,7 +1159,7 @@ export default function Gastos() {
                   <img
                     src={comprobantePreview}
                     alt="comprobante"
-                    className="h-14 w-14 rounded-lg object-cover border border-yeikar-secondary-light/20"
+                    className="h-14 w-14 rounded-lg object-contain bg-white border border-yeikar-secondary-light/20"
                   />
                 )}
                 <label className="flex items-center justify-center gap-1.5 h-14 px-3 rounded-xl border-2 border-dashed border-yeikar-secondary-light/20 hover:border-yeikar-primary/50 cursor-pointer text-[11px] font-bold text-yeikar-neutral/50 transition-colors flex-1">
@@ -1173,7 +1224,8 @@ export default function Gastos() {
             <AdjuntoImagen
               adjunto={{ id: comprobanteVer.id, mime: comprobanteVer.mime }}
               alt="comprobante"
-              className="w-full max-h-[85vh] object-contain"
+              fit="contain"
+              className="w-full max-h-[85vh]"
             />
           </div>
         </div>
@@ -1237,7 +1289,7 @@ export default function Gastos() {
               onChange={(e) => setDeudaForm((prev) => ({ ...prev, fecha: e.target.value }))}
             />
           </Field>
-          <Field label="Monto de la deuda (COP)" required>
+          <Field label={`Monto de la deuda (${codigoMonedaDeudaForm})`} required>
             <MontoInput
               min="0"
               value={deudaForm.monto || ''}
@@ -1308,7 +1360,7 @@ export default function Gastos() {
                 <div className="flex items-center justify-end gap-2 text-xs font-mono text-yeikar-neutral/60 pt-1">
                   <span>Suma de renglones:</span>
                   <span className="font-bold text-yeikar-secondary">
-                    {fmtMoneda(deudaForm.detalles.reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.precio_unitario) || 0), 0), 'COP')}
+                    {fmtMoneda(deudaForm.detalles.reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.precio_unitario) || 0), 0), codigoMonedaDeudaForm)}
                   </span>
                 </div>
               </div>
@@ -1329,13 +1381,13 @@ export default function Gastos() {
         open={abonarDeuda !== null}
         onClose={() => setAbonarDeuda(null)}
         title={abonarDeuda ? `Abonar a ${abonarDeuda.proveedor?.nombre || 'proveedor'}` : 'Abonar'}
-        subtitle={abonarDeuda ? `Debía ${fmtMoneda(Number(abonarDeuda.monto), abonarDeuda.moneda?.codigo || 'COP')} · Saldo ${fmtMoneda(Number(abonarDeuda.saldo), abonarDeuda.moneda?.codigo || 'COP')}` : ''}
+        subtitle={abonarDeuda ? `Debía ${fmtMoneda(Number(abonarDeuda.monto), codigoMonedaDe(abonarDeuda))} · Saldo ${fmtMoneda(Number(abonarDeuda.saldo), codigoMonedaDe(abonarDeuda))}` : ''}
         size="lg"
         footer={
           <>
             <Button variant="outline" onClick={() => setAbonarDeuda(null)}>Cancelar</Button>
             <Button
-              disabled={!abonoForm.metodo_caja_id || !(Number(abonoForm.monto) > 0) || abonoExcede || (necesitaTasaAbono && !(Number(abonoForm.tasa_cambio) > 0))}
+              disabled={!abonoForm.metodo_caja_id || !(Number(abonoForm.monto) > 0) || abonoExcede || montoCajaAbono <= 0 || (necesitaTasaAbono && !(Number(abonoForm.tasa_cambio) > 0))}
               onClick={handleAbonar}
             >
               Abonar
@@ -1350,11 +1402,38 @@ export default function Gastos() {
               value={abonoForm.monto || ''}
               onChange={(v) => setAbonoForm((prev) => ({ ...prev, monto: Number(v) || 0 }))}
             />
+            <p className="mt-1 text-[10px] text-yeikar-neutral/45">
+              Se aplica completo a la deuda, antes del descuento. El descuento
+              se calcula sobre la deuda original, no sobre este abono.
+            </p>
           </Field>
           <div className="flex items-end pb-1">
             <Button size="sm" variant="outline" onClick={() => setAbonoForm((prev) => ({ ...prev, monto: Number(abonarDeuda?.saldo || 0) }))}>
               Pagar todo
             </Button>
+          </div>
+          <Field label="Descuento del proveedor (%) — opcional">
+            <Input
+              type="number"
+              min="0"
+              max="99.99"
+              step="0.01"
+              placeholder="Ej. 5"
+              value={abonoForm.descuento_pct}
+              onChange={(e) => setAbonoForm((prev) => ({ ...prev, descuento_pct: e.target.value }))}
+            />
+          </Field>
+          <div className="flex items-end pb-1">
+            {descuentoAbono > 0 && Number(abonoForm.monto) > 0 ? (
+              <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                Descuento {descuentoPctAbono}% sobre {fmtMoneda(baseDescuentoAbono, codigoMonedaDe(abonarDeuda))} ={' '}
+                {fmtMoneda(descuentoAbono, codigoMonedaDe(abonarDeuda))}
+              </p>
+            ) : (
+              <p className="text-[10px] text-yeikar-neutral/45">
+                Sin descuento: sale de caja el monto completo. El costo original no cambia.
+              </p>
+            )}
           </div>
           <Field label="¿Desde qué cuenta sale el dinero?" required>
             <SearchSelect
@@ -1392,11 +1471,27 @@ export default function Gastos() {
           <div className="col-span-2 space-y-2">
             {abonoExcede && (
               <p className="text-xs font-bold text-red-600">
-                El abono excede el saldo de la deuda ({fmtMoneda(Number(abonarDeuda?.saldo || 0), abonarDeuda?.moneda?.codigo || 'COP')}).
+                El abono excede el saldo de la deuda ({fmtMoneda(Number(abonarDeuda?.saldo || 0), codigoMonedaDe(abonarDeuda))}).
+              </p>
+            )}
+            {descuentoAbono > Number(abonoForm.monto) && Number(abonoForm.monto) > 0 && (
+              <p className="text-xs font-bold text-red-600">
+                El descuento ({fmtMoneda(descuentoAbono, codigoMonedaDe(abonarDeuda))}) supera
+                el abono ({fmtMoneda(Number(abonoForm.monto), codigoMonedaDe(abonarDeuda))}).
+                Ajusta el monto o el porcentaje.
               </p>
             )}
             {Number(abonoForm.monto) > 0 && cuentaAbonoSel && (
               <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+                {descuentoAbono > 0 && (
+                  <>
+                    Se aplican <b>{fmtMoneda(Number(abonoForm.monto), codigoMonedaDe(abonarDeuda))}</b> a
+                    la deuda: <b>{fmtMoneda(montoCajaAbono, codigoMonedaDe(abonarDeuda))}</b> de caja +{' '}
+                    <b>{fmtMoneda(descuentoAbono, codigoMonedaDe(abonarDeuda))}</b> de descuento
+                    ({descuentoPctAbono}% de la deuda original de{' '}
+                    {fmtMoneda(baseDescuentoAbono, codigoMonedaDe(abonarDeuda))}).{' '}
+                  </>
+                )}
                 Saldrán ≈ <b>{fmtMoneda(deducAbono, cuentaAbonoSel.metodo_caja.moneda_codigo || 'COP')}</b> desde{' '}
                 <b>{cuentaAbonoSel.metodo_caja.nombre}</b>
                 {necesitaTasaAbono && !(Number(abonoForm.tasa_cambio) > 0) ? ' · falta la tasa' : ''}
@@ -1411,7 +1506,7 @@ export default function Gastos() {
         onClose={() => setHistorialDeuda(null)}
         title={historialDeuda ? `Detalle — ${historialDeuda.proveedor?.nombre || 'proveedor'}` : 'Detalle'}
         subtitle={historialDeuda
-          ? `Pendiente ${fmtMoneda(Number(historialDeuda.saldo), historialDeuda.moneda?.codigo || 'COP')} · ${historialDeuda.detalles?.length || 0} renglones · ${historialDeuda.pagos?.length || 0} abonos`
+          ? `Pendiente ${fmtMoneda(Number(historialDeuda.saldo), codigoMonedaDe(historialDeuda))} · ${historialDeuda.detalles?.length || 0} renglones · ${historialDeuda.pagos?.length || 0} abonos${Number(historialDeuda.monto_descontado || 0) > 0 ? ` · Descontado ${fmtMoneda(Number(historialDeuda.monto_descontado), codigoMonedaDe(historialDeuda))}` : ''}`
           : ''}
         size="xl"
         footer={
@@ -1425,7 +1520,7 @@ export default function Gastos() {
                   abrirAbonoDeuda(d);
                 }}
               >
-                Abonar {fmtMoneda(Number(historialDeuda.saldo), historialDeuda.moneda?.codigo || 'COP')}
+                Abonar {fmtMoneda(Number(historialDeuda.saldo), codigoMonedaDe(historialDeuda))}
               </Button>
             )}
           </>
@@ -1459,8 +1554,8 @@ export default function Gastos() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">{det.cantidad}</td>
-                      <td className="px-3 py-2 text-right font-mono">{fmtMoneda(Number(det.precio_unitario), 'COP')}</td>
-                      <td className="px-3 py-2 text-right font-mono font-bold text-yeikar-secondary">{fmtMoneda(Number(det.total), 'COP')}</td>
+                      <td className="px-3 py-2 text-right font-mono">{fmtMoneda(Number(det.precio_unitario), codigoMonedaDe(historialDeuda))}</td>
+                      <td className="px-3 py-2 text-right font-mono font-bold text-yeikar-secondary">{fmtMoneda(Number(det.total), codigoMonedaDe(historialDeuda))}</td>
                       <td className="px-3 py-2 text-yeikar-neutral/70">{det.cliente_nombre || det.cliente?.nombre || '—'}</td>
                     </tr>
                   ))}
@@ -1468,7 +1563,7 @@ export default function Gastos() {
                 <tfoot>
                   <tr className="border-t border-yeikar-secondary-light/10 bg-yeikar-tertiary/10">
                     <td colSpan={3} className="px-3 py-1.5 text-right font-bold uppercase text-[10px] tracking-wider text-yeikar-neutral/50">Total</td>
-                    <td className="px-3 py-1.5 text-right font-mono font-black text-yeikar-secondary">{fmtMoneda(Number(historialDeuda.monto), historialDeuda.moneda?.codigo || 'COP')}</td>
+                    <td className="px-3 py-1.5 text-right font-mono font-black text-yeikar-secondary">{fmtMoneda(Number(historialDeuda.monto), codigoMonedaDe(historialDeuda))}</td>
                     <td />
                   </tr>
                 </tfoot>
@@ -1484,12 +1579,32 @@ export default function Gastos() {
             </div>
             <div className="divide-y divide-yeikar-secondary-light/5 max-h-[30vh] overflow-y-auto">
               {historialDeuda?.pagos && historialDeuda.pagos.length > 0 ? (
-                historialDeuda.pagos.map((p: Abono) => (
+                historialDeuda.pagos.map((p: Abono) => {
+                  const monedaDeuda = codigoMonedaDe(historialDeuda);
+                  const descuento = Number(p.descuento || 0);
+                  const aplicado = Number(p.monto_aplicado ?? (Number(p.monto) + descuento));
+                  const salidaCaja = Number(p.tasa_cambio) > 0
+                    ? Number(p.monto_en_moneda_base) / Number(p.tasa_cambio)
+                    : Number(p.monto);
+                  const monedaCaja = p.metodo_caja_moneda_codigo || monedaDeuda;
+                  return (
                   <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
                     <div>
                       <p className="text-sm font-bold text-emerald-700">
-                        {fmtMoneda(Number(p.monto), historialDeuda.moneda?.codigo || 'COP')}
+                        {fmtMoneda(aplicado, monedaDeuda)}
+                        <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-yeikar-neutral/40">
+                          aplicado
+                        </span>
                       </p>
+                      {descuento > 0 && (
+                        <p className="text-[11px] font-bold text-amber-700">
+                          Descuento {p.descuento_porcentaje != null ? `${Number(p.descuento_porcentaje)}%` : ''}:{' '}
+                          {fmtMoneda(descuento, monedaDeuda)}
+                          <span className="font-normal text-yeikar-neutral/55">
+                            {' · '}salió de caja {fmtMoneda(salidaCaja, monedaCaja)}
+                          </span>
+                        </p>
+                      )}
                       <p className="text-[11px] text-yeikar-neutral/60">
                         {p.fecha} · desde <b>{p.metodo_caja_nombre || 'cuenta'}</b>
                       </p>
@@ -1503,7 +1618,8 @@ export default function Gastos() {
                       Revertir
                     </Button>
                   </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="p-6 text-center text-sm text-yeikar-neutral/50">Esta deuda no tiene abonos todavía.</div>
               )}

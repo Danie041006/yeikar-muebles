@@ -19,7 +19,13 @@ interface EntregaParcialModalProps {
 }
 
 function claveItem(item: PendienteEntregaItem): string {
-  return `${item.detalle_pedido_id}:${item.orden_produccion_id ?? 'sin-orden'}`;
+  // Una pieza sin orden se identifica por su detalle_pieza_id: un mismo renglón
+  // compuesto puede llevar varias (mesa + sillas) en la misma entrega.
+  return [
+    item.detalle_pedido_id,
+    item.orden_produccion_id ?? 'sin-orden',
+    item.detalle_pieza_id ?? 'sin-pieza',
+  ].join(':');
 }
 
 export default function EntregaParcialModal({
@@ -110,6 +116,7 @@ export default function EntregaParcialModal({
       .map((item) => ({
         detalle_pedido_id: item.detalle_pedido_id,
         orden_produccion_id: item.orden_produccion_id ?? null,
+        detalle_pieza_id: item.detalle_pieza_id ?? null,
         cantidad: Number(seleccion[claveItem(item)]),
       }));
 

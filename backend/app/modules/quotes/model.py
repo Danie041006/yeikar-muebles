@@ -99,12 +99,39 @@ class DetalleCotizacionPieza(Base):
     # Foto opcional de la pieza (data URL ya comprimida en el navegador).
     # `deferred`: los listados no cargan el texto/base64; solo el detalle.
     foto = deferred(Column(Text, nullable=True))
+    # --- Composición comercial de la pieza (opcional, todo NULL = juego clásico
+    # con precio global, comportamiento de siempre) ---
+    # Producto del catálogo que ES la pieza (de ahí salen receta, costo y precio
+    # de referencia). Permite combinar piezas de muebles distintos en un mismo
+    # renglón: mesa de un comedor + sillas de otro.
+    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="SET NULL"), nullable=True)
+    # Precio unitario de la pieza EN ESTE renglón (editable sobre el precio del
+    # catálogo). Si TODAS las piezas del renglón lo traen, el precio del renglón
+    # se calcula como la suma de sus subtotales; si ninguna lo trae, el renglón
+    # conserva su precio global manual.
+    precio = Column(Numeric(15, 2), nullable=True)
+    # De dónde sale la pieza: FABRICADO (se produce, como siempre) o EXHIBICION
+    # (se toma de una pieza ya fabricada del showroom). NULL = FABRICADO.
+    origen = Column(String(20), nullable=True)
+    # Conjunto de exhibición del que se desprende la pieza (NULL = la pieza ya
+    # está suelta en stock). Al convertir a pedido, ese conjunto se DESPIEZA:
+    # sale del showroom y las piezas que no se llevaron vuelven como sueltas.
+    conjunto_origen_id = Column(BigInteger, ForeignKey("producto.id", ondelete="SET NULL"), nullable=True)
+    # Retoque pedido por el cliente sobre una pieza de exhibición ("repintar en
+    # nogal oscuro"): abre una orden de retrabajo ligada al pedido.
+    modificacion = Column(Text, nullable=True)
+    requiere_retrabajo = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Lo que se cobra por el retoque, por UNIDAD de la pieza (se suma a su
+    # precio en el subtotal del renglón).
+    precio_modificacion = Column(Numeric(15, 2), nullable=True)
     # Orden de aparición en el renglón (Mesa, Sillas, Sillones…).
     orden = Column(BigInteger, nullable=False, default=0)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     detalle = relationship("DetalleCotizacion", back_populates="piezas")
+    producto = relationship("Producto", foreign_keys=[producto_id])
+    conjunto_origen = relationship("Producto", foreign_keys=[conjunto_origen_id])
 
 
 class CotizacionAnalisisIA(Base):

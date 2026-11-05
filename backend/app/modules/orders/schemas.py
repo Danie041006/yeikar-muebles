@@ -14,6 +14,8 @@ from app.modules.quotes.schemas import (
 class DetallePedidoPiezaResponse(PiezaJuegoBase):
     id: int
     detalle_pedido_id: int
+    # Costo REAL (COP) congelado al despiezar una pieza de exhibición.
+    costo_unitario: Optional[float] = None
     orden: int
 
     class Config:
@@ -27,6 +29,14 @@ class DetallePedidoPiezaListaResponse(BaseModel):
     nombre: str
     cantidad: float
     notas: Optional[str] = None
+    producto_id: Optional[int] = None
+    precio: Optional[float] = None
+    origen: Optional[str] = None
+    conjunto_origen_id: Optional[int] = None
+    modificacion: Optional[str] = None
+    requiere_retrabajo: bool = False
+    precio_modificacion: Optional[float] = None
+    costo_unitario: Optional[float] = None
     orden: int
 
     class Config:

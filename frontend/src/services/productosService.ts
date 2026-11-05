@@ -30,6 +30,10 @@ export interface Product {
   es_exhibicion?: boolean;
   /** Colchón: en Cotizaciones muestra la pregunta del plástico de regalo. */
   es_colchon?: boolean;
+  /** Conjunto: tiene piezas declaradas en su composición (solo lectura). */
+  es_conjunto?: boolean;
+  /** Pieza de un conjunto: se puede cotizar sola o combinar con otras. */
+  es_pieza?: boolean;
   /** Moneda de los precios de referencia (COP=1). Los reventa suelen ser USD. */
   moneda_id?: number | null;
   moneda?: MonedaInfo | null;
@@ -180,6 +184,53 @@ export interface PromocionObsequio {
   obsequio_precio?: number | null;
 }
 
+/** Pieza de un conjunto: el costo y el precio viven en el producto de la pieza. */
+export interface ProductoPiezaResumen {
+  id: number;
+  nombre: string;
+  codigo?: string | null;
+  es_pieza?: boolean;
+  es_exhibicion?: boolean;
+  es_reventa?: boolean;
+  moneda_id?: number | null;
+  precio_costo_base?: number | null;
+  precio_venta_base?: number | null;
+}
+
+export interface ProductoPieza {
+  id: number;
+  producto_id: number;
+  pieza_producto_id: number;
+  cantidad: number;
+  orden?: number;
+  pieza?: ProductoPiezaResumen | null;
+}
+
+export interface ComposicionResumen {
+  costo_piezas: number;
+  precio_piezas: number;
+  costo_conjunto?: number | null;
+  precio_conjunto?: number | null;
+  diferencia_costo?: number | null;
+  diferencia_precio?: number | null;
+  piezas_sin_costo: number;
+  piezas_sin_precio: number;
+  advertencia_moneda?: string | null;
+}
+
+export interface ComposicionProducto {
+  producto_id: number;
+  es_conjunto: boolean;
+  piezas: ProductoPieza[];
+  resumen: ComposicionResumen;
+}
+
+export interface ProductoPiezaIn {
+  pieza_producto_id: number;
+  cantidad: number;
+  orden?: number;
+}
+
 export const productosService = {
   getProductos: async (search?: string, options?: { es_reventa?: boolean; es_exhibicion?: boolean; limite?: number }): Promise<Product[]> => {
     const params: Record<string, unknown> = {};
@@ -233,6 +284,18 @@ export const productosService = {
 
   getRecetaEstructurada: async (productoId: number): Promise<SeccionProducto[]> => {
     const response = await api.get<SeccionProducto[]>(`/producto/${productoId}/receta-estructurada`);
+    return response.data;
+  },
+
+  /** Composición del conjunto (mesa ×1 + sillas ×6) con su conciliación. */
+  getComposicion: async (productoId: number): Promise<ComposicionProducto> => {
+    const response = await api.get<ComposicionProducto>(`/producto/${productoId}/piezas`);
+    return response.data;
+  },
+
+  /** Reemplaza TODA la composición (contrato de lista completa). Solo admin. */
+  guardarComposicion: async (productoId: number, piezas: ProductoPiezaIn[]): Promise<ComposicionProducto> => {
+    const response = await api.put<ComposicionProducto>(`/producto/${productoId}/piezas`, { piezas });
     return response.data;
   },
 

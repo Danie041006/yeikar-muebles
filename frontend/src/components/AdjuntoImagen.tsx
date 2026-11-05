@@ -5,6 +5,13 @@ interface Props {
   adjunto?: AdjuntoInfo | null;
   alt?: string;
   className?: string;
+  /**
+   * Cómo encajar la imagen en su caja:
+   * - `cover` (default): recorta para llenar (fotos de catálogo).
+   * - `contain`: muestra la imagen COMPLETA, con franjas si es vertical
+   *   (comprobantes/recibos tomados con el celular).
+   */
+  fit?: 'cover' | 'contain';
   /** Llamada cuando el usuario hace clic (p. ej. para ampliar en un modal). */
   onClick?: () => void;
 }
@@ -15,7 +22,7 @@ interface Props {
  * - Si solo trae `id` (recibos/comprobantes) la descarga con el token y la
  *   muestra como blob — así los comprobantes jamás se exponen públicamente.
  */
-export default function AdjuntoImagen({ adjunto, alt, className, onClick }: Props) {
+export default function AdjuntoImagen({ adjunto, alt, className, fit = 'cover', onClick }: Props) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState(false);
 
@@ -56,7 +63,7 @@ export default function AdjuntoImagen({ adjunto, alt, className, onClick }: Prop
     <img
       src={src}
       alt={alt ?? 'adjunto'}
-      className={`object-cover ${className ?? ''} ${onClick ? 'cursor-pointer' : ''}`}
+      className={`${fit === 'contain' ? 'object-contain' : 'object-cover'} ${className ?? ''} ${onClick ? 'cursor-pointer' : ''}`}
       onClick={onClick}
       loading="lazy"
     />

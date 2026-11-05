@@ -25,25 +25,47 @@ def _es_producible(tipo_item) -> bool:
     return (tipo_item or "FABRICADO") in ("FABRICADO", "REPARACION")
 
 
+def _pieza_requiere_trabajo(pieza) -> bool:
+    """Una pieza de exhibición sin retrabajo ya está lista: no hay que fabricar."""
+    origen = (getattr(pieza, "origen", None) or "FABRICADO")
+    if isinstance(origen, str):
+        origen = origen.strip().upper()
+    if origen != "EXHIBICION":
+        return True
+    return bool(getattr(pieza, "requiere_retrabajo", False))
+
+
+def _detalle_requiere_produccion(detalle, cotizado=None) -> bool:
+    """True si el renglón necesita trabajo de taller (órdenes de producción).
+
+    Un combo armado SOLO con piezas de exhibición sin retrabajo no entra a
+    producción: se aparta del showroom y se entrega. Los muebles a fabricar y
+    los retrabajos sí.
+    """
+    tipo = detalle.get("tipo_item", "FABRICADO") if isinstance(detalle, dict) else detalle.tipo_item
+    if not _es_producible(tipo):
+        return False
+    piezas = detalle.get("piezas") if isinstance(detalle, dict) else getattr(detalle, "piezas", None)
+    if piezas is None and cotizado is not None:
+        piezas = getattr(cotizado, "piezas", None)
+    if piezas:
+        return any(_pieza_requiere_trabajo(p) for p in piezas)
+    return True
+
+
 def _datos_pieza(pieza) -> dict:
     """Normaliza una pieza de dict (payload), Pydantic (request) o modelo SQLAlchemy."""
-    if isinstance(pieza, dict):
-        return pieza
-    if hasattr(pieza, "model_dump"):
-        return pieza.model_dump()
-    return {
-        "nombre": getattr(pieza, "nombre", ""),
-        "cantidad": getattr(pieza, "cantidad", 1),
-        "notas": getattr(pieza, "notas", None),
-        "foto": getattr(pieza, "foto", None),
-    }
+    from app.modules.quotes.piezas import datos_pieza
+
+    return datos_pieza(pieza)
 
 
 def _piezas_desde_payload(detalle_dict: dict, cotizado) -> list:
     """Piezas del juego para el detalle del pedido.
 
     Prioriza lo que envió la conversión; si no vino, copia las piezas de la
-    cotización emparejada. Devuelve dicts homogéneos (nombre/cantidad/notas).
+    cotización emparejada. Devuelve dicts homogéneos con la composición
+    comercial completa (producto, precio, origen y retrabajo).
     """
     piezas = detalle_dict.pop("piezas", None)
     if piezas is None and cotizado is not None:
@@ -54,10 +76,17 @@ def _piezas_desde_payload(detalle_dict: dict, cotizado) -> list:
     for pieza in piezas or []:
         datos = _datos_pieza(pieza)
         normalizadas.append({
-            "nombre": (datos.get("nombre") or "").strip(),
-            "cantidad": datos.get("cantidad") or 1,
-            "notas": (datos.get("notas") or "").strip() or None,
+            "nombre": datos["nombre"],
+            "cantidad": datos["cantidad"],
+            "notas": datos["notas"],
             "foto": datos.get("foto") or None,
+            "producto_id": datos["producto_id"],
+            "precio": datos["precio"],
+            "origen": datos["origen"],
+            "conjunto_origen_id": datos["conjunto_origen_id"],
+            "modificacion": datos["modificacion"],
+            "requiere_retrabajo": datos["requiere_retrabajo"],
+            "precio_modificacion": datos["precio_modificacion"],
         })
     return normalizadas
 
@@ -69,6 +98,13 @@ def _agregar_piezas_pedido(db_detalle, piezas: list | None) -> None:
             cantidad=pieza["cantidad"],
             notas=pieza["notas"],
             foto=pieza.get("foto") or None,
+            producto_id=pieza.get("producto_id"),
+            precio=pieza.get("precio"),
+            origen=pieza.get("origen"),
+            conjunto_origen_id=pieza.get("conjunto_origen_id"),
+            modificacion=pieza.get("modificacion"),
+            requiere_retrabajo=bool(pieza.get("requiere_retrabajo")),
+            precio_modificacion=pieza.get("precio_modificacion"),
             orden=orden,
         ))
 
@@ -176,6 +212,11 @@ def obtener_pedidos(
 
 def crear_pedido(db: Session, esquema: schemas.PedidoCreate, usuario: Usuario | None = None):
     from app.modules.productos.service import validar_regalos_plastico
+    from app.modules.quotes.piezas import aplicar_composicion_detalles
+
+    # Composición de piezas: normaliza/valida los renglones compuestos antes de
+    # crear nada (el precio del renglón es la suma de sus piezas).
+    aplicar_composicion_detalles(db, esquema.detalles)
     validar_regalos_plastico(db, esquema.detalles)
     # Crear cabecera de pedido
     pedido_datos = esquema.model_dump(exclude={"detalles"})
@@ -198,6 +239,12 @@ def crear_pedido(db: Session, esquema: schemas.PedidoCreate, usuario: Usuario | 
         _agregar_piezas_pedido(db_detalle, piezas)
 
     db.flush()
+
+    # Piezas de exhibición: se apartan/despiezan del showroom en la MISMA
+    # transacción (si algo falla, no queda stock a medias).
+    from app.modules.orders.despiece import despiezar_exhibicion
+
+    despiezar_exhibicion(db, db_pedido, usuario)
 
     record_event(
         db,
@@ -240,7 +287,7 @@ def actualizar_pedido(
         # puede ir APROBADO → TERMINADO directamente. Con fabricables se exige
         # el flujo normal (PRODUCCION → TERMINADO).
         if estado_anterior == "APROBADO" and nuevo_estado == "TERMINADO":
-            fabricables = [d for d in db_pedido.detalles if _es_producible(d.tipo_item)]
+            fabricables = [d for d in db_pedido.detalles if _detalle_requiere_produccion(d)]
             if fabricables:
                 raise ValueError(
                     "Este pedido tiene muebles a fabricar: debe pasar por PRODUCCION "
@@ -300,10 +347,15 @@ def actualizar_pedido(
     # If transitioning to PRODUCCION, generate production orders and stages
     # Solo los ítems FABRICADO generan orden; REVENTA e INSUMO no se fabrican.
     if estado_anterior != "PRODUCCION" and nuevo_estado == "PRODUCCION":
+        from app.modules.orders.despiece import despiezar_exhibicion
         from app.modules.production.service import crear_ordenes_desde_detalle_pedido
 
+        # Pedidos creados por otras vías (no conversión) también apartan sus
+        # piezas de exhibición al entrar a producción.
+        despiezar_exhibicion(db, db_pedido, usuario)
+
         for detalle in db_pedido.detalles:
-            if not _es_producible(detalle.tipo_item):
+            if not _detalle_requiere_produccion(detalle):
                 continue
             crear_ordenes_desde_detalle_pedido(
                 db,
@@ -580,8 +632,10 @@ def convertir_cotizacion_a_pedido(
     # a fabricar (reventa/insumos/exhibición) nace APROBADO: no tiene
     # producción, y desde ahí va directo a TERMINADO (envío automático).
     tiene_fabricables = any(
-        _es_producible(d.get("tipo_item", "FABRICADO") if isinstance(d, dict) else d.tipo_item)
-        for d in detalles
+        _detalle_requiere_produccion(
+            d, dcs_match[i] if i < len(dcs_match) else None
+        )
+        for i, d in enumerate(detalles)
     )
     estado_pedido = "PRODUCCION" if tiene_fabricables else "APROBADO"
     db_pedido = model.Pedido(
@@ -619,6 +673,20 @@ def convertir_cotizacion_a_pedido(
         if piezas_explicitas is None and dc_cot is not None and (dc_cot.piezas or []):
             piezas_copiadas_de_cotizacion.add(dc_cot.id)
         piezas_del_juego = _piezas_desde_payload(detalle_dict, dc_cot)
+        # Composición comercial: el costo del renglón cotizado es de TODA la
+        # línea (Σ piezas × cantidad), así que el costo unitario del pedido se
+        # obtiene dividiendo entre la cantidad de juegos. Los renglones
+        # clásicos conservan el comportamiento histórico.
+        from app.modules.quotes.piezas import tiene_composicion_comercial
+
+        if (
+            piezas_del_juego
+            and tiene_composicion_comercial(piezas_del_juego)
+            and dc_cot is not None
+            and dc_cot.costo_total is not None
+            and float(dc_cot.cantidad or 0) > 0
+        ):
+            detalle_dict["costo_unitario"] = float(dc_cot.costo_total) / float(dc_cot.cantidad)
         # Validar que el producto o material exista (REPARACION/SERVICIO no
         # referencian producto ni material: la pieza es del cliente o es un
         # cobro de flete/instalación; FABRICADO sin producto es un mueble a
@@ -701,6 +769,14 @@ def convertir_cotizacion_a_pedido(
         _agregar_piezas_pedido(db_detalle, piezas_del_juego)
     db.flush()
 
+    # Piezas de exhibición: apartar el conjunto/pieza del showroom y devolver
+    # los sobrantes como piezas sueltas. Debe ocurrir ANTES de crear las
+    # órdenes (los costos congelados alimentan la Hoja de Trabajo y la
+    # rentabilidad) y dentro de la misma transacción de la conversión.
+    from app.modules.orders.despiece import despiezar_exhibicion
+
+    despiezar_exhibicion(db, db_pedido, usuario)
+
     # El pedido nació en PRODUCCION: generar las órdenes de producción de las
     # líneas FABRICADO/REPARACION (REVENTA/INSUMO/SERVICIO no se fabrican).
     # Mismo criterio que actualizar_pedido al pasar a PRODUCCION, pero sin paso
@@ -715,7 +791,7 @@ def convertir_cotizacion_a_pedido(
             .all()
         )
         for detalle in detalles_db:
-            if _es_producible(detalle.tipo_item):
+            if _detalle_requiere_produccion(detalle):
                 crear_ordenes_desde_detalle_pedido(db, detalle, usuario, commit=False)
 
     # ── Factura automática en la moneda de la cotización ──────────────────
@@ -849,6 +925,42 @@ def obtener_rentabilidad_pedido(db: Session, id_pedido: int, usuario: Usuario | 
         costo_orden = float(costo.costo_total) if costo and costo.costo_total is not None else 0.0
         costo_real += costo_orden
         por_pieza.append(_rentabilidad_de_orden(orden, costo_orden))
+
+    # Piezas de exhibición SIN orden: ya estaban fabricadas y su costo real se
+    # congeló al despiezar el showroom. Se suman al costo real del pedido (su
+    # retrabajo, si lo tuvieron, ya entró arriba como orden RETRABAJO).
+    from app.modules.orders.model import DetallePedidoPieza
+
+    piezas_exhibicion = (
+        db.query(DetallePedidoPieza)
+        .join(
+            model.DetallePedido,
+            model.DetallePedido.id == DetallePedidoPieza.detalle_pedido_id,
+        )
+        .filter(
+            model.DetallePedido.pedido_id == id_pedido,
+            DetallePedidoPieza.origen == "EXHIBICION",
+            DetallePedidoPieza.costo_unitario.isnot(None),
+        )
+        .order_by(DetallePedidoPieza.id)
+        .all()
+    )
+    for pieza in piezas_exhibicion:
+        cantidad = float(pieza.cantidad or 0) * float(pieza.detalle.cantidad or 0)
+        costo_pieza = float(pieza.costo_unitario) * cantidad
+        costo_real += costo_pieza
+        por_pieza.append(schemas.RentabilidadPieza(
+            # Id negativo: no es una orden; mantiene una clave única en la UI.
+            orden_id=-pieza.id,
+            detalle_pedido_id=pieza.detalle_pedido_id,
+            pieza_nombre=pieza.nombre,
+            producto_nombre=(
+                pieza.producto.nombre if pieza.producto is not None else pieza.nombre
+            ),
+            cantidad=cantidad,
+            estado="EXHIBICION",
+            costo_real=round(costo_pieza, 2),
+        ))
 
     # Flete real: con entregas parciales hay varios despachos; se suman todos
     # los que no fallaron (un FALLIDO no incurrió en el costo del viaje).

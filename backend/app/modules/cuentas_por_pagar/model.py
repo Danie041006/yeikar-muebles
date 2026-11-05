@@ -26,8 +26,12 @@ class CuentaPorPagar(Base):
     # Tasa "1 [moneda] = X COP" congelada al crear la deuda.
     tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
     monto_en_moneda_base = Column(Numeric(15, 2), nullable=False, default=0.0)
-    # Total abonado, en la moneda de la deuda.
+    # Total abonado en efectivo, en la moneda de la deuda (sin descuentos).
     monto_pagado = Column(Numeric(15, 2), nullable=False, default=0.0)
+    # Total condonado/descontado por el proveedor, en la moneda de la deuda.
+    # Cierra deuda sin mover caja y NO altera el gasto original (el costo
+    # del ítem sigue siendo el precio de compra).
+    monto_descontado = Column(Numeric(15, 2), nullable=False, default=0.0)
     estado = Column(String(20), nullable=False, default="PENDIENTE", index=True)  # PENDIENTE | PAGADA
     # De dónde nació la deuda: MANUAL (registrada a mano) | ENTRADA_INVENTARIO (fiar).
     origen_tipo = Column(String(30), nullable=True)
@@ -51,7 +55,11 @@ class CuentaPorPagar(Base):
 
     @property
     def saldo(self) -> Decimal:
-        return (Decimal(str(self.monto)) - Decimal(str(self.monto_pagado))).quantize(Decimal("0.01"))
+        return (
+            Decimal(str(self.monto))
+            - Decimal(str(self.monto_pagado))
+            - Decimal(str(self.monto_descontado))
+        ).quantize(Decimal("0.01"))
 
 
 class DetalleCuentaPorPagar(Base):
@@ -89,7 +97,11 @@ class DetalleCuentaPorPagar(Base):
 
 
 class PagoCuentaPorPagar(Base):
-    """Abono a una deuda: el dinero sale de una cuenta de caja."""
+    """Abono a una deuda: el dinero sale de una cuenta de caja.
+
+    Puede llevar descuento del proveedor (ej. 5% por mayorista): `monto` es lo
+    que salió de caja y `descuento` lo condonado; ambos juntos bajan la deuda.
+    """
 
     __tablename__ = "pago_cuenta_por_pagar"
 
@@ -97,8 +109,13 @@ class PagoCuentaPorPagar(Base):
     cuenta_por_pagar_id = Column(BigInteger, ForeignKey("cuenta_por_pagar.id", ondelete="CASCADE"), nullable=False, index=True)
     fecha = Column(Date, nullable=False)
     metodo_caja_id = Column(BigInteger, ForeignKey("metodo_caja.id", ondelete="RESTRICT"), nullable=False)
-    # Monto del abono EN LA MONEDA DE LA DEUDA.
+    # Dinero que SALE de caja, en la moneda de la deuda (neto de descuento).
     monto = Column(Numeric(15, 2), nullable=False)
+    # Parte del abono que el proveedor condonó (moneda de la deuda). Se suma
+    # al monto para saber cuánto bajó la deuda: monto + descuento.
+    descuento = Column(Numeric(15, 2), nullable=False, default=0.0, server_default="0")
+    # Porcentaje con que se calculó el descuento (solo para mostrarlo).
+    descuento_porcentaje = Column(Numeric(7, 4), nullable=True)
     # Tasa "1 [moneda de la cuenta] = X COP" usada en la salida de caja.
     tasa_cambio = Column(Numeric(15, 6), nullable=False, default=1.0)
     monto_en_moneda_base = Column(Numeric(15, 2), nullable=False, default=0.0)
@@ -116,3 +133,14 @@ class PagoCuentaPorPagar(Base):
     @property
     def metodo_caja_nombre(self) -> str | None:
         return self.metodo_caja.nombre if self.metodo_caja else None
+
+    @property
+    def metodo_caja_moneda_codigo(self) -> str | None:
+        return self.metodo_caja.moneda_codigo if self.metodo_caja else None
+
+    @property
+    def monto_aplicado(self) -> Decimal:
+        """Cuánto bajó la deuda con este abono: efectivo + descuento."""
+        return (
+            Decimal(str(self.monto)) + Decimal(str(self.descuento or 0))
+        ).quantize(Decimal("0.01"))

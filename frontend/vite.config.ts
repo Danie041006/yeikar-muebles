@@ -11,7 +11,15 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: false,
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'Logo-yeikar.png', 'Logo-yeikar.webp'],
+      includeAssets: [
+        'favicon.ico',
+        'favicon-32x32.png',
+        'apple-touch-icon.png',
+        'logo-192.png',
+        'logo-512.png',
+        'Logo-yeikar.png',
+        'Logo-yeikar.webp',
+      ],
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,webp,svg,woff2,webmanifest}'],
         navigateFallback: '/index.html',

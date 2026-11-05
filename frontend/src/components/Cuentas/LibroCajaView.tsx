@@ -643,7 +643,8 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
                         key={c.id}
                         adjunto={c}
                         alt="comprobante"
-                        className="h-16 w-16 cursor-pointer rounded-lg border border-yeikar-secondary-light/20 transition-colors hover:border-yeikar-primary/60"
+                        fit="contain"
+                        className="h-16 w-16 cursor-pointer rounded-lg bg-white border border-yeikar-secondary-light/20 transition-colors hover:border-yeikar-primary/60"
                         onClick={() => setComprobanteVer(c)}
                       />
                     ))}
@@ -779,7 +780,8 @@ export default function LibroCajaView({ cuentas, onFiltroChange }: Props) {
             <AdjuntoImagen
               adjunto={comprobanteVer}
               alt="comprobante"
-              className="max-h-[85vh] w-full object-contain"
+              fit="contain"
+              className="max-h-[85vh] w-full"
             />
           </div>
         </div>

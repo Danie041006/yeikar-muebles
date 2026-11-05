@@ -71,7 +71,7 @@ def _crear_deuda(client, cleaner, proveedor_id, monto, tipo_gasto_id, moneda_id=
     return body
 
 
-def _abonar(client, cxp_id, monto, cuenta_id, tasa=None):
+def _abonar(client, cxp_id, monto, cuenta_id, tasa=None, descuento=None, descuento_porcentaje=None):
     payload = {
         "fecha": str(date.today()),
         "monto": monto,
@@ -79,6 +79,10 @@ def _abonar(client, cxp_id, monto, cuenta_id, tasa=None):
     }
     if tasa is not None:
         payload["tasa_cambio"] = tasa
+    if descuento is not None:
+        payload["descuento"] = descuento
+    if descuento_porcentaje is not None:
+        payload["descuento_porcentaje"] = descuento_porcentaje
     r = client.post(f"/api/v1/cuentas-por-pagar/{cxp_id}/abonos", json=payload, headers=ADMIN_HEADERS)
     assert r.status_code == 201, f"abonar → {r.status_code}: {r.text}"
     return r.json()
@@ -338,6 +342,99 @@ def test_abono_multimoneda_deuda_cop_desde_cuenta_usd(client, cleaner, db):
     r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
     cxp_actual = next(c for c in r.json() if c["id"] == cxp["id"])
     assert float(cxp_actual["saldo"]) == 600000.0
+
+
+def test_abono_con_descuento_cierra_deuda_sin_tocar_costo_ni_caja(client, cleaner, db):
+    """Descuento del proveedor (ej. 5% mayorista): la deuda baja el monto
+    completo, de caja sale solo el neto y el gasto/costo original NO cambia."""
+    cuenta = _cuenta_id(db)
+    if cuenta is None:
+        pytest.skip("No hay cuentas de caja en la BD de pruebas")
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    cxp = _crear_deuda(client, cleaner, proveedor["id"], 1000000.0, tg["id"])
+
+    # Deuda 1.000.000, descuento 5% = 50.000 → de caja salen 950.000.
+    abono = _abonar(
+        client, cxp["id"], 950000.0, cuenta,
+        descuento=50000.0, descuento_porcentaje=5,
+    )
+    cleaner.registrar("pago_cuenta_por_pagar", abono["id"])
+    assert float(abono["monto"]) == 950000.0
+    assert float(abono["descuento"]) == 50000.0
+    assert float(abono["monto_aplicado"]) == 1000000.0
+
+    mov = _mov_caja(db, f"CxP #{cxp['id']} abono #{abono['id']}")
+    assert mov is not None and float(mov[0]) == 950000.0, mov
+
+    # El costo/gasto original sigue siendo 1.000.000 (no lo reduce el descuento).
+    gastos = _gastos_de_deuda(db, cxp["id"])
+    assert len(gastos) == 1 and float(gastos[0][1]) == 1000000.0
+
+    r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
+    actual = next(c for c in r.json() if c["id"] == cxp["id"])
+    assert actual["estado"] == "PAGADA"
+    assert float(actual["saldo"]) == 0.0
+    assert float(actual["monto_pagado"]) == 950000.0
+    assert float(actual["monto_descontado"]) == 50000.0
+
+    # Revertir el abono devuelve la deuda completa (efectivo + descuento).
+    rd = client.delete(f"/api/v1/cuentas-por-pagar/abonos/{abono['id']}", headers=ADMIN_HEADERS)
+    assert rd.status_code == 204, rd.text
+    r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
+    actual = next(c for c in r.json() if c["id"] == cxp["id"])
+    assert actual["estado"] == "PENDIENTE"
+    assert float(actual["saldo"]) == 1000000.0
+    assert float(actual["monto_pagado"]) == 0.0
+    assert float(actual["monto_descontado"]) == 0.0
+
+
+def test_abono_con_descuento_excede_saldo_rechazado(client, cleaner, db):
+    cuenta = _cuenta_id(db)
+    if cuenta is None:
+        pytest.skip("No hay cuentas de caja en la BD de pruebas")
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    cxp = _crear_deuda(client, cleaner, proveedor["id"], 100000.0, tg["id"])
+
+    # 95.000 de caja + 10.000 de descuento = 105.000 > saldo 100.000.
+    r = client.post(f"/api/v1/cuentas-por-pagar/{cxp['id']}/abonos", json={
+        "fecha": str(date.today()),
+        "monto": 95000.0,
+        "descuento": 10000.0,
+        "descuento_porcentaje": 10,
+        "metodo_caja_id": cuenta,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 400
+    assert "excede" in r.json()["detail"]
+
+
+def test_abono_con_descuento_multimoneda(client, cleaner, db):
+    """Deuda en COP abonada desde una cuenta USD con descuento: el descuento
+    va en moneda de la deuda y la caja convierte solo el neto."""
+    cuenta_usd = _cuenta_usd(db, cleaner)
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    cxp = _crear_deuda(client, cleaner, proveedor["id"], 800000.0, tg["id"])
+
+    # Aplicado 200.000 COP con 5% (10.000) → caja 190.000 COP = 47,50 USD.
+    abono = _abonar(
+        client, cxp["id"], 190000.0, cuenta_usd,
+        tasa=4000.0, descuento=10000.0, descuento_porcentaje=5,
+    )
+    cleaner.registrar("pago_cuenta_por_pagar", abono["id"])
+    assert float(abono["monto_aplicado"]) == 200000.0
+    assert float(abono["monto_en_moneda_base"]) == 190000.0
+
+    mov = _mov_caja(db, f"CxP #{cxp['id']} abono #{abono['id']}")
+    assert mov is not None
+    assert float(mov[0]) == 47.5, f"salida en USD: {mov}"
+    assert float(mov[3]) == 190000.0
+
+    r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
+    actual = next(c for c in r.json() if c["id"] == cxp["id"])
+    assert float(actual["saldo"]) == 600000.0
+    assert float(actual["monto_descontado"]) == 10000.0
 
 
 # ══════════════════════════════════════════════════════════════════════════════

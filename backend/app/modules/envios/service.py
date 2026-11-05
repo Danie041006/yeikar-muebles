@@ -24,6 +24,16 @@ ESTADOS_VALIDOS = {"PREPARADO", "EN_TRANSITO", "ENTREGADO", "FALLIDO"}
 TIPOS_PRODUCIDOS = {"FABRICADO", "REPARACION"}
 
 
+def _pieza_requiere_orden(pieza) -> bool:
+    """Misma regla que Producción: exhibición sin retrabajo ya está lista."""
+    origen = (getattr(pieza, "origen", None) or "FABRICADO")
+    if isinstance(origen, str):
+        origen = origen.strip().upper()
+    if origen != "EXHIBICION":
+        return True
+    return bool(getattr(pieza, "requiere_retrabajo", False))
+
+
 def _scope_envios(query, usuario: Usuario | None):
     if usuario is None or tiene_alcance_total(usuario):
         return query
@@ -82,20 +92,30 @@ def _d(valor) -> Decimal:
     return Decimal(str(valor if valor is not None else 0))
 
 
-def _descripcion_item(detalle: DetallePedido, orden: OrdenProduccion | None) -> str:
+def _descripcion_item(
+    detalle: DetallePedido,
+    orden: OrdenProduccion | None,
+    pieza=None,
+) -> str:
     base = None
     if detalle.producto is not None:
         base = detalle.producto.nombre
     elif detalle.material is not None:
         base = detalle.material.nombre
     base = base or detalle.descripcion_especifica or detalle.observaciones or "Servicio"
-    if orden is not None and orden.pieza_nombre:
-        return f"{base} — {orden.pieza_nombre}"
+    nombre_pieza = (
+        orden.pieza_nombre if orden is not None and orden.pieza_nombre
+        else (getattr(pieza, "nombre", None) if pieza is not None else None)
+    )
+    if nombre_pieza:
+        return f"{base} — {nombre_pieza}"
     return base
 
 
-def _consumos_por_item(db: Session, pedido_id: int) -> dict[tuple[int, int | None], dict[str, Decimal]]:
-    """Suma entregado/reservado por (detalle, orden) de todos los despachos.
+def _consumos_por_item(
+    db: Session, pedido_id: int
+) -> dict[tuple[int, int | None, int | None], dict[str, Decimal]]:
+    """Suma entregado/reservado por (detalle, orden, pieza) del pedido.
 
     Un envío PREPARADO o EN_TRANSITO RESERVA sus cantidades; uno ENTREGADO las
     da por entregadas. FALLIDO no ocupa nada (se puede reprogramar).
@@ -104,17 +124,27 @@ def _consumos_por_item(db: Session, pedido_id: int) -> dict[tuple[int, int | Non
         db.query(
             EnvioDetalle.detalle_pedido_id,
             EnvioDetalle.orden_produccion_id,
+            EnvioDetalle.detalle_pieza_id,
             Envio.estado,
             func.coalesce(func.sum(EnvioDetalle.cantidad), 0),
         )
         .join(Envio, Envio.id == EnvioDetalle.envio_id)
         .filter(Envio.pedido_id == pedido_id)
-        .group_by(EnvioDetalle.detalle_pedido_id, EnvioDetalle.orden_produccion_id, Envio.estado)
+        .group_by(
+            EnvioDetalle.detalle_pedido_id,
+            EnvioDetalle.orden_produccion_id,
+            EnvioDetalle.detalle_pieza_id,
+            Envio.estado,
+        )
         .all()
     )
-    consumos: dict[tuple[int, int | None], dict[str, Decimal]] = {}
-    for detalle_id, orden_id, estado, cantidad in filas:
-        clave = (int(detalle_id), int(orden_id) if orden_id is not None else None)
+    consumos: dict[tuple[int, int | None, int | None], dict[str, Decimal]] = {}
+    for detalle_id, orden_id, pieza_id, estado, cantidad in filas:
+        clave = (
+            int(detalle_id),
+            int(orden_id) if orden_id is not None else None,
+            int(pieza_id) if pieza_id is not None else None,
+        )
         acumulado = consumos.setdefault(
             clave, {"entregado": Decimal("0"), "reservado": Decimal("0")}
         )
@@ -137,6 +167,7 @@ def _items_entrega(db: Session, pedido: Pedido) -> list[dict]:
             joinedload(DetallePedido.producto),
             joinedload(DetallePedido.material),
             selectinload(DetallePedido.ordenes),
+            selectinload(DetallePedido.piezas),
         )
         .filter(DetallePedido.pedido_id == pedido.id)
         .order_by(DetallePedido.id)
@@ -151,17 +182,79 @@ def _items_entrega(db: Session, pedido: Pedido) -> list[dict]:
             orden for orden in (detalle.ordenes or [])
             if orden.estado != "CANCELADA"
         ]
-        if tipo in TIPOS_PRODUCIDOS and ordenes:
+        piezas = list(detalle.piezas or [])
+        # Renglón compuesto: una fila por pieza. Las piezas de exhibición sin
+        # retrabajo no tienen orden y se entregan de inmediato; las fabricadas
+        # y los retrabajos esperan a que su orden esté FINALIZADA.
+        if piezas and not any(orden.detalle_pieza_id is None for orden in (detalle.ordenes or [])):
+            con_orden = {orden.detalle_pieza_id for orden in ordenes if orden.detalle_pieza_id}
             for orden in ordenes:
                 total = _d(
                     orden.cantidad if orden.cantidad is not None else detalle.cantidad
                 )
                 if total <= 0:
                     continue
-                consumo = consumos.get((detalle.id, orden.id), {})
+                pieza = next(
+                    (p for p in piezas if p.id == orden.detalle_pieza_id), None
+                )
+                consumo = consumos.get((detalle.id, orden.id, None), {})
                 items.append({
                     "detalle": detalle,
                     "orden": orden,
+                    "pieza": pieza,
+                    "total": total,
+                    "entregado": consumo.get("entregado", Decimal("0")),
+                    "reservado": consumo.get("reservado", Decimal("0")),
+                    "listo_total": total if orden.estado == "FINALIZADA" else Decimal("0"),
+                    "estado_produccion": orden.estado,
+                    "descripcion": _descripcion_item(detalle, orden, pieza),
+                    "pieza_nombre": orden.pieza_nombre or (pieza.nombre if pieza else None),
+                })
+            for pieza in piezas:
+                if pieza.id in con_orden:
+                    continue
+                total = _d(pieza.cantidad) * _d(detalle.cantidad)
+                if total <= 0:
+                    continue
+                # Sin orden: una pieza FABRICADO pendiente no se puede entregar
+                # (aún no existe). La exhibición sin retrabajo ya está lista; un
+                # retrabajo cancelado también deja la pieza disponible.
+                requiere = _pieza_requiere_orden(pieza)
+                tuvo_orden = any(
+                    o.detalle_pieza_id == pieza.id for o in (detalle.ordenes or [])
+                )
+                era_retrabajo = any(
+                    o.detalle_pieza_id == pieza.id and o.tipo == "RETRABAJO"
+                    for o in (detalle.ordenes or [])
+                )
+                listo_total = total
+                if requiere and (not tuvo_orden or not era_retrabajo):
+                    listo_total = Decimal("0")
+                consumo = consumos.get((detalle.id, None, pieza.id), {})
+                items.append({
+                    "detalle": detalle,
+                    "orden": None,
+                    "pieza": pieza,
+                    "total": total,
+                    "entregado": consumo.get("entregado", Decimal("0")),
+                    "reservado": consumo.get("reservado", Decimal("0")),
+                    "listo_total": listo_total,
+                    "estado_produccion": "LISTA" if listo_total > 0 else None,
+                    "descripcion": _descripcion_item(detalle, None, pieza),
+                    "pieza_nombre": pieza.nombre,
+                })
+        elif tipo in TIPOS_PRODUCIDOS and ordenes:
+            for orden in ordenes:
+                total = _d(
+                    orden.cantidad if orden.cantidad is not None else detalle.cantidad
+                )
+                if total <= 0:
+                    continue
+                consumo = consumos.get((detalle.id, orden.id, None), {})
+                items.append({
+                    "detalle": detalle,
+                    "orden": orden,
+                    "pieza": None,
                     "total": total,
                     "entregado": consumo.get("entregado", Decimal("0")),
                     "reservado": consumo.get("reservado", Decimal("0")),
@@ -174,7 +267,7 @@ def _items_entrega(db: Session, pedido: Pedido) -> list[dict]:
             total = _d(detalle.cantidad)
             if total <= 0:
                 continue
-            consumo = consumos.get((detalle.id, None), {})
+            consumo = consumos.get((detalle.id, None, None), {})
             # Sin orden (reventa/insumo/servicio o pedido histórico ya terminado):
             # se puede despachar de una vez. Un FABRICADO sin orden en producción
             # no se puede entregar hasta que el pedido esté TERMINADO (legacy).
@@ -185,6 +278,7 @@ def _items_entrega(db: Session, pedido: Pedido) -> list[dict]:
             items.append({
                 "detalle": detalle,
                 "orden": None,
+                "pieza": None,
                 "total": total,
                 "entregado": consumo.get("entregado", Decimal("0")),
                 "reservado": consumo.get("reservado", Decimal("0")),
@@ -249,7 +343,7 @@ def _resolver_items_envio(
     db: Session,
     pedido: Pedido,
     payload: list[schemas.EnvioDetalleCreate],
-) -> list[tuple[DetallePedido, OrdenProduccion | None, Decimal]]:
+) -> list[tuple[DetallePedido, OrdenProduccion | None, object | None, Decimal]]:
     """Valida y normaliza los ítems de un despacho contra lo que está listo.
 
     - Con `detalles`: valida pertenencia, orden FINALIZADA y cantidad disponible.
@@ -257,15 +351,21 @@ def _resolver_items_envio(
       pendiente esté listo y despacha el pedido completo restante.
     """
     items = _items_entrega(db, pedido)
-    por_clave = {
-        (item["detalle"].id, item["orden"].id if item["orden"] else None): item
+    por_orden = {
+        (item["detalle"].id, item["orden"].id): item
         for item in items
+        if item["orden"] is not None
+    }
+    por_pieza = {
+        (item["detalle"].id, item["pieza"].id): item
+        for item in items
+        if item["orden"] is None and item["pieza"] is not None
     }
     por_detalle: dict[int, list[dict]] = {}
     for item in items:
         por_detalle.setdefault(item["detalle"].id, []).append(item)
 
-    resueltos: list[tuple[DetallePedido, OrdenProduccion | None, Decimal]] = []
+    resueltos: list[tuple[DetallePedido, OrdenProduccion | None, object | None, Decimal]] = []
 
     if not payload:
         pendientes = [item for item in items if item["pendiente"] > 0]
@@ -282,19 +382,25 @@ def _resolver_items_envio(
                 f"({nombres}). Indica solo los ítems listos para una entrega parcial."
             )
         for item in pendientes:
-            resueltos.append((item["detalle"], item["orden"], item["pendiente"]))
+            resueltos.append(
+                (item["detalle"], item["orden"], item["pieza"], item["pendiente"])
+            )
         return resueltos
 
-    agrupados: dict[tuple[int, int | None], Decimal] = {}
+    agrupados: dict[tuple[int, int | None, int | None], Decimal] = {}
     for linea in payload:
-        clave = (linea.detalle_pedido_id, linea.orden_produccion_id)
+        clave = (
+            linea.detalle_pedido_id,
+            linea.orden_produccion_id,
+            linea.detalle_pieza_id,
+        )
         agrupados[clave] = agrupados.get(clave, Decimal("0")) + _d(linea.cantidad)
 
-    for (detalle_id, orden_id), cantidad in agrupados.items():
+    for (detalle_id, orden_id, pieza_id), cantidad in agrupados.items():
         if cantidad <= 0:
             raise ValueError("Las cantidades a entregar deben ser mayores que cero.")
         if orden_id is not None:
-            item = por_clave.get((detalle_id, orden_id))
+            item = por_orden.get((detalle_id, orden_id))
             if item is None:
                 raise ValueError(
                     f"La pieza/orden #{orden_id} no pertenece al pedido o fue cancelada."
@@ -303,6 +409,12 @@ def _resolver_items_envio(
                 raise ValueError(
                     f"La orden #{orden_id} todavía no está FINALIZADA "
                     f"(estado: {item['estado_produccion'] or 'sin orden'})."
+                )
+        elif pieza_id is not None:
+            item = por_pieza.get((detalle_id, pieza_id))
+            if item is None:
+                raise ValueError(
+                    f"La pieza #{pieza_id} no pertenece al pedido o ya tiene orden de producción."
                 )
         else:
             candidatos = por_detalle.get(detalle_id, [])
@@ -322,20 +434,21 @@ def _resolver_items_envio(
                 f"De '{item['descripcion']}' solo hay {float(item['cantidad_lista']):g} "
                 f"disponible(s) para entregar (pediste {float(cantidad):g})."
             )
-        resueltos.append((item["detalle"], item["orden"], cantidad))
+        resueltos.append((item["detalle"], item["orden"], item["pieza"], cantidad))
 
     return resueltos
 
 
 def _crear_detalles_envio(
     envio: Envio,
-    items: list[tuple[DetallePedido, OrdenProduccion | None, Decimal]],
+    items: list[tuple[DetallePedido, OrdenProduccion | None, object | None, Decimal]],
 ) -> None:
-    for detalle, orden, cantidad in items:
+    for detalle, orden, pieza, cantidad in items:
         envio.detalles.append(
             EnvioDetalle(
                 detalle_pedido_id=detalle.id,
                 orden_produccion_id=orden.id if orden else None,
+                detalle_pieza_id=pieza.id if (orden is None and pieza is not None) else None,
                 cantidad=cantidad,
             )
         )
@@ -603,7 +716,10 @@ def crear_envio_automatico(db: Session, pedido_id: int, usuario: Usuario | None 
     db.flush()
     _crear_detalles_envio(
         db_envio,
-        [(item["detalle"], item["orden"], item["cantidad_lista"]) for item in items],
+        [
+            (item["detalle"], item["orden"], item["pieza"], item["cantidad_lista"])
+            for item in items
+        ],
     )
     db.flush()
     record_event(
@@ -729,6 +845,11 @@ def obtener_pendientes_entrega(db: Session, pedido_id: int):
             {
                 "detalle_pedido_id": item["detalle"].id,
                 "orden_produccion_id": item["orden"].id if item["orden"] else None,
+                "detalle_pieza_id": (
+                    item["pieza"].id
+                    if item["orden"] is None and item["pieza"] is not None
+                    else None
+                ),
                 "pieza_nombre": item["pieza_nombre"],
                 "descripcion": item["descripcion"],
                 "tipo_item": item["detalle"].tipo_item,

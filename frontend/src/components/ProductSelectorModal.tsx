@@ -112,7 +112,11 @@ export default function ProductSelectorModal({
       // Category filter (en modo bloqueado la categoría es fija)
       if (categoriaActiva === 'FABRICADOS' && esItemStock(p)) return false;
       if (categoriaActiva === 'REVENTA' && !esItemStock(p)) return false;
-      if (categoriaActiva === 'EXHIBICION' && !p.es_exhibicion) return false;
+      // Exhibición: solo piezas activas del showroom (las vendidas/dadas de
+      // baja no deben ofrecerse como stock).
+      if (categoriaActiva === 'EXHIBICION' && (!p.es_exhibicion || p.activo === false)) {
+        return false;
+      }
       if (
         categoriaActiva !== 'TODOS' &&
         categoriaActiva !== 'FABRICADOS' &&

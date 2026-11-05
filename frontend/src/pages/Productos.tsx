@@ -8,6 +8,7 @@ import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import EstructuraCostos from '../components/EstructuraCostos';
+import ComposicionEditor from '../components/Productos/ComposicionEditor';
 import { normalizarEstructuraCostos, EstructuraCostos as EstructuraCostosData } from '../utils/estructuraCostos';
 import { formatCurrency } from '../utils/format';
 import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
@@ -1356,6 +1357,12 @@ export default function Productos() {
         {/* ── Right Panel: Recipe + Price Simulator ── */}
         {selectedProduct && !selectedProduct.es_reventa && (
           <div className="w-full xl:w-[440px] shrink-0 space-y-4">
+
+            <ComposicionEditor
+              producto={selectedProduct}
+              esAdmin={esAdmin}
+              onChanged={(actualizado) => setSelectedProduct(actualizado)}
+            />
 
             {/* Recipe header */}
             <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl overflow-hidden shadow-sm">

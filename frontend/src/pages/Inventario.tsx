@@ -7,9 +7,11 @@ import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO, type AdjuntoInfo } from '.
 import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
 import { SearchSelect, ResponsiveDataTable, MontoInput, type DataColumn } from '../components/ui';
 import AdjuntoImagen from '../components/AdjuntoImagen';
+import ComposicionEditor from '../components/Productos/ComposicionEditor';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage, fmtNumero } from '../utils/format';
 import { hoyVE } from '../utils/fechas';
 
@@ -40,16 +42,19 @@ interface Material {
   id: number;
   nombre: string;
   codigo?: string;
+  tipo_producto_id: number;
   activo?: boolean;
   stock_minimo?: number;
   es_reventa?: boolean;
   es_exhibicion?: boolean;
+  es_conjunto?: boolean;
+  es_pieza?: boolean;
   moneda_id?: number | null;
   moneda?: MonedaInfo | null;
   categoria_inventario_id?: number | null;
   precio_costo_base?: number | null;
   precio_venta_base?: number | null;
-  fotos?: { id?: number; mime?: string; url?: string }[];
+  fotos?: AdjuntoInfo[];
 }
 
 type Tab = 'insumos' | 'productos' | 'plasticos' | 'exhibicion' | 'crudo';
@@ -111,6 +116,7 @@ function parsePagoKey(key: string): { cuentaId: number | null; monedaId: number 
 export default function Inventario() {
   const toast = useToast();
   const navigate = useNavigate();
+  const { esAdmin } = useAuth();
   interface UnidadMedida {
     id: number;
     nombre: string;
@@ -217,7 +223,7 @@ export default function Inventario() {
   });
   const [savingMovProd, setSavingMovProd] = useState(false);
   // Tab del modal de producto (movimiento / editar / historial).
-  const [detalleTabProducto, setDetalleTabProducto] = useState<'movimiento' | 'editar' | 'historial'>('movimiento');
+  const [detalleTabProducto, setDetalleTabProducto] = useState<'movimiento' | 'editar' | 'historial' | 'composicion'>('movimiento');
   // Edición inline del producto (tab EDITAR del modal).
   const [editProducto, setEditProducto] = useState({ nombre: '', codigo: '', precio_venta_base: '', precio_costo_base: '', stock_minimo: '', categoria_inventario_id: '' });
   const [savingEditProd, setSavingEditProd] = useState(false);
@@ -2998,9 +3004,13 @@ export default function Inventario() {
           const monCod = productoSeleccionado?.moneda?.codigo ?? 'COP';
           const tabsProd = (
             esExh
-              ? [{ key: 'movimiento', label: 'Movimiento' }, { key: 'historial', label: 'Historial' }]
+              ? [
+                  { key: 'movimiento', label: 'Movimiento' },
+                  { key: 'composicion', label: 'Composición' },
+                  { key: 'historial', label: 'Historial' },
+                ]
               : [{ key: 'movimiento', label: 'Movimiento' }, { key: 'editar', label: 'Editar producto' }, { key: 'historial', label: 'Historial' }]
-          ) as { key: 'movimiento' | 'editar' | 'historial'; label: string }[];
+          ) as { key: 'movimiento' | 'editar' | 'historial' | 'composicion'; label: string }[];
           return (
           <div
             className="fixed inset-0 z-50 bg-yeikar-secondary/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6"
@@ -3185,6 +3195,14 @@ export default function Inventario() {
             })()}
 
             {/* ── TAB: Registrar movimiento ── */}
+            {detalleTabProducto === 'composicion' && (
+              <ComposicionEditor
+                producto={productoSeleccionado}
+                esAdmin={esAdmin}
+                onChanged={() => { void fetchProductos(); }}
+              />
+            )}
+
             {detalleTabProducto === 'movimiento' && (
               esExh ? (
                 <p className="text-[11px] text-yeikar-neutral/60 bg-yeikar-tertiary/30 border border-yeikar-secondary-light/10 rounded-xl px-4 py-3">

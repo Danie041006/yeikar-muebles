@@ -6,6 +6,8 @@ export interface EnvioDetalle {
   id: number;
   detalle_pedido_id: number;
   orden_produccion_id?: number | null;
+  /** Pieza sin orden de producción (exhibición ya lista). */
+  detalle_pieza_id?: number | null;
   cantidad: number;
   descripcion?: string | null;
   pieza_nombre?: string | null;
@@ -17,12 +19,15 @@ export interface EnvioDetalle {
 export interface EnvioDetalleCreate {
   detalle_pedido_id: number;
   orden_produccion_id?: number | null;
+  /** Pieza sin orden de producción (exhibición ya lista). */
+  detalle_pieza_id?: number | null;
   cantidad: number;
 }
 
 export interface PendienteEntregaItem {
   detalle_pedido_id: number;
   orden_produccion_id?: number | null;
+  detalle_pieza_id?: number | null;
   pieza_nombre?: string | null;
   descripcion: string;
   tipo_item?: string | null;

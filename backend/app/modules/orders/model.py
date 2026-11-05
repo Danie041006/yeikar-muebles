@@ -121,6 +121,9 @@ class DetallePedido(Base):
     observaciones = Column(Text, nullable=True)
     # Promo obsequio: línea del plástico de regalo (precio 0, 1 por colchón)
     es_obsequio = Column(Boolean, nullable=False, server_default="false")
+    # Despiece de exhibición ya ejecutado para este renglón (idempotencia): el
+    # conjunto de showroom se apartó y sus sobrantes volvieron como piezas.
+    piezas_apartadas = Column(Boolean, nullable=False, server_default="false")
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 
@@ -157,8 +160,21 @@ class DetallePedidoPieza(Base):
     notas = Column(Text, nullable=True)
     # Foto opcional de la pieza (copiada de la cotización al convertir).
     foto = deferred(Column(Text, nullable=True))
+    # --- Composición comercial (espejo de detalle_cotizacion_pieza) ---
+    producto_id = Column(BigInteger, ForeignKey("producto.id", ondelete="SET NULL"), nullable=True)
+    precio = Column(Numeric(15, 2), nullable=True)
+    origen = Column(String(20), nullable=True)  # FABRICADO | EXHIBICION (NULL = FABRICADO)
+    conjunto_origen_id = Column(BigInteger, ForeignKey("producto.id", ondelete="SET NULL"), nullable=True)
+    modificacion = Column(Text, nullable=True)
+    requiere_retrabajo = Column(Boolean, nullable=False, server_default="false", default=False)
+    precio_modificacion = Column(Numeric(15, 2), nullable=True)
+    # Costo REAL con el que salió la pieza del showroom (congelado al apartarla
+    # en el despiece). NULL en piezas fabricadas: su costo lo da su orden.
+    costo_unitario = Column(Numeric(15, 2), nullable=True)
     orden = Column(BigInteger, nullable=False, default=0)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     detalle = relationship("DetallePedido", back_populates="piezas")
+    producto = relationship("Producto", foreign_keys=[producto_id])
+    conjunto_origen = relationship("Producto", foreign_keys=[conjunto_origen_id])

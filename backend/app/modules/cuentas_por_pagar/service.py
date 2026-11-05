@@ -11,6 +11,7 @@ from app.modules.gastos.service import crear_gasto
 from app.modules.productos.model import Material
 from app.modules.clients.model import Client
 from app.modules.proveedores.model import Proveedor
+from app.modules.reports.model import MetodoCaja
 from app.modules.users.deps import filtrar_registros_propios
 from app.modules.users.model import Usuario
 from app.modules.auditoria.service import record_event
@@ -70,6 +71,7 @@ def _snapshot(cxp: model.CuentaPorPagar) -> dict:
         "proveedor_id": cxp.proveedor_id,
         "monto": cxp.monto,
         "monto_pagado": cxp.monto_pagado,
+        "monto_descontado": cxp.monto_descontado,
         "estado": cxp.estado,
         "fecha": cxp.fecha,
     }
@@ -103,7 +105,9 @@ def obtener_cuenta(db: Session, cxp_id: int, usuario: Optional[Usuario] = None):
         joinedload(model.CuentaPorPagar.creador),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.material),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.cliente),
-        joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.metodo_caja),
+        joinedload(model.CuentaPorPagar.pagos)
+        .joinedload(model.PagoCuentaPorPagar.metodo_caja)
+        .joinedload(MetodoCaja.moneda),
         joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.creador),
     ).filter(model.CuentaPorPagar.id == cxp_id)
     if usuario is not None:
@@ -126,7 +130,9 @@ def obtener_cuentas(
         joinedload(model.CuentaPorPagar.creador),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.material),
         joinedload(model.CuentaPorPagar.detalles).joinedload(model.DetalleCuentaPorPagar.cliente),
-        joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.metodo_caja),
+        joinedload(model.CuentaPorPagar.pagos)
+        .joinedload(model.PagoCuentaPorPagar.metodo_caja)
+        .joinedload(MetodoCaja.moneda),
         joinedload(model.CuentaPorPagar.pagos).joinedload(model.PagoCuentaPorPagar.creador),
     )
     if usuario is not None:
@@ -317,8 +323,18 @@ def abonar(db: Session, cxp_id: int, abono: schemas.AbonoCreate, usuario: Option
     if not cxp:
         raise ValueError("La cuenta por pagar no existe.")
     saldo = cxp.saldo
-    if Decimal(str(abono.monto)) > saldo + Decimal("0.005"):
+    monto = Decimal(str(abono.monto)).quantize(Decimal("0.01"))
+    descuento = Decimal(str(abono.descuento or 0)).quantize(Decimal("0.01"))
+    if descuento < 0:
+        raise ValueError("El descuento no puede ser negativo.")
+    # El descuento NO sale de caja: cierra deuda igual que el efectivo, pero
+    # el gasto original (el costo) se queda intacto.
+    aplicado = (monto + descuento).quantize(Decimal("0.01"))
+    if aplicado > saldo + Decimal("0.005"):
         raise ValueError(f"El abono excede el saldo de la deuda (saldo: {saldo}).")
+    porcentaje = abono.descuento_porcentaje
+    if descuento <= 0:
+        porcentaje = None
     antes = _snapshot(cxp)
 
     cuenta, moneda_cuenta, monto_cuenta, monto_base, tasa_cuenta = _calcular_abono_caja(db, cxp, abono)
@@ -326,7 +342,9 @@ def abonar(db: Session, cxp_id: int, abono: schemas.AbonoCreate, usuario: Option
         cuenta_por_pagar_id=cxp.id,
         fecha=abono.fecha,
         metodo_caja_id=cuenta.id,
-        monto=abono.monto,
+        monto=monto,
+        descuento=descuento,
+        descuento_porcentaje=porcentaje,
         tasa_cambio=tasa_cuenta,
         monto_en_moneda_base=monto_base,
         creado_por_id=usuario.id if usuario is not None else None,
@@ -349,7 +367,8 @@ def abonar(db: Session, cxp_id: int, abono: schemas.AbonoCreate, usuario: Option
         usuario_id=usuario.id if usuario is not None else None,
     )
 
-    cxp.monto_pagado = (Decimal(str(cxp.monto_pagado)) + Decimal(str(abono.monto))).quantize(Decimal("0.01"))
+    cxp.monto_pagado = (Decimal(str(cxp.monto_pagado)) + monto).quantize(Decimal("0.01"))
+    cxp.monto_descontado = (Decimal(str(cxp.monto_descontado)) + descuento).quantize(Decimal("0.01"))
     if cxp.saldo <= Decimal("0.005"):
         cxp.estado = "PAGADA"
     record_event(
@@ -378,6 +397,9 @@ def eliminar_abono(db: Session, abono_id: int, usuario: Optional[Usuario] = None
         MovimientoCaja.referencia == f"CxP #{cxp.id} abono #{pago.id}"
     ).delete(synchronize_session=False)
     cxp.monto_pagado = (Decimal(str(cxp.monto_pagado)) - Decimal(str(pago.monto))).quantize(Decimal("0.01"))
+    cxp.monto_descontado = (
+        Decimal(str(cxp.monto_descontado)) - Decimal(str(pago.descuento or 0))
+    ).quantize(Decimal("0.01"))
     cxp.estado = "PAGADA" if cxp.saldo <= Decimal("0.005") else "PENDIENTE"
     db.delete(pago)
     db.commit()
@@ -388,7 +410,7 @@ def eliminar_cuenta(db: Session, cxp_id: int, usuario: Optional[Usuario] = None)
     cxp = obtener_cuenta(db, cxp_id, usuario)
     if not cxp:
         return False
-    if Decimal(str(cxp.monto_pagado)) > 0:
+    if Decimal(str(cxp.monto_pagado)) > 0 or Decimal(str(cxp.monto_descontado)) > 0:
         raise ValueError("No se puede eliminar una deuda con abonos. Elimina primero sus abonos.")
 
     if cxp.gasto_id:

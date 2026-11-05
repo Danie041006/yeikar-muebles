@@ -49,9 +49,10 @@ def clave_pieza(nombre: str) -> str:
 def validar_piezas_juego(piezas: "list[PiezaJuegoBase]", tipo_item: str) -> None:
     """Reglas compartidas por cotización y pedido.
 
-    Las piezas no llevan precio: son la apertura interna de producción/costos
-    de un renglón con precio global. Solo tienen sentido en FABRICADO y sus
-    nombres deben ser únicos (sin duplicar por mayúsculas/acentos).
+    Las piezas pueden ser solo la apertura interna de producción/costos de un
+    renglón con precio global (juego clásico) o una composición comercial con
+    producto y precio por pieza. Solo tienen sentido en FABRICADO y sus nombres
+    deben ser únicos (sin duplicar por mayúsculas/acentos).
     """
     if not piezas:
         return
@@ -68,6 +69,15 @@ def validar_piezas_juego(piezas: "list[PiezaJuegoBase]", tipo_item: str) -> None
         if clave in vistas:
             raise ValueError(f"La pieza '{nombre}' está repetida en el juego.")
         vistas.add(clave)
+    # Precio por pieza: TODAS o NINGUNA. Mezclar precios parciales haría que
+    # el total del renglón no cuadre con lo que ve el cliente.
+    con_precio = [p for p in piezas if p.precio is not None]
+    if con_precio and len(con_precio) != len(piezas):
+        faltan = [p.nombre for p in piezas if p.precio is None]
+        raise ValueError(
+            "Las piezas del renglón deben tener TODAS precio o NINGUNA. "
+            f"Falta el precio de: {', '.join(faltan)}."
+        )
 
 
 class PiezaJuegoBase(BaseModel):
@@ -78,6 +88,24 @@ class PiezaJuegoBase(BaseModel):
     # Foto opcional de la pieza como data URL (el navegador la comprime antes
     # de enviarla; el backend solo la guarda con la pieza). No es obligatoria.
     foto: Optional[str] = Field(None, max_length=2_000_000)
+    # --- Composición comercial (opcional) ---
+    # Producto del catálogo que ES la pieza. Si viene, la pieza puede tener
+    # precio propio y, en exhibición, despiezarse de un conjunto.
+    producto_id: Optional[int] = Field(None, gt=0)
+    # Precio unitario EN LA MONEDA DE LA COTIZACIÓN. Si TODAS las piezas del
+    # renglón lo traen, el precio del renglón se calcula como la suma de sus
+    # subtotales; si ninguna lo trae, el renglón conserva su precio global.
+    precio: Optional[float] = Field(None, ge=0)
+    # FABRICADO (se produce) o EXHIBICION (se toma del showroom).
+    origen: Optional[str] = Field(None, pattern=r"^(FABRICADO|EXHIBICION)$")
+    # Conjunto de exhibición del que se desprende la pieza (se despieza al
+    # convertir a pedido y los sobrantes vuelven como piezas sueltas).
+    conjunto_origen_id: Optional[int] = Field(None, gt=0)
+    # Retoque pedido sobre una pieza de exhibición ("repintar en nogal").
+    modificacion: Optional[str] = Field(None, max_length=2000)
+    requiere_retrabajo: bool = False
+    # Cobro adicional por el retoque, por unidad de la pieza.
+    precio_modificacion: Optional[float] = Field(None, ge=0)
 
     @field_validator("foto")
     @classmethod
@@ -97,11 +125,44 @@ class PiezaJuegoBase(BaseModel):
     def _normalizar(self):
         self.nombre = self.nombre.strip()
         self.notas = (self.notas or "").strip() or None
+        self.origen = (self.origen or "FABRICADO").strip().upper()
+        self.modificacion = (self.modificacion or "").strip() or None
         return self
 
 
 class PiezaJuegoCreate(PiezaJuegoBase):
-    pass
+    """Pieza de ENTRADA: además de normalizar, valida las reglas comerciales.
+
+    Las reglas viven solo aquí (no en `PiezaJuegoBase`) para que una fila
+    histórica cuyo producto fue borrado (FK SET NULL) siga siendo serializable
+    en las respuestas sin romper el listado.
+    """
+
+    @model_validator(mode="after")
+    def _validar_composicion(self):
+        if self.origen == "EXHIBICION" and not self.producto_id:
+            raise ValueError(
+                f"La pieza de exhibición '{self.nombre}' debe indicar el producto "
+                "del catálogo del que sale (producto_id)."
+            )
+        if self.origen != "EXHIBICION" and self.conjunto_origen_id:
+            raise ValueError(
+                f"El conjunto de origen solo aplica a piezas de exhibición ('{self.nombre}')."
+            )
+        if self.requiere_retrabajo:
+            if not self.modificacion:
+                raise ValueError(
+                    f"La pieza '{self.nombre}' requiere retrabajo pero no indica la modificación."
+                )
+            if not self.producto_id:
+                raise ValueError(
+                    f"La pieza '{self.nombre}' requiere retrabajo pero no tiene producto del catálogo."
+                )
+        elif self.precio_modificacion is not None:
+            raise ValueError(
+                f"La pieza '{self.nombre}' tiene precio de modificación sin requerir retrabajo."
+            )
+        return self
 
 
 class DetalleCotizacionPiezaResponse(PiezaJuegoBase):
@@ -120,6 +181,13 @@ class DetalleCotizacionPiezaListaResponse(BaseModel):
     nombre: str
     cantidad: float
     notas: Optional[str] = None
+    producto_id: Optional[int] = None
+    precio: Optional[float] = None
+    origen: Optional[str] = None
+    conjunto_origen_id: Optional[int] = None
+    modificacion: Optional[str] = None
+    requiere_retrabajo: bool = False
+    precio_modificacion: Optional[float] = None
     orden: int
 
     class Config:

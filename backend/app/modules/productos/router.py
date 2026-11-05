@@ -12,6 +12,7 @@ from app.modules.users.deps import es_admin_user, require_module
 from app.modules.productos import schemas, service
 from app.modules.productos import cost_service
 from app.modules.productos import estructura_import
+from app.modules.productos import composicion
 from app.modules.adjuntos import service as adjuntos_service
 from app.modules.productos.model import ProductoMaterial
 
@@ -100,10 +101,72 @@ def eliminar_producto(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
+    # Una pieza referenciada por un conjunto tiene FK RESTRICT: mejor un 409
+    # claro que un error de integridad al borrar.
+    en_conjuntos = db.query(model.ProductoPieza).filter(
+        model.ProductoPieza.pieza_producto_id == id_producto
+    ).count()
+    if en_conjuntos:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Este producto es pieza de {en_conjuntos} conjunto(s). "
+                "Quítalo de la composición de esos conjuntos antes de eliminarlo."
+            ),
+        )
     exito = service.eliminar_producto(db, id_producto)
     if not exito:
         raise HTTPException(status_code=404, detail="Producto no encontrado")
     return None
+
+# ------------------------------------------------------------
+# Composición de un conjunto (producto_pieza)
+# ------------------------------------------------------------
+@router.get("/producto/{id_producto}/piezas", response_model=schemas.ProductoComposicionResponse, tags=["composicion"])
+def ver_composicion_producto(
+    id_producto: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Piezas que forman el conjunto, con la conciliación de costos y precios.
+
+    Un comedor = mesa ×1 + sillas ×6. Cada pieza es un producto del catálogo:
+    su costo y su precio se leen de ahí, no se duplican en la composición.
+    """
+    producto = service.obtener_producto(db, id_producto)
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return composicion.obtener_composicion(db, producto)
+
+
+@router.put("/producto/{id_producto}/piezas", response_model=schemas.ProductoComposicionResponse, tags=["composicion"])
+def reemplazar_composicion_producto(
+    id_producto: int,
+    esquema: schemas.ProductoComposicionReplace,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user)
+):
+    """Reemplaza TODA la composición del conjunto (contrato de lista completa).
+
+    Define el desglose comercial y de costo del mueble, base para combinar
+    piezas de exhibición distintas en una cotización. Como mueve precios y
+    costos del catálogo, escribirlo queda reservado a Dueño/Administrador.
+    """
+    if not es_admin_user(usuario_actual):
+        raise HTTPException(
+            status_code=403,
+            detail="Solo Dueño/Administrador pueden definir las piezas de un conjunto.",
+        )
+    producto = service.obtener_producto(db, id_producto)
+    if not producto:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    try:
+        return composicion.reemplazar_composicion(
+            db, producto, esquema.piezas, usuario=usuario_actual
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 # ------------------------------------------------------------
 # Material
