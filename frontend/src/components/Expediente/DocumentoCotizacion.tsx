@@ -58,7 +58,7 @@ function FotosRenglon({ urls, alt }: { urls: string[]; alt: string }) {
           key={i}
           src={u}
           alt={doble ? `${alt} (vista ${i + 1})` : alt}
-          className={`${doble ? 'h-14 w-14' : 'h-24 w-24'} rounded-lg object-cover border border-stone-300 shrink-0`}
+          className={`${doble ? 'h-14 w-14' : 'h-[88px] w-[88px]'} rounded-lg object-cover border border-stone-300 shrink-0`}
           loading="lazy"
         />
       ))}
@@ -185,20 +185,19 @@ export default function DocumentoCotizacion({
           {/* ── Items Table ── */}
           <div className="border border-stone-300 rounded-lg overflow-hidden shadow-sm">
             <table className="w-full border-collapse text-[11px]" style={{ tableLayout: 'fixed' }}>
-              {/* La columna Modelo es ancha a propósito: el nombre del mueble
-                  debe leerse a lo HORIZONTAL junto a la foto, no en 5 renglones. */}
+              {/* Modelo y Descripción van en UNA sola columna ancha: el nombre
+                  del mueble debe leerse en una línea horizontal junto a la foto. */}
               <colgroup>
-                <col style={{ width: '34%' }} />
+                <col style={{ width: '63%' }} />
                 <col style={{ width: '7%' }} />
-                <col style={{ width: '29%' }} />
                 <col style={{ width: '15%' }} />
                 <col style={{ width: '15%' }} />
               </colgroup>
               <thead>
                 <tr className="bg-stone-900 text-stone-100">
-                  {['Modelo', 'Cant.', 'Descripción', 'P. Unitario', 'Total'].map((h, i) => (
+                  {['Modelo / Descripción', 'Cant.', 'P. Unitario', 'Total'].map((h, i) => (
                     <th key={h} className={`px-3 py-2 font-serif font-bold uppercase tracking-[0.12em] text-[9px]
-                      ${i === 0 ? 'text-left' : i === 1 ? 'text-center' : i === 2 ? 'text-left' : 'text-right'}`}>{h}</th>
+                      ${i === 0 ? 'text-left' : i === 1 ? 'text-center' : 'text-right'}`}>{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -295,14 +294,14 @@ export default function DocumentoCotizacion({
                     return (
                       <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                         {sinAsociar ? (
-                          <td colSpan={3} className="px-3 py-2 font-serif font-bold text-stone-950">
+                          <td colSpan={2} className="px-3 py-2 font-serif font-bold text-stone-950">
                             <div className="flex items-center gap-2.5">
                               <FotosRenglon urls={fotosDet} alt={textoItem} />
-                              <span className="min-w-0 flex-1 leading-snug">
+                              <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10.5px] leading-tight">
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
                                 {notaItem && (
-                                  <span className="block text-[8px] text-stone-600 italic font-medium">{notaItem}</span>
+                                  <span className="ml-2 text-[9px] text-stone-600 italic font-medium">{notaItem}</span>
                                 )}
                               </span>
                             </div>
@@ -312,11 +311,19 @@ export default function DocumentoCotizacion({
                             <td className="px-3 py-2 font-serif font-bold text-stone-950">
                               <div className="flex items-center gap-2.5">
                                 <FotosRenglon urls={fotosDet} alt={modelName} />
-                                <span className="min-w-0 flex-1 leading-snug">{modelName}</span>
+                                {/* Una sola línea: el nombre manda; la descripción
+                                    (medidas/notas/piezas) va inline y se recorta. */}
+                                <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10.5px] leading-tight">
+                                  <span className="font-serif font-extrabold">{modelName}</span>
+                                  {desc && (
+                                    <span className="ml-2 text-[9px] font-medium italic text-stone-600">
+                                      {desc}
+                                    </span>
+                                  )}
+                                </span>
                               </div>
                             </td>
                             <td className="px-3 py-2 text-center font-mono font-extrabold text-stone-900">{cantTexto}</td>
-                            <td className="px-3 py-2 text-stone-700 italic font-medium">{desc}</td>
                           </>
                         )}
                         <td className="px-3 py-2 text-right font-mono text-stone-850 font-medium">{formatCurrency(Number(det.precio), moneda)}</td>
@@ -325,7 +332,7 @@ export default function DocumentoCotizacion({
                     );
                   })
                 ) : (
-                  <tr><td colSpan={5} className="px-3 py-4 text-center text-stone-400 italic">Sin renglones.</td></tr>
+                  <tr><td colSpan={4} className="px-3 py-4 text-center text-stone-400 italic">Sin renglones.</td></tr>
                 )}
               </tbody>
             </table>
