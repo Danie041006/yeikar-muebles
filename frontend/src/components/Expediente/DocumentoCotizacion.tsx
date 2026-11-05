@@ -297,7 +297,7 @@ export default function DocumentoCotizacion({
                           <td colSpan={2} className="px-3 py-2 font-serif font-bold text-stone-950">
                             <div className="flex items-center gap-2.5">
                               <FotosRenglon urls={fotosDet} alt={textoItem} />
-                              <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10.5px] leading-tight">
+                              <span className="min-w-0 flex-1 whitespace-nowrap text-[10.5px] leading-normal">
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
                                 {notaItem && (
@@ -312,8 +312,8 @@ export default function DocumentoCotizacion({
                               <div className="flex items-center gap-2.5">
                                 <FotosRenglon urls={fotosDet} alt={modelName} />
                                 {/* Una sola línea: el nombre manda; la descripción
-                                    (medidas/notas/piezas) va inline y se recorta. */}
-                                <span className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[10.5px] leading-tight">
+                                    (medidas/notas/piezas) va inline en menor tamaño. */}
+                                <span className="min-w-0 flex-1 whitespace-nowrap text-[10.5px] leading-normal">
                                   <span className="font-serif font-extrabold">{modelName}</span>
                                   {desc && (
                                     <span className="ml-2 text-[9px] font-medium italic text-stone-600">
