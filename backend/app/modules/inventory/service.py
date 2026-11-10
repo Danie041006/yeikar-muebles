@@ -1655,7 +1655,7 @@ def actualizar_movimiento_inventario(
     # bloquea sin dejar la entrada a medias.
     flete_existente = (
         None
-        if (m.fiar or not pagos_existentes)
+        if (m.fiar or not (m.llevada_gasto_id or m.pagado_desde_metodo_caja_id))
         else _gasto_llevada_de_entrada(db, m)
     )
 
@@ -1699,6 +1699,33 @@ def actualizar_movimiento_inventario(
             raise ValueError(
                 "Indica la cuenta de pago (una o varias) o marca la entrada como fiada."
             )
+
+    # La llevada se paga desde la cuenta principal. Una entrada cuyo costo de
+    # material sea cero puede aun tener una llevada pagada, como permite el
+    # formulario original; en ese caso no hay pago de compra, solo de flete.
+    cuenta_flete_id = (
+        datos.get("pagado_desde_metodo_caja_id")
+        if "pagado_desde_metodo_caja_id" in datos
+        else m.pagado_desde_metodo_caja_id
+    )
+    moneda_flete_id = int(datos.get("moneda_pago_id") or m.moneda_pago_id or MONEDA_BASE_ID)
+    tasa_flete = datos.get("tasa_pago", m.tasa_pago)
+    if resumen:
+        cuenta_flete_id = resumen[0]["metodo_caja_id"]
+        moneda_flete_id = resumen[0]["moneda_id"]
+        tasa_flete = resumen[0]["tasa_pago"]
+    if not nuevo_fiar and nueva_llevada > 0 and cuenta_flete_id is not None:
+        from app.modules.reports.model import MetodoCaja
+
+        cuenta_flete = db.query(MetodoCaja).filter(MetodoCaja.id == cuenta_flete_id).first()
+        if cuenta_flete is None or not cuenta_flete.activo:
+            raise ValueError("La cuenta de pago del flete no existe o está inactiva.")
+        if cuenta_flete.moneda_id and cuenta_flete.moneda_id != moneda_flete_id:
+            raise ValueError("La moneda del flete no coincide con la cuenta seleccionada.")
+        if moneda_flete_id != MONEDA_BASE_ID and (
+            tasa_flete is None or Decimal(str(tasa_flete)) <= 0
+        ):
+            raise ValueError("Para pagar el flete en otra moneda indica su tasa de cambio.")
 
     # A partir de aquí ya está todo validado. Se reemplazan las caras.
     if pagos_existentes:
@@ -1793,8 +1820,7 @@ def actualizar_movimiento_inventario(
             m.tasa_pago = None
 
         # Flete/llevada: se recrea con la cuenta principal (primera cuenta).
-        if nueva_llevada > 0 and resumen:
-            principal = resumen[0]
+        if nueva_llevada > 0 and cuenta_flete_id is not None:
             _aplicar_llevada_entrada(
                 db,
                 m,
@@ -1803,14 +1829,22 @@ def actualizar_movimiento_inventario(
                 nueva_llevada=nueva_llevada,
                 fecha=fecha_mov.date(),
                 usuario=usuario,
-                cuenta_id=principal["metodo_caja_id"],
-                moneda_id=principal["moneda_id"],
-                tasa_pago=principal["tasa_pago"],
+                cuenta_id=cuenta_flete_id,
+                moneda_id=moneda_flete_id,
+                tasa_pago=tasa_flete,
                 proveedor_nombre=pnom,
                 clasificacion=clasificacion,
                 nuevo_fiar=False,
             )
+            if not resumen:
+                m.pagado_desde_metodo_caja_id = cuenta_flete_id
+                m.moneda_pago_id = moneda_flete_id
+                m.tasa_pago = tasa_flete
+        elif nueva_llevada > 0:
+            m.llevada = nueva_llevada
+            m.llevada_gasto_id = None
         else:
+            m.llevada = None
             m.llevada_gasto_id = None
 
     inventario.cantidad = Decimal(str(inventario.cantidad)) + delta
@@ -1892,7 +1926,7 @@ def anular_movimiento_inventario(
         _validar_cxp_sin_abonos(db, cxp)
     flete_existente = (
         None
-        if (m.fiar or not pagos_existentes)
+        if (m.fiar or not (m.llevada_gasto_id or m.pagado_desde_metodo_caja_id))
         else _gasto_llevada_de_entrada(db, m)
     )
 

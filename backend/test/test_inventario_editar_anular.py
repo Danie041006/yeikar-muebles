@@ -316,6 +316,44 @@ def test_editar_flete_crea_y_elimina_su_gasto(client, db, cleaner):
     assert _caja_por_gasto(db, flete_id) is None
 
 
+def test_editar_entrada_sin_precio_conserva_pago_del_flete(client, db, cleaner):
+    """La entrada puede no tener precio de material y sí pagar la llevada."""
+    material = crear_material(client, cleaner, costo_base=1000.0)
+    r = client.post("/api/v1/inventario/movimiento", json={
+        "material_id": material["id"],
+        "tipo": "ENTRADA",
+        "cantidad": 2,
+        "pagado_desde_metodo_caja_id": 1,
+        "llevada": 5000,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    mov = r.json()
+    cleaner.registrar("movimiento_inventario", mov["id"])
+    registrar_inventario_de_material(db, cleaner, material["id"])
+    flete_id = mov["llevada_gasto_id"]
+    assert flete_id is not None
+    cleaner.registrar("gasto", flete_id)
+    cleaner.registrar_caja_ref(f"Gasto #{flete_id}")
+    assert abs(float(_gasto(db, flete_id)[0]) - 5000) < 0.01
+
+    r = client.put(f"/api/v1/inventario/movimiento/{mov['id']}", json={
+        "cantidad": 2,
+        "costo_unitario": 0,
+        "pagos": [],
+        "pagado_desde_metodo_caja_id": 1,
+        "moneda_pago_id": 1,
+        "llevada": 6000,
+        "fiar": False,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    corregido = r.json()
+    assert corregido["gasto_id"] is None
+    assert corregido["pagado_desde_metodo_caja_id"] == 1
+    assert abs(float(_gasto(db, corregido["llevada_gasto_id"])[0]) - 6000) < 0.01
+    cleaner.registrar("gasto", corregido["llevada_gasto_id"])
+    cleaner.registrar_caja_ref(f"Gasto #{corregido['llevada_gasto_id']}")
+
+
 def test_pasar_a_fiado_y_volver_a_pagado(client, db, cleaner):
     material = crear_material(client, cleaner, costo_base=1000.0)
     mov = _crear_entrada_simple(client, cleaner, db, material)

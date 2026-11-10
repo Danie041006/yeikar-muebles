@@ -142,7 +142,9 @@ export default function Inventario() {
   const [movimientoEditando, setMovimientoEditando] = useState<MovimientoResponse | null>(null);
   const [formEditarMov, setFormEditarMov] = useState<{
     cantidad: string;
-    costo_unitario: string;
+    precio_moneda: string;
+    moneda_precio_id: number;
+    tasa_precio: string;
     fecha: string;
     proveedor_nombre: string;
     cliente_nombre: string;
@@ -913,7 +915,9 @@ export default function Inventario() {
     setPagosEdicion([]);
     setFormEditarMov({
       cantidad: String(mov.cantidad ?? ''),
-      costo_unitario: mov.costo_unitario != null ? String(mov.costo_unitario) : '',
+      precio_moneda: mov.costo_unitario != null ? String(mov.costo_unitario) : '',
+      moneda_precio_id: MONEDA_BASE_ID,
+      tasa_precio: '',
       fecha: mov.fecha ? String(mov.fecha).slice(0, 10) : hoyVE(),
       proveedor_nombre: mov.proveedor_nombre ?? '',
       cliente_nombre: mov.cliente_nombre ?? '',
@@ -938,10 +942,17 @@ export default function Inventario() {
         tasa: p.tasa_pago != null ? String(p.tasa_pago) : '',
         fecha: '',
       }));
+      const descuentoEntrada = Number(detalle.descuento_porcentaje || 0);
+      const precioNetoCop = Number(detalle.costo_unitario || 0);
+      const precioListaCop = descuentoEntrada < 100
+        ? precioNetoCop / (1 - descuentoEntrada / 100)
+        : precioNetoCop;
       setPagosEdicion(extras);
       setFormEditarMov({
         cantidad: String(detalle.cantidad ?? ''),
-        costo_unitario: detalle.costo_unitario != null ? String(detalle.costo_unitario) : '',
+        precio_moneda: detalle.costo_unitario != null ? String(precioListaCop) : '',
+        moneda_precio_id: MONEDA_BASE_ID,
+        tasa_precio: '',
         fecha: detalle.fecha ? String(detalle.fecha).slice(0, 10) : hoyVE(),
         proveedor_nombre: detalle.proveedor_nombre ?? '',
         cliente_nombre: detalle.cliente_nombre ?? '',
@@ -952,10 +963,16 @@ export default function Inventario() {
         llevada_unidad: detalle.llevada != null && Number(detalle.cantidad) > 0
           ? String(Number(detalle.llevada) / Number(detalle.cantidad))
           : '',
-        pago_key: primero ? `${primero.metodo_caja_id}:${primero.moneda_id}` : '',
+        pago_key: primero
+          ? `${primero.metodo_caja_id}:${primero.moneda_id}`
+          : (detalle.pagado_desde_metodo_caja_id
+            ? `${detalle.pagado_desde_metodo_caja_id}:${detalle.moneda_pago_id ?? MONEDA_BASE_ID}`
+            : ''),
         tasa_pago: primero && primero.moneda_id !== MONEDA_BASE_ID && primero.tasa_pago != null
           ? String(primero.tasa_pago)
-          : '',
+          : (detalle.tasa_pago != null && detalle.moneda_pago_id !== MONEDA_BASE_ID
+            ? String(detalle.tasa_pago)
+            : ''),
         monto_principal: primero ? String(primero.monto) : '',
         motivo_correccion: '',
       });
@@ -980,18 +997,27 @@ export default function Inventario() {
     e.preventDefault();
     if (!movimientoEditando || !formEditarMov) return;
     const cantidad = Number(formEditarMov.cantidad);
-    const costo = Number(formEditarMov.costo_unitario);
+    const precioDigitado = Number(formEditarMov.precio_moneda || '0');
     if (!Number.isFinite(cantidad) || cantidad <= 0) {
       toast.error('La cantidad debe ser mayor que cero.');
       return;
     }
-    if (!Number.isFinite(costo) || costo < 0) {
+    if (!Number.isFinite(precioDigitado) || precioDigitado < 0) {
       toast.error('El precio unitario no puede ser negativo.');
       return;
     }
     const descuento = Number(formEditarMov.descuento_porcentaje || '0') || 0;
+    const tasaPrecio = Number(formEditarMov.tasa_precio || '0') || 0;
+    if (formEditarMov.moneda_precio_id !== MONEDA_BASE_ID && precioDigitado > 0 && !(tasaPrecio > 0)) {
+      toast.error(`Indica la tasa de cambio: 1 ${codMonedaDe(formEditarMov.moneda_precio_id)} = ? COP.`);
+      return;
+    }
+    const precioBrutoCop = formEditarMov.moneda_precio_id === MONEDA_BASE_ID
+      ? precioDigitado
+      : precioDigitado * tasaPrecio;
+    const costoNetoCop = Math.max(0, precioBrutoCop * (1 - descuento / 100));
     const llevadaUnidad = Number(formEditarMov.llevada_unidad || '0') || 0;
-    const totalCompra = Math.round(cantidad * costo * 100) / 100;
+    const totalCompra = Math.round(cantidad * costoNetoCop * 100) / 100;
     const llevadaTotal = Math.round(llevadaUnidad * cantidad * 100) / 100;
     const { cuentaId, monedaId } = parsePagoKey(formEditarMov.pago_key);
     const pagoCod = codMonedaDe(monedaId);
@@ -999,8 +1025,8 @@ export default function Inventario() {
 
     const payload: MovimientoUpdate = {
       cantidad,
-      costo_unitario: costo,
-      fecha: formEditarMov.fecha || undefined,
+      costo_unitario: costoNetoCop,
+      fecha: formEditarMov.fecha || hoyVE(),
       proveedor_nombre: formEditarMov.proveedor_nombre.trim() || null,
       cliente_nombre: formEditarMov.cliente_nombre.trim() || null,
       departamento: formEditarMov.departamento || null,
@@ -1011,9 +1037,21 @@ export default function Inventario() {
       motivo_correccion: formEditarMov.motivo_correccion.trim() || undefined,
     };
 
-    if (!cuentaId) {
+    if (totalCompra <= 0) {
+      // Sin costo neto no hay pago de compra que registrar; mantiene la regla
+      // del formulario inicial, aunque la entrada tenga cantidad de stock.
+      payload.fiar = false;
+      payload.pagos = [];
+      if (cuentaId && llevadaTotal > 0) {
+        payload.pagado_desde_metodo_caja_id = cuentaId;
+        payload.moneda_pago_id = monedaId ?? MONEDA_BASE_ID;
+        if (pagoCod !== 'COP') payload.tasa_pago = tasaPago;
+      } else if (!cuentaId) {
+        payload.pagado_desde_metodo_caja_id = null;
+      }
+    } else if (!cuentaId) {
       // Sin cuenta: si hay costo, la regla del formulario es que queda fiada.
-      payload.fiar = totalCompra > 0;
+      payload.fiar = true;
       payload.pagos = null;
     } else {
       if (pagoCod !== 'COP' && !(tasaPago > 0)) {
@@ -5181,7 +5219,13 @@ export default function Inventario() {
       {movimientoEditando && formEditarMov && (() => {
         const cuentaPrincipal = parsePagoKey(formEditarMov.pago_key);
         const cantidad = Number(formEditarMov.cantidad || '0') || 0;
-        const costoUnitario = Number(formEditarMov.costo_unitario || '0') || 0;
+        const precioDigitado = Number(formEditarMov.precio_moneda || '0') || 0;
+        const tasaPrecio = Number(formEditarMov.tasa_precio || '0') || 0;
+        const precioBrutoCop = formEditarMov.moneda_precio_id === MONEDA_BASE_ID
+          ? precioDigitado
+          : precioDigitado * tasaPrecio;
+        const descuentoPct = Number(formEditarMov.descuento_porcentaje || '0') || 0;
+        const costoUnitario = Math.max(0, precioBrutoCop * (1 - descuentoPct / 100));
         const totalCompra = Math.round(cantidad * costoUnitario * 100) / 100;
         const fleteUnidad = Number(formEditarMov.llevada_unidad || '0') || 0;
         const fleteTotal = Math.round(fleteUnidad * cantidad * 100) / 100;
@@ -5250,17 +5294,54 @@ export default function Inventario() {
                       </div>
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">
-                          Precio unitario neto <span className="text-yeikar-neutral/40 font-normal">(COP)</span>
+                          Precio unitario ({codMonedaDe(formEditarMov.moneda_precio_id)})
                         </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          value={formEditarMov.costo_unitario}
-                          onChange={(e) => setFormEditarMov((f) => f ? { ...f, costo_unitario: e.target.value } : f)}
-                          className={inputCls}
-                          required
-                        />
+                        <div className="flex gap-2">
+                          <MontoInput
+                            min="0"
+                            placeholder="0.00"
+                            value={formEditarMov.precio_moneda}
+                            onChange={(v) => setFormEditarMov((f) => f ? { ...f, precio_moneda: v } : f)}
+                            className={inputCls}
+                          />
+                          <select
+                            value={formEditarMov.moneda_precio_id}
+                            onChange={(e) => setFormEditarMov((f) => f ? {
+                              ...f,
+                              moneda_precio_id: Number(e.target.value) || MONEDA_BASE_ID,
+                              precio_moneda: '',
+                              tasa_precio: '',
+                            } : f)}
+                            className="w-24 rounded-lg border border-yeikar-secondary-light/20 bg-white px-2 text-xs font-mono"
+                            title="Moneda en la que se digita el precio"
+                          >
+                            {monedas.filter((m) => m.activo !== false).map((m) => (
+                              <option key={m.id} value={m.id}>{m.codigo}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {formEditarMov.moneda_precio_id !== MONEDA_BASE_ID && (
+                          <div className="space-y-1 pt-1">
+                            <label className="text-[10px] font-semibold text-yeikar-neutral/60">
+                              Tasa del precio · 1 {codMonedaDe(formEditarMov.moneda_precio_id)} = ? COP
+                            </label>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0"
+                              value={formEditarMov.tasa_precio}
+                              onChange={(e) => setFormEditarMov((f) => f ? { ...f, tasa_precio: e.target.value } : f)}
+                              className={inputCls}
+                              required={precioDigitado > 0}
+                            />
+                          </div>
+                        )}
+                        <p className="text-[10px] text-yeikar-neutral/50">
+                          Precio bruto: ${precioBrutoCop.toLocaleString('es-CO', { maximumFractionDigits: 2 })} COP · Neto con descuento: ${costoUnitario.toLocaleString('es-CO', { maximumFractionDigits: 2 })} COP
+                        </p>
+                        <p className="text-[10px] text-yeikar-neutral/40">
+                          El costo histórico se conserva en COP; puedes cambiar la moneda para volver a digitar el precio.
+                        </p>
                       </div>
                     </div>
 
@@ -5314,9 +5395,6 @@ export default function Inventario() {
                           placeholder="0"
                           className={inputCls}
                         />
-                        <p className="text-[10px] text-yeikar-neutral/45">
-                          El precio unitario de arriba ya es el neto; este % es informativo.
-                        </p>
                       </div>
                     </div>
 
