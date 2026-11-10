@@ -3417,7 +3417,7 @@ export default function Inventario() {
                                       {mov.observaciones}
                                     </p>
                                   )}
-                                  {mov.tipo === 'ENTRADA' && !mov.referencia_tipo && !mov.fiar && !(Number(mov.llevada) > 0) && (
+                                  {mov.tipo === 'ENTRADA' && !mov.referencia_tipo && (
                                     <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-yeikar-secondary-light/10">
                                       <button
                                         type="button"
