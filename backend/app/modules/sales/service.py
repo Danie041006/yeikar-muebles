@@ -873,6 +873,122 @@ def actualizar_pago(
     return db_pago
 
 
+def _bloquear_pago_y_venta(db: Session, id_pago: int) -> tuple[Pago, Venta] | None:
+    pago = db.query(Pago).filter(Pago.id == id_pago).first()
+    if not pago:
+        return None
+
+    venta = (
+        db.query(Venta)
+        .filter(Venta.id == pago.venta_id)
+        .with_for_update()
+        .first()
+    )
+    if not venta:
+        raise ValueError("La venta del pago no existe.")
+
+    pago = db.query(Pago).filter(Pago.id == id_pago).with_for_update().first()
+    if not pago:
+        return None
+    if venta.estado == "CANCELADA":
+        raise ValueError("No se puede eliminar un cobro de una venta cancelada.")
+    return pago, venta
+
+
+def _snapshot_eliminacion_pago(pago: Pago, movimientos: list, recibos: list) -> dict:
+    return {
+        "venta_id": pago.venta_id,
+        "fecha": pago.fecha.isoformat() if pago.fecha else None,
+        "monto": float(pago.monto),
+        "monto_en_moneda_base": float(pago.monto_en_moneda_base),
+        "moneda_id": pago.moneda_id,
+        "tasa_cambio": float(pago.tasa_cambio or 1.0),
+        "metodo_pago": pago.metodo_pago,
+        "referencia": pago.referencia,
+        "observaciones": pago.observaciones,
+        "creado_por_id": pago.creado_por_id,
+        "created_at": pago.created_at.isoformat() if pago.created_at else None,
+        "correcciones": [
+            {
+                "id": c.id,
+                "monto_anterior": float(c.monto_anterior),
+                "monto_nuevo": float(c.monto_nuevo),
+                "motivo": c.motivo,
+            }
+            for c in pago.correcciones
+        ],
+        "recibos": [{"id": r.id, "nombre": r.nombre_original} for r in recibos],
+        "movimientos_caja": [
+            {
+                "id": m.id,
+                "fecha": m.fecha.isoformat(),
+                "tipo": m.tipo,
+                "monto": float(m.monto),
+                "moneda_id": m.moneda_id,
+                "monto_en_moneda_base": (
+                    float(m.monto_en_moneda_base)
+                    if m.monto_en_moneda_base is not None
+                    else None
+                ),
+                "metodo_caja_id": m.metodo_caja_id,
+            }
+            for m in movimientos
+        ],
+    }
+
+
+def _eliminar_registros_pago(
+    db: Session, pago: Pago, movimientos: list, recibos: list
+) -> None:
+    for movimiento in movimientos:
+        db.delete(movimiento)
+    for recibo in recibos:
+        db.delete(recibo)
+    db.delete(pago)
+
+
+def _eliminar_pago_y_registros_relacionados(
+    db: Session, pago: Pago, usuario: Usuario | None
+) -> None:
+    from app.modules.adjuntos.model import Adjunto
+    from app.modules.reports.model import MovimientoCaja
+
+    movimientos = (
+        db.query(MovimientoCaja)
+        .filter(MovimientoCaja.pago_id == pago.id)
+        .all()
+    )
+    recibos = (
+        db.query(Adjunto)
+        .filter(Adjunto.entidad_tipo == "PAGO", Adjunto.entidad_id == pago.id)
+        .all()
+    )
+    record_event(
+        db,
+        actor=usuario,
+        action="DELETE",
+        entity_type="pago",
+        entity_id=pago.id,
+        before=_snapshot_eliminacion_pago(pago, movimientos, recibos),
+    )
+    _eliminar_registros_pago(db, pago, movimientos, recibos)
+
+
+def eliminar_pago(db: Session, id_pago: int, usuario: Usuario | None = None) -> bool:
+    """Elimina un abono erróneo y conserva sus datos en auditoría."""
+    pago_venta = _bloquear_pago_y_venta(db, id_pago)
+    if not pago_venta:
+        return False
+    pago, venta = pago_venta
+    _eliminar_pago_y_registros_relacionados(db, pago, usuario)
+    db.flush()
+    _recalcular_estado_venta(db, venta)
+    if usuario is not None:
+        venta.actualizado_por_id = usuario.id
+    db.commit()
+    return True
+
+
 # ------------------------------------------------------------
 # Descuentos de cobro (rebaja sin movimiento de caja)
 # ------------------------------------------------------------

@@ -552,6 +552,8 @@ function ModalDetalle({
   const [fechaPago, setFechaPago] = useState(hoyVE());
   // ── Corrección de un cobro ya registrado (monto, fecha, ref, observaciones) ──
   const [pagoEditando, setPagoEditando] = useState<Pago | null>(null);
+  const [eliminandoPagoId, setEliminandoPagoId] = useState<number | null>(null);
+  const [errorAccionPago, setErrorAccionPago] = useState('');
   const [editFecha, setEditFecha] = useState(hoyVE());
   const [editMonto, setEditMonto] = useState('');
   const [editMetodoPago, setEditMetodoPago] = useState('');
@@ -799,6 +801,26 @@ function ModalDetalle({
       setEditError(extractErrorMessage(err, 'Error al corregir el cobro.'));
     } finally {
       setEditSubmitting(false);
+    }
+  };
+
+  const handleEliminarPago = async (pago: Pago) => {
+    const monto = `${pago.moneda?.simbolo ?? ''}${Number(pago.monto).toLocaleString('es-ES')} ${pago.moneda?.codigo ?? ''}`.trim();
+    if (!window.confirm(
+      `¿Eliminar el abono de ${monto}?\n\nSe eliminará también su entrada de caja y el saldo pendiente de la factura aumentará. Esta acción no se puede deshacer.`,
+    )) return;
+
+    setErrorAccionPago('');
+    try {
+      setEliminandoPagoId(pago.id);
+      await pagoService.eliminar(pago.id);
+      if (pagoEditando?.id === pago.id) setPagoEditando(null);
+      await cargar();
+      onPagoRegistrado();
+    } catch (err: any) {
+      setErrorAccionPago(extractErrorMessage(err, 'Error al eliminar el abono.'));
+    } finally {
+      setEliminandoPagoId(null);
     }
   };
 
@@ -1187,6 +1209,11 @@ function ModalDetalle({
                 <h4 className="font-headline font-bold text-sm text-yeikar-secondary mb-2 uppercase tracking-wider">
                   Cobros ({detalle.pagos.length})
                 </h4>
+                {errorAccionPago && (
+                  <p role="alert" className="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+                    {errorAccionPago}
+                  </p>
+                )}
                 {detalle.pagos.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-yeikar-secondary-light/25 bg-yeikar-tertiary/10 p-6 text-center">
                     <p className="text-sm font-bold text-yeikar-secondary">Sin cobros todavía</p>
@@ -1293,6 +1320,19 @@ function ModalDetalle({
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828 2.828L11.828 15.83a2 2 0 01-.707.464l-3.536 1.414 1.414-3.536A2 2 0 019 13z" />
                                 </svg>
                                 Corregir
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEliminarPago(p)}
+                                disabled={eliminandoPagoId !== null}
+                                className="mt-1 inline-flex items-center gap-1 rounded-lg px-1.5 py-1 font-mono text-[10px] font-bold text-red-700/70 transition-colors hover:bg-red-100 hover:text-red-800 disabled:cursor-wait disabled:opacity-50"
+                                title="Eliminar este abono y revertir su entrada de caja"
+                                aria-label={`Eliminar abono de ${p.moneda?.simbolo ?? ''}${Number(p.monto).toLocaleString('es-ES')}`}
+                              >
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 7h12m-10 0V5a1 1 0 011-1h6a1 1 0 011 1v2m-9 0 1 13h6l1-13M10 11v5m4-5v5" />
+                                </svg>
+                                {eliminandoPagoId === p.id ? 'Eliminando…' : 'Eliminar'}
                               </button>
                             </span>
                           </div>

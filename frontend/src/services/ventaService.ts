@@ -326,6 +326,11 @@ export const pagoService = {
     return res.data;
   },
 
+  /** Eliminar un abono digitado por error (también revierte su movimiento de caja). */
+  eliminar: async (id: number): Promise<void> => {
+    await api.delete(`/pago/${id}`);
+  },
+
   /** Corregir fecha/referencia/observaciones de un cobro ya registrado */
   actualizar: async (id: number, data: PagoUpdate): Promise<Pago> => {
     const res = await api.put<Pago>(`/pago/${id}`, data);
