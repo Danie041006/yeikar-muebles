@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, QuoteDetail, Moneda } from '../services/cotizacionService';
 import { clienteService, Client } from '../services/clienteService';
 import { pedidoService } from '../services/pedidoService';
@@ -65,6 +63,10 @@ interface CotizacionItemForm {
   cantidadBase?: number | null;
   /** Unidad base y dimensionalidad del material seleccionado. */
   materialUnidad?: string | null;
+  /** Nombre del material (viene de la cotización guardada o de la búsqueda):
+   *  la lista local de materiales está paginada y puede no traerlo, así que
+   *  el nombre viaja en el renglón para el documento/observaciones. */
+  materialNombre?: string | null;
   materialDimension?: Dimensionalidad;
   /** El precio del insumo se cargó solo desde su costo real (no lo escribió
    *  el usuario). Si el usuario lo edita, pasa a false y no se vuelve a tocar. */
@@ -77,6 +79,111 @@ interface CotizacionItemForm {
 
 let itemUidSeq = 0;
 const nuevoItemUid = () => `item-${Date.now().toString(36)}-${++itemUidSeq}`;
+
+const ESTILOS_IMPRESION_COTIZACION = `
+  @page { size: letter portrait; margin: 0; }
+  html, body {
+    width: 215.9mm !important;
+    min-width: 215.9mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #fff !important;
+  }
+  body { display: block !important; overflow: visible !important; }
+  #pdf-preview-container {
+    width: 215.9mm !important;
+    min-width: 215.9mm !important;
+    max-width: none !important;
+    min-height: 279.4mm !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+  }
+  #pdf-preview-container.cotizacion-interna {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+  *, *::before, *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  thead { display: table-header-group; }
+  tr, img { break-inside: avoid; page-break-inside: avoid; }
+  @media screen {
+    body { background: #e7e5e4 !important; }
+    #pdf-preview-container {
+      margin: 12px auto !important;
+      box-shadow: 0 4px 24px #0002 !important;
+    }
+  }
+`;
+
+type TipoCopiaCotizacion = 'cliente' | 'interna';
+
+function etiquetaCopiaCotizacion(tipoCopia: TipoCopiaCotizacion): string {
+  return tipoCopia === 'interna' ? 'Para el negocio' : 'Para el cliente';
+}
+
+function construirHtmlImpresionCotizacion(
+  elemento: HTMLElement,
+  cotizacionId: number,
+  tipoCopia: TipoCopiaCotizacion,
+): string {
+  const estilosAplicacion = Array.from(document.head.querySelectorAll('link[rel="stylesheet"], style'))
+    .map((nodo) => nodo.outerHTML).join('\n');
+  const documento = elemento.cloneNode(true) as HTMLElement;
+  documento.querySelectorAll('img[loading="lazy"]').forEach((imagen) => imagen.setAttribute('loading', 'eager'));
+  const nombreCopia = etiquetaCopiaCotizacion(tipoCopia);
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <base href="${window.location.origin}/" /><title>Cotización ${cotizacionId} · ${nombreCopia}</title>
+    ${estilosAplicacion}<style>${ESTILOS_IMPRESION_COTIZACION}</style>
+    </head><body>${documento.outerHTML}</body></html>`;
+}
+
+function esperarCargaVentanaImpresion(ventana: Window): Promise<void> {
+  return new Promise((resolve) => {
+    // Respaldo para navegadores que no emiten `load` después de document.write().
+    const limite = ventana.setTimeout(resolve, 12000);
+    ventana.addEventListener('load', () => {
+      ventana.clearTimeout(limite);
+      resolve();
+    }, { once: true });
+  });
+}
+
+async function esperarFuentesEImagenes(ventana: Window): Promise<void> {
+  await ventana.document.fonts?.ready;
+  // Una foto dañada no debe impedir que se imprima el resto de la cotización.
+  await Promise.all(Array.from(ventana.document.images).map((imagen) => (
+    typeof imagen.decode === 'function' ? imagen.decode().catch(() => undefined) : Promise.resolve()
+  )));
+}
+
+async function imprimirDocumentoCotizacion(
+  ventana: Window,
+  cotizacionId: number,
+  tipoCopia: TipoCopiaCotizacion,
+): Promise<void> {
+  const elemento = document.getElementById('pdf-preview-container');
+  if (!elemento) throw new Error('No se encontró la vista previa de la cotización.');
+  const recursosListos = esperarCargaVentanaImpresion(ventana);
+  ventana.document.open();
+  ventana.document.write(construirHtmlImpresionCotizacion(elemento, cotizacionId, tipoCopia));
+  ventana.document.close();
+  await recursosListos;
+  await esperarFuentesEImagenes(ventana);
+  ventana.addEventListener('afterprint', () => ventana.close(), { once: true });
+  ventana.focus();
+  ventana.print();
+}
+
+function guardarConfiguracionImpresionCotizacion(rif: string, direccion: string, telefono: string): void {
+  localStorage.setItem('print_company_rif', rif);
+  localStorage.setItem('print_company_address', direccion);
+  localStorage.setItem('print_company_phone', telefono);
+}
 
 /** Piezas del juego listas para la API (el precio NO viaja: es del renglón). */
 function piezasParaPayload(item: CotizacionItemForm) {
@@ -133,6 +240,7 @@ function itemsDesdeCotizacion(quote: Quote, monedaCodigo: string): CotizacionIte
         unidadCaptura: d.unidad_captura ?? '',
         cantidadBase,
         materialUnidad: unidadBase,
+        materialNombre: d.material?.nombre ?? null,
         materialDimension: dimensionalidad(unidadBase),
         precioAuto: false,
         insumoCosto: {
@@ -346,10 +454,12 @@ export default function Cotizaciones() {
   const [selectedQuoteForPrint, setSelectedQuoteForPrint] = useState<Quote | null>(null);
   const [printDiscount, setPrintDiscount] = useState('0');
   const [printIva, setPrintIva] = useState('0');
+  const [tipoCopiaImpresion, setTipoCopiaImpresion] = useState<TipoCopiaCotizacion>('cliente');
   const [printCompanyRif, setPrintCompanyRif] = useState('J-50146039-3');
   const [printCompanyAddress, setPrintCompanyAddress] = useState('AV. INTERCOMUNAL CON CALLE 16 LOCAL Nro 15-205, BARRIO SIMÓN BOLÍVAR, UREÑA, TÁCHIRA');
   const [printCompanyPhone, setPrintCompanyPhone] = useState('+58 412-1234567');
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
+  const [isLoadingPrintPayments, setIsLoadingPrintPayments] = useState(false);
   const [associatedVenta, setAssociatedVenta] = useState<VentaDetalle | null>(null);
 
   // Convert Form state
@@ -975,7 +1085,7 @@ export default function Cotizaciones() {
         descripcion_especifica: '', observaciones: '',
         calcResult: null, calcLoading: false, receta_personalizada: null,
         unidadCaptura: '', cantidadBase: null,
-        materialUnidad: null, materialDimension: 'OTRA',
+        materialUnidad: null, materialNombre: null, materialDimension: 'OTRA',
         precioAuto: true,
       }
     ]);
@@ -1014,6 +1124,7 @@ export default function Cotizaciones() {
       next[index] = {
         ...actual,
         materialUnidad: unidadBase,
+        materialNombre: mat.nombre,
         materialDimension: dim,
         unidadCaptura,
         cantidadBase,
@@ -1724,7 +1835,7 @@ export default function Cotizaciones() {
           : item.unidadCaptura === 'M'
             ? 'm'
             : (item.materialUnidad || '');
-        return `${item.cantidad}${unidad ? ` ${unidad}` : ''} x ${mat?.nombre || 'Insumo'}`;
+        return `${item.cantidad}${unidad ? ` ${unidad}` : ''} x ${item.materialNombre || mat?.nombre || 'Insumo'}`;
       }
       const selectedProd = products.find(p => p.id === Number(item.producto_id));
       if (item.es_obsequio) {
@@ -1828,6 +1939,8 @@ export default function Cotizaciones() {
   const handleOpenPrintPreview = async (quote: Quote) => {
     setSelectedQuoteForPrint(quote);
     setAssociatedVenta(null);
+    setTipoCopiaImpresion('cliente');
+    setIsLoadingPrintPayments(Boolean(quote.pedido_id));
     
     // Load default values or saved configurations
     setPrintCompanyRif(localStorage.getItem('print_company_rif') || 'J-50146039-3');
@@ -1838,62 +1951,38 @@ export default function Cotizaciones() {
     
     setIsPrintModalOpen(true);
 
-    // Buscar si existe un pedido y factura/abonos asociados a esta cotización
+    // Consultar por el pedido asociado evita perder pagos de facturas antiguas
+    // o pagadas que no estén en la primera página del listado.
     try {
-      const ventas = await ventaService.getAll();
-      const responsePedidos = await pedidoService.getAll();
-      const pedidoVinculado = responsePedidos.find((p: any) => p.cotizacion_id === quote.id || p.cotizacion?.id === quote.id);
-      if (pedidoVinculado) {
-        const ventaVinculada = ventas.find((v: any) => v.pedido_id === pedidoVinculado.id);
-        if (ventaVinculada) {
-          const detalleVenta = await ventaService.getById(ventaVinculada.id);
-          setAssociatedVenta(detalleVenta);
-        }
+      if (quote.pedido_id) {
+        const ventasVinculadas = await ventaService.getAll({ pedido_id: quote.pedido_id, limite: 1 });
+        const ventaVinculada = ventasVinculadas[0];
+        if (ventaVinculada) setAssociatedVenta(await ventaService.getById(ventaVinculada.id));
       }
     } catch (err) {
       console.error('Error al cargar ventas/abonos vinculados a la cotización:', err);
+      toast.error('No se pudo cargar el historial de pagos para la impresión.');
+    } finally {
+      setIsLoadingPrintPayments(false);
     }
   };
 
   const handleGeneratePdf = async () => {
     if (!selectedQuoteForPrint) return;
+    // La ventana debe abrirse desde el click para que el navegador no la bloquee.
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Permite las ventanas emergentes para imprimir la cotización.');
+      return;
+    }
     setIsGeneratingPdf(true);
-
-    // Save settings in localStorage
-    localStorage.setItem('print_company_rif', printCompanyRif);
-    localStorage.setItem('print_company_address', printCompanyAddress);
-    localStorage.setItem('print_company_phone', printCompanyPhone);
-
-    const element = document.getElementById('pdf-preview-container');
-    if (!element) { setIsGeneratingPdf(false); return; }
-
     try {
-      const canvas = await html2canvas(element, { scale: 6, useCORS: true });
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'letter' });
-      const pdfW = pdf.internal.pageSize.getWidth();
-      const pdfH = pdf.internal.pageSize.getHeight();
-      const totalH = (canvas.height * pdfW) / canvas.width;
-
-      if (totalH <= pdfH) {
-        pdf.addImage(canvas.toDataURL('image/jpeg', 0.98), 'JPEG', 0, 0, pdfW, totalH);
-      } else {
-        const pxPerMm = canvas.width / pdfW;
-        const pageHpx = Math.floor(pdfH * pxPerMm);
-        let yPx = 0; let pg = 0;
-        while (yPx < canvas.height) {
-          const slicePx = Math.min(pageHpx, canvas.height - yPx);
-          const sc = document.createElement('canvas');
-          sc.width = canvas.width; sc.height = slicePx;
-          sc.getContext('2d')?.drawImage(canvas, 0, -yPx);
-          if (pg > 0) pdf.addPage('letter', 'portrait');
-          pdf.addImage(sc.toDataURL('image/jpeg', 0.98), 'JPEG', 0, 0, pdfW, (slicePx / canvas.width) * pdfW);
-          yPx += slicePx; pg++;
-        }
-      }
-      pdf.save(`Cotizacion_${selectedQuoteForPrint.id}.pdf`);
+      guardarConfiguracionImpresionCotizacion(printCompanyRif, printCompanyAddress, printCompanyPhone);
+      await imprimirDocumentoCotizacion(printWindow, selectedQuoteForPrint.id, tipoCopiaImpresion);
     } catch (err) {
-      console.error('Error generating PDF:', err);
-      toast.error('Hubo un error al generar el PDF.');
+      console.error('Error preparing quotation for print:', err);
+      printWindow.close();
+      toast.error('No se pudo preparar la cotización para imprimir.');
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -2783,6 +2872,16 @@ export default function Cotizaciones() {
                                       label: `${m.nombre} (${m.unidad_medida?.abreviatura || 'und'}) — COP ${m.costo_base?.toLocaleString('es-CO', { maximumFractionDigits: 2 })}`,
                                     }))
                                 }
+                                // La lista local viene paginada (100): al editar
+                                // una cotización vieja el material puede no estar
+                                // y el selector mostraría vacío. El nombre viaja
+                                // en el renglón (relación `material` de la API).
+                                selectedOption={item.material_id
+                                  ? {
+                                      value: item.material_id,
+                                      label: `${item.materialNombre || 'Material'} (${item.materialUnidad || 'und'})`,
+                                    }
+                                  : undefined}
                                 minChars={1}
                                 placeholder="Buscar lámina, tela, tornillo..."
                               />
@@ -3364,7 +3463,7 @@ export default function Cotizaciones() {
                           ? materiales.find(m => m.id === Number(item.material_id))
                           : null;
                         const libre = (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') ? item.descripcion_especifica?.trim() : null;
-                        const label = libre || mat?.nombre || prod?.nombre || 'Renglón';
+                        const label = libre || mat?.nombre || item.materialNombre || prod?.nombre || 'Renglón';
                         return (
                           <option key={idx} value={idx} className="bg-yeikar-neutral text-yeikar-tertiary">
                             Renglón {idx + 1}: {label}{item.tipo_item === 'INSUMO' ? ' (Insumo)' : (item.tipo_item === 'REPARACION' || item.tipo_item === 'SERVICIO') ? ` (${item.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'})` : ` (${item.ancho}x${item.largo}m)`}
@@ -3752,7 +3851,7 @@ export default function Cotizaciones() {
               <div className="bg-yeikar-neutral px-5 py-3.5 flex items-center justify-between shrink-0">
                 <div>
                   <h3 className="font-headline font-bold text-base text-yeikar-primary leading-tight">
-                    Cotización #{selectedQuoteForPrint.id.toString().padStart(5, '0')} — Vista Previa
+                    Cotización #{selectedQuoteForPrint.id.toString().padStart(5, '0')} — {etiquetaCopiaCotizacion(tipoCopiaImpresion)}
                   </h3>
                   <p className="text-yeikar-tertiary/50 text-xs font-mono mt-0.5">
                     {selectedQuoteForPrint.cliente?.nombre}
@@ -3771,6 +3870,35 @@ export default function Cotizaciones() {
 
                 {/* ─── Left: Config Panel ─── */}
                 <div className="w-full md:w-80 shrink-0 p-5 border-b md:border-b-0 md:border-r border-stone-100 overflow-y-auto space-y-5 bg-white">
+
+                  <section className="space-y-2">
+                    <h4 className="text-[10px] uppercase tracking-widest font-bold text-stone-400">Versión para imprimir</h4>
+                    <div className="grid grid-cols-2 gap-2 rounded-xl bg-stone-100 p-1">
+                      {([
+                        { value: 'cliente', label: 'Para el cliente' },
+                        { value: 'interna', label: 'Para el negocio' },
+                      ] as const).map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={tipoCopiaImpresion === value}
+                          onClick={() => setTipoCopiaImpresion(value)}
+                          className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-colors ${
+                            tipoCopiaImpresion === value
+                              ? 'bg-white text-yeikar-secondary shadow-sm'
+                              : 'text-stone-500 hover:text-stone-800'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] leading-relaxed text-stone-500">
+                      {tipoCopiaImpresion === 'cliente'
+                        ? 'Copia limpia para entregar al cliente; conserva los pagos registrados.'
+                        : 'Copia del negocio con abonos registrados, saldos y renglones para anotaciones a mano.'}
+                    </p>
+                  </section>
 
                   <section className="space-y-2">
                     <h4 className="text-[10px] uppercase tracking-widest font-bold text-stone-400">Tasas & Ajustes</h4>
@@ -3812,32 +3940,33 @@ export default function Cotizaciones() {
                   <button
                     type="button"
                     onClick={handleGeneratePdf}
-                    disabled={isGeneratingPdf}
+                    disabled={isGeneratingPdf || isLoadingPrintPayments}
                     className="w-full bg-stone-900 text-amber-400 font-bold py-3 rounded-xl shadow-md hover:bg-stone-800 transition-all flex items-center justify-center gap-2 font-headline disabled:opacity-50 text-sm border-t-2 border-amber-500"
                   >
-                    {isGeneratingPdf ? (
-                      <span className="animate-pulse">Generando PDF…</span>
+                    {isLoadingPrintPayments ? (
+                      <span className="animate-pulse">Cargando abonos…</span>
+                    ) : isGeneratingPdf ? (
+                      <span className="animate-pulse">Preparando impresión…</span>
                     ) : (
                       <>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
-                        Descargar PDF
+                        Imprimir {etiquetaCopiaCotizacion(tipoCopiaImpresion).toLocaleLowerCase('es')}
                       </>
                     )}
                   </button>
+                  <p className="text-[10px] text-stone-500 text-center -mt-3">
+                    En el diálogo, elige tu impresora o «Guardar como PDF».
+                  </p>
                 </div>
 
                 {/* ─── Right: Live Preview ─── */}
                 <div className="flex-1 overflow-y-auto bg-stone-100 p-8">
-                  {/*
-                    IMPORTANT: min-h-[279.4mm] NOT h-[279.4mm]
-                    The container grows with content — no stretching.
-                    For PDFs larger than one page the canvas-slicing
-                    function handles the split automatically.
-                  */}
-                                    <DocumentoCotizacion
+                  {/* min-height lets the browser paginate long copies without clipping content. */}
+                  <DocumentoCotizacion
                     containerId="pdf-preview-container"
+                    copia={tipoCopiaImpresion}
                     cotizacion={{
                       id: selectedQuoteForPrint.id,
                       fecha: selectedQuoteForPrint.fecha,
@@ -3852,16 +3981,20 @@ export default function Cotizaciones() {
                         const mat = d.tipo_item === 'INSUMO'
                           ? materiales.find((m) => m.id === d.material_id)
                           : null;
+                        // El nombre viene resuelto por la API (producto o
+                        // insumo). Las listas locales están paginadas y pueden
+                        // no traer el ítem de una cotización vieja.
+                        const nombreItem = (d.tipo_item === 'REPARACION' || d.tipo_item === 'SERVICIO')
+                          ? (d.descripcion_especifica || d.observaciones || (d.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
+                          : d.tipo_item === 'INSUMO'
+                            ? (d.material_nombre ?? mat?.nombre ?? d.material?.nombre
+                              ?? d.descripcion_especifica ?? d.observaciones ?? 'Ítem a medida')
+                            : (d.producto_nombre ?? prod?.nombre
+                              ?? d.descripcion_especifica ?? d.observaciones ?? 'Ítem a medida');
                         return {
                           ...d,
-                          // Sin producto ni insumo (importación histórica): la
-                          // descripción ES el nombre — fusionados en un solo campo.
-                          producto_nombre: (d.tipo_item === 'REPARACION' || d.tipo_item === 'SERVICIO')
-                          ? (d.descripcion_especifica || d.observaciones || (d.tipo_item === 'REPARACION' ? 'Reparación' : 'Servicio'))
-                          // `d.material` viene en la respuesta de la API: la
-                          // lista local de materiales está paginada (100) y
-                          // puede no traer el insumo de una cotización vieja.
-                          : (prod?.nombre ?? mat?.nombre ?? d.material?.nombre ?? d.descripcion_especifica ?? d.observaciones ?? 'Ítem a medida'),
+producto_nombre: nombreItem,
+                          material_nombre: d.material_nombre ?? mat?.nombre ?? d.material?.nombre ?? null,
                           // Unidad vendida del insumo + equivalencia en la
                           // unidad del inventario (para la columna Cant.).
                           unidad_captura: d.unidad_captura ?? null,
