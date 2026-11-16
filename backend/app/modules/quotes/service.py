@@ -114,9 +114,13 @@ def _anotar_pedido(db: Session, cotizaciones: list):
 
 
 def _con_piezas(query):
-    """Eager-load de las piezas del juego: evita N+1 al serializar cotizaciones."""
+    """Eager-load de piezas y de producto/material: el documento de cotización
+    muestra el nombre resuelto en el servidor y no depende de las listas
+    paginadas del frontend."""
     return query.options(
-        selectinload(model.Cotizacion.detalles).selectinload(model.DetalleCotizacion.piezas)
+        selectinload(model.Cotizacion.detalles).selectinload(model.DetalleCotizacion.piezas),
+        selectinload(model.Cotizacion.detalles).selectinload(model.DetalleCotizacion.producto),
+        selectinload(model.Cotizacion.detalles).selectinload(model.DetalleCotizacion.material),
     )
 
 

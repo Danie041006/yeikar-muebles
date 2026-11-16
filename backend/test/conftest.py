@@ -165,8 +165,10 @@ ORDEN_LIMPIEZA = [
     "producto_pieza",
     "producto",
     "material",
+    "compra_inventario_multiple",
     "cuenta_por_pagar",
     "gasto",
+    "tipo_gasto",
     "tasa_cambio",
     "cliente",
     "proveedor",
@@ -239,6 +241,10 @@ class Cleaner:
                 continue
             ids_str = ",".join(str(i) for i in ids)
             try:
+                if tabla == "compra_inventario_multiple":
+                    db.execute(text(
+                        f"UPDATE gasto SET entrada_inventario_id = NULL WHERE entrada_inventario_id IN ({ids_str})"
+                    ))
                 # La composición de un conjunto liga productos entre sí
                 # (pieza_producto_id es RESTRICT): hay que soltar esas filas
                 # antes de borrar los productos del test, en cualquier orden.

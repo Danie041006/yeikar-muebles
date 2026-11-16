@@ -354,6 +354,8 @@ def actualizar_gasto(
     db_gasto = obtener_gasto(db, gasto_id, usuario)
     if not db_gasto:
         return None
+    from app.modules.inventory.entrada_pagos import proteger_gasto_entrada
+    proteger_gasto_entrada(db, gasto_id)
     antes = _snapshot(db_gasto)
     data = gasto_update.model_dump(exclude_unset=True)
 
@@ -444,6 +446,8 @@ def eliminar_gasto(
     db_gasto = obtener_gasto(db, gasto_id, usuario)
     if not db_gasto:
         return False
+    from app.modules.inventory.entrada_pagos import proteger_gasto_entrada
+    proteger_gasto_entrada(db, gasto_id)
     # Un gasto generado por una entrada de inventario no se puede borrar solo:
     # la entrada quedaría con stock y costo, pero sin pago ni salida de caja
     # (y con la cuenta marcada). Hay que corregir/eliminar la entrada.

@@ -69,6 +69,10 @@ export interface CuentaPorPagar {
   tipo_gasto?: { id: number; nombre: string; categoria: string } | null;
   detalles?: DetalleCuentaPorPagar[];
   pagos?: Abono[];
+  /** Texto que llevará la salida de caja del próximo abono en el libro. */
+  concepto_abono?: string | null;
+  /** Canasta del gasto de la deuda (fiar = GASTO_FABRICA por defecto). */
+  clasificacion?: string | null;
 }
 
 export interface DetalleCuentaPorPagarCreate {

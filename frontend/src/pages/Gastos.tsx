@@ -1457,6 +1457,21 @@ export default function Gastos() {
               onChange={(e) => setAbonoForm((prev) => ({ ...prev, fecha: e.target.value }))}
             />
           </Field>
+          {abonarDeuda?.concepto_abono && (
+            <div className="col-span-2 rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-emerald-800/70">
+                Así quedará en el libro de caja
+              </p>
+              <p className="mt-0.5 text-xs font-semibold text-yeikar-secondary">
+                {abonarDeuda.concepto_abono}
+              </p>
+              {abonarDeuda.clasificacion && (
+                <p className="mt-1 text-[10px] text-yeikar-neutral/55">
+                  Clasificación: {nombreClasificacion(abonarDeuda.clasificacion)} · queda en esa canasta del libro.
+                </p>
+              )}
+            </div>
+          )}
           {necesitaTasaAbono && (
             <Field label={`Tasa de cambio * (1 ${cuentaAbonoSel?.metodo_caja.moneda_codigo} = ? COP)`}>
               <Input

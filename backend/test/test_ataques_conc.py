@@ -367,15 +367,17 @@ def test_eliminar_pedido_vs_finalizar_orden(client, db, cleaner):
     pedido_existe = db.execute(text("SELECT id FROM pedido WHERE id = :p"), {"p": pedido_id}).fetchone()
     orden_existe = db.execute(text("SELECT id FROM orden_produccion WHERE id = :o"), {"o": orden_id}).fetchone()
 
-    # Invariante: nunca quedan filas huérfanas.
+    # Invariante: nunca quedan filas huérfanas de ESTA operación. Las órdenes de
+    # exhibición/stock tienen detalle_pedido_id NULL por diseño y no son huérfanas.
     huérfanas_orden = db.execute(text(
         "SELECT count(*) FROM orden_produccion op "
-        "WHERE NOT EXISTS (SELECT 1 FROM detalle_pedido dp WHERE dp.id = op.detalle_pedido_id)"
-    )).fetchone()[0]
+        "WHERE op.id = :o AND op.detalle_pedido_id IS NOT NULL "
+        "AND NOT EXISTS (SELECT 1 FROM detalle_pedido dp WHERE dp.id = op.detalle_pedido_id)"
+    ), {"o": orden_id}).fetchone()[0]
     huérfanas_envio = db.execute(text(
         "SELECT count(*) FROM envio e "
-        "WHERE NOT EXISTS (SELECT 1 FROM pedido p WHERE p.id = e.pedido_id)"
-    )).fetchone()[0]
+        "WHERE e.pedido_id = :p AND NOT EXISTS (SELECT 1 FROM pedido p WHERE p.id = e.pedido_id)"
+    ), {"p": pedido_id}).fetchone()[0]
     assert huérfanas_orden == 0, f"BUG: {huérfanas_orden} órdenes de producción huérfanas en la BD"
     assert huérfanas_envio == 0, f"BUG: {huérfanas_envio} envíos huérfanos en la BD"
 

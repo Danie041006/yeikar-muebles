@@ -28,6 +28,7 @@ class Gasto(Base):
     observaciones = Column(Text, nullable=True)
     creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
     actualizado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True, index=True)
+    entrada_inventario_id = Column(BigInteger, ForeignKey("compra_inventario_multiple.id", ondelete="RESTRICT"), nullable=True, index=True)
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 

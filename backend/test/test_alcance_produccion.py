@@ -76,7 +76,10 @@ def test_produccion_alcance_compartido(client, db, cleaner):
     # Ve la orden (creada por jackson) y aparece en el listado del Kanban.
     r = client.get(f"/api/v1/produccion/orden/{orden['id']}", headers=headers)
     assert r.status_code == 200, r.text
-    r = client.get("/api/v1/produccion/orden", params={"limite": 500}, headers=headers)
+    # El listado no tiene ORDER BY: con miles de órdenes, la recién creada puede
+    # quedar fuera de la primera página. Se busca por id para probar el alcance,
+    # no el orden del heap.
+    r = client.get("/api/v1/produccion/orden/", params={"limite": 50, "buscar": str(orden["id"])}, headers=headers)
     assert r.status_code == 200, r.text
     assert any(o["id"] == orden["id"] for o in r.json()), (
         "el Kanban de producción debe ser compartido para quienes tienen el módulo"

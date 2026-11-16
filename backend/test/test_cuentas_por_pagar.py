@@ -90,8 +90,15 @@ def _abonar(client, cxp_id, monto, cuenta_id, tasa=None, descuento=None, descuen
 
 def _gastos_de_deuda(db, cxp_id):
     return db.execute(text(
-        "SELECT id, monto, monto_en_moneda_base FROM gasto WHERE observaciones LIKE :pat"
+        "SELECT id, monto, monto_en_moneda_base, clasificacion "
+        "FROM gasto WHERE observaciones LIKE :pat"
     ), {"pat": f"%Por Pagar #{cxp_id}%"}).fetchall()
+
+
+def _movimiento_de_abono(db, cxp_id, abono_id):
+    return db.execute(text(
+        "SELECT concepto, persona_entidad FROM movimiento_caja WHERE referencia = :r"
+    ), {"r": f"CxP #{cxp_id} abono #{abono_id}"}).fetchone()
 
 
 def _mov_caja(db, referencia):
@@ -116,6 +123,8 @@ def test_deuda_manual_genera_gasto_sin_tocar_caja(client, cleaner, db):
     assert len(gastos) == 1
     assert float(gastos[0][1]) == 300000.0
     assert _mov_caja(db, f"Gasto #{gastos[0][0]}") is None
+    # Fiar es compra de fábrica: el gasto nace en esa canasta.
+    assert gastos[0][3] == "GASTO_FABRICA"
 
 
 def test_abonos_parciales_y_estado_pagada(client, cleaner, db):
@@ -195,12 +204,27 @@ def test_entrada_fiar_crea_deuda_automatica(client, cleaner, db):
     # El gasto "COMPRA DE INSUMOS" nació con la deuda; la caja no se movió.
     gastos = _gastos_de_deuda(db, cxp["id"])
     assert len(gastos) == 1 and float(gastos[0][1]) == 230000.0
+    assert gastos[0][3] == "GASTO_FABRICA"
     assert _mov_caja(db, f"CxP #{cxp['id']} abono #") is None or True  # sin abonos aún
+
+    # El texto que verá la dueña antes de abonar (modal → libro de caja).
+    r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
+    cxp_listado = next(c for c in r.json() if c["id"] == cxp["id"])
+    assert cxp_listado["concepto_abono"].startswith("Abono de fiado:")
+    assert mat["nombre"] in cxp_listado["concepto_abono"]
+    assert cxp_listado["clasificacion"] == "GASTO_FABRICA"
 
     # Abonarla desde la cuenta normal.
     abono = _abonar(client, cxp["id"], 230000.0, cuenta)
     cleaner.registrar("pago_cuenta_por_pagar", abono["id"])
     assert float(abono["monto_en_moneda_base"]) == 230000.0
+
+    # El egreso de caja dice QUÉ se fió, no el número de deuda.
+    mov = _movimiento_de_abono(db, cxp["id"], abono["id"])
+    assert mov is not None
+    assert mat["nombre"] in mov[0]
+    assert "Por Pagar #" not in mov[0]
+    assert mov[1] == proveedor["nombre"]
 
 
 def test_entrada_fiar_exige_proveedor(client, cleaner, db):
@@ -389,6 +413,48 @@ def test_abono_con_descuento_cierra_deuda_sin_tocar_costo_ni_caja(client, cleane
     assert float(actual["monto_descontado"]) == 0.0
 
 
+def test_descuento_porcentaje_se_calcula_sobre_la_deuda_original(client, cleaner, db):
+    """El % es sobre la deuda ORIGINAL, no sobre el saldo/abono del momento.
+
+    Deuda 9.800.000; tras abonar 4.800.000 queda saldo 5.000.000. Un 5% sobre
+    la deuda original genera 490.000 de descuento: el cajero paga 4.510.000 y
+    la deuda baja los 5.000.000 completos.
+    """
+    cuenta = _cuenta_id(db)
+    if cuenta is None:
+        pytest.skip("No hay cuentas de caja en la BD de pruebas")
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    cxp = _crear_deuda(client, cleaner, proveedor["id"], 9800000.0, tg["id"])
+
+    abono1 = _abonar(client, cxp["id"], 4800000.0, cuenta)
+    cleaner.registrar("pago_cuenta_por_pagar", abono1["id"])
+
+    # 5% de 9.800.000 = 490.000 (NO 5% de los 5.000.000 = 250.000).
+    abono2 = _abonar(
+        client, cxp["id"], 4510000.0, cuenta,
+        descuento_porcentaje=5,
+    )
+    cleaner.registrar("pago_cuenta_por_pagar", abono2["id"])
+    assert float(abono2["descuento"]) == 490000.0
+    assert float(abono2["monto_aplicado"]) == 5000000.0
+    assert float(abono2["monto"]) == 4510000.0
+
+    mov = _mov_caja(db, f"CxP #{cxp['id']} abono #{abono2['id']}")
+    assert mov is not None and float(mov[0]) == 4510000.0
+
+    r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
+    actual = next(c for c in r.json() if c["id"] == cxp["id"])
+    assert actual["estado"] == "PAGADA"
+    assert float(actual["saldo"]) == 0.0
+    assert float(actual["monto_pagado"]) == 9310000.0
+    assert float(actual["monto_descontado"]) == 490000.0
+
+    # El gasto/costo original no cambió con el descuento.
+    gastos = _gastos_de_deuda(db, cxp["id"])
+    assert len(gastos) == 1 and float(gastos[0][1]) == 9800000.0
+
+
 def test_abono_con_descuento_excede_saldo_rechazado(client, cleaner, db):
     cuenta = _cuenta_id(db)
     if cuenta is None:
@@ -417,24 +483,26 @@ def test_abono_con_descuento_multimoneda(client, cleaner, db):
     tg = _crear_tipo_gasto(client)
     cxp = _crear_deuda(client, cleaner, proveedor["id"], 800000.0, tg["id"])
 
-    # Aplicado 200.000 COP con 5% (10.000) → caja 190.000 COP = 47,50 USD.
+    # Deuda original 800.000 al 5% → descuento 40.000. Se aplican 200.000,
+    # así que de caja salen 160.000 COP = 40 USD a 4.000.
     abono = _abonar(
-        client, cxp["id"], 190000.0, cuenta_usd,
-        tasa=4000.0, descuento=10000.0, descuento_porcentaje=5,
+        client, cxp["id"], 160000.0, cuenta_usd,
+        tasa=4000.0, descuento_porcentaje=5,
     )
     cleaner.registrar("pago_cuenta_por_pagar", abono["id"])
+    assert float(abono["descuento"]) == 40000.0
     assert float(abono["monto_aplicado"]) == 200000.0
-    assert float(abono["monto_en_moneda_base"]) == 190000.0
+    assert float(abono["monto_en_moneda_base"]) == 160000.0
 
     mov = _mov_caja(db, f"CxP #{cxp['id']} abono #{abono['id']}")
     assert mov is not None
-    assert float(mov[0]) == 47.5, f"salida en USD: {mov}"
-    assert float(mov[3]) == 190000.0
+    assert float(mov[0]) == 40.0, f"salida en USD: {mov}"
+    assert float(mov[3]) == 160000.0
 
     r = client.get("/api/v1/cuentas-por-pagar/", headers=ADMIN_HEADERS)
     actual = next(c for c in r.json() if c["id"] == cxp["id"])
     assert float(actual["saldo"]) == 600000.0
-    assert float(actual["monto_descontado"]) == 10000.0
+    assert float(actual["monto_descontado"]) == 40000.0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -532,3 +600,111 @@ def test_entrada_fiar_crea_renglon_con_cliente(client, cleaner, db):
     assert det["material_id"] == mat["id"]
     assert det["cliente_id"] == cliente[0]
     assert float(cxp["monto"]) == 200000.0
+
+
+def test_libro_caja_abono_legible_y_clasificado(client, cleaner, db):
+    """El libro de caja muestra el abono por lo que se fiado (producto y
+    proveedor, sin "Por Pagar #N") y lo cuenta en Gastos de Fábrica."""
+    cuenta = _cuenta_id(db)
+    if cuenta is None:
+        pytest.skip("No hay cuentas de caja en la BD de pruebas")
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    descripcion = _uniq("MADERA PARA CAMA")
+    cxp = _crear_deuda(
+        client, cleaner, proveedor["id"], 50000.0, tg["id"], descripcion=descripcion
+    )
+    abono = _abonar(client, cxp["id"], 20000.0, cuenta)
+    cleaner.registrar("pago_cuenta_por_pagar", abono["id"])
+
+    hoy = str(date.today())
+    r = client.get("/api/v1/cuenta/libro", params={
+        "metodo_caja_id": cuenta,
+        "fecha_desde": hoy,
+        "fecha_hasta": hoy,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    fila = next(
+        f for f in r.json()["filas"]
+        if f["referencia"] == f"CxP #{cxp['id']} abono #{abono['id']}"
+    )
+    assert descripcion in fila["concepto"]
+    assert "Por Pagar #" not in fila["concepto"]
+    assert proveedor["nombre"] in fila["concepto"]
+    assert fila["clasificacion"] == "GASTO_FABRICA"
+
+
+def test_abono_concepto_nombre_corto_sin_descripcion_repetida(client, cleaner, db):
+    """El concepto usa el nombre del producto y recorta la descripción larga:
+    no repite párrafos ni el destino "(para …)" de cada renglón."""
+    cuenta = _cuenta_id(db)
+    if cuenta is None:
+        pytest.skip("No hay cuentas de caja en la BD de pruebas")
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    desc_a = _uniq("COCINA CAMBIO DE BISAGRAS PUERTAS DE VIDRIO ALUMINIO NATURAL")
+    desc_b = _uniq("PUERTA CORREDIZA ELABORADA EN MELAMINA AMBAR")
+
+    r = client.post("/api/v1/cuentas-por-pagar/", json={
+        "proveedor_id": proveedor["id"],
+        "tipo_gasto_id": tg["id"],
+        "moneda_id": 1,
+        "fecha": str(date.today()),
+        "monto": 30000.0,
+        "detalles": [
+            {"descripcion": desc_a, "cantidad": 1, "precio_unitario": 20000.0,
+             "cliente_nombre": "LILIBETH VILLALOBOS"},
+            {"descripcion": desc_b, "cantidad": 1, "precio_unitario": 10000.0,
+             "cliente_nombre": "LILIBETH VILLALOBOS"},
+        ],
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 201, r.text
+    cxp = r.json()
+    cleaner.registrar("cuenta_por_pagar", cxp["id"])
+
+    abono = _abonar(client, cxp["id"], 5000.0, cuenta)
+    cleaner.registrar("pago_cuenta_por_pagar", abono["id"])
+    mov = _movimiento_de_abono(db, cxp["id"], abono["id"])
+    assert mov is not None
+    concepto = mov[0]
+
+    assert concepto.startswith("Abono de fiado: ")
+    assert "COCINA CAMBIO DE BISAGRAS" in concepto
+    assert "(+1 más)" in concepto
+    assert "…" in concepto
+    assert desc_a not in concepto
+    assert desc_b not in concepto
+    assert "(para" not in concepto
+    assert proveedor["nombre"] in concepto
+    assert len(concepto) < 110
+
+
+def test_abono_de_deuda_historica_sin_gasto_se_clasifica_fabrica(client, cleaner, db):
+    """Las deudas viejas sin gasto (o sin clasificar) igual cuentan como
+    Gastos de Fábrica en el libro: fiar es de fábrica."""
+    cuenta = _cuenta_id(db)
+    if cuenta is None:
+        pytest.skip("No hay cuentas de caja en la BD de pruebas")
+    proveedor = crear_proveedor(client, cleaner)
+    tg = _crear_tipo_gasto(client)
+    cxp = _crear_deuda(client, cleaner, proveedor["id"], 50000.0, tg["id"])
+    # Deuda histórica: el gasto no existe o quedó sin canasta.
+    db.execute(text(
+        "UPDATE cuenta_por_pagar SET gasto_id = NULL WHERE id = :id"
+    ), {"id": cxp["id"]})
+    db.commit()
+    abono = _abonar(client, cxp["id"], 10000.0, cuenta)
+    cleaner.registrar("pago_cuenta_por_pagar", abono["id"])
+
+    hoy = str(date.today())
+    r = client.get("/api/v1/cuenta/libro", params={
+        "metodo_caja_id": cuenta,
+        "fecha_desde": hoy,
+        "fecha_hasta": hoy,
+    }, headers=ADMIN_HEADERS)
+    assert r.status_code == 200, r.text
+    fila = next(
+        f for f in r.json()["filas"]
+        if f["referencia"] == f"CxP #{cxp['id']} abono #{abono['id']}"
+    )
+    assert fila["clasificacion"] == "GASTO_FABRICA"

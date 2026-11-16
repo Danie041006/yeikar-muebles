@@ -1037,6 +1037,41 @@ def deshacer_importacion(
 _TAG_LIBRO = re.compile(r"^\[Libro [^\]]+\]\s*(.*)$")
 
 
+def _cxp_id_de_referencia(referencia: str | None) -> Optional[int]:
+    """'CxP #102 abono #65' → 102 (None si no es un abono de deuda)."""
+    if not (referencia or "").startswith("CxP #"):
+        return None
+    try:
+        return int(referencia.split("#", 1)[1].split()[0])
+    except (IndexError, ValueError):
+        return None
+
+
+def _deudas_de_abonos(db: Session, movimientos: list) -> dict[int, "CuentaPorPagar"]:
+    """{deuda_id: deuda} de los abonos de la página del libro."""
+    from app.modules.cuentas_por_pagar.model import CuentaPorPagar
+
+    cxp_ids = {
+        cxp_id for cxp_id in (_cxp_id_de_referencia(mov.referencia) for mov in movimientos)
+        if cxp_id is not None
+    }
+    if not cxp_ids:
+        return {}
+    return {
+        cxp.id: cxp
+        for cxp in (
+            db.query(CuentaPorPagar)
+            .options(
+                joinedload(CuentaPorPagar.proveedor),
+                joinedload(CuentaPorPagar.detalles),
+                joinedload(CuentaPorPagar.gasto),
+            )
+            .filter(CuentaPorPagar.id.in_(cxp_ids))
+            .all()
+        )
+    }
+
+
 def _tipo_concepto_movimiento(
     mov: MovimientoCaja, gasto: Optional[Gasto]
 ) -> tuple[str, str]:
@@ -1132,6 +1167,12 @@ def obtener_libro_caja(
         )
     }
 
+    # Abonos de deudas ("CxP #N abono #M"): el libro dice QUÉ se está pagando
+    # (producto fiado + proveedor) y su canasta de gasto, no el número de deuda.
+    from app.modules.cuentas_por_pagar.service import concepto_abono
+
+    deudas = _deudas_de_abonos(db, movimientos)
+
     saldo = saldo_inicial
     total_ingresos = _CERO
     total_egresos = _CERO
@@ -1152,8 +1193,18 @@ def obtener_libro_caja(
                 gasto = gastos.get(int(mov.referencia.split("#", 1)[1].split()[0]))
             except (ValueError, IndexError):
                 gasto = None
+        cxp_id = _cxp_id_de_referencia(mov.referencia)
+        deuda = deudas.get(cxp_id) if cxp_id is not None else None
         tipo, concepto = _tipo_concepto_movimiento(mov, gasto)
+        if deuda is not None:
+            concepto = concepto_abono(deuda)
         clasificacion = gasto.clasificacion if gasto else None
+        if clasificacion is None and deuda is not None:
+            # Fiar es de fábrica: aplica también a deudas históricas sin gasto
+            # o sin clasificar (el gasto viejo no se reescribe aquí).
+            clasificacion = (
+                deuda.gasto.clasificacion if deuda.gasto is not None else None
+            ) or "GASTO_FABRICA"
         if clasificacion:
             acumulado = por_clasificacion.setdefault(
                 clasificacion, {"count": 0, "total": _CERO}

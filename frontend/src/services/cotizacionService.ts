@@ -77,6 +77,9 @@ export interface QuoteDetail {
   cotizacion_id?: number;
   producto_id?: number | null;
   material_id?: number | null;
+  /** Nombres resueltos por el backend (documento de cotización). */
+  producto_nombre?: string | null;
+  material_nombre?: string | null;
   tipo_item?: 'FABRICADO' | 'REVENTA' | 'INSUMO' | 'REPARACION' | 'SERVICIO';
   cantidad: number;
   precio: number;

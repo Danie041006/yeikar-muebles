@@ -17,6 +17,8 @@ Ejecutar:
 """
 from sqlalchemy import text
 
+from app.modules.adjuntos.model import Adjunto
+from app.modules.auditoria.model import AuditEvent
 from conftest import (
     ADMIN_HEADERS,
     crear_cliente,
@@ -404,3 +406,57 @@ def test_corregir_tasa_que_excede_el_saldo_se_rechaza(client, cleaner):
     pago_actual = next(p for p in detalle["pagos"] if p["id"] == pago["id"])
     assert float(pago_actual["tasa_cambio"]) == 4000.0
     assert float(pago_actual["monto_en_moneda_base"]) == 100000.0
+
+
+def test_eliminar_abono_revierte_caja_saldo_adjuntos_y_deja_auditoria(client, cleaner, db):
+    cliente = crear_cliente(client, cleaner)
+    producto = crear_producto(client, cleaner)
+    venta = _crear_venta_pendiente(client, cleaner, cliente["id"], producto["id"])
+    primer_pago = _registrar_pago(client, cleaner, venta, 40000)
+    pago_a_eliminar = _registrar_pago(client, cleaner, venta, 60000)
+
+    recibo = Adjunto(
+        entidad_tipo="PAGO",
+        entidad_id=pago_a_eliminar["id"],
+        nombre_original="recibo-duplicado.jpg",
+        mime="image/jpeg",
+        tamano=4,
+        archivo=b"test",
+    )
+    db.add(recibo)
+    db.commit()
+    cleaner.registrar("adjunto", recibo.id)
+
+    antes = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
+    assert antes["estado"] == "PAGADA"
+
+    respuesta = client.delete(f"/api/v1/pago/{pago_a_eliminar['id']}", headers=ADMIN_HEADERS)
+    assert respuesta.status_code == 204, f"eliminar abono → {respuesta.status_code}: {respuesta.text}"
+
+    despues = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
+    assert despues["estado"] == "ABONADA"
+    assert float(despues["total_pagado"]) == 40000.0
+    assert float(despues["saldo_pendiente"]) == 60000.0
+    assert [p["id"] for p in despues["pagos"]] == [primer_pago["id"]]
+
+    assert _movimientos_del_pago(db, pago_a_eliminar["id"]) == []
+    assert len(_movimientos_del_pago(db, primer_pago["id"])) == 1
+    assert db.query(Adjunto).filter(Adjunto.id == recibo.id).first() is None
+
+    evento = (
+        db.query(AuditEvent)
+        .filter(
+            AuditEvent.entity_type == "pago",
+            AuditEvent.entity_id == str(pago_a_eliminar["id"]),
+            AuditEvent.action == "DELETE",
+        )
+        .order_by(AuditEvent.id.desc())
+        .first()
+    )
+    assert evento is not None
+    assert evento.before_data["monto"] == 60000.0
+    assert len(evento.before_data["movimientos_caja"]) == 1
+    assert evento.before_data["recibos"][0]["nombre"] == "recibo-duplicado.jpg"
+
+    inexistente = client.delete("/api/v1/pago/999999999", headers=ADMIN_HEADERS)
+    assert inexistente.status_code == 404

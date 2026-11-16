@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from typing import List, Optional
 from decimal import Decimal
 from datetime import date
@@ -8,7 +8,7 @@ from datetime import date
 from app.db.session import get_db
 from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
-from app.modules.users.deps import require_module
+from app.modules.users.deps import es_admin_user, obtener_accesos_usuario, require_module
 from app.modules.inventory import service, schemas
 
 router = APIRouter(prefix="/inventario", tags=["Inventario"], dependencies=[Depends(require_module('inventario'))])
@@ -54,6 +54,129 @@ def crear_movimiento(
         raise HTTPException(status_code=400, detail=str(e))
     except IntegrityError:
         raise HTTPException(status_code=409, detail="El movimiento de inventario entró en conflicto con otra operación simultánea")
+
+
+@router.post(
+    "/compra-multiple",
+    response_model=schemas.CompraInventarioMultipleResponse,
+    status_code=201,
+)
+def crear_compra_multiple(
+    datos: schemas.CompraInventarioMultipleCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Registra una factura de inventario con varios artículos y formas de pago."""
+    accesos = obtener_accesos_usuario(db, current_user)
+    if not es_admin_user(current_user):
+        necesita_materiales = any(linea.nuevo_material for linea in datos.lineas)
+        necesita_productos = any(linea.nuevo_producto for linea in datos.lineas)
+        if necesita_materiales and not accesos.get("materiales", False):
+            raise HTTPException(status_code=403, detail="No tienes permiso para crear materiales desde una compra.")
+        if necesita_productos and not accesos.get("productos", False):
+            raise HTTPException(status_code=403, detail="No tienes permiso para crear productos desde una compra.")
+
+    try:
+        resultado = service.crear_compra_inventario_multiple(db, datos, usuario=current_user)
+        db.commit()
+        return resultado
+    except PermissionError as e:
+        db.rollback()
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="La compra tuvo un conflicto al guardar. No se registró ningún renglón ni pago; vuelve a intentarlo.",
+        )
+    except ProgrammingError as e:
+        db.rollback()
+        error_bd = str(e.orig).lower()
+        sqlstate = (
+            getattr(e.orig, "sqlstate", None)
+            or getattr(e.orig, "pgcode", None)
+            or getattr(getattr(e.orig, "diag", None), "sqlstate", None)
+        )
+        if sqlstate == "42P01" and "compra_inventario_multiple" in error_bd:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "La base de datos todavía no tiene instalada la migración de compras múltiples. "
+                    "Un administrador debe ejecutar las migraciones pendientes y luego puedes reintentar esta compra."
+                ),
+            ) from e
+        raise
+
+
+@router.get("/entradas")
+def entradas_registradas(
+    response: Response,
+    buscar: Optional[str] = Query(None, max_length=150),
+    offset: int = Query(0, ge=0),
+    limite: int = Query(25, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    from app.modules.inventory.entrada_edicion import listar_entradas
+
+    entradas, total = listar_entradas(db, current_user, {"buscar": buscar, "offset": offset, "limite": limite})
+    response.headers["X-Total-Count"] = str(total)
+    return entradas
+
+
+@router.get("/entradas/{compra_id}")
+def detalle_entrada(
+    compra_id: int,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    from app.modules.inventory.entrada_edicion import obtener_entrada
+
+    try:
+        entrada = obtener_entrada(db, compra_id, current_user)
+        if entrada is None:
+            raise HTTPException(status_code=404, detail="La entrada no existe.")
+        return entrada
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.put("/entradas/{compra_id}")
+def corregir_entrada_inventario(
+    compra_id: int,
+    solicitud: schemas.CorreccionEntradaCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    from app.modules.inventory.entrada_edicion import ConflictoEntrada, corregir_entrada
+
+    # Crear artículos desde una corrección exige los mismos permisos que el alta.
+    accesos = obtener_accesos_usuario(db, current_user)
+    if not es_admin_user(current_user):
+        for campo, modulo in (("nuevo_material", "materiales"), ("nuevo_producto", "productos")):
+            if any(getattr(linea, campo) for linea in solicitud.entrada.lineas) and not accesos.get(modulo, False):
+                raise HTTPException(status_code=403, detail=f"No tienes permiso para crear {modulo}.")
+    try:
+        respuesta = corregir_entrada(db, compra_id, solicitud, current_user)
+        db.commit()
+        return respuesta
+    except PermissionError as e:
+        db.rollback()
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    except ConflictoEntrada as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="La entrada cambió mientras se corregía. Recarga y revisa los datos; no se aplicó la corrección.") from e
 
 
 @router.get("/movimientos/material/{material_id}", response_model=List[schemas.MovimientoResponse])

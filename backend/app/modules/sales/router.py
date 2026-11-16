@@ -122,6 +122,21 @@ def actualizar_pago(
     return db_pago
 
 
+@pago_router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_pago(
+    id: int,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user),
+):
+    try:
+        exito = service.eliminar_pago(db, id, usuario=usuario_actual)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not exito:
+        raise HTTPException(status_code=404, detail="Pago no encontrado")
+    return None
+
+
 # ------------------------------------------------------------
 # Endpoints de Descuentos de cobro (rebaja sin movimiento de caja)
 # ------------------------------------------------------------

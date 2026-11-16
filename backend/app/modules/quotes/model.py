@@ -65,6 +65,16 @@ class DetalleCotizacion(Base):
     cotizacion = relationship("Cotizacion", back_populates="detalles")
     producto = relationship("Producto")
     material = relationship("Material")
+
+    @property
+    def producto_nombre(self) -> str | None:
+        """Nombre del producto (para el documento, sin depender de listas del frontend)."""
+        return self.producto.nombre if self.producto else None
+
+    @property
+    def material_nombre(self) -> str | None:
+        """Nombre del insumo/material cuando el renglón es INSUMO."""
+        return self.material.nombre if self.material else None
     materiales = relationship("CotizacionDetalleMaterial", back_populates="detalle_cotizacion", cascade="all, delete-orphan")
     # Piezas que componen un juego (mesa, sillas, sillones…). El renglón sigue
     # siendo UNO con precio global; las piezas solo abren la producción y el

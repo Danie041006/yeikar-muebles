@@ -77,9 +77,14 @@ class CuentaPorPagarCreate(CuentaPorPagarBase):
     # Renglones que componen la deuda. Si se envían, el monto debe ser la
     # suma de los renglones (se valida en el servicio).
     detalles: Optional[List[DetalleCuentaPorPagarCreate]] = None
+    # Canasta del gasto (P&L) que nace con la deuda. Fiar es de fábrica por
+    # defecto; se deja explícito para los casos que se definan después.
+    clasificacion: Optional[str] = None
 
 
 class CuentaPorPagarResponse(CuentaPorPagarBase):
+    # Corregir una entrada puede cerrar el fiado original en cero; su historial se conserva.
+    monto: Decimal = Field(..., ge=0)
     id: int
     gasto_id: Optional[int] = None
     monto_en_moneda_base: Decimal
@@ -98,6 +103,11 @@ class CuentaPorPagarResponse(CuentaPorPagarBase):
     tipo_gasto: Optional[TipoGastoResponse] = None
     detalles: List[DetalleCuentaPorPagarResponse] = []
     pagos: List[AbonoResponse] = []
+    # Texto que llevará la salida de caja del próximo abono ("Abono de fiado:
+    # 2 × MADERA — proveedor JUAN"). Se muestra en el modal antes de abonar.
+    concepto_abono: Optional[str] = None
+    # Canasta del gasto de la deuda (P&L): por ahora fiar = GASTO_FABRICA.
+    clasificacion: Optional[str] = None
 
     class Config:
         from_attributes = True

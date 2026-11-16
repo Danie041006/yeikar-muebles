@@ -2,9 +2,10 @@
 test_diario_moneda.py — Estado del día desglosado por moneda.
 
 Cubre la iteración 1 del rework del reporte diario:
-- El abono a una CxP se lista con concepto corto ("Abono deuda #N — proveedor")
-  y la referencia va aparte (antes el concepto ERA la referencia y la UI lo
-  mostraba duplicado). El responsable es el nombre visible del usuario.
+- El abono a una CxP se lista con concepto descriptivo ("Abono de fiado: qué
+  se fió — proveedor") y la referencia va aparte (antes el concepto ERA la
+  referencia y la UI lo mostraba duplicado). El responsable es el nombre
+  visible del usuario.
 - `saldos_por_cuenta` trae una fila por (cuenta, moneda) con saldos NATIVOS:
   una cuenta en USD muestra dólares, no una cifra COP que se mezcla con pesos.
 - El gasto nacido de una deuda (fiado) se marca "(fiado)" y no tiene cuenta
@@ -64,8 +65,12 @@ def test_diario_abono_cxp_concepto_limpio_y_quien(client, cleaner, db):
         assert len(lineas) == 1, f"esperaba 1 línea {ref}, hubo {len(lineas)}"
         linea = lineas[0]
         assert linea["tipo"] == "SALIDA"
-        # Concepto corto con proveedor; la referencia va aparte, no duplicada.
-        assert linea["concepto"] == f"Abono deuda #{cxp['id']} — {proveedor['nombre']}"
+        # Concepto descriptivo (qué se fió + proveedor); la referencia va
+        # aparte y el número de deuda no ensucia el libro.
+        assert linea["concepto"] == (
+            f"Abono de fiado: {cxp['descripcion']} — {proveedor['nombre']}"
+        )
+        assert "Por Pagar #" not in linea["concepto"]
         assert linea["concepto"] != linea["referencia"]
         assert linea["quien"] == _nombre_admin(client)
     finally:

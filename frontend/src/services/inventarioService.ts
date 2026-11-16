@@ -182,6 +182,115 @@ export interface MovimientoProductoResponse {
   updated_at: string;
 }
 
+export interface CompraInventarioMultipleCreate {
+  operacion_id: string;
+  fecha: string;
+  proveedor_id?: number;
+  proveedor_nombre?: string;
+  recibido_por?: string;
+  observaciones?: string;
+  lineas: {
+    linea_id?: string;
+    tipo_item: 'MATERIAL' | 'PRODUCTO';
+    material_id?: number;
+    producto_id?: number;
+    nuevo_material?: {
+      nombre: string;
+      unidad_medida_id: number;
+      departamento?: string;
+      categoria_inventario_id?: number;
+    };
+    nuevo_producto?: {
+      nombre: string;
+      codigo?: string;
+      tipo_producto_id: number;
+      moneda_id: number;
+      categoria_inventario_id?: number;
+      precio_venta_base?: number;
+      stock_minimo?: number;
+    };
+    cantidad: number;
+    precio_unitario: number;
+    moneda_precio_id: number;
+    tasa_precio_a_cop?: number;
+    llevada_unitaria: number;
+    llevada_total?: number | null;
+    descuento_porcentaje: number;
+    departamento?: string;
+    ubicacion_id?: number;
+    cliente_nombre?: string;
+    observaciones?: string;
+  }[];
+  pagos: {
+    pago_id?: string;
+    metodo_caja_id: number;
+    monto: number;
+    tasa_cambio?: number;
+    observacion?: string;
+  }[];
+}
+
+export interface CompraInventarioMultipleResponse {
+  compra_id: number;
+  saldo_actual?: string | number;
+  total_en_moneda_base: number;
+  pagado_en_moneda_base: number;
+  saldo_en_moneda_base: number;
+  cuenta_por_pagar_id?: number | null;
+  lineas: {
+    tipo_item: 'MATERIAL' | 'PRODUCTO';
+    item_id: number;
+    nombre: string;
+    cantidad: number;
+    total_en_moneda_base: number;
+  }[];
+}
+
+export interface CapturaEntrada extends CompraInventarioMultipleCreate {
+  lineas: (CompraInventarioMultipleCreate['lineas'][number] & {
+    nombre: string;
+    unidad?: string | null;
+    item_id: number;
+    movimiento_id: number;
+  })[];
+  pagos: (CompraInventarioMultipleCreate['pagos'][number] & {
+    moneda_id: number;
+    codigo: string;
+    gasto_id: number;
+    movimiento_caja_id: number;
+  })[];
+}
+
+export interface EntradaInventarioResumen {
+  compra_id: number;
+  fecha: string;
+  proveedor_nombre: string | null;
+  recibido_por: string | null;
+  articulos: string;
+  total_en_moneda_base: string;
+  pagado_en_moneda_base: string;
+  saldo_actual: string;
+  cuenta_por_pagar_id: number | null;
+  version: number;
+  historica: boolean;
+}
+
+export interface EntradaInventarioDetalle extends EntradaInventarioResumen {
+  datos: CapturaEntrada;
+  original: CapturaEntrada;
+  created_at: string;
+  abonado_posterior: string;
+  descontado_posterior: string;
+  historial: { motivo: string; fecha: string; usuario_id: number; antes: CapturaEntrada; despues: CapturaEntrada }[];
+}
+
+export interface CorreccionEntradaCreate {
+  operacion_id: string;
+  version: number;
+  motivo: string;
+  entrada: CompraInventarioMultipleCreate;
+}
+
 export interface CostoUnitarioRealMaterial {
   material_id: number;
   costo_compra: number;
@@ -290,6 +399,26 @@ export const inventarioService = {
   crearMovimientoProducto: async (movimiento: MovimientoProductoCreate): Promise<MovimientoProductoResponse> => {
     const response = await api.post<MovimientoProductoResponse>('/inventario/producto/movimiento', movimiento);
     return response.data;
+  },
+
+  crearCompraMultiple: async (compra: CompraInventarioMultipleCreate): Promise<CompraInventarioMultipleResponse> => {
+    const response = await api.post<CompraInventarioMultipleResponse>('/inventario/compra-multiple', compra);
+    return response.data;
+  },
+
+  getEntradas: async (buscar: string, offset: number) => {
+    const respuesta = await api.get<EntradaInventarioResumen[]>('/inventario/entradas', { params: { buscar: buscar || undefined, offset, limite: 25 } });
+    return { entradas: respuesta.data, total: Number(respuesta.headers['x-total-count'] || 0) };
+  },
+
+  getEntrada: async (id: number): Promise<EntradaInventarioDetalle> => {
+    const respuesta = await api.get<EntradaInventarioDetalle>(`/inventario/entradas/${id}`);
+    return respuesta.data;
+  },
+
+  corregirEntrada: async (id: number, solicitud: CorreccionEntradaCreate): Promise<CompraInventarioMultipleResponse> => {
+    const respuesta = await api.put<CompraInventarioMultipleResponse>(`/inventario/entradas/${id}`, solicitud);
+    return respuesta.data;
   },
 
   getKardexProducto: async (productoId: number, limit: number = 100): Promise<MovimientoProductoResponse[]> => {

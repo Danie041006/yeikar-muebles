@@ -260,6 +260,10 @@ class DetalleCotizacionCreate(DetalleCotizacionBase):
 class DetalleCotizacionResponse(DetalleCotizacionBase):
     id: int
     cotizacion_id: int
+    # Nombres resueltos en el servidor: el documento de cotización no debe
+    # depender de las listas paginadas del frontend (productos/materiales).
+    producto_nombre: Optional[str] = None
+    material_nombre: Optional[str] = None
     material: Optional[MaterialResponse] = None
     piezas: List[DetalleCotizacionPiezaResponse] = []
 
@@ -271,6 +275,8 @@ class DetalleCotizacionListaResponse(DetalleCotizacionBase):
     """Renglón de los listados: piezas sin foto (solo nombre/cantidad/nota)."""
     id: int
     cotizacion_id: int
+    producto_nombre: Optional[str] = None
+    material_nombre: Optional[str] = None
     material: Optional[MaterialResponse] = None
     piezas: List[DetalleCotizacionPiezaListaResponse] = []
 

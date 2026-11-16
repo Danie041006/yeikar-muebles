@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, CategoriaInventario } from '../services/inventarioService';
+import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, CategoriaInventario, type EntradaInventarioDetalle } from '../services/inventarioService';
 import { productosService, type MonedaInfo } from '../services/productosService';
 import { crudoService, produccionService, type Crudo, type CrudoMovimiento, type RetrabajoAbierto } from '../services/produccionService';
 import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO, type AdjuntoInfo } from '../services/adjuntosService';
@@ -9,9 +9,14 @@ import api from '../services/api';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
+import { ReceiptText } from 'lucide-react';
 import { SearchSelect, ResponsiveDataTable, MontoInput, type DataColumn } from '../components/ui';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import ComposicionEditor from '../components/Productos/ComposicionEditor';
+import CompraMultipleModal from '../components/Inventario/CompraMultipleModal';
+import EntradasRegistradas from '../components/Inventario/EntradasRegistradas';
+import PagosEntradaEditor, { capturaPagos, totalPagosCOP, type PagoEntradaDraft } from '../components/Inventario/PagosEntradaEditor';
+import { useRegistroEntrada } from '../components/Inventario/useRegistroEntrada';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage, fmtNumero } from '../utils/format';
 import { hoyVE } from '../utils/fechas';
 
@@ -116,7 +121,7 @@ function parsePagoKey(key: string): { cuentaId: number | null; monedaId: number 
 export default function Inventario() {
   const toast = useToast();
   const navigate = useNavigate();
-  const { esAdmin } = useAuth();
+  const { esAdmin, user } = useAuth();
   interface UnidadMedida {
     id: number;
     nombre: string;
@@ -170,6 +175,8 @@ export default function Inventario() {
     recibido_por: '',    // quién trajo la compra (texto libre, solo entradas)
   });
   const [savingMov, setSavingMov] = useState(false);
+  const [pagosMaterial, setPagosMaterial] = useState<PagoEntradaDraft[]>([]);
+  const registroMaterial = useRegistroEntrada(`yeikar:entrada-material:${user?.id}`);
 
   // Cuentas con su moneda para pagos de contado (una cuenta puede tener varias)
   interface CuentaMonedaOpcion { key: string; cuentaId: number; nombre: string; monedaId: number; codigo: string; }
@@ -220,8 +227,13 @@ export default function Inventario() {
     llevada: '',    // "la llevada": flete/aduana (opcional)
     proveedor_nombre: '', // dónde se compró (texto libre, opcional, solo entradas)
     cliente_nombre: '',  // comprado para un cliente específico (texto libre, opcional)
+    recibido_por: '',
   });
   const [savingMovProd, setSavingMovProd] = useState(false);
+  const [pagosProducto, setPagosProducto] = useState<PagoEntradaDraft[]>([]);
+  const registroProducto = useRegistroEntrada(`yeikar:entrada-producto:${user?.id}`);
+  const [pagosProductoNuevo, setPagosProductoNuevo] = useState<PagoEntradaDraft[]>([]);
+  const registroProductoNuevo = useRegistroEntrada(`yeikar:entrada-producto-nuevo:${user?.id}`);
   // Tab del modal de producto (movimiento / editar / historial).
   const [detalleTabProducto, setDetalleTabProducto] = useState<'movimiento' | 'editar' | 'historial' | 'composicion'>('movimiento');
   // Edición inline del producto (tab EDITAR del modal).
@@ -317,6 +329,9 @@ export default function Inventario() {
   const [asignando, setAsignando] = useState(false);
 
   const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [showCompraMultiple, setShowCompraMultiple] = useState(false);
+  const [showEntradasRegistradas, setShowEntradasRegistradas] = useState(false);
+  const [entradaCorregir, setEntradaCorregir] = useState<EntradaInventarioDetalle | undefined>();
   // Las dimensiones de lámina no se muestran de entrada (confunden al crear un
   // insumo normal): solo aparecen si el material es laminar.
   const [newMaterialEsLamina, setNewMaterialEsLamina] = useState(false);
@@ -346,9 +361,8 @@ export default function Inventario() {
     // aparecía con una unidad fantasma.
     cantidad_inicial: '0',
     fecha: hoyVE(),     // fecha real de la entrada inicial (por defecto hoy; admite días anteriores)
-    cuenta_pago_id: '', // key "cuentaId:monedaId" — de qué caja salió el dinero (vacío = fiado)
     proveedor_nombre: '', // proveedor de la entrada inicial (obligatorio si queda fiada)
-    tasa_pago: '',      // 1 [moneda_pago] = X COP (manual, obligatoria si aplica)
+    tasa_pago: '',      // 1 [moneda del precio] = X COP (manual, obligatoria si aplica)
     moneda_id: '', // string para SearchSelect; default USD cuando cargan las monedas
   });
   const [savingProducto, setSavingProducto] = useState(false);
@@ -506,6 +520,19 @@ export default function Inventario() {
     fetchRetrabajos();
   }, [fetchData, fetchInsumos, fetchProductos, fetchCrudo, fetchRetrabajos]);
 
+  const handleCompraMultipleCreada = async (compra: Awaited<ReturnType<typeof inventarioService.crearCompraMultiple>>) => {
+    const eraCorreccion = Boolean(entradaCorregir);
+    const saldo = Number(compra.saldo_actual ?? compra.saldo_en_moneda_base);
+    setShowCompraMultiple(false);
+    setEntradaCorregir(undefined);
+    toast.success(
+      eraCorreccion ? `Entrada corregida. Pendiente actual: ${fmtNumero(saldo, 2)} COP.` : compra.saldo_en_moneda_base > 0
+        ? `Entrada de inventario registrada. Saldo pendiente: ${fmtNumero(compra.saldo_en_moneda_base, 2)} COP.`
+        : 'Entrada de inventario registrada y pagada.',
+    );
+    await Promise.all([fetchInsumos(), fetchProductos()]);
+  };
+
   const handleCreateCrudo = async (e: React.FormEvent) => {
     e.preventDefault();
     const nombre = newCrudo.nombre.trim();
@@ -605,6 +632,17 @@ export default function Inventario() {
   // ---- Crear producto comprado para revender (REVENTA o PLÁSTICOS) ----
   const handleCreateProducto = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registroProductoNuevo.pendiente) {
+      const entrada = await registroProductoNuevo.reintentar();
+      if (entrada) {
+        setShowProductoModal(false);
+        setPagosProductoNuevo([]);
+        void fetchProductos();
+        toast.success('Producto y entrada registrados. El saldo pendiente quedó en Gastos → Por Pagar.');
+        if (fotoProducto) toast.info('La foto no se subió con el reintento: agrégala desde el detalle del producto.');
+      }
+      return;
+    }
     if (!newProducto.nombre.trim()) return;
     // El rubro lo define la pestaña activa: Plásticos tiene tipo y categoría
     // propios, pero la mecánica (stock, costo, gasto de compra) es la de reventa.
@@ -624,20 +662,7 @@ export default function Inventario() {
       );
       return;
     }
-    const pagoModal = parsePagoKey(newProducto.cuenta_pago_id);
     const prodMonedaNueva = parseInt(newProducto.moneda_id || String(MONEDA_BASE_ID)) || MONEDA_BASE_ID;
-    const pagoMid = pagoModal.monedaId ?? prodMonedaNueva;
-    const necesitaTasa = !!pagoModal.cuentaId && pagoMid !== prodMonedaNueva;
-    const par = resolverParMonedas(codMonedaDe(prodMonedaNueva), codMonedaDe(pagoMid));
-    if (
-      necesitaTasa &&
-      !(parseFloat(newProducto.tasa_pago || '0') > 0)
-    ) {
-      toast.error(
-        `Indica la tasa de cambio: ${par.label}.`
-      );
-      return;
-    }
 
     const costoBruto = parseFloat(newProducto.costo_base || '0') || 0;
     const pctDesc = parseFloat(newProducto.descuento_porcentaje || '0') || 0;
@@ -648,18 +673,41 @@ export default function Inventario() {
     const cantInicial = parseFloat(newProducto.cantidad_inicial || '0') || 0;
     // "Fiar": entrada inicial sin cuenta de pago → cuenta por pagar con el
     // proveedor. Solo aplica si hay costo: sin costo no hay deuda que registrar.
-    const fiando = cantInicial > 0 && !pagoModal.cuentaId && costoNeto !== undefined && costoNeto > 0;
-    if (fiando && !newProducto.proveedor_nombre.trim()) {
-      toast.error('Al fiar debes indicar el proveedor de la entrada inicial.');
+    if (cantInicial > 0 && costoBruto <= 0 && pagosProductoNuevo.length > 0) {
+      toast.error('Indica el precio unitario antes de registrar pagos.');
       return;
     }
     const detalleDesc = costoBruto > 0 && pctDesc > 0
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${simboloPrecio}${fmtNumero(costoBruto, 2)} → Neto: ${simboloPrecio}${fmtNumero(costoNeto, 2)})`
       : '';
 
+    const totalEntradaCOP = cantInicial * (costoNeto || 0) * (prodMonedaNueva === MONEDA_BASE_ID ? 1 : Number(newProducto.tasa_pago || 0));
+    const pagadoEntrada = totalPagosCOP(pagosProductoNuevo, cuentasPago);
+    if (pagadoEntrada > totalEntradaCOP + 0.005) {
+      toast.error('Los pagos superan el total de la entrada. Revisa los montos.');
+      return;
+    }
+    if (totalEntradaCOP - pagadoEntrada > 0.005 && !newProducto.proveedor_nombre.trim()) {
+      toast.error('Indica el proveedor para registrar el saldo pendiente en Gastos → Por Pagar.');
+      return;
+    }
+
     try {
       setSavingProducto(true);
-      const creado = await productosService.crearProducto({
+      const conEntrada = cantInicial > 0 && costoBruto > 0;
+      const entrada = conEntrada ? await registroProductoNuevo.registrar({
+        fecha: newProducto.fecha || hoyVE(), proveedor_nombre: newProducto.proveedor_nombre.trim() || undefined,
+        lineas: [{ tipo_item: 'PRODUCTO', cantidad: cantInicial, precio_unitario: costoBruto,
+          moneda_precio_id: prodMonedaNueva, tasa_precio_a_cop: Number(newProducto.tasa_pago) || undefined,
+          llevada_unitaria: 0, descuento_porcentaje: pctDesc, ubicacion_id: ubicaciones[0]?.id,
+          nuevo_producto: { nombre: newProducto.nombre.toUpperCase().trim(), codigo: newProducto.codigo.trim() || undefined,
+            tipo_producto_id: esPlastico ? tipoRubro!.id : 2, moneda_id: prodMonedaNueva,
+            categoria_inventario_id: esPlastico ? categoriaRubro!.id : undefined,
+            precio_venta_base: precioVenta || undefined, stock_minimo: Number(newProducto.stock_minimo || 8) } }],
+        pagos: capturaPagos(pagosProductoNuevo, cuentasPago),
+      }) : null;
+      if (conEntrada && !entrada) return;
+      const creado = entrada ? { id: entrada.lineas[0].item_id } : await productosService.crearProducto({
         nombre: newProducto.nombre.toUpperCase().trim(),
         codigo: newProducto.codigo ? newProducto.codigo.trim() : undefined,
         tipo_producto_id: esPlastico ? tipoRubro!.id : 2, // 2 = Revendido
@@ -679,12 +727,14 @@ export default function Inventario() {
       });
       // Foto de referencia (opcional): se sube y el servidor la optimiza
       if (fotoProducto && creado.id) {
-        await subirAdjunto(fotoProducto, TIPO_ADJUNTO.PRODUCTO, creado.id);
+        try { await subirAdjunto(fotoProducto, TIPO_ADJUNTO.PRODUCTO, creado.id); }
+        catch { toast.warning('El producto se guardó, pero la foto no se pudo subir. Puedes agregarla desde su detalle.'); }
         setFotoProducto(null);
         if (fotoProductoPreview) URL.revokeObjectURL(fotoProductoPreview);
         setFotoProductoPreview(null);
       }
       setShowProductoModal(false);
+      setPagosProductoNuevo([]);
       setNewProducto({
         nombre: '',
         codigo: '',
@@ -695,7 +745,6 @@ export default function Inventario() {
         stock_minimo: '8',
         cantidad_inicial: '0',
         fecha: hoyVE(),
-        cuenta_pago_id: '',
         proveedor_nombre: '',
         tasa_pago: '',
         moneda_id: idMonedaPorDefecto(),
@@ -705,7 +754,7 @@ export default function Inventario() {
       // cantidad (un producto nuevo nace en stock 0). Si indica cuenta de
       // pago, se genera el egreso automático; si no, queda fiada al
       // proveedor y se registra la cuenta por pagar.
-      if (cantInicial > 0 && creado.id) {
+      if (!conEntrada && cantInicial > 0 && creado.id) {
         const ubi = ubicaciones[0];
         if (ubi) {
           await inventarioService.crearMovimientoProducto({
@@ -715,14 +764,9 @@ export default function Inventario() {
             cantidad: cantInicial,
             fecha: newProducto.fecha || hoyVE(),
             costo_unitario: costoNeto,
-            pagado_desde_metodo_caja_id: pagoModal.cuentaId ?? undefined,
-            moneda_pago_id: pagoModal.cuentaId ? (pagoModal.monedaId ?? undefined) : undefined,
-            tasa_pago: pagoModal.cuentaId && parseFloat(newProducto.tasa_pago || '0') > 0 ? parseFloat(newProducto.tasa_pago) : undefined,
             proveedor_nombre: newProducto.proveedor_nombre.trim() || undefined,
-            fiar: fiando || undefined,
             observaciones: [
               `Carga inicial de producto de ${esPlastico ? 'plástico' : 'reventa'}`,
-              fiando ? `Fiado a ${newProducto.proveedor_nombre.trim()}` : '',
               detalleDesc,
             ].filter(Boolean).join(' · '),
           });
@@ -952,6 +996,18 @@ export default function Inventario() {
   // ---- Registrar movimiento de material (desde el panel) ----
   const handleRegisterMovement = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registroMaterial.pendiente) {
+      const entrada = await registroMaterial.reintentar();
+      if (entrada) {
+        setPagosMaterial([]);
+        toast.success('Entrada registrada. El saldo pendiente quedó en Gastos → Por Pagar.');
+        void fetchInsumos();
+        const material = materiales.find((opcion) => opcion.id === entrada.lineas[0]?.item_id);
+        if (material) handleOpenMaterial(material);
+        else setSelectedMaterialId(null);
+      }
+      return;
+    }
     if (!selectedMaterialId || !movMaterial.cantidad) return;
 
     const esEntrada = movMaterial.tipo === 'ENTRADA' || movMaterial.tipo === 'DEVOLUCION';
@@ -972,6 +1028,41 @@ export default function Inventario() {
     const costoNeto = costoBruto !== undefined && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
       : costoBruto;
+    if (movMaterial.tipo === 'ENTRADA' && costoBruto !== undefined) {
+      const pagado = totalPagosCOP(pagosMaterial, cuentasPago);
+      const totalEntrada = Number(movMaterial.cantidad || 0) * (
+        Math.round((costoBruto * (1 - pctDesc / 100)) * 100) / 100 + Number(movMaterial.llevada || 0));
+      if (pagado > totalEntrada + 0.005) {
+        toast.error('Los pagos superan el total de la entrada. Revisa los montos.');
+        return;
+      }
+      if (totalEntrada - pagado > 0.005 && !movMaterial.proveedor_nombre.trim()) {
+        toast.error('Indica el proveedor para registrar el saldo pendiente en Gastos → Por Pagar.');
+        return;
+      }
+      const entrada = await registroMaterial.registrar({
+        fecha: movMaterial.fecha || hoyVE(), proveedor_nombre: movMaterial.proveedor_nombre.trim() || undefined,
+        recibido_por: movMaterial.recibido_por.trim() || undefined, observaciones: movMaterial.observaciones || undefined,
+        lineas: [{ tipo_item: 'MATERIAL', material_id: selectedMaterialId,
+          cantidad: Number(movMaterial.cantidad), precio_unitario: movMaterial.moneda_precio_id === MONEDA_BASE_ID ? Number(movMaterial.costo_unitario) : Number(movMaterial.precio_moneda),
+          moneda_precio_id: movMaterial.moneda_precio_id, tasa_precio_a_cop: tasaNum || undefined,
+          descuento_porcentaje: pctDesc, llevada_unitaria: Number(movMaterial.llevada || 0),
+          cliente_nombre: movMaterial.cliente_nombre.trim() || undefined, departamento: movMaterial.departamento || undefined }],
+        pagos: capturaPagos(pagosMaterial, cuentasPago),
+      });
+      if (entrada) {
+        setPagosMaterial([]);
+        toast.success('Entrada registrada. El saldo pendiente quedó en Gastos → Por Pagar.');
+        void fetchInsumos();
+        const material = materiales.find((opcion) => opcion.id === selectedMaterialId);
+        if (material) handleOpenMaterial(material);
+      }
+      return;
+    }
+    if (movMaterial.tipo === 'ENTRADA' && pagosMaterial.length > 0) {
+      toast.error('Indica el precio unitario antes de registrar pagos.');
+      return;
+    }
     // "Fiar": entrada sin cuenta de pago → la deuda queda registrada con el
     // proveedor (obligatorio). Solo si hay costo: una entrada sin costo es
     // una carga de stock y no genera deuda.
@@ -1056,7 +1147,7 @@ export default function Inventario() {
     });
     // En exhibición, el movimiento típico es ENTRADA a la ubicación de exhibición.
     const ubiExh = tab === 'exhibicion' ? ubicaciones.find(u => esNombreExhibicion(u.nombre)) : undefined;
-    setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+    setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', recibido_por: '' });
     refrescarKardexProducto(p.id);
   };
 
@@ -1101,6 +1192,17 @@ export default function Inventario() {
   // En exhibición el formulario ni se muestra (nada de entradas manuales).
   const handleRegisterMovementProducto = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (registroProducto.pendiente) {
+      const entrada = await registroProducto.reintentar();
+      if (entrada) {
+        setPagosProducto([]);
+        toast.success('Entrada registrada. El saldo pendiente quedó en Gastos → Por Pagar.');
+        void fetchProductos();
+        const productoId = entrada.lineas[0]?.item_id ?? selectedProductoId;
+        if (productoId) handleOpenProducto({ id: productoId });
+      }
+      return;
+    }
     if (!selectedProductoId || !movProducto.ubicacion_id || !movProducto.cantidad) return;
 
     const esEntrada = movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION';
@@ -1119,6 +1221,40 @@ export default function Inventario() {
     const costoNeto = costoBruto !== undefined && pctDesc > 0
       ? parseFloat((costoBruto * (1 - pctDesc / 100)).toFixed(2))
       : costoBruto;
+    if (movProducto.tipo === 'ENTRADA' && costoBruto !== undefined) {
+      const totalCOP = (costoNeto! * Number(movProducto.cantidad || 0) + Number(movProducto.llevada || 0)) * (refMid === MONEDA_BASE_ID ? 1 : tasaNum);
+      const pagado = totalPagosCOP(pagosProducto, cuentasPago);
+      if (pagado > totalCOP + 0.005) {
+        toast.error('Los pagos superan el total de la entrada. Revisa los montos.');
+        return;
+      }
+      if (totalCOP - pagado > 0.005 && !movProducto.proveedor_nombre.trim()) {
+        toast.error('Indica el proveedor para registrar el saldo pendiente en Gastos → Por Pagar.');
+        return;
+      }
+      const entrada = await registroProducto.registrar({
+        fecha: movProducto.fecha || hoyVE(), proveedor_nombre: movProducto.proveedor_nombre.trim() || undefined,
+        recibido_por: movProducto.recibido_por.trim() || undefined,
+        observaciones: movProducto.observaciones || undefined,
+        lineas: [{ tipo_item: 'PRODUCTO', producto_id: selectedProductoId,
+          ubicacion_id: Number(movProducto.ubicacion_id), cantidad: Number(movProducto.cantidad),
+          precio_unitario: costoBruto, moneda_precio_id: refMid, tasa_precio_a_cop: tasaNum || undefined,
+          descuento_porcentaje: pctDesc, llevada_unitaria: 0, llevada_total: Number(movProducto.llevada || 0),
+          cliente_nombre: movProducto.cliente_nombre.trim() || undefined }],
+        pagos: capturaPagos(pagosProducto, cuentasPago),
+      });
+      if (entrada) {
+        setPagosProducto([]);
+        toast.success('Entrada registrada. El saldo pendiente quedó en Gastos → Por Pagar.');
+        void fetchProductos();
+        handleOpenProducto({ id: selectedProductoId });
+      }
+      return;
+    }
+    if (movProducto.tipo === 'ENTRADA' && pagosProducto.length > 0) {
+      toast.error('Indica el precio unitario antes de registrar pagos.');
+      return;
+    }
     // "Fiar": ENTRADA sin cuenta de pago → la deuda queda registrada con el
     // proveedor (obligatorio). Solo si hay costo: sin costo la entrada es una
     // carga de stock y no hay deuda que registrar.
@@ -1155,7 +1291,7 @@ export default function Inventario() {
         observaciones: [movProducto.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+      setMovProducto({ ubicacion_id: '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', recibido_por: '' });
       fetchProductos();
       refrescarKardexProducto(selectedProductoId);
     } catch (error: any) {
@@ -1851,6 +1987,21 @@ export default function Inventario() {
                Nuevo Material
             </button>
           )}
+          {(tab === 'insumos' || tab === 'productos' || tab === 'plasticos') && (
+            <button type="button" onClick={() => { if (cuentasPago.length === 0) void cargarCuentasPago(); setShowEntradasRegistradas(true); }} className="rounded-xl border border-yeikar-secondary/20 bg-white px-4 py-2.5 text-sm font-bold text-yeikar-secondary">Entradas registradas</button>
+          )}
+          {(tab === 'insumos' || tab === 'productos' || tab === 'plasticos') && (
+            <button
+              onClick={() => {
+                if (cuentasPago.length === 0) void cargarCuentasPago();
+                setShowCompraMultiple(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-yeikar-secondary/20 bg-white px-4 py-2.5 text-sm font-bold text-yeikar-secondary shadow-sm transition hover:border-yeikar-primary/60 hover:bg-yeikar-tertiary/40"
+              title="Registrar una factura con varios artículos y formas de pago"
+            >
+              <ReceiptText size={16} /> Entrada de inventario
+            </button>
+          )}
           {(tab === 'productos' || tab === 'plasticos') && (
             <button
               onClick={() => {
@@ -2320,6 +2471,7 @@ export default function Inventario() {
                         <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movMaterial.tipo]}</p>
                       </div>
 
+                      <fieldset disabled={registroMaterial.enviando || registroMaterial.pendiente} className="min-w-0 space-y-4 border-0 p-0">
                       {/* Fecha real del movimiento: por defecto HOY; admite un día anterior */}
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">
@@ -2344,7 +2496,7 @@ export default function Inventario() {
                         <label className="text-xs font-bold text-yeikar-secondary">
                           Cantidad <span className="text-yeikar-neutral/40 font-normal">({materialSeleccionado.unidad_medida?.abreviatura || materialSeleccionado.unidad_medida?.nombre || ''})</span>
                         </label>
-                        <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial((p) => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
+                        <input aria-label="Cantidad recibida del material" type="number" step="0.0001" min="0.0001" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial((p) => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
                       </div>
 
                       {/* Datos de la compra (entradas y devoluciones) */}
@@ -2358,6 +2510,7 @@ export default function Inventario() {
                               </label>
                               <div className="flex gap-2">
                                 <MontoInput
+                                  aria-label="Precio unitario del material"
                                   min="0"
                                   placeholder="0.00"
                                   value={movMaterial.moneda_precio_id === MONEDA_BASE_ID ? movMaterial.costo_unitario : movMaterial.precio_moneda}
@@ -2585,120 +2738,27 @@ export default function Inventario() {
                         );
                       })()}
 
-                      {/* Pago: SIEMPRE visible al elegir ENTRADA, antes de
-                          digitar cantidad o costo (Paola registra entradas
-                          sin precio y también debe ver la pregunta). */}
-                      {movMaterial.tipo === 'ENTRADA' && (() => {
-                        const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
-                        const brutoRef = parseFloat(movMaterial.costo_unitario || '0') || 0;
-                        const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
-                        const netoUnit = descPct > 0 ? Math.max(0, brutoRef * (1 - descPct / 100)) : brutoRef;
-                        const cantRef = parseFloat(movMaterial.cantidad || '0') || 0;
-                        const totalRef = netoUnit * cantRef;
-                        // "La llevada" es flete POR UNIDAD → el gasto/deuda usa el total
-                        const llevadaRef = (parseFloat(movMaterial.llevada || '0') || 0) * cantRef;
-                        const granTotalRef = totalRef + llevadaRef;
-                        const pagoCod = codMonedaDe(monedaId);
-                        const necesitaTasa = !!cuentaId && monedaId !== MONEDA_BASE_ID;
-                        const par = resolverParMonedas('COP', pagoCod);
-                        const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
-                        const tasaValida = necesitaTasa && tasaNum > 0;
-                        const deduc = cuentaId ? (tasaValida ? convertirMonedaHumana(granTotalRef, 'COP', pagoCod, tasaNum) : granTotalRef) : 0;
-                        return (
-                          <div className="space-y-3">
-                            <div className="space-y-1">
-                              <label className="text-xs font-bold text-yeikar-secondary">
-                                ¿Se pagó esta entrada? <span className="text-yeikar-neutral/40 font-normal">(elige la cuenta; si no, queda fiada)</span>
-                              </label>
-                              <SearchSelect
-                                value={movMaterial.pago_key}
-                                onChange={(v) => setMovMaterial((p) => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago, precio_moneda: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.precio_moneda }))}
-                                options={[
-                                  { value: '', label: 'No se pagó — quedó fiada al proveedor' },
-                                  ...cuentasPago.map((c) => ({ value: c.key, label: `Sí, desde ${c.nombre} · ${c.codigo}` })),
-                                ]}
-                                placeholder="Elige la cuenta si se pagó..."
-                              />
-                            </div>
-                            {!cuentaId && granTotalRef > 0 && (
-                              <div className="space-y-1.5">
-                                <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
-                                  Se registrará una deuda de ≈ <b>${granTotalRef.toLocaleString('es-CO')} COP</b>
-                                  {' '}(compra + llevada) en <b>Egresos y Gastos → Por Pagar</b>.
-                                </p>
-                                {!movMaterial.proveedor_nombre && (
-                                  <p className="text-[11px] font-bold text-red-600">
-                                    Al fiar es obligatorio indicar el proveedor (campo de arriba).
-                                  </p>
-                                )}
-                              </div>
-                            )}
-                            {!cuentaId && cantRef <= 0 && (
-                              <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
-                                Escribe la cantidad de la entrada. Si no se pagó, la deuda se calcula con el costo unitario × cantidad.
-                              </p>
-                            )}
-                            {!cuentaId && cantRef > 0 && granTotalRef <= 0 && (
-                              <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
-                                Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
-                              </p>
-                            )}
-                            {necesitaTasa && (
-                              <div className="space-y-1">
-                                <label className="text-xs font-bold text-yeikar-secondary">
-                                  Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
-                                </label>
-                                <input type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) => {
-                                  const t = e.target.value;
-                                  const tnum = parseFloat(t) || 0;
-                                  const enMoneda = parseFloat(movMaterial.precio_moneda || '0') || 0;
-                                  setMovMaterial((p) => ({
-                                    ...p,
-                                    tasa_pago: t,
-                                    // Si el precio se digitó en USD, recalcula el COP.
-                                    costo_unitario: enMoneda > 0 && tnum > 0 ? (enMoneda * tnum).toFixed(2) : p.costo_unitario,
-                                  }));
-                                }} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
-                              </div>
-                            )}
-                            {!!cuentaId && parseFloat(movMaterial.cantidad || '0') > 0 && (
-                              tasaValida ? (
-                                <div className="text-[11px] text-emerald-900 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2 space-y-0.5">
-                                  <p>
-                                    Se descontarán ≈ <b>${deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
-                                  </p>
-                                  <p className="text-[10px] text-emerald-700/80">
-                                    Compra: <span className="font-mono">${totalRef.toLocaleString('es-CO')} COP</span>
-                                    {llevadaRef > 0 && <> · Llevada: <span className="font-mono">${llevadaRef.toLocaleString('es-CO')} COP</span></>}
-                                    {' '}· tasa {tasaNum.toLocaleString('es-CO')}
-                                  </p>
-                                </div>
-                              ) : necesitaTasa ? (
-                                <p className="text-[11px] text-amber-800 bg-amber-50/80 border border-amber-200 rounded-lg px-3 py-2">
-                                  La compra {llevadaRef > 0 ? '+ llevada ' : ''}suma ≈ <b>${granTotalRef.toLocaleString('es-CO')} COP</b> · escribe la tasa <b>({par.label})</b> para calcular cuánto se descuenta en {pagoCod}.
-                                </p>
-                              ) : (
-                                <p className="text-[11px] text-emerald-900 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                                  Se descontarán ≈ <b>${deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movMaterial.pago_key)?.nombre}</b>
-                                </p>
-                              )
-                            )}
-                          </div>
-                        );
-                      })()}
+                      {movMaterial.tipo === 'ENTRADA' && <PagosEntradaEditor
+                        pagos={pagosMaterial} cuentas={cuentasPago} onChange={setPagosMaterial}
+                        totalCOP={Number(movMaterial.cantidad || 0) * (
+                          Math.round(Number(movMaterial.costo_unitario || 0) * (1 - Number(movMaterial.descuento_porcentaje || 0) / 100) * 100) / 100
+                          + Number(movMaterial.llevada || 0))}
+                      />}
 
                       {/* Observaciones */}
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
                         <textarea rows={2} placeholder="Detalle o referencia..." value={movMaterial.observaciones} onChange={(e) => setMovMaterial((p) => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
                       </div>
+                      </fieldset>
+                      {registroMaterial.error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{registroMaterial.error}</p>}
 
                       <button
                         type="submit"
-                        disabled={savingMov}
+                        disabled={savingMov || registroMaterial.enviando}
                         className="w-full py-3 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50 shadow-gold"
                       >
-                        {savingMov ? 'Registrando...' : 'Registrar Movimiento'}
+                        {savingMov || registroMaterial.enviando ? 'Registrando...' : registroMaterial.pendiente ? 'Reintentar misma entrada' : 'Registrar Movimiento'}
                       </button>
                     </form>
                   )}
@@ -3236,6 +3296,7 @@ export default function Inventario() {
                   <p className="text-[11px] text-yeikar-neutral/50 mt-2">{HINTS_TIPO[movProducto.tipo]}</p>
                 </div>
 
+                <fieldset disabled={registroProducto.enviando || registroProducto.pendiente} className="min-w-0 space-y-4 border-0 p-0">
                 {/* Fecha real del movimiento: por defecto HOY; admite un día anterior */}
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">
@@ -3371,80 +3432,25 @@ export default function Inventario() {
                     )}
                   </div>
                 )}
-                {/* Pago: SIEMPRE visible al elegir ENTRADA, antes de digitar
-                    cantidad o costo (plásticos y reventa usan este form). */}
                 {movProducto.tipo === 'ENTRADA' && (() => {
                   const refMid = Number(productoSeleccionado?.moneda_id ?? MONEDA_BASE_ID);
-                  const { cuentaId, monedaId } = parsePagoKey(movProducto.pagado_desde_metodo_caja_id);
-                  const pagoMid = monedaId ?? refMid;
-                  const pagoCod = codMonedaDe(pagoMid);
                   const refCod = codMonedaDe(refMid);
-                  // Tasa manual si las monedas difieren
-                  const necesitaTasa = !!cuentaId && pagoMid !== refMid;
-                  const par = resolverParMonedas(refCod, pagoCod);
-                  const tasaNum = parseFloat(movProducto.tasa_pago || '0') || 0;
                   const bruto = parseFloat(movProducto.costo_unitario || '0') || 0;
                   const desc = parseFloat(movProducto.descuento_porcentaje || '0') || 0;
                   const costoNetoUnit = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
                   const cantProd = parseFloat(movProducto.cantidad || '0') || 0;
                   const totalRef = costoNetoUnit * cantProd;
                   const totalCompra = totalRef + (parseFloat(movProducto.llevada || '0') || 0);
-                  const deduc = !cuentaId ? 0
-                    : pagoMid === refMid ? totalRef
-                    : convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum);
                   return (
                     <>
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-yeikar-secondary">
-                          ¿Se pagó esta entrada? <span className="text-yeikar-neutral/40 font-normal">(elige la cuenta; si no, queda fiada)</span>
-                        </label>
-                        <SearchSelect
-                          value={movProducto.pagado_desde_metodo_caja_id}
-                          onChange={(v) => setMovProducto(p => ({ ...p, pagado_desde_metodo_caja_id: String(v), tasa_pago: '' }))}
-                          options={[
-                            { value: '', label: 'No se pagó — quedó fiada al proveedor' },
-                            ...cuentasPago.map((c) => ({ value: c.key, label: `Sí, desde ${c.nombre} · ${c.codigo}` })),
-                          ]}
-                          placeholder="Elige la cuenta si se pagó..."
-                        />
-                      </div>
-                      {!cuentaId && totalCompra > 0 && (
-                        <div className="space-y-1.5">
-                          <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2">
-                            Se registrará una deuda de ≈ <b>${totalCompra.toLocaleString('es-CO')} {refCod}</b>
-                            {' '}(compra + llevada) en <b>Egresos y Gastos → Por Pagar</b>.
-                          </p>
-                          {!movProducto.proveedor_nombre && (
-                            <p className="text-[11px] font-bold text-red-600">
-                              Al fiar es obligatorio indicar el proveedor (campo de arriba).
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      {!cuentaId && cantProd <= 0 && (
-                        <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
-                          Escribe la cantidad de la entrada. Si no se pagó, la deuda se calcula con el costo unitario × cantidad.
-                        </p>
-                      )}
-                      {!cuentaId && cantProd > 0 && totalCompra <= 0 && (
-                        <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2">
-                          Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
-                        </p>
-                      )}
-                      {cuentaId && necesitaTasa && (
-                        <div className="space-y-1">
-                          <label className="text-xs font-bold text-yeikar-secondary">
-                            Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
-                          </label>
-                          <input type="number" step="any" min="0" required value={movProducto.tasa_pago} onChange={(e) => setMovProducto(p => ({ ...p, tasa_pago: e.target.value }))} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
-                        </div>
-                      )}
-                      {!!cuentaId && (
-                        <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                          Se descontarán ≈ <b>{deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === movProducto.pagado_desde_metodo_caja_id)?.nombre}</b>
-                          {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
-                        </p>
-                      )}
+                      <label className="block text-xs font-bold text-yeikar-secondary">Quién trajo la entrada (opcional)
+                        <input className={inputCls} value={movProducto.recibido_por} onChange={(e) => setMovProducto(p => ({ ...p, recibido_por: e.target.value }))} />
+                      </label>
+                      {refCod !== 'COP' && <label className="block text-xs font-bold text-yeikar-secondary">Tasa del precio · 1 {refCod} = ¿cuántos COP?
+                        <input className={inputCls} type="number" min="0.000001" step="0.000001" required value={movProducto.tasa_pago} onChange={(e) => setMovProducto(p => ({ ...p, tasa_pago: e.target.value }))} />
+                      </label>}
+                      <PagosEntradaEditor pagos={pagosProducto} cuentas={cuentasPago} onChange={setPagosProducto}
+                        totalCOP={totalCompra * (refCod === 'COP' ? 1 : Number(movProducto.tasa_pago || 0))} />
                     </>
                   );
                 })()}
@@ -3452,12 +3458,14 @@ export default function Inventario() {
                   <label className="text-xs font-bold text-yeikar-secondary">Observaciones</label>
                   <textarea rows={2} placeholder="Detalle o referencia..." value={movProducto.observaciones} onChange={(e) => setMovProducto(p => ({ ...p, observaciones: e.target.value }))} className="w-full bg-yeikar-tertiary/20 border border-yeikar-secondary-light/10 rounded-xl p-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary" />
                 </div>
+                </fieldset>
+                {registroProducto.error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{registroProducto.error}</p>}
                 <button
                   type="submit"
-                  disabled={savingMovProd}
+                  disabled={savingMovProd || registroProducto.enviando}
                   className="w-full py-3 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-colors disabled:opacity-50 shadow-gold"
                 >
-                  {savingMovProd ? 'Registrando...' : 'Registrar Movimiento'}
+                  {savingMovProd || registroProducto.enviando ? 'Registrando...' : registroProducto.pendiente ? 'Reintentar misma entrada' : 'Registrar Movimiento'}
                 </button>
               </form>
               ))}
@@ -4189,85 +4197,22 @@ export default function Inventario() {
               </div>
               {parseFloat(newProducto.cantidad_inicial || '0') > 0 && (() => {
                 const refMid = Number(newProducto.moneda_id || MONEDA_BASE_ID);
-                const { cuentaId, monedaId } = parsePagoKey(newProducto.cuenta_pago_id);
-                const pagoMid = monedaId ?? refMid;
-                const pagoCod = codMonedaDe(pagoMid);
                 const refCod = codMonedaDe(refMid);
-                const necesitaTasa = !!cuentaId && pagoMid !== refMid;
-                const par = resolverParMonedas(refCod, pagoCod);
                 const tasaNum = parseFloat(newProducto.tasa_pago || '0') || 0;
                 const bruto = parseFloat(newProducto.costo_base || '0') || 0;
                 const desc = parseFloat(newProducto.descuento_porcentaje || '0') || 0;
                 const neto = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
                 const cant = parseFloat(newProducto.cantidad_inicial || '0') || 0;
                 const totalRef = neto * cant;
-                const puedeFiar = neto > 0;
-                const fiado = !cuentaId;
-                const deduc = !cuentaId ? 0
-                  : pagoMid === refMid ? totalRef
-                  : convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum);
                 return (
                   <div className="space-y-2 rounded-2xl border border-yeikar-secondary-light/10 bg-yeikar-tertiary/15 p-4">
-                    <div>
-                      <label className="block text-xs font-bold text-yeikar-secondary mb-1">
-                        ¿Se pagó esta entrada? *
-                      </label>
-                      <SearchSelect
-                        value={newProducto.cuenta_pago_id}
-                        onChange={(v) => setNewProducto(prev => ({ ...prev, cuenta_pago_id: String(v), tasa_pago: '' }))}
-                        options={[
-                          { value: '', label: 'No se pagó — quedó fiada al proveedor' },
-                          ...cuentasPago.map((c) => ({ value: c.key, label: `${c.nombre} · ${c.codigo}` })),
-                        ]}
-                        placeholder="Elige la cuenta si se pagó..."
-                      />
-                      <p className="text-[10px] text-yeikar-neutral/40 mt-1">
-                        Si eliges una cuenta, se registra la salida de caja de la compra. Si no, la deuda queda en <b>Por Pagar</b>.
-                      </p>
-                    </div>
-                    {fiado && (
-                      <div>
-                        <label className="block text-xs font-bold text-yeikar-secondary mb-1">
-                          Proveedor {puedeFiar && <span className="text-red-500">*</span>}
-                        </label>
-                        <input
-                          type="text"
-                          value={newProducto.proveedor_nombre}
-                          onChange={(e) => setNewProducto(prev => ({ ...prev, proveedor_nombre: e.target.value }))}
-                          placeholder="¿A quién le quedó fiado?"
-                          className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl px-3 py-2.5 text-sm text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
-                        />
-                        {puedeFiar ? (
-                          <p className="text-[11px] text-red-600/80 bg-red-50/70 border border-red-100 rounded-lg px-3 py-2 mt-1.5">
-                            Se registrará una deuda de ≈ <b>{simboloPrecio}{fmtNumero(totalRef, 2)}</b> ({cant.toLocaleString('es-CO')} × {simboloPrecio}{fmtNumero(neto, 2)}) en <b>Egresos y Gastos → Por Pagar</b>.
-                          </p>
-                        ) : (
-                          <p className="text-[11px] text-yeikar-neutral/60 bg-white/70 border border-yeikar-secondary-light/10 rounded-lg px-3 py-2 mt-1.5">
-                            Sin costo unitario no hay deuda que registrar: la entrada solo suma stock.
-                          </p>
-                        )}
-                      </div>
-                    )}
-                    {cuentaId && necesitaTasa && (
-                      <div>
-                        <label className="block text-xs font-bold text-yeikar-secondary mb-1">
-                          Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
-                        </label>
-                        <input
-                          type="number" step="any" min="0" required
-                          value={newProducto.tasa_pago}
-                          onChange={(e) => setNewProducto(prev => ({ ...prev, tasa_pago: e.target.value }))}
-                          placeholder={`Ej: ${par.placeholder}`}
-                          className="w-full bg-white border border-yeikar-secondary-light/15 rounded-xl p-2.5 text-sm font-mono text-yeikar-neutral focus:outline-none focus:border-yeikar-primary"
-                        />
-                      </div>
-                    )}
-                    {!!cuentaId && (
-                      <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                        Se descontarán ≈ <b>{deduc.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b> desde <b>{cuentasPago.find((c) => c.key === newProducto.cuenta_pago_id)?.nombre}</b>
-                        {necesitaTasa && tasaNum <= 0 ? ' · falta la tasa' : ''}
-                      </p>
-                    )}
+                    <label className="block text-xs font-bold text-yeikar-secondary">Proveedor
+                      <input value={newProducto.proveedor_nombre} onChange={(e) => setNewProducto(prev => ({ ...prev, proveedor_nombre: e.target.value }))} placeholder="Obligatorio si queda saldo pendiente" className={inputCls} />
+                    </label>
+                    {refCod !== 'COP' && neto > 0 && <label className="block text-xs font-bold text-yeikar-secondary">Tasa del precio · 1 {refCod} = ¿cuántos COP?
+                      <input type="number" min="0.000001" step="0.000001" required value={newProducto.tasa_pago} onChange={(e) => setNewProducto(prev => ({ ...prev, tasa_pago: e.target.value }))} className={inputCls} />
+                    </label>}
+                    <PagosEntradaEditor pagos={pagosProductoNuevo} cuentas={cuentasPago} onChange={setPagosProductoNuevo} totalCOP={totalRef * (refCod === 'COP' ? 1 : tasaNum)} />
                   </div>
                 );
               })()}
@@ -4280,6 +4225,7 @@ export default function Inventario() {
                   El producto se crea en <b>stock 0</b>. Después puedes registrar una entrada desde su detalle.
                 </p>
               )}
+              {registroProductoNuevo.error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{registroProductoNuevo.error}</p>}
               <div className="flex gap-3 pt-3 border-t border-yeikar-secondary-light/5">
                 <button type="button" onClick={() => setShowProductoModal(false)} className="flex-1 py-2.5 bg-yeikar-tertiary hover:bg-yeikar-secondary-light/15 text-yeikar-secondary rounded-xl font-bold font-headline text-sm transition-colors">Cancelar</button>
                 <button type="submit" disabled={savingProducto} className="flex-1 py-2.5 bg-yeikar-primary hover:bg-yeikar-primary-dark text-yeikar-neutral rounded-xl font-bold font-headline text-sm transition-all disabled:opacity-50">{savingProducto ? 'Creando...' : 'Crear Producto'}</button>
@@ -4681,6 +4627,23 @@ export default function Inventario() {
           </div>
         </div>
       )}
+
+      <CompraMultipleModal
+        key={entradaCorregir ? `corregir:${entradaCorregir.compra_id}` : 'entrada-nueva'}
+        open={showCompraMultiple}
+        userId={user?.id ?? null}
+        onClose={() => { setShowCompraMultiple(false); setEntradaCorregir(undefined); }}
+        onCreated={handleCompraMultipleCreada}
+        unidades={unidades}
+        monedas={monedas}
+        ubicaciones={ubicaciones}
+        cuentas={cuentasPago}
+        categoriasMaterial={categoriasMaterial}
+        categoriasProducto={categoriasProducto}
+        tiposProducto={tiposProducto}
+        entrada={entradaCorregir}
+      />
+      {showEntradasRegistradas && <EntradasRegistradas onClose={() => setShowEntradasRegistradas(false)} onEditar={(entrada) => { setShowEntradasRegistradas(false); setEntradaCorregir(entrada); setShowCompraMultiple(true); }} />}
     </div>
   );
 }
