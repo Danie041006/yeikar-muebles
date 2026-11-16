@@ -200,7 +200,9 @@ def test_04_inventario_entrada_negativa_cero(client, db, cleaner):
         r = client.post("/api/v1/inventario/movimiento", json={
             "material_id": mat["id"], "ubicacion_id": 1, "tipo": "ENTRADA", "cantidad": cant,
         }, headers=ADMIN_HEADERS)
-        assert r.status_code == 422, (
+        # Negativa → 422 (Pydantic); cero → 400 (el service exige cantidad > 0).
+        # Lo que importa es que se rechace y no toque el stock.
+        assert r.status_code in (400, 422), (
             f"ENTRADA cantidad={cant} aceptada → BUG: {r.status_code} {r.text[:150]}"
         )
     assert _stock_material(db, mat["id"]) == 0.0, (

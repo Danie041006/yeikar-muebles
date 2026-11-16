@@ -126,6 +126,16 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 - **Nómina**: lee `mano_obra` directamente (no los consumos); el costo de producción suma esa misma fila `monto × (1+recargo/100)`.
 - **Sobrantes de lámina RETIRADOS** (decisión del dueño: ocultar y apagar, sin borrar datos): el inventario de retazos ya no se crea, ni se consume, ni se repone. Los endpoints `/inventario/sobrantes` NO existen; un `origen_sobrante_id` en un consumo se rechaza con 400 claro; la confirmación por cortes ya no registra el retazo. La tabla `sobrante_lamina`, las columnas `origen_sobrante_id` y el modelo quedan **congelados** (sin uso) para no romper el historial ni las FKs. Los cortes siguen funcionando con costo proporcional al área.
 
+### Entradas agrupadas de inventario y corrección de cabecera
+
+- **Conviven dos flujos**: la entrada **individual** sigue con su formulario de siempre (`PagosMixtosEditor` + `GET/PUT/DELETE /inventario/movimiento/{id}`, edición y anulación con reversa). La entrada **agrupada** (`Entrada de inventario` en la barra de Inventario) registra una factura con varios artículos/pagos vía `POST /inventario/compra-multiple` y la tabla `compra_inventario_multiple`.
+- **Pagos de la agrupada**: cada cuenta pide su **monto explícito**; agregar otra cuenta no reparte ni mueve lo escrito. Lo no pagado queda como deuda en **Gastos → Por Pagar**. El saldo se muestra siempre en COP.
+- **Captura fiel**: la cabecera guarda `datos_json` (vigente), `original_json` (primera captura) y `pagos_json` (cada pago con cuenta, moneda, monto, tasa, observación, `gasto_id` y `movimiento_caja_id`). Cada renglón lleva `linea_id` y `movimiento_id`; `gasto.entrada_inventario_id` enlaza los egresos.
+- **Corrección** (`GET /inventario/entradas`, `GET/PUT /inventario/entradas/{id}`): solo autor o Dueño/Administrador; exige `version`, `operacion_id` idempotente y `motivo`. Una sola transacción corrige stock, movimientos, pagos/gastos y deuda; la UI muestra la captura original, el historial y una vista previa antes de confirmar.
+- **Reglas**: si el artículo tiene movimientos posteriores se bloquean artículo/cantidad/ubicación/fecha (lo demás sí se corrige). Los abonos de Gastos no se borran ni recrean; si la deuda corregida queda por debajo de lo abonado se rechaza. Las líneas de una entrada agrupada **no** se editan por el kardex (`_validar_entrada_corregible` ya bloquea `referencia_tipo`): se corrigen desde **Entradas registradas**. Caja y Gastos tampoco editan/borran esos pagos.
+- **Migraciones**: `a8b9c0d1e2f3` (depende del head `x2y3z4a5b6c7`) y `b9c0d1e2f3a4`. Ambas aditivas.
+- Tests: `pytest test/test_compra_inventario_multiple.py test/test_entrada_correccion.py -v` y `npx playwright test e2e/entradas-inventario.spec.ts`.
+
 ### Muebles a la medida y piezas del juego (checklist)
 
 - **Renglón a medida**: `DetalleCotizacion`/`DetallePedido` aceptan `tipo_item=FABRICADO` con `producto_id NULL` si hay `descripcion_especifica` (juegos, diseños nuevos). En Cotizaciones, el selector de productos muestra la fila contextual «Usar “…” como mueble a la medida» al escribir; el precio se digita a mano. Es la vía para teclear notas de papel completas.

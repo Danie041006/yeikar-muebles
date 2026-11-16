@@ -1,16 +1,20 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, MovimientoUpdate, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, CategoriaInventario } from '../services/inventarioService';
+import { inventarioService, InventarioItem, AlertaStock, MovimientoResponse, MovimientoUpdate, ProductoInventarioItem, AlertaStockProducto, MovimientoProductoResponse, CategoriaInventario, type EntradaInventarioDetalle } from '../services/inventarioService';
 import { productosService, type MonedaInfo } from '../services/productosService';
 import { crudoService, produccionService, type Crudo, type CrudoMovimiento, type RetrabajoAbierto } from '../services/produccionService';
 import { subirAdjunto, eliminarAdjunto, TIPO_ADJUNTO, type AdjuntoInfo } from '../services/adjuntosService';
 import { cuentasService } from '../services/cuentasService';
 import api from '../services/api';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { motion } from 'framer-motion';
+import { ReceiptText } from 'lucide-react';
 import { SearchSelect, ResponsiveDataTable, MontoInput, type DataColumn } from '../components/ui';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import PagosMixtosEditor, { equivalenteTotal, pagosCompletos, type PagoMixtoRow } from '../components/Inventario/PagosMixtosEditor';
+import CompraMultipleModal from '../components/Inventario/CompraMultipleModal';
+import EntradasRegistradas from '../components/Inventario/EntradasRegistradas';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage, fmtNumero } from '../utils/format';
 import { hoyVE } from '../utils/fechas';
 
@@ -112,6 +116,7 @@ function parsePagoKey(key: string): { cuentaId: number | null; monedaId: number 
 export default function Inventario() {
   const toast = useToast();
   const navigate = useNavigate();
+  const { user } = useAuth();
   interface UnidadMedida {
     id: number;
     nombre: string;
@@ -346,6 +351,9 @@ export default function Inventario() {
   const [asignando, setAsignando] = useState(false);
 
   const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [showCompraMultiple, setShowCompraMultiple] = useState(false);
+  const [showEntradasRegistradas, setShowEntradasRegistradas] = useState(false);
+  const [entradaCorregir, setEntradaCorregir] = useState<EntradaInventarioDetalle | undefined>();
   // Las dimensiones de lámina no se muestran de entrada (confunden al crear un
   // insumo normal): solo aparecen si el material es laminar.
   const [newMaterialEsLamina, setNewMaterialEsLamina] = useState(false);
@@ -534,6 +542,20 @@ export default function Inventario() {
     fetchCrudo();
     fetchRetrabajos();
   }, [fetchData, fetchInsumos, fetchProductos, fetchCrudo, fetchRetrabajos]);
+
+  const handleCompraMultipleCreada = async (compra: Awaited<ReturnType<typeof inventarioService.crearCompraMultiple>>) => {
+    const eraCorreccion = Boolean(entradaCorregir);
+    const saldo = Number(compra.saldo_actual ?? compra.saldo_en_moneda_base);
+    setShowCompraMultiple(false);
+    setEntradaCorregir(undefined);
+    toast.success(
+      eraCorreccion ? `Entrada corregida. Pendiente actual: ${fmtNumero(saldo, 2)} COP.`
+        : compra.saldo_en_moneda_base > 0
+          ? `Entrada de inventario registrada. Saldo pendiente: ${fmtNumero(compra.saldo_en_moneda_base, 2)} COP.`
+          : 'Entrada de inventario registrada y pagada.',
+    );
+    await Promise.all([fetchInsumos(), fetchProductos()]);
+  };
 
   const handleCreateCrudo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2250,6 +2272,31 @@ export default function Inventario() {
           >
             Inventario de Oficina
           </button>
+          {(tab === 'insumos' || tab === 'productos' || tab === 'plasticos') && (
+            <button
+              onClick={() => {
+                if (cuentasPago.length === 0) void cargarCuentasPago();
+                setShowEntradasRegistradas(true);
+              }}
+              className="bg-white border border-yeikar-secondary-light/20 hover:border-yeikar-primary/40 text-yeikar-secondary px-4 py-2.5 rounded-xl font-bold font-headline text-sm transition-colors"
+              title="Corregir entradas registradas"
+            >
+              Entradas registradas
+            </button>
+          )}
+          {(tab === 'insumos' || tab === 'productos' || tab === 'plasticos') && (
+            <button
+              onClick={() => {
+                if (cuentasPago.length === 0) void cargarCuentasPago();
+                setEntradaCorregir(undefined);
+                setShowCompraMultiple(true);
+              }}
+              className="bg-white border border-yeikar-secondary-light/20 hover:border-yeikar-primary/40 text-yeikar-secondary px-4 py-2.5 rounded-xl font-bold font-headline text-sm transition-colors flex items-center gap-2"
+              title="Registrar una factura con varios artículos y formas de pago"
+            >
+              <ReceiptText size={16} /> Entrada de inventario
+            </button>
+          )}
           {tab === 'insumos' && (
             <button
               onClick={() => setShowMaterialModal(true)}
@@ -5727,6 +5774,32 @@ export default function Inventario() {
           </div>
         );
       })()}
+
+      <CompraMultipleModal
+        key={entradaCorregir ? `corregir:${entradaCorregir.compra_id}` : 'entrada-nueva'}
+        open={showCompraMultiple}
+        userId={user?.id ?? null}
+        onClose={() => { setShowCompraMultiple(false); setEntradaCorregir(undefined); }}
+        onCreated={handleCompraMultipleCreada}
+        unidades={unidades}
+        monedas={monedas}
+        ubicaciones={ubicaciones}
+        cuentas={cuentasPago}
+        categoriasMaterial={categoriasMaterial}
+        categoriasProducto={categoriasProducto}
+        tiposProducto={tiposProducto}
+        entrada={entradaCorregir}
+      />
+      {showEntradasRegistradas && (
+        <EntradasRegistradas
+          onClose={() => setShowEntradasRegistradas(false)}
+          onEditar={(entrada) => {
+            setShowEntradasRegistradas(false);
+            setEntradaCorregir(entrada);
+            setShowCompraMultiple(true);
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -59,7 +59,8 @@ class CuentaPorPagarBase(BaseModel):
     moneda_id: int = 1
     fecha: date
     descripcion: Optional[str] = None
-    monto: Decimal = Field(..., gt=0)
+    # Una corrección de entrada puede cerrar el fiado original en cero.
+    monto: Decimal = Field(..., ge=0)
     tasa_cambio: Optional[Decimal] = Field(None, gt=0)
 
 

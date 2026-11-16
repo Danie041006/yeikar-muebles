@@ -313,6 +313,8 @@ def _calcular_abono_caja(db: Session, cxp: model.CuentaPorPagar, abono: schemas.
 
 
 def abonar(db: Session, cxp_id: int, abono: schemas.AbonoCreate, usuario: Optional[Usuario] = None) -> model.PagoCuentaPorPagar:
+    from app.modules.inventory.entrada_pagos import bloquear_deuda_entrada
+    bloquear_deuda_entrada(db, cxp_id)
     cxp = obtener_cuenta(db, cxp_id, usuario)
     if not cxp:
         raise ValueError("La cuenta por pagar no existe.")
@@ -352,6 +354,8 @@ def abonar(db: Session, cxp_id: int, abono: schemas.AbonoCreate, usuario: Option
     cxp.monto_pagado = (Decimal(str(cxp.monto_pagado)) + Decimal(str(abono.monto))).quantize(Decimal("0.01"))
     if cxp.saldo <= Decimal("0.005"):
         cxp.estado = "PAGADA"
+    from app.modules.inventory.entrada_pagos import marcar_abonos_modificados
+    marcar_abonos_modificados(db, cxp)
     record_event(
         db,
         actor=usuario,
@@ -369,6 +373,11 @@ def eliminar_abono(db: Session, abono_id: int, usuario: Optional[Usuario] = None
     pago = db.query(model.PagoCuentaPorPagar).filter(model.PagoCuentaPorPagar.id == abono_id).first()
     if not pago:
         return False
+    from app.modules.inventory.entrada_pagos import bloquear_deuda_entrada
+    bloquear_deuda_entrada(db, pago.cuenta_por_pagar_id)
+    pago = db.query(model.PagoCuentaPorPagar).filter(model.PagoCuentaPorPagar.id == abono_id).populate_existing().with_for_update().first()
+    if pago is None:
+        return False
     cxp = obtener_cuenta(db, pago.cuenta_por_pagar_id, usuario)
     if not cxp:
         raise ValueError("La cuenta por pagar asociada no existe.")
@@ -379,6 +388,8 @@ def eliminar_abono(db: Session, abono_id: int, usuario: Optional[Usuario] = None
     ).delete(synchronize_session=False)
     cxp.monto_pagado = (Decimal(str(cxp.monto_pagado)) - Decimal(str(pago.monto))).quantize(Decimal("0.01"))
     cxp.estado = "PAGADA" if cxp.saldo <= Decimal("0.005") else "PENDIENTE"
+    from app.modules.inventory.entrada_pagos import marcar_abonos_modificados
+    marcar_abonos_modificados(db, cxp)
     db.delete(pago)
     db.commit()
     return True
@@ -388,6 +399,8 @@ def eliminar_cuenta(db: Session, cxp_id: int, usuario: Optional[Usuario] = None)
     cxp = obtener_cuenta(db, cxp_id, usuario)
     if not cxp:
         return False
+    if cxp.origen_tipo == "COMPRA_INVENTARIO_MULTIPLE":
+        raise ValueError("Esta deuda pertenece a una entrada de inventario. Corrige la entrada desde Inventario → Entradas registradas; sus abonos se administran aquí en Gastos.")
     if Decimal(str(cxp.monto_pagado)) > 0:
         raise ValueError("No se puede eliminar una deuda con abonos. Elimina primero sus abonos.")
 

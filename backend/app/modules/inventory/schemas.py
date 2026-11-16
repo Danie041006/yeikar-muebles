@@ -1,8 +1,9 @@
 # backend/app/modules/inventory/schemas.py
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from decimal import Decimal
+from uuid import UUID
 
 # Zonas del taller para las entradas de insumos (mismas que material.departamento)
 DEPARTAMENTOS_VALIDOS = {
@@ -384,3 +385,155 @@ class LibroEntradasSalidasResponse(BaseModel):
     resumen: LibroResumenResponse
     filas: List[LibroFilaResponse]
     truncado: bool = False
+
+
+# ── Compra múltiple de inventario ─────────────────────────────────────────
+
+class NuevoMaterialCompra(BaseModel):
+    nombre: str = Field(..., min_length=1, max_length=150)
+    unidad_medida_id: int = Field(..., gt=0)
+    departamento: Optional[str] = None
+    categoria_inventario_id: Optional[int] = Field(None, gt=0)
+    stock_minimo: Decimal = Field(Decimal("8"), ge=0)
+    largo_cm: Optional[Decimal] = Field(None, gt=0)
+    ancho_cm: Optional[Decimal] = Field(None, gt=0)
+
+    @field_validator("nombre")
+    @classmethod
+    def _validar_nombre_material(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("El nombre del material no puede estar vacío.")
+        return value.strip()
+
+    @field_validator("departamento")
+    @classmethod
+    def _validar_departamento_nuevo_material(cls, value: Optional[str]) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        value = value.upper().strip()
+        if value not in DEPARTAMENTOS_VALIDOS:
+            raise ValueError(f"Departamento inválido: {value}")
+        return value
+
+
+class NuevoProductoReventaCompra(BaseModel):
+    nombre: str = Field(..., min_length=1, max_length=150)
+    tipo_producto_id: int = Field(..., gt=0)
+    moneda_id: int = Field(1, gt=0)
+    codigo: Optional[str] = Field(None, max_length=50)
+    categoria_inventario_id: Optional[int] = Field(None, gt=0)
+    precio_venta_base: Optional[Decimal] = Field(None, ge=0)
+    stock_minimo: Decimal = Field(Decimal("8"), ge=0)
+
+    @field_validator("nombre")
+    @classmethod
+    def _validar_nombre_producto(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("El nombre del producto no puede estar vacío.")
+        return value.strip()
+
+
+class CompraInventarioMultipleLinea(BaseModel):
+    linea_id: Optional[UUID] = None
+    tipo_item: Literal["MATERIAL", "PRODUCTO"]
+    material_id: Optional[int] = Field(None, gt=0)
+    producto_id: Optional[int] = Field(None, gt=0)
+    nuevo_material: Optional[NuevoMaterialCompra] = None
+    nuevo_producto: Optional[NuevoProductoReventaCompra] = None
+    cantidad: Decimal = Field(..., gt=0, max_digits=12, decimal_places=4)
+    precio_unitario: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2)
+    moneda_precio_id: int = Field(1, gt=0)
+    tasa_precio_a_cop: Optional[Decimal] = Field(None, gt=0, max_digits=15, decimal_places=6)
+    llevada_unitaria: Decimal = Field(Decimal("0"), ge=0, max_digits=15, decimal_places=2)
+    llevada_total: Optional[Decimal] = Field(None, ge=0, max_digits=15, decimal_places=2)
+    descuento_porcentaje: Decimal = Field(Decimal("0"), ge=0, le=100)
+    departamento: Optional[str] = None
+    ubicacion_id: Optional[int] = Field(None, gt=0)
+    cliente_nombre: Optional[str] = Field(None, max_length=150)
+    observaciones: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validar_item(self):
+        if self.tipo_item == "MATERIAL":
+            if (self.material_id is not None) == (self.nuevo_material is not None):
+                raise ValueError("Cada renglón de material debe elegir uno existente o completar uno nuevo, no ambos.")
+            if self.producto_id is not None or self.nuevo_producto is not None:
+                raise ValueError("Un renglón de material no puede incluir datos de producto.")
+        else:
+            if (self.producto_id is not None) == (self.nuevo_producto is not None):
+                raise ValueError("Cada renglón de producto debe elegir uno existente o completar uno nuevo, no ambos.")
+            if self.material_id is not None or self.nuevo_material is not None:
+                raise ValueError("Un renglón de producto no puede incluir datos de material.")
+        if self.departamento:
+            self.departamento = self.departamento.upper().strip()
+            if self.departamento not in DEPARTAMENTOS_VALIDOS:
+                raise ValueError(f"Departamento inválido: {self.departamento}")
+        precision_cantidad = Decimal("0.01") if self.tipo_item == "PRODUCTO" else Decimal("0.0001")
+        if self.cantidad != self.cantidad.quantize(precision_cantidad):
+            decimales = abs(precision_cantidad.as_tuple().exponent)
+            raise ValueError(f"La cantidad admite máximo {decimales} decimales.")
+        if self.descuento_porcentaje != self.descuento_porcentaje.quantize(Decimal("0.01")):
+            raise ValueError("El descuento admite máximo 2 decimales.")
+        return self
+
+
+class CompraInventarioMultiplePagoCreate(BaseModel):
+    pago_id: Optional[UUID] = None
+    metodo_caja_id: int = Field(..., gt=0)
+    monto: Decimal = Field(..., gt=0, max_digits=15, decimal_places=2)
+    # 1 unidad de moneda de la cuenta = X COP. COP usa 1.
+    tasa_cambio: Optional[Decimal] = Field(None, gt=0)
+    # Se anexa al concepto del egreso en caja, después del detalle de la compra.
+    observacion: Optional[str] = Field(None, max_length=250)
+
+
+class CompraInventarioMultipleCreate(BaseModel):
+    operacion_id: UUID
+    fecha: date
+    proveedor_id: Optional[int] = Field(None, gt=0)
+    proveedor_nombre: Optional[str] = Field(None, max_length=150)
+    recibido_por: Optional[str] = Field(None, max_length=150)
+    observaciones: Optional[str] = None
+    lineas: List[CompraInventarioMultipleLinea] = Field(..., min_length=1, max_length=100)
+    pagos: List[CompraInventarioMultiplePagoCreate] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def _validar_claves(self):
+        for etiqueta, claves in (
+            ("renglones", [linea.linea_id for linea in self.lineas if linea.linea_id]),
+            ("pagos", [pago.pago_id for pago in self.pagos if pago.pago_id]),
+        ):
+            if len(claves) != len(set(claves)):
+                raise ValueError(f"Hay identificadores repetidos entre los {etiqueta}.")
+        return self
+
+
+class CorreccionEntradaCreate(BaseModel):
+    operacion_id: UUID
+    version: int = Field(..., gt=0)
+    motivo: str = Field(..., min_length=3, max_length=500)
+    entrada: CompraInventarioMultipleCreate
+
+    @field_validator("motivo")
+    @classmethod
+    def _validar_motivo(cls, motivo: str) -> str:
+        if len(motivo.strip()) < 3:
+            raise ValueError("Explica el motivo de la corrección.")
+        return motivo.strip()
+
+
+class CompraInventarioMultipleLineaResponse(BaseModel):
+    tipo_item: Literal["MATERIAL", "PRODUCTO"]
+    item_id: int
+    nombre: str
+    cantidad: Decimal
+    total_en_moneda_base: Decimal
+
+
+class CompraInventarioMultipleResponse(BaseModel):
+    compra_id: int
+    total_en_moneda_base: Decimal
+    pagado_en_moneda_base: Decimal
+    saldo_en_moneda_base: Decimal
+    cuenta_por_pagar_id: Optional[int] = None
+    lineas: List[CompraInventarioMultipleLineaResponse]

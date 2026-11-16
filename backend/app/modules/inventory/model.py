@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Text, DateTime, ForeignKey, UniqueConstraint, Boolean
+from sqlalchemy import Column, Integer, BigInteger, Numeric, String, Text, DateTime, ForeignKey, UniqueConstraint, Boolean, JSON, text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -220,3 +220,51 @@ class EntradaCompraPago(Base):
 
     moneda = relationship("Moneda")
     metodo_caja = relationship("MetodoCaja")
+class CompraInventarioMultiple(Base):
+    """Cabecera de una factura que registra varias entradas de inventario."""
+
+    __tablename__ = "compra_inventario_multiple"
+    __table_args__ = (
+        UniqueConstraint("operacion_id", name="uq_compra_inventario_multiple_operacion_id"),
+    )
+
+    id = Column(BigInteger, primary_key=True)
+    operacion_id = Column(String(36), nullable=False)
+    fecha = Column(DateTime, nullable=False)
+    proveedor_id = Column(BigInteger, ForeignKey("proveedor.id", ondelete="SET NULL"), nullable=True)
+    proveedor_nombre = Column(String(150), nullable=True)
+    recibido_por = Column(String(150), nullable=True)
+    observaciones = Column(Text, nullable=True)
+    total_en_moneda_base = Column(Numeric(15, 2), nullable=False)
+    pagado_en_moneda_base = Column(Numeric(15, 2), nullable=False)
+    saldo_en_moneda_base = Column(Numeric(15, 2), nullable=False)
+    lineas_json = Column(JSON, nullable=False, default=list, server_default=text("'[]'::json"))
+    cuenta_por_pagar_id = Column(
+        BigInteger,
+        ForeignKey("cuenta_por_pagar.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    creado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    datos_json = Column(JSON, nullable=True)
+    original_json = Column(JSON, nullable=True)
+    pagos_json = Column(JSON, nullable=False, default=list, server_default=text("'[]'::json"))
+    version = Column(Integer, nullable=False, server_default="1", default=1)
+    actualizado_por_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    updated_at = Column(DateTime, onupdate=func.now())
+
+
+class CorreccionEntradaInventario(Base):
+    __tablename__ = "correccion_entrada_inventario"
+
+    id = Column(BigInteger, primary_key=True)
+    compra_id = Column(BigInteger, ForeignKey("compra_inventario_multiple.id", ondelete="CASCADE"), nullable=False, index=True)
+    operacion_id = Column(String(36), nullable=False, unique=True)
+    solicitud_json = Column(JSON, nullable=False)
+    respuesta_json = Column(JSON, nullable=False)
+    motivo = Column(String(500), nullable=False)
+    antes_json = Column(JSON, nullable=False)
+    despues_json = Column(JSON, nullable=False)
+    usuario_id = Column(BigInteger, ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, server_default=func.now())

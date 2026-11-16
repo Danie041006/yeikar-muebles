@@ -1,11 +1,12 @@
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional, List
+from uuid import uuid4
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 
 
@@ -2621,6 +2622,7 @@ _ORDEN_ZONAS = [
 
 _ORIGEN_LABELS = {
     "COMPRA": "Compra",
+    "COMPRA_INVENTARIO_MULTIPLE": "Entrada de inventario",
     "VENTA": "Venta",
     "PRODUCCION": "Producción",
     "PRODUCCION_EXHIBICION": "Producción (exhibición)",
@@ -3212,3 +3214,599 @@ def obtener_libro_entradas_salidas(db: Session, consulta: ConsultaLibro) -> dict
         "filas": filas[:consulta.limite],
         "truncado": len(filas) > consulta.limite,
     }
+def _centavos(valor: Decimal) -> Decimal:
+    return Decimal(str(valor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _tipo_gasto_compra_multiple(db: Session, lineas: list[dict]) -> tuple[int, Optional[str]]:
+    """Reutiliza el tipo de gasto disponible y evita clasificar compras mixtas como una sola canasta."""
+    from app.modules.catalogos.model import TipoGasto
+
+    tipos = {linea["tipo_item"] for linea in lineas}
+    departamentos = {linea.get("departamento") for linea in lineas if linea["tipo_item"] == "MATERIAL"}
+    if tipos == {"MATERIAL"} and departamentos == {"OFICINA"}:
+        nombre, clasificacion = "PAPELERIA DE OFICINA", "GASTO_OFICINA"
+    elif tipos == {"MATERIAL"}:
+        nombre, clasificacion = "COMPRA DE INSUMOS", "GASTO_FABRICA"
+        if "OFICINA" in departamentos:
+            clasificacion = None
+    elif tipos == {"PRODUCTO"}:
+        nombre, clasificacion = "COMPRA INVENTARIO REVENTA", None
+    else:
+        nombre, clasificacion = "COMPRA DE INVENTARIO", None
+
+    tipo = db.query(TipoGasto).filter(func.lower(TipoGasto.nombre) == nombre.lower()).first()
+    if not tipo:
+        tipo = TipoGasto(nombre=nombre, categoria="OPERATIVO")
+        db.add(tipo)
+        db.flush()
+    return tipo.id, clasificacion
+
+
+def _moneda_y_tasa_cop(db: Session, moneda_id: int, tasa: Optional[Decimal], etiqueta: str) -> tuple:
+    from app.modules.catalogos.model import Moneda
+
+    moneda = db.query(Moneda).filter(Moneda.id == moneda_id).first()
+    if not moneda:
+        raise ValueError(f"La moneda #{moneda_id} de {etiqueta} no existe.")
+    if moneda.codigo.upper() == "COP":
+        return moneda, Decimal("1.0")
+    if tasa is None or Decimal(str(tasa)) <= 0:
+        raise ValueError(f"Indica la tasa de {etiqueta}: 1 {moneda.codigo} = ? COP.")
+    tasa_decimal = Decimal(str(tasa)).quantize(Decimal("0.000001"))
+    if tasa_decimal <= 0:
+        raise ValueError(f"La tasa de {etiqueta} debe ser mayor que 0,000001.")
+    return moneda, tasa_decimal
+
+
+def _validar_categoria_compra(db: Session, categoria_id: Optional[int], tipo: str, nombre: str) -> None:
+    if not categoria_id:
+        return
+    categoria = db.query(CategoriaInventario).filter(
+        CategoriaInventario.id == categoria_id,
+        CategoriaInventario.tipo == tipo,
+        CategoriaInventario.activo.is_(True),
+    ).first()
+    if not categoria:
+        raise ValueError(f"La categoría de '{nombre}' no existe o no corresponde a {tipo.lower()}.")
+
+
+def _crear_material_compra(db: Session, linea: schemas.CompraInventarioMultipleLinea) -> Material:
+    if linea.material_id:
+        material = db.query(Material).filter(
+            Material.id == linea.material_id,
+            Material.activo.is_(True),
+        ).first()
+        if not material:
+            raise ValueError(f"El material #{linea.material_id} no existe o está inactivo.")
+        return material
+
+    datos = linea.nuevo_material
+    nombre = datos.nombre.strip().upper()
+    repetido = db.query(Material.id).filter(
+        func.lower(Material.nombre) == nombre.lower(),
+        Material.activo.is_(True),
+    ).first()
+    if repetido:
+        raise ValueError(f"Ya existe el material '{nombre}'. Búscalo y selecciónalo en el renglón.")
+    if not db.query(UnidadMedida).filter(UnidadMedida.id == datos.unidad_medida_id).first():
+        raise ValueError(f"La unidad de medida del material '{nombre}' no existe.")
+    _validar_categoria_compra(db, datos.categoria_inventario_id, "MATERIAL", nombre)
+    material = Material(
+        nombre=nombre,
+        unidad_medida_id=datos.unidad_medida_id,
+        costo_base=Decimal("0"),
+        activo=True,
+        stock_minimo=datos.stock_minimo,
+        largo_cm=datos.largo_cm,
+        ancho_cm=datos.ancho_cm,
+        categoria_inventario_id=datos.categoria_inventario_id,
+        departamento=datos.departamento,
+    )
+    db.add(material)
+    db.flush()
+    return material
+
+
+def _crear_producto_reventa_compra(db: Session, linea: schemas.CompraInventarioMultipleLinea) -> Producto:
+    from app.modules.catalogos.model import TipoProducto
+
+    if linea.producto_id:
+        producto = db.query(Producto).filter(
+            Producto.id == linea.producto_id,
+            Producto.activo.is_(True),
+        ).first()
+        if not producto or not producto.es_reventa:
+            raise ValueError(f"El producto #{linea.producto_id} no existe, está inactivo o no es de reventa.")
+        return producto
+
+    datos = linea.nuevo_producto
+    nombre = datos.nombre.strip().upper()
+    repetido = db.query(Producto.id).filter(
+        func.lower(Producto.nombre) == nombre.lower(),
+        Producto.es_reventa.is_(True),
+        Producto.activo.is_(True),
+    ).first()
+    if repetido:
+        raise ValueError(f"Ya existe el producto de reventa '{nombre}'. Búscalo y selecciónalo en el renglón.")
+    if not db.query(TipoProducto).filter(TipoProducto.id == datos.tipo_producto_id).first():
+        raise ValueError(f"El tipo de producto de '{nombre}' no existe.")
+    _validar_categoria_compra(db, datos.categoria_inventario_id, "PRODUCTO", nombre)
+    producto = Producto(
+        nombre=nombre,
+        codigo=(datos.codigo or "").strip() or None,
+        tipo_producto_id=datos.tipo_producto_id,
+        descripcion="Producto de reventa",
+        activo=True,
+        stock_minimo=datos.stock_minimo,
+        es_reventa=True,
+        es_exhibicion=False,
+        moneda_id=datos.moneda_id,
+        categoria_inventario_id=datos.categoria_inventario_id,
+        precio_costo_base=Decimal("0"),
+        precio_venta_base=datos.precio_venta_base,
+    )
+    db.add(producto)
+    db.flush()
+    return producto
+
+
+def _crear_item_compra_multiple(db: Session, linea: schemas.CompraInventarioMultipleLinea):
+    if linea.tipo_item == "MATERIAL":
+        return _crear_material_compra(db, linea)
+    return _crear_producto_reventa_compra(db, linea)
+
+
+def _respuesta_compra_multiple(compra: model.CompraInventarioMultiple) -> dict:
+    return {
+        "compra_id": compra.id,
+        "total_en_moneda_base": compra.total_en_moneda_base,
+        "pagado_en_moneda_base": compra.pagado_en_moneda_base,
+        "saldo_en_moneda_base": compra.saldo_en_moneda_base,
+        "cuenta_por_pagar_id": compra.cuenta_por_pagar_id,
+        "lineas": compra.lineas_json or [],
+    }
+
+
+@dataclass
+class CompraMultipleContext:
+    datos: schemas.CompraInventarioMultipleCreate
+    usuario: object | None
+    lineas: list[dict]
+    pagos: list[dict]
+    compra: model.CompraInventarioMultiple
+    proveedor: Optional[Proveedor]
+    proveedor_nombre: Optional[str]
+    tipo_gasto_id: int
+    clasificacion: Optional[str]
+    total_cop: Decimal
+    saldo_cop: Decimal
+
+
+def _calcular_importes_linea_compra(
+    db: Session,
+    linea: schemas.CompraInventarioMultipleLinea,
+    articulo,
+) -> dict:
+    es_material = linea.tipo_item == "MATERIAL"
+    moneda_id = int(linea.moneda_precio_id or MONEDA_BASE_ID) if es_material else int(articulo.moneda_id or MONEDA_BASE_ID)
+    if not es_material and linea.moneda_precio_id != moneda_id:
+        raise ValueError(
+            f"El precio de {articulo.nombre} debe estar en la moneda del producto (moneda #{moneda_id})."
+        )
+
+    moneda, tasa = _moneda_y_tasa_cop(
+        db,
+        moneda_id,
+        linea.tasa_precio_a_cop,
+        f"precio de {articulo.nombre}",
+    )
+    precio = Decimal(str(linea.precio_unitario))
+    descuento = Decimal(str(linea.descuento_porcentaje)) / Decimal("100")
+    if es_material:
+        tasa = Decimal("1") if moneda.codigo.upper() == "COP" else tasa
+        precio *= tasa
+    costo_unitario = _centavos(precio * (Decimal("1") - descuento))
+    if costo_unitario <= 0:
+        raise ValueError(f"El precio neto de '{articulo.nombre}' debe ser mayor que cero. Revisa el precio o el descuento.")
+    llevada_unitaria = _centavos(linea.llevada_unitaria)
+    multiplicador = Decimal("1") if es_material else tasa
+    llevada_total = _centavos(linea.llevada_total) if linea.llevada_total is not None else _centavos(llevada_unitaria * linea.cantidad)
+    total_cop = _centavos((_centavos(costo_unitario * linea.cantidad) + llevada_total) * multiplicador)
+    departamento = linea.departamento
+    if es_material and departamento is None and linea.nuevo_material is not None:
+        departamento = linea.nuevo_material.departamento
+
+    return {
+        "moneda_id": moneda_id,
+        "tasa_precio": tasa,
+        "costo_unitario": costo_unitario,
+        "total_cop": total_cop,
+        "llevada_movimiento": llevada_total,
+        "departamento": departamento,
+    }
+
+
+def _preparar_linea_compra_multiple(
+    db: Session,
+    linea: schemas.CompraInventarioMultipleLinea,
+) -> dict:
+    articulo = _crear_item_compra_multiple(db, linea)
+    importes = _calcular_importes_linea_compra(db, linea, articulo)
+    ubicacion_id = None
+    if linea.tipo_item == "PRODUCTO":
+        ubicacion_id = linea.ubicacion_id or _ubicacion_deposito_predeterminada(db)
+        ubicacion = db.query(Ubicacion).filter(
+            Ubicacion.id == ubicacion_id,
+            Ubicacion.activo.is_(True),
+        ).first()
+        if not ubicacion:
+            raise ValueError(f"La ubicación #{ubicacion_id} de {articulo.nombre} no existe o está inactiva.")
+
+    return {
+        "tipo_item": linea.tipo_item,
+        "item_id": articulo.id,
+        "nombre": articulo.nombre,
+        "cantidad": linea.cantidad,
+        "costo_catalogo_anterior": str((articulo.costo_base if linea.tipo_item == "MATERIAL" else articulo.precio_costo_base) or 0),
+        "unidad": (
+            articulo.unidad_medida.abreviatura
+            if linea.tipo_item == "MATERIAL" and articulo.unidad_medida else None
+        ),
+        "descuento_porcentaje": linea.descuento_porcentaje,
+        "cliente_nombre": linea.cliente_nombre,
+        "observaciones": linea.observaciones,
+        "ubicacion_id": ubicacion_id,
+        **importes,
+    }
+
+
+def _preparar_lineas_compra_multiple(db: Session, lineas: list) -> tuple[list[dict], Decimal]:
+    lineas_preparadas = [_preparar_linea_compra_multiple(db, linea) for linea in lineas]
+    total_cop = _centavos(sum((linea["total_cop"] for linea in lineas_preparadas), Decimal("0")))
+    if total_cop <= 0:
+        raise ValueError("La compra debe tener un total mayor que cero.")
+    return lineas_preparadas, total_cop
+
+
+def _preparar_pagos_compra_multiple(db: Session, pagos: list) -> tuple[list[dict], Decimal]:
+    from app.modules.reports.model import MetodoCaja
+
+    pagos_preparados = []
+    total_pagado_cop = Decimal("0.00")
+    for pago in pagos:
+        cuenta = db.query(MetodoCaja).filter(
+            MetodoCaja.id == pago.metodo_caja_id,
+            MetodoCaja.activo.is_(True),
+        ).first()
+        if not cuenta:
+            raise ValueError(f"La cuenta de caja #{pago.metodo_caja_id} no existe o está inactiva.")
+        moneda_id = int(cuenta.moneda_id or MONEDA_BASE_ID)
+        moneda, tasa = _moneda_y_tasa_cop(db, moneda_id, pago.tasa_cambio, f"pago desde {cuenta.nombre}")
+        monto = _centavos(pago.monto)
+        monto_cop = _centavos(monto * tasa)
+        pagos_preparados.append({
+            "cuenta": cuenta,
+            "moneda_id": moneda.id,
+            "monto": monto,
+            "tasa": tasa,
+            "monto_cop": monto_cop,
+            "observacion": (pago.observacion or "").strip() or None,
+        })
+        total_pagado_cop += monto_cop
+    return pagos_preparados, _centavos(total_pagado_cop)
+
+
+def _resolver_proveedor_compra(
+    db: Session,
+    datos: schemas.CompraInventarioMultipleCreate,
+    saldo_cop: Decimal,
+) -> tuple[Optional[Proveedor], Optional[str]]:
+    proveedor_id, proveedor_nombre, _, _ = _resolver_proveedor_cliente(
+        db, datos.proveedor_id, datos.proveedor_nombre, None, None
+    )
+    proveedor = None
+    if proveedor_id:
+        proveedor = db.query(Proveedor).filter(Proveedor.id == proveedor_id).first()
+        if not proveedor:
+            raise ValueError(f"El proveedor #{proveedor_id} no existe.")
+        proveedor_nombre = proveedor_nombre or proveedor.nombre
+
+    if saldo_cop <= 0:
+        return proveedor, proveedor_nombre
+    nombre = (proveedor_nombre or "").strip()
+    if not proveedor and not nombre:
+        raise ValueError("Indica el proveedor para registrar el saldo pendiente.")
+    if not proveedor:
+        proveedor = db.query(Proveedor).filter(func.lower(Proveedor.nombre) == nombre.lower()).first()
+        if not proveedor:
+            proveedor = Proveedor(nombre=nombre)
+            db.add(proveedor)
+            db.flush()
+    return proveedor, proveedor.nombre
+
+
+def _crear_movimiento_compra_multiple(
+    db: Session,
+    contexto: CompraMultipleContext,
+    linea: schemas.CompraInventarioMultipleLinea,
+    preparada: dict,
+):
+    nota_descuento = ""
+    if preparada["descuento_porcentaje"] > 0:
+        nota_descuento = f"Descuento de compra: {preparada['descuento_porcentaje']}%."
+    observaciones = " · ".join(
+        parte for parte in (
+            linea.observaciones,
+            nota_descuento,
+        ) if parte
+    )
+    datos_movimiento = {
+        "tipo": "ENTRADA",
+        "cantidad": preparada["cantidad"],
+        "costo_unitario": preparada["costo_unitario"],
+        "llevada": preparada["llevada_movimiento"],
+        "proveedor_id": contexto.proveedor.id if contexto.proveedor else None,
+        "proveedor_nombre": contexto.proveedor_nombre,
+        "cliente_nombre": preparada["cliente_nombre"],
+        "descuento_porcentaje": linea.descuento_porcentaje,
+        "fecha": contexto.datos.fecha,
+        "referencia_tipo": "COMPRA_INVENTARIO_MULTIPLE",
+        "referencia_id": contexto.compra.id,
+        "observaciones": observaciones,
+    }
+    if preparada["tipo_item"] == "MATERIAL":
+        return registrar_movimiento(
+            db,
+            schemas.MovimientoCreate(
+                material_id=preparada["item_id"],
+                departamento=preparada["departamento"],
+                recibido_por=(contexto.datos.recibido_por or "").strip() or None,
+                **datos_movimiento,
+            ),
+            usuario=contexto.usuario,
+        )
+
+    return registrar_movimiento_producto(
+        db,
+        schemas.MovimientoProductoCreate(
+            producto_id=preparada["item_id"],
+            ubicacion_id=preparada["ubicacion_id"],
+            **datos_movimiento,
+        ),
+        usuario=contexto.usuario,
+    )
+
+
+def _registrar_lineas_compra_multiple(db: Session, contexto: CompraMultipleContext) -> None:
+    from app.modules.inventory.entrada_datos import renglon_guardado
+
+    pares = list(zip(contexto.datos.lineas, contexto.lineas))
+    ordenadas = sorted(pares, key=lambda par: (par[1]["tipo_item"], par[1]["item_id"], par[1]["ubicacion_id"] or 0))
+    movimientos = {id(preparada): _crear_movimiento_compra_multiple(db, contexto, linea, preparada) for linea, preparada in ordenadas}
+    lineas_respuesta = []
+    for linea, preparada in pares:
+        movimiento = movimientos[id(preparada)]
+        lineas_respuesta.append(renglon_guardado(linea, preparada, movimiento))
+    contexto.compra.lineas_json = lineas_respuesta
+
+
+def _detalle_entrada_inventario(lineas: list[dict]) -> str:
+    """Resume la entrada con la cantidad y la unidad de cada renglón."""
+    partes = []
+    for linea in lineas:
+        unidad = f" {linea['unidad']}" if linea.get("unidad") else ""
+        partes.append(f"{linea['cantidad']:g}{unidad} {linea['nombre']}")
+    detalle = ", ".join(partes)
+    return f"Entrada de inventario: {detalle}"
+
+
+def _concepto_pago_compra(detalle_entrada: str, observacion: Optional[str]) -> str:
+    """La observación del pago va primero: es lo que se busca al leer la caja."""
+    return f"{observacion} · {detalle_entrada}" if observacion else detalle_entrada
+
+
+def _registrar_pagos_compra_multiple(db: Session, contexto: CompraMultipleContext) -> None:
+    from app.modules.gastos import schemas as gastos_schemas
+    from app.modules.gastos.service import crear_gasto
+    from app.modules.catalogos.model import TipoGasto
+    from app.modules.reports.model import MovimientoCaja
+
+    tipo_gasto = db.query(TipoGasto).filter(TipoGasto.id == contexto.tipo_gasto_id).first()
+    nombre_proveedor = _persona_compra(
+        db,
+        contexto.usuario,
+        contexto.proveedor.id if contexto.proveedor else None,
+        contexto.proveedor_nombre,
+    )
+    detalle_entrada = _detalle_entrada_inventario(contexto.lineas)
+    observaciones_factura = (contexto.datos.observaciones or "").strip() or None
+    pagos_guardados = []
+    for captura, pago in zip(contexto.datos.pagos, contexto.pagos):
+        descripcion = _concepto_pago_compra(detalle_entrada, pago["observacion"])
+        gasto = crear_gasto(
+            db,
+            gastos_schemas.GastoCreate(
+                tipo_gasto_id=tipo_gasto.id,
+                moneda_id=pago["moneda_id"],
+                fecha=contexto.datos.fecha,
+                descripcion=descripcion,
+                monto=pago["monto"],
+                tasa_cambio=pago["tasa"],
+                metodo_caja_id=pago["cuenta"].id,
+                clasificacion=contexto.clasificacion,
+                observaciones=observaciones_factura,
+            ),
+            usuario=contexto.usuario,
+            commit=False,
+            persona_entidad=nombre_proveedor,
+        )
+        gasto.entrada_inventario_id = contexto.compra.id
+        movimiento = db.query(MovimientoCaja).filter(MovimientoCaja.referencia == f"Gasto #{gasto.id}").one()
+        gasto.monto_en_moneda_base = movimiento.monto_en_moneda_base = pago["monto_cop"]
+        pagos_guardados.append({
+            "pago_id": str(captura.pago_id or uuid4()),
+            "metodo_caja_id": pago["cuenta"].id,
+            "moneda_id": pago["moneda_id"],
+            "codigo": pago["cuenta"].moneda.codigo if pago["cuenta"].moneda else "COP",
+            "monto": str(pago["monto"]),
+            "tasa_cambio": str(pago["tasa"]),
+            "observacion": pago["observacion"],
+            "gasto_id": gasto.id,
+            "movimiento_caja_id": movimiento.id,
+        })
+    contexto.compra.pagos_json = pagos_guardados
+
+
+def _registrar_detalles_deuda_compra(db: Session, contexto: CompraMultipleContext, deuda) -> None:
+    from app.modules.cuentas_por_pagar.model import DetalleCuentaPorPagar
+
+    saldo_restante = contexto.saldo_cop
+    for indice, linea in enumerate(contexto.lineas):
+        if indice == len(contexto.lineas) - 1:
+            monto_pendiente = saldo_restante
+        else:
+            monto_pendiente = _centavos(contexto.saldo_cop * linea["total_cop"] / contexto.total_cop)
+            monto_pendiente = min(monto_pendiente, saldo_restante)
+        saldo_restante = _centavos(saldo_restante - monto_pendiente)
+        if monto_pendiente <= 0:
+            continue
+        db.add(DetalleCuentaPorPagar(
+            cuenta_por_pagar_id=deuda.id,
+            orden=indice,
+            descripcion=(
+                f"{linea['cantidad']:g} × {linea['nombre']} · "
+                f"parte pendiente de entrada de inventario"
+            ),
+            material_id=linea["item_id"] if linea["tipo_item"] == "MATERIAL" else None,
+            cantidad=Decimal("1"),
+            precio_unitario=monto_pendiente,
+            cliente_nombre=linea["cliente_nombre"],
+            observaciones=linea["observaciones"],
+        ))
+
+
+def _registrar_deuda_compra_multiple(db: Session, contexto: CompraMultipleContext) -> None:
+    if contexto.saldo_cop <= 0:
+        return
+    if contexto.proveedor is None:
+        raise ValueError("Indica el proveedor para registrar el saldo pendiente.")
+
+    from app.modules.cuentas_por_pagar.model import CuentaPorPagar
+    from app.modules.gastos import schemas as gastos_schemas
+    from app.modules.gastos.service import crear_gasto
+    from app.modules.auditoria.service import record_event
+
+    descripcion = f"Entrada de inventario · {len(contexto.lineas)} renglones"
+    deuda = CuentaPorPagar(
+        proveedor_id=contexto.proveedor.id,
+        tipo_gasto_id=contexto.tipo_gasto_id,
+        moneda_id=MONEDA_BASE_ID,
+        fecha=contexto.datos.fecha,
+        descripcion=descripcion,
+        monto=contexto.saldo_cop,
+        tasa_cambio=Decimal("1.0"),
+        monto_en_moneda_base=contexto.saldo_cop,
+        estado="PENDIENTE",
+        origen_tipo="COMPRA_INVENTARIO_MULTIPLE",
+        origen_id=contexto.compra.id,
+        creado_por_id=contexto.usuario.id if contexto.usuario else None,
+    )
+    db.add(deuda)
+    db.flush()
+    _registrar_detalles_deuda_compra(db, contexto, deuda)
+
+    gasto_deuda = crear_gasto(
+        db,
+        gastos_schemas.GastoCreate(
+            tipo_gasto_id=contexto.tipo_gasto_id,
+            moneda_id=MONEDA_BASE_ID,
+            fecha=contexto.datos.fecha,
+            descripcion=descripcion,
+            monto=contexto.saldo_cop,
+            tasa_cambio=Decimal("1.0"),
+            clasificacion=contexto.clasificacion or "GASTO_FABRICA",
+            observaciones=f"Fiado — Por Pagar #{deuda.id}",
+        ),
+        usuario=contexto.usuario,
+        commit=False,
+        persona_entidad=contexto.proveedor_nombre,
+    )
+    deuda.gasto_id = gasto_deuda.id
+    gasto_deuda.entrada_inventario_id = contexto.compra.id
+    contexto.compra.cuenta_por_pagar_id = deuda.id
+    record_event(
+        db,
+        actor=contexto.usuario,
+        action="CREATE",
+        entity_type="cuenta_por_pagar",
+        entity_id=deuda.id,
+        after={
+            "proveedor_id": contexto.proveedor.id,
+            "monto": contexto.saldo_cop,
+            "estado": "PENDIENTE",
+            "fecha": contexto.datos.fecha,
+        },
+    )
+
+
+def crear_compra_inventario_multiple(
+    db: Session,
+    datos: schemas.CompraInventarioMultipleCreate,
+    usuario=None,
+) -> dict:
+    existente = db.query(model.CompraInventarioMultiple).filter(
+        model.CompraInventarioMultiple.operacion_id == str(datos.operacion_id)
+    ).first()
+    if existente:
+        from app.modules.inventory.entrada_datos import validar_autoria
+        validar_autoria(existente, usuario)
+        original = existente.original_json or {}
+        if original.get("_solicitud") and original["_solicitud"] != datos.model_dump(mode="json"):
+            raise ValueError("Este identificador corresponde a otra solicitud. Recupera la entrada guardada antes de cambiarla.")
+        return _respuesta_compra_multiple(existente)
+
+    fecha_movimiento = _fecha_movimiento(datos.fecha)
+    lineas, total_cop = _preparar_lineas_compra_multiple(db, datos.lineas)
+    pagos, pagado_cop = _preparar_pagos_compra_multiple(db, datos.pagos)
+    if pagado_cop > total_cop:
+        raise ValueError(f"Los pagos suman {pagado_cop} COP y exceden el total de la compra ({total_cop} COP).")
+    saldo_cop = _centavos(total_cop - pagado_cop)
+    proveedor, proveedor_nombre = _resolver_proveedor_compra(db, datos, saldo_cop)
+    tipo_gasto_id, clasificacion = _tipo_gasto_compra_multiple(db, lineas)
+
+    compra = model.CompraInventarioMultiple(
+        operacion_id=str(datos.operacion_id),
+        fecha=fecha_movimiento,
+        proveedor_id=proveedor.id if proveedor else None,
+        proveedor_nombre=proveedor_nombre,
+        recibido_por=(datos.recibido_por or "").strip() or None,
+        observaciones=datos.observaciones,
+        total_en_moneda_base=total_cop,
+        pagado_en_moneda_base=pagado_cop,
+        saldo_en_moneda_base=saldo_cop,
+        creado_por_id=usuario.id if usuario is not None else None,
+    )
+    db.add(compra)
+    db.flush()
+
+    contexto = CompraMultipleContext(
+        datos=datos,
+        usuario=usuario,
+        lineas=lineas,
+        pagos=pagos,
+        compra=compra,
+        proveedor=proveedor,
+        proveedor_nombre=proveedor_nombre,
+        tipo_gasto_id=tipo_gasto_id,
+        clasificacion=clasificacion,
+        total_cop=total_cop,
+        saldo_cop=saldo_cop,
+    )
+    _registrar_lineas_compra_multiple(db, contexto)
+    _registrar_pagos_compra_multiple(db, contexto)
+    _registrar_deuda_compra_multiple(db, contexto)
+    from app.modules.inventory.entrada_datos import guardar_captura
+    guardar_captura(compra, datos)
+    db.flush()
+    return _respuesta_compra_multiple(compra)

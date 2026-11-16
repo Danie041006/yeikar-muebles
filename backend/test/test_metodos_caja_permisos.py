@@ -8,7 +8,7 @@ Bancolombia Karolay, y con nombres genéricos ("Zelle" en vez de "Zelle
 Blanca Mendoza"). El CRUD de cuentas sigue siendo exclusivo de
 Dueño/Administrador.
 """
-from conftest import ADMIN_HEADERS, VENTAS_HEADERS
+from conftest import ADMIN_HEADERS, VENTAS_HEADERS, _uniq
 
 URL = "/api/v1/reports/metodos-caja"
 
@@ -52,7 +52,7 @@ def test_vendedor_no_admin_no_puede_mutar_cuentas(client):
 
 def test_admin_sigue_creando_cuentas(client, cleaner):
     r = client.post(URL, headers=ADMIN_HEADERS, json={
-        "nombre": "test_metodo_admin", "codigo": "TEST_METODO_ADMIN",
+        "nombre": _uniq("metodo_admin"), "codigo": _uniq("TEST_METODO_ADMIN").upper(),
         "activo": True, "orden": 998,
     })
     assert r.status_code == 201, r.text

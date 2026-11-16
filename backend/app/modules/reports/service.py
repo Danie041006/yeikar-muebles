@@ -1452,6 +1452,10 @@ def _validar_movimiento_editable(db: Session, obj: model.MovimientoCaja) -> None
     - Cobro de préstamo: el abono quedó atado a este asiento; el saldo se
       recalcula al eliminarlo. Se corrige eliminando y creando de nuevo.
     """
+    gasto_id = _gasto_id_de_movimiento(obj)
+    if gasto_id:
+        from app.modules.inventory.entrada_pagos import proteger_gasto_entrada
+        proteger_gasto_entrada(db, gasto_id)
     if obj.pago_id:
         raise ValueError(
             "Este movimiento viene de un cobro de venta: el abono se corrige "

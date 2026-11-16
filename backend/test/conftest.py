@@ -164,6 +164,7 @@ ORDEN_LIMPIEZA = [
     "precio_produccion",
     "producto",
     "material",
+    "compra_inventario_multiple",
     "cuenta_por_pagar",
     "gasto",
     "tasa_cambio",
@@ -238,6 +239,10 @@ class Cleaner:
                 continue
             ids_str = ",".join(str(i) for i in ids)
             try:
+                if tabla == "compra_inventario_multiple":
+                    db.execute(text(
+                        f"UPDATE gasto SET entrada_inventario_id = NULL WHERE entrada_inventario_id IN ({ids_str})"
+                    ))
                 # La conversión de cotización a pedido auto-genera las órdenes
                 # de producción de las líneas FABRICADO (PENDIENTE). Si el test
                 # no las registró (p.ej. porque no creó etapas), su FK
