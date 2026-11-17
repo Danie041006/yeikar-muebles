@@ -55,6 +55,7 @@ interface EtapaModalProps {
   loadingReceta: boolean;
   costosEnVivo: CostosEnVivoOrden | null;
   costosEnVivoLoading: boolean;
+  puedeVerCostos: boolean;
   statusUpdating: boolean;
   onClose: () => void;
   onRefrescarEtapa: () => Promise<void>;
@@ -177,6 +178,7 @@ export default function EtapaModal({
   loadingReceta,
   costosEnVivo,
   costosEnVivoLoading,
+  puedeVerCostos,
   statusUpdating,
   onClose,
   onRefrescarEtapa,
@@ -307,10 +309,18 @@ export default function EtapaModal({
 
   // Tarifario de costos de producción del área de la etapa (form de mano de obra)
   useEffect(() => {
+    if (!puedeVerCostos) {
+      setOpcionesCosto([]);
+      setTab((actual) => actual === 'costos' || actual === 'mano-obra' ? 'etapa' : actual);
+      return;
+    }
+    let activo = true;
     api.get('/produccion/opciones-costo-produccion', {
       params: stage.area_id ? { area_id: stage.area_id } : {},
-    }).then((r) => setOpcionesCosto(r.data)).catch(() => setOpcionesCosto([]));
-  }, [stage.id, stage.area_id]);
+    }).then((r) => { if (activo) setOpcionesCosto(r.data); })
+      .catch(() => { if (activo) setOpcionesCosto([]); });
+    return () => { activo = false; };
+  }, [stage.id, stage.area_id, puedeVerCostos]);
 
   // ── Búsqueda async de materiales (autocomplete server-side) ──
   // El catálogo completo no se baja al cliente (con cientos de materiales solo
@@ -865,7 +875,9 @@ export default function EtapaModal({
               ['materiales', 'Materiales', consumos.length],
               ['mano-obra', 'Mano de obra', manoObras.length],
               ['costos', 'Costos', null],
-            ] as [TabActiva, string, number | null][]).map(([id, label, count]) => (
+            ] as [TabActiva, string, number | null][])
+              .filter(([id]) => puedeVerCostos || id === 'etapa' || id === 'materiales')
+              .map(([id, label, count]) => (
               <button
                 key={id}
                 onClick={() => setTab(id)}
@@ -1903,7 +1915,7 @@ export default function EtapaModal({
             </>
           )}
 
-          {tab === 'mano-obra' && (
+          {puedeVerCostos && tab === 'mano-obra' && (
             <>
               {/* ── MANO DE OBRA (form + registro en la misma tarjeta) ── */}
               <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
@@ -2120,7 +2132,7 @@ export default function EtapaModal({
             </>
           )}
 
-          {tab === 'costos' && (
+          {puedeVerCostos && tab === 'costos' && (
             <div className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
               <header className="flex items-center justify-between gap-2 px-4 py-3 bg-yeikar-tertiary/40 border-b border-yeikar-secondary-light/10">
                 <div>
@@ -2143,17 +2155,21 @@ export default function EtapaModal({
               <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase tracking-wider">Materiales</span>
               <span className="text-sm font-black text-yeikar-secondary font-mono">${totalMateriales.toLocaleString('es-CO')}</span>
             </div>
-            <div className="border-l border-yeikar-secondary-light/10 pl-4 sm:pl-6">
-              <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase tracking-wider">Mano de obra</span>
-              <span className="text-sm font-black text-yeikar-secondary font-mono">${totalManoObra.toLocaleString('es-CO')}</span>
-            </div>
-            <div className="border-l border-yeikar-secondary-light/10 pl-4 sm:pl-6">
-              <span className="text-[9px] font-bold text-yeikar-primary block uppercase tracking-wider">Total etapa</span>
-              <span className="text-lg font-black text-yeikar-primary font-mono">${totalEtapa.toLocaleString('es-CO')}</span>
-            </div>
+            {puedeVerCostos && (
+              <>
+                <div className="border-l border-yeikar-secondary-light/10 pl-4 sm:pl-6">
+                  <span className="text-[9px] font-bold text-yeikar-neutral/50 block uppercase tracking-wider">Mano de obra</span>
+                  <span className="text-sm font-black text-yeikar-secondary font-mono">${totalManoObra.toLocaleString('es-CO')}</span>
+                </div>
+                <div className="border-l border-yeikar-secondary-light/10 pl-4 sm:pl-6">
+                  <span className="text-[9px] font-bold text-yeikar-primary block uppercase tracking-wider">Total etapa</span>
+                  <span className="text-lg font-black text-yeikar-primary font-mono">${totalEtapa.toLocaleString('es-CO')}</span>
+                </div>
+              </>
+            )}
             <span className="flex-1" />
             <span className="text-[10px] font-mono text-yeikar-neutral/40 hidden sm:block">
-              {consumos.length} materiales · {manoObras.length} mano de obra
+              {consumos.length} materiales{puedeVerCostos && ` · ${manoObras.length} mano de obra`}
             </span>
             {accionPrimaria && (
               <button

@@ -10,6 +10,7 @@ import EtapaModal from '../components/Produccion/EtapaModal';
 import { ahoraVE } from '../utils/fechas';
 import { TRANSICIONES_ETAPA, esOrdenExhibicion, esOrdenRetrabajo, etiquetaOrden, nombreOrden, type Empleado, type Material } from '../components/Produccion/tipos';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 
 // (Empleado, Material, TRANSICIONES_ETAPA, fmt y esOrdenExhibicion viven en
 //  components/Produccion/tipos.ts, compartidos con el EtapaModal.)
@@ -254,6 +255,10 @@ function KanbanCard({ stage, pedidoInfo, onClick, onStatusChange, onPassToArea, 
 // Main Production Kanban Page
 export default function ProduccionKanban() {
   const toast = useToast();
+  const { esAdmin, hasModulo } = useAuth();
+  // Producción permite operar el taller; el desglose y las tarifas de mano
+  // de obra requieren además acceso a Costos de Producción.
+  const puedeVerCostos = esAdmin || hasModulo('costos_produccion');
   const [confirmFinalizarId, setConfirmFinalizarId] = useState<number | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [stages, setStages] = useState<EtapaProduccion[]>([]);
@@ -313,8 +318,9 @@ export default function ProduccionKanban() {
 
   useEffect(() => {
     const ordenId = selectedStage?.orden_produccion_id;
-    if (ordenId == null) {
+    if (ordenId == null || !puedeVerCostos) {
       setCostosEnVivo(null);
+      setCostosEnVivoLoading(false);
       return;
     }
     let activo = true;
@@ -324,7 +330,7 @@ export default function ProduccionKanban() {
       .catch(() => { if (activo) setCostosEnVivo(null); })
       .finally(() => { if (activo) setCostosEnVivoLoading(false); });
     return () => { activo = false; };
-  }, [selectedStage?.orden_produccion_id, refreshVivo]);
+  }, [selectedStage?.orden_produccion_id, refreshVivo, puedeVerCostos]);
 
   const cargarInventario = async () => {
     try {
@@ -595,9 +601,11 @@ export default function ProduccionKanban() {
       const res = await api.put(`/produccion/orden/${ordenId}/estado?estado=FINALIZADA`);
       const estructuraGenerada = res.data?.estructura_generada;
       toast.success(
-        estructuraGenerada
-          ? `Orden #${ordenId} finalizada. Estructura de costes generada y costo base del producto actualizado.`
-          : `Orden #${ordenId} finalizada con sus costos calculados.`,
+        !puedeVerCostos
+          ? `Orden #${ordenId} finalizada.`
+          : estructuraGenerada
+            ? `Orden #${ordenId} finalizada. Estructura de costes generada y costo base del producto actualizado.`
+            : `Orden #${ordenId} finalizada con sus costos calculados.`,
       );
       setRefreshVivo(v => v + 1);
       fetchKanbanData();
@@ -900,6 +908,7 @@ export default function ProduccionKanban() {
           loadingReceta={loadingReceta}
           costosEnVivo={costosEnVivo}
           costosEnVivoLoading={costosEnVivoLoading}
+          puedeVerCostos={puedeVerCostos}
           statusUpdating={statusUpdatingId === selectedStage.id}
           onClose={() => setSelectedStage(null)}
           onRefrescarEtapa={refrescarEtapa}

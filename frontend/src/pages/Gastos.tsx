@@ -4,7 +4,7 @@ import {
   Gasto, GastoCreate, TipoGasto, Moneda, Area,
   CLASIFICACIONES_GASTO, nombreClasificacion,
 } from '../services/gastoService';
-import { cuentasService, ResumenCuenta } from '../services/cuentasService';
+import { cuentasService, type MetodoCaja, type ResumenCuenta } from '../services/cuentasService';
 import {
   cuentasPorPagarService, CuentaPorPagar, ResumenCuentasPorPagar, Abono, DetalleCuentaPorPagar, DetalleCuentaPorPagarCreate,
 } from '../services/cuentasPorPagarService';
@@ -13,6 +13,7 @@ import { hoyVE } from '../utils/fechas';
 import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import {
   Button, Card, Badge, Spinner, EmptyState, StatCard, Modal, PageHeader,
   Field, Input, Select, Textarea, ConfirmDialog, SearchSelect, MontoInput,
@@ -45,13 +46,18 @@ const hoy = () => hoyVE();
 
 export default function Gastos() {
   const toast = useToast();
+  const { esAdmin, hasModulo } = useAuth();
+  // El saldo de cada cuenta es información del módulo Cuentas. El formulario
+  // solo necesita nombre y moneda para elegir el origen/destino del dinero.
+  const puedeVerSaldos = esAdmin || hasModulo('cuentas');
   // "apartadito": la página vive en Egresos y Gastos pero las deudas (fiar)
   // se manejan en su propia vista.
   const [vista, setVista] = useState<'gastos' | 'por-pagar'>('gastos');
   const [gastos, setGastos] = useState<Gasto[]>([]);
   const [tiposGasto, setTiposGasto] = useState<TipoGasto[]>([]);
   const [monedas, setMonedas] = useState<Moneda[]>([]);
-  const [cuentas, setCuentas] = useState<ResumenCuenta[]>([]);
+  const [cuentas, setCuentas] = useState<MetodoCaja[]>([]);
+  const [saldosPorCuenta, setSaldosPorCuenta] = useState<Record<number, string>>({});
   const [areas, setAreas] = useState<Area[]>([]);
   const [deudas, setDeudas] = useState<CuentaPorPagar[]>([]);
   const [resumen, setResumen] = useState<ResumenCuentasPorPagar | null>(null);
@@ -119,27 +125,37 @@ export default function Gastos() {
   }, [categoria, clasificacionFiltro, fechaDesde, fechaHasta, areaFiltro]);
 
   const cargarCatalogos = useCallback(async () => {
-    const [tipos, monedasData, cuentasData, areasData] = await Promise.all([
+    const [tipos, monedasData, cuentasData, areasData, resumenData] = await Promise.all([
       getTiposGasto(),
       getMonedas(),
-      cuentasService.getResumen().catch(() => []),
+      cuentasService.getOperativas(),
       getAreas(),
+      puedeVerSaldos
+        ? cuentasService.getResumen().catch((): ResumenCuenta[] => [])
+        : Promise.resolve<ResumenCuenta[]>([]),
     ]);
     setTiposGasto(tipos);
     setMonedas(monedasData);
     setCuentas(cuentasData);
     setAreas(areasData);
+    const saldos: Record<number, string> = {};
+    for (const cuenta of resumenData) {
+      saldos[cuenta.metodo_caja.id] = cuenta.saldo_por_moneda.length
+        ? cuenta.saldo_por_moneda.map((linea) => `${linea.simbolo} ${fmtMoneda(Number(linea.monto), linea.codigo)}`).join(' / ')
+        : 'sin movimientos';
+    }
+    setSaldosPorCuenta(saldos);
     setForm((prev) => ({
       ...prev,
-      metodo_caja_id: prev.metodo_caja_id === 0 ? cuentasData[0]?.metodo_caja.id || 0 : prev.metodo_caja_id,
+      metodo_caja_id: prev.metodo_caja_id === 0 ? cuentasData[0]?.id || 0 : prev.metodo_caja_id,
       // La moneda del gasto arranca en la moneda propia de la cuenta por defecto.
-      moneda_id: cuentasData[0]?.metodo_caja.moneda_id || prev.moneda_id,
+      moneda_id: cuentasData[0]?.moneda_id || prev.moneda_id,
     }));
     setAbonoForm((prev) => ({
       ...prev,
-      metodo_caja_id: prev.metodo_caja_id === 0 ? cuentasData[0]?.metodo_caja.id || 0 : prev.metodo_caja_id,
+      metodo_caja_id: prev.metodo_caja_id === 0 ? cuentasData[0]?.id || 0 : prev.metodo_caja_id,
     }));
-  }, []);
+  }, [puedeVerSaldos]);
 
   const cargarPorPagar = useCallback(async () => {
     const [deudasData, resumenData] = await Promise.all([
@@ -195,7 +211,7 @@ export default function Gastos() {
       monto: 0,
       tasa_cambio: 1,
       clasificacion: null,
-      metodo_caja_id: cuentas[0]?.metodo_caja.id || 0,
+      metodo_caja_id: cuentas[0]?.id || 0,
       descripcion: '',
       observaciones: '',
     });
@@ -271,12 +287,12 @@ export default function Gastos() {
     const monto = Number(abonoForm.monto);
     if (!(monto > 0)) return;
     try {
-      const cuentaAbono = cuentas.find((c) => c.metodo_caja.id === Number(abonoForm.metodo_caja_id));
+      const cuentaAbono = cuentas.find((c) => c.id === Number(abonoForm.metodo_caja_id));
       await cuentasPorPagarService.abonar(abonarDeuda.id, {
         fecha: abonoForm.fecha,
         monto,
         metodo_caja_id: Number(abonoForm.metodo_caja_id),
-        tasa_cambio: cuentaAbono && cuentaAbono.metodo_caja.moneda_id !== 1 ? Number(abonoForm.tasa_cambio) : undefined,
+        tasa_cambio: cuentaAbono && cuentaAbono.moneda_id !== 1 ? Number(abonoForm.tasa_cambio) : undefined,
       });
       const saldoCubierto = monto >= Number(abonarDeuda.saldo) - 0.005;
       setAbonarDeuda(null);
@@ -354,8 +370,13 @@ export default function Gastos() {
 
   // ── Derivados de la vista "Por Pagar" ──
   const deudaAbonoSel = abonarDeuda;
-  const cuentaAbonoSel = cuentas.find((c) => c.metodo_caja.id === Number(abonoForm.metodo_caja_id));
-  const necesitaTasaAbono = !!cuentaAbonoSel && cuentaAbonoSel.metodo_caja.moneda_id !== 1;
+  const cuentaAbonoSel = cuentas.find((c) => c.id === Number(abonoForm.metodo_caja_id));
+  const necesitaTasaAbono = !!cuentaAbonoSel && cuentaAbonoSel.moneda_id !== 1;
+  // Nombre y moneda siempre; el saldo solo para quien puede entrar a Cuentas.
+  const etiquetaCuenta = (cuenta: MetodoCaja) => {
+    const base = `${cuenta.nombre} · ${cuenta.moneda_codigo || '?'}`;
+    return puedeVerSaldos ? `${base} (saldo ${saldosPorCuenta[cuenta.id] ?? 'no disponible'})` : base;
+  };
   const abonoExcede = deudaAbonoSel ? Number(abonoForm.monto) > Number(deudaAbonoSel.saldo) + 0.005 : false;
   const deducAbono = (() => {
     if (!deudaAbonoSel || !cuentaAbonoSel || !(Number(abonoForm.monto) > 0)) return 0;
@@ -992,25 +1013,19 @@ export default function Gastos() {
             <SearchSelect
               value={form.metodo_caja_id}
               onChange={(v) => {
-                const cuenta = cuentas.find((c) => c.metodo_caja.id === Number(v));
+                const cuenta = cuentas.find((c) => c.id === Number(v));
                 setForm((prev) => ({
                   ...prev,
                   metodo_caja_id: Number(v),
                   // Al elegir cuenta, la moneda del gasto sigue a la de la cuenta
                   // (se puede cambiar manualmente después si hace falta).
-                  moneda_id: cuenta?.metodo_caja.moneda_id || prev.moneda_id,
-                  tasa_cambio: Number(v) && cuenta?.metodo_caja.moneda_id === 1 ? 1 : prev.tasa_cambio,
+                  moneda_id: cuenta?.moneda_id || prev.moneda_id,
+                  tasa_cambio: Number(v) && cuenta?.moneda_id === 1 ? 1 : prev.tasa_cambio,
                 }));
               }}
               options={cuentas.map((c) => ({
-                value: c.metodo_caja.id,
-                // Nombre · MONEDA (saldo en la moneda propia de la cuenta, sin
-                // conversión a COP: la tasa cambia a diario y se ingresa manual).
-                label: `${c.metodo_caja.nombre} · ${c.metodo_caja.moneda_codigo || '?'} (saldo ${
-                  c.saldo_por_moneda.length
-                    ? c.saldo_por_moneda.map((l) => `${l.simbolo} ${fmtMoneda(Number(l.monto), l.codigo)}`).join(' / ')
-                    : 'sin movimientos'
-                })`,
+                value: c.id,
+                label: etiquetaCuenta(c),
               }))}
               placeholder="Seleccione la cuenta..."
             />
@@ -1346,6 +1361,7 @@ export default function Gastos() {
         <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
           <Field label="¿Cuánto abonas?" required>
             <MontoInput
+              aria-label="¿Cuánto abonas?"
               min="0"
               value={abonoForm.monto || ''}
               onChange={(v) => setAbonoForm((prev) => ({ ...prev, monto: Number(v) || 0 }))}
@@ -1361,12 +1377,8 @@ export default function Gastos() {
               value={abonoForm.metodo_caja_id}
               onChange={(v) => setAbonoForm((prev) => ({ ...prev, metodo_caja_id: Number(v) }))}
               options={cuentas.map((c) => ({
-                value: c.metodo_caja.id,
-                label: `${c.metodo_caja.nombre} · ${c.metodo_caja.moneda_codigo || '?'} (saldo ${
-                  c.saldo_por_moneda.length
-                    ? c.saldo_por_moneda.map((l) => `${l.simbolo} ${fmtMoneda(Number(l.monto), l.codigo)}`).join(' / ')
-                    : 'sin movimientos'
-                })`,
+                value: c.id,
+                label: etiquetaCuenta(c),
               }))}
               placeholder="Seleccione la cuenta..."
             />
@@ -1379,7 +1391,7 @@ export default function Gastos() {
             />
           </Field>
           {necesitaTasaAbono && (
-            <Field label={`Tasa de cambio * (1 ${cuentaAbonoSel?.metodo_caja.moneda_codigo} = ? COP)`}>
+            <Field label={`Tasa de cambio * (1 ${cuentaAbonoSel?.moneda_codigo} = ? COP)`}>
               <Input
                 type="number"
                 step="0.01"
@@ -1397,8 +1409,8 @@ export default function Gastos() {
             )}
             {Number(abonoForm.monto) > 0 && cuentaAbonoSel && (
               <p className="text-[11px] text-yeikar-neutral/70 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
-                Saldrán ≈ <b>{fmtMoneda(deducAbono, cuentaAbonoSel.metodo_caja.moneda_codigo || 'COP')}</b> desde{' '}
-                <b>{cuentaAbonoSel.metodo_caja.nombre}</b>
+                Saldrán ≈ <b>{fmtMoneda(deducAbono, cuentaAbonoSel.moneda_codigo || 'COP')}</b> desde{' '}
+                <b>{cuentaAbonoSel.nombre}</b>
                 {necesitaTasaAbono && !(Number(abonoForm.tasa_cambio) > 0) ? ' · falta la tasa' : ''}
               </p>
             )}

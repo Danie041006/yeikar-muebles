@@ -80,7 +80,10 @@ def ver_orden(
         raise HTTPException(status_code=404, detail="Orden de produccion no encontrada")
     return db_obj
 
-@router.get("/orden/{id}/costos-en-vivo")
+@router.get(
+    "/orden/{id}/costos-en-vivo",
+    dependencies=[Depends(require_module('costos_produccion'))],
+)
 def costos_en_vivo(
     id: int,
     db: Session = Depends(get_db),
@@ -469,15 +472,18 @@ def eliminar_consumo(
 # ------------------------------------------------------------
 # Endpoints de Mano de Obra
 # ------------------------------------------------------------
-@router.get("/opciones-costo-produccion")
+@router.get(
+    "/opciones-costo-produccion",
+    dependencies=[Depends(require_module('costos_produccion'))],
+)
 def opciones_costo_produccion(
     area_id: Optional[int] = Query(None, description="Filtrar por área de la etapa"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     """Tarifario activo de costos de producción (id, descripción, precio) para
-    el formulario de mano de obra. Vive bajo el módulo `produccion` porque quien
-    registra MO puede no tener el módulo `costos_produccion`."""
+    el formulario de mano de obra. Exige `costos_produccion`: el formulario de
+    MO se oculta a quien no puede ver costos."""
     from app.modules.costos_produccion.model import PrecioProduccion
     query = db.query(PrecioProduccion).filter(PrecioProduccion.activo.is_(True))
     if area_id is not None:
@@ -489,7 +495,11 @@ def opciones_costo_produccion(
     ]
 
 
-@router.post("/opciones-costo-produccion", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/opciones-costo-produccion",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_module('costos_produccion'))],
+)
 def crear_opcion_costo_produccion(
     payload: dict = Body(...),
     db: Session = Depends(get_db),
@@ -500,15 +510,9 @@ def crear_opcion_costo_produccion(
 
     Escribe el tarifario GLOBAL que alimenta la nómina: exige el mismo permiso
     de escritura que el módulo costos_produccion (o Dueño/Administrador)."""
-    from app.modules.users.deps import es_admin_user, obtener_accesos_usuario
     from app.modules.costos_produccion import schemas as costos_schemas
     from app.modules.costos_produccion import service as costos_service
 
-    if not es_admin_user(usuario_actual) and not obtener_accesos_usuario(db, usuario_actual).get("costos_produccion"):
-        raise HTTPException(
-            status_code=403,
-            detail="No tienes permisos para crear tarifas de costos de producción.",
-        )
     try:
         area_id = int(payload.get("area_id") or 0)
         descripcion = str(payload.get("descripcion") or "").strip()
@@ -612,7 +616,11 @@ def marcar_mano_obra_pagada(
 # ------------------------------------------------------------
 # Endpoints de Costos de Producción
 # ------------------------------------------------------------
-@router.post("/costo/calcular/{orden_id}", response_model=schemas.CostoProduccionResponse)
+@router.post(
+    "/costo/calcular/{orden_id}",
+    response_model=schemas.CostoProduccionResponse,
+    dependencies=[Depends(require_module('costos_produccion'))],
+)
 def calcular_costo(
     orden_id: int,
     esquema: schemas.CostoProduccionCreate = Body(default_factory=schemas.CostoProduccionCreate),
@@ -633,7 +641,11 @@ def calcular_costo(
     except IntegrityError:
         raise HTTPException(status_code=409, detail="El costo de producción ya está siendo calculado por otra operación")
 
-@router.get("/costo/{orden_id}", response_model=schemas.CostoProduccionResponse)
+@router.get(
+    "/costo/{orden_id}",
+    response_model=schemas.CostoProduccionResponse,
+    dependencies=[Depends(require_module('costos_produccion'))],
+)
 def ver_costo(
     orden_id: int,
     db: Session = Depends(get_db),

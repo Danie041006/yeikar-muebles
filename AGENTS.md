@@ -72,6 +72,9 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 
 ## Production Kanban specifics
 
+- **Permisos separados**: `produccion` permite operar el taller; `costos_produccion` permite ver las pestañas **Costos** y **Mano de obra**, sus totales y el tarifario. Sin este último, el Kanban no consulta `costos-en-vivo` ni `opciones-costo-produccion`. Los endpoints de desglose, costo guardado, cálculo manual y tarifario exigen ambos módulos (Dueño/Administrador conserva acceso completo). Finalizar sigue calculando internamente como siempre; materiales, consumos y Hoja de Trabajo no cambian.
+- **Elegir una cuenta NO requiere abrir Cuentas**: Gastos usa `/cuenta/operativas` (nombre y moneda); consulta/muestra saldos solo con `cuentas` o Dueño/Administrador. Cotizaciones/Ventas conservan `/reports/metodos-caja` e Inventario conserva `/cuenta/operativas`. Para revocar acceso a un módulo hay que quitar su fila de `rol_modulo`: `gestionar=false` sigue permitiendo lectura. El rol Paola conserva Ventas/cobros y Gastos/pago de deudas; se retiran únicamente `cuentas` y `costos_produccion`.
+- Tests de esta separación: `pytest test/test_permisos_operativos.py test/test_alcance_produccion.py -v` y `npx playwright test e2e/permisos-operativos.spec.ts`.
 - Etapas have states: `ASIGNADA` → `EN_PROCESO` → `PAUSADA` → `COMPLETADA`
 - Product recipe stored in `producto_material` with `seccion` field (EBANISTERIA, TAPICERIA, PINTURA, etc.)
 - Recipe quantities scale via `tipo_escala` (FIJO, LINEAL, AREA, ESPACIADO, POR_RANGO, FORMULA) — logic in `cost_service.py`
