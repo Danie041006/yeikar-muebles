@@ -25,6 +25,15 @@ const deuda = {
   moneda_id: 1, moneda, monto: 8000, saldo: 8000, monto_pagado: 0, tasa_cambio: 1,
   monto_en_moneda_base: 8000, fecha: '2026-11-16', estado: 'PENDIENTE', detalles: [], pagos: [],
 };
+const envio = {
+  id: 701, pedido_id: 801, estado: 'PREPARADO', direccion_entrega: 'Calle QA',
+  guia_despacho: null, observaciones: null, empleado: null, detalles: [],
+  pedido: {
+    id: 801,
+    cliente: { id: 1, nombre: 'Cliente Despacho QA', telefono: '555-0101', direccion: 'Calle QA' },
+    detalles: [{ id: 901, cantidad: 1, tipo_item: 'FABRICADO', descripcion_especifica: 'Sofá QA' }],
+  },
+};
 
 type Perfil = 'operativo' | 'costos-lectura' | 'admin';
 
@@ -48,7 +57,7 @@ async function preparar(page: Page, perfil: Perfil = 'operativo') {
       id: 1, nombre_usuario: 'operativo_qa', nombre: 'Prueba', activo: true,
       roles: [{ id: 1, nombre: perfil === 'admin' ? 'Administrador' : 'Operativo QA' }],
       modulos: [
-        ...['dashboard', 'produccion', 'gastos', 'ventas', 'cotizaciones', 'pedidos', 'inventario'].map((modulo) => ({ modulo, gestionar: true })),
+        ...['dashboard', 'produccion', 'gastos', 'ventas', 'cotizaciones', 'pedidos', 'inventario', 'envios'].map((modulo) => ({ modulo, gestionar: true })),
         ...(perfil === 'costos-lectura' ? [{ modulo: 'costos_produccion', gestionar: false }] : []),
       ],
     };
@@ -75,7 +84,11 @@ async function preparar(page: Page, perfil: Perfil = 'operativo') {
       total_pendiente: 8000, total_pagado: 0, total_deudas: 1,
       por_proveedor: [{ proveedor_id: 701, proveedor_nombre: 'Proveedor QA', saldo: 8000 }],
     };
-    return ruta.fulfill({ json: respuesta });
+    else if (camino.endsWith('/envio/')) respuesta = [envio];
+    return ruta.fulfill({
+      json: respuesta,
+      headers: { 'X-Total-Count': String(Array.isArray(respuesta) ? respuesta.length : 1) },
+    });
   });
   return { consultas, escrituras };
 }
@@ -177,6 +190,20 @@ test('Admin conserva los saldos del selector de Gastos', async ({ page }) => {
   const modal = page.getByRole('dialog', { name: 'Nuevo Gasto / Egreso' });
   await expect(modal.getByRole('button', { name: /Efectivo QA · COP \(saldo/ })).toBeVisible();
   expect(consultas).toContain('/api/v1/cuenta/resumen');
+});
+
+test('Paola entra a Despachos y ve los pedidos listos para despachar', async ({ page }) => {
+  const { consultas } = await preparar(page);
+  await page.goto('/envios');
+  await expect(page).not.toHaveURL(/\/mis-despachos/);
+  await expect(page.getByRole('heading', { name: 'Envíos y Despachos', exact: true })).toBeVisible();
+  await expect(page.getByText('Cliente Despacho QA', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Asignar y Enviar', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '+ Registrar entrega', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Despachos', exact: true })).toBeVisible();
+  expect(consultas).toContain('/api/v1/envio/');
+  await page.goto('/mis-despachos');
+  await expect(page).toHaveURL(/\/envios$/);
 });
 
 test('La URL directa de Cuentas también queda fuera del rol operativo', async ({ page }) => {

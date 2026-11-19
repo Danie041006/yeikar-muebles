@@ -26,7 +26,8 @@ export default function Pedidos() {
   const [searchParams] = useSearchParams();
   const toast = useToast();
   const { hasModulo, esAdmin } = useAuth();
-  const puedeEntregar = esAdmin && hasModulo('envios');
+  const puedeVerEntregas = esAdmin || hasModulo('envios');
+  const puedeRegistrarEntrega = esAdmin || hasModulo('envios', true);
   const [orders, setOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState('');
   const [soloMesActual, setSoloMesActual] = useState(true);
@@ -107,7 +108,7 @@ export default function Pedidos() {
   const [entregasLoading, setEntregasLoading] = useState(false);
 
   useEffect(() => {
-    if (!selectedOrder || !puedeEntregar) {
+    if (!selectedOrder || !puedeVerEntregas) {
       setEntregas([]);
       return;
     }
@@ -118,7 +119,7 @@ export default function Pedidos() {
       .catch(() => { if (activo) setEntregas([]); })
       .finally(() => { if (activo) setEntregasLoading(false); });
     return () => { activo = false; };
-  }, [selectedOrder, puedeEntregar]);
+  }, [selectedOrder, puedeVerEntregas]);
 
   const handleUpdateStatus = async (orderId: number, currentObs: string | undefined, newStatus: string) => {
     if (statusUpdatingId !== null) return; // evita PUTs concurrentes del estado
@@ -289,7 +290,7 @@ export default function Pedidos() {
       >
         Ver detalles
       </button>
-      {puedeEntregar && order.entrega_resumen && order.entrega_resumen.pendiente > 0
+      {puedeRegistrarEntrega && order.entrega_resumen && order.entrega_resumen.pendiente > 0
         && ['APROBADO', 'PRODUCCION', 'PAUSADO', 'TERMINADO'].includes(order.estado) && (
         <button
           onClick={() => setEntregaPedido(order)}
@@ -512,7 +513,7 @@ export default function Pedidos() {
                 Ver información del Pedido
               </Button>
             )}
-            {puedeEntregar && selectedOrder?.entrega_resumen && selectedOrder.entrega_resumen.pendiente > 0
+            {puedeRegistrarEntrega && selectedOrder?.entrega_resumen && selectedOrder.entrega_resumen.pendiente > 0
               && ['APROBADO', 'PRODUCCION', 'PAUSADO', 'TERMINADO'].includes(selectedOrder.estado) && (
               <Button
                 onClick={() => setEntregaPedido(selectedOrder)}
@@ -702,7 +703,7 @@ export default function Pedidos() {
                 )}
               </div>
 
-              {!puedeEntregar ? (
+              {!puedeVerEntregas ? (
                 <p className="text-sm text-yeikar-neutral/50">
                   No tienes acceso al módulo de despachos para consultar las entregas.
                 </p>
@@ -753,7 +754,7 @@ export default function Pedidos() {
                 </div>
               )}
 
-              {puedeEntregar && selectedOrder.entrega_resumen && selectedOrder.entrega_resumen.pendiente > 0
+              {puedeRegistrarEntrega && selectedOrder.entrega_resumen && selectedOrder.entrega_resumen.pendiente > 0
                 && ['APROBADO', 'PRODUCCION', 'PAUSADO', 'TERMINADO'].includes(selectedOrder.estado) && (
                 <Button
                   className="mt-3"

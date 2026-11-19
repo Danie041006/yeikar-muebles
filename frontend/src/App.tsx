@@ -90,12 +90,14 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/dashboard" />;
   }
 
-  // Vista bifurcada por rol: la administradora ve el panel completo de
-  // Despachos (/envios); el chofer ve solo sus repartos (/mis-despachos).
-  if (location.pathname === '/envios' && !esAdmin) {
+  // Vista bifurcada por rol: el chofer (usuario vinculado a un empleado) ve
+  // solo sus repartos (/mis-despachos); el supervisor/administrador ve el
+  // panel completo de Despachos (/envios).
+  const esChofer = !esAdmin && !!user?.empleado_id;
+  if (location.pathname === '/envios' && esChofer) {
     return <Navigate to="/mis-despachos" replace />;
   }
-  if (location.pathname === '/mis-despachos' && esAdmin) {
+  if (location.pathname === '/mis-despachos' && !esChofer) {
     return <Navigate to="/envios" replace />;
   }
 

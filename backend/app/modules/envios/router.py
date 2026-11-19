@@ -15,8 +15,8 @@ router = APIRouter(dependencies=[Depends(require_module("envios"))])
 
 
 def _serialize_envio(envio, usuario: Usuario):
-    """Drivers receive a redacted DTO; owners can receive the operational detail."""
-    if tiene_alcance_total(usuario):
+    """Detalle operativo para supervisores; DTO redactado para choferes."""
+    if service.puede_preparar_despachos(usuario):
         return jsonable_encoder(schemas.EnvioResponse.model_validate(envio))
     return jsonable_encoder(schemas.EnvioRepartoResponse.model_validate(envio))
 
@@ -47,7 +47,7 @@ def listar_mis_asignaciones(
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user),
 ):
-    if tiene_alcance_total(usuario_actual):
+    if tiene_alcance_total(usuario_actual) or usuario_actual.empleado_id is None:
         raise HTTPException(status_code=400, detail="Este endpoint es exclusivo para repartidores asignados.")
     envios = service.obtener_envios(db, limite=500, estado=estado, usuario=usuario_actual)
     return envios
@@ -91,7 +91,7 @@ def pendientes_entrega(
     usuario_actual: Usuario = Depends(get_current_user),
 ):
     """Lo que falta por entregar de un pedido y qué está listo para despachar."""
-    if not tiene_alcance_total(usuario_actual):
+    if not service.puede_preparar_despachos(usuario_actual):
         raise HTTPException(
             status_code=403,
             detail="Solo un supervisor puede preparar despachos.",

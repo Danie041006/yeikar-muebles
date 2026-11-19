@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import false, func, or_
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
 from app.modules.auditoria.service import record_event
 from app.modules.clients.model import Client
@@ -11,7 +11,7 @@ from app.modules.envios import schemas
 from app.modules.envios.model import Envio, EnvioAsignacion, EnvioDetalle, EnvioUbicacion
 from app.modules.orders.model import DetallePedido, Pedido
 from app.modules.production.model import OrdenProduccion
-from app.modules.users.deps import tiene_alcance_total
+from app.modules.users.deps import obtener_accesos_usuario, tiene_alcance_total
 from app.modules.users.model import Usuario
 from app.core.state_machine import TRANSICIONES_ENVIO, validar_transicion
 from app.core.hora_ve import ahora_ve
@@ -24,12 +24,33 @@ ESTADOS_VALIDOS = {"PREPARADO", "EN_TRANSITO", "ENTREGADO", "FALLIDO"}
 TIPOS_PRODUCIDOS = {"FABRICADO", "REPARACION"}
 
 
+def puede_preparar_despachos(usuario: Usuario | None) -> bool:
+    """Supervisor de despacho: Dueño/Admin o usuario SIN empleado vinculado
+    con el módulo `envios` en gestión. Un chofer (con `empleado_id`) no prepara
+    despachos: solo ve y mueve los suyos."""
+    if usuario is None:
+        return False
+    if tiene_alcance_total(usuario):
+        return True
+    if usuario.empleado_id is not None:
+        return False
+    db = object_session(usuario)
+    if db is None:
+        return False
+    return bool(obtener_accesos_usuario(db, usuario).get("envios"))
+
+
 def _scope_envios(query, usuario: Usuario | None):
     if usuario is None or tiene_alcance_total(usuario):
         return query
-    if usuario.empleado_id is None:
-        return query.filter(false())
-    return query.filter(Envio.empleado_id == usuario.empleado_id)
+    if usuario.empleado_id is not None:
+        return query.filter(Envio.empleado_id == usuario.empleado_id)
+    # Sin empleado vinculado: es supervisor (no chofer). Solo ve todo si
+    # gestiona Despachos; un usuario de Ventas con `envios` en lectura no ve
+    # la operación completa.
+    if puede_preparar_despachos(usuario):
+        return query
+    return query.filter(false())
 
 
 def _snapshot(envio: Envio) -> dict:

@@ -19,6 +19,8 @@ from conftest import (
 )
 from test_alcance_produccion import _crear_etapa, _crear_usuario_con_modulos, _pedido_con_orden
 from test_compra_inventario_multiple import _crear_segunda_cuenta_cop, _registrar_dependencias_compra
+from test_entregas_parciales import _crear_envio, _crear_pedido_dos_lineas, _finalizar_completa
+from helpers_e2e import crear_empleado
 
 
 @pytest.fixture
@@ -232,3 +234,79 @@ def test_operativo_consume_y_finaliza_sin_acceso_al_desglose(client, db, cleaner
         "id": orden["detalle_pedido"]["pedido"]["id"],
     }).scalars().all()
     cleaner.registrar_muchos("envio", envios)
+
+
+def _pedido_con_envio(client, db, cleaner):
+    """Pedido con una línea finalizada y un despacho PREPARADO de esa línea."""
+    pedido, ordenes = _crear_pedido_dos_lineas(client, cleaner, db)
+    _finalizar_completa(client, cleaner, db, ordenes[0])
+    creado = _crear_envio(client, pedido["id"], "PREPARADO", [{
+        "detalle_pedido_id": pedido["detalles"][0]["id"],
+        "cantidad": 1,
+    }])
+    assert creado.status_code == 201, creado.text
+    envio_id = creado.json()["id"]
+    cleaner.registrar("envio", envio_id)
+    return pedido, envio_id
+
+
+def test_supervisor_sin_empleado_ve_y_prepara_todos_los_envios(client, db, cleaner):
+    """Paola: sin empleado vinculado y `envios` en gestión ve la operación
+    completa y puede preparar despachos (no entra a Mis Despachos)."""
+    pedido, envio_id = _pedido_con_envio(client, db, cleaner)
+    headers = _crear_usuario_con_modulos(db, cleaner, _uniq("despacho_sup"), [("envios", True)])
+    lista = client.get("/api/v1/envio/", headers=headers)
+    assert lista.status_code == 200, lista.text
+    assert any(envio["id"] == envio_id for envio in lista.json())
+    detalle = client.get(f"/api/v1/envio/{envio_id}", headers=headers)
+    assert detalle.status_code == 200, detalle.text
+    assert "costo_flete" in detalle.json(), "el supervisor recibe el detalle operativo completo"
+    pendientes = client.get(f"/api/v1/envio/pendientes/{pedido['id']}", headers=headers)
+    assert pendientes.status_code == 200, pendientes.text
+    mis = client.get("/api/v1/envio/mis-asignaciones", headers=headers)
+    assert mis.status_code == 400, mis.text
+
+
+def test_ventas_sin_empleado_no_ve_envios_ni_prepara(client, db, cleaner):
+    """Ventas conserva `envios` en lectura, pero no ve la operación completa ni
+    puede preparar despachos."""
+    pedido, envio_id = _pedido_con_envio(client, db, cleaner)
+    headers = _crear_usuario_con_modulos(db, cleaner, _uniq("ventas_envios"), [("envios", False)])
+    lista = client.get("/api/v1/envio/", headers=headers)
+    assert lista.status_code == 200, lista.text
+    assert lista.json() == []
+    detalle = client.get(f"/api/v1/envio/{envio_id}", headers=headers)
+    assert detalle.status_code == 404, detalle.text
+    pendientes = client.get(f"/api/v1/envio/pendientes/{pedido['id']}", headers=headers)
+    assert pendientes.status_code == 403, pendientes.text
+
+
+def test_chofer_con_empleado_ve_solo_sus_envios(client, db, cleaner):
+    """Un chofer (empleado vinculado) ve solo sus repartos y no prepara."""
+    pedido, envio_id = _pedido_con_envio(client, db, cleaner)
+    empleado = crear_empleado(client, cleaner)
+    asignado = client.put(f"/api/v1/envio/{envio_id}", json={
+        "empleado_id": empleado["id"],
+    }, headers=ADMIN_HEADERS)
+    assert asignado.status_code == 200, asignado.text
+    nombre = _uniq("chofer")
+    headers = _crear_usuario_con_modulos(db, cleaner, nombre, [("envios", True)])
+    usuario_id = db.execute(text(
+        "SELECT id FROM usuario WHERE nombre_usuario = :n"
+    ), {"n": nombre}).scalar_one()
+    db.execute(text(
+        "UPDATE usuario SET empleado_id = :e WHERE id = :u"
+    ), {"e": empleado["id"], "u": usuario_id})
+    db.commit()
+
+    lista = client.get("/api/v1/envio/", headers=headers)
+    assert lista.status_code == 200, lista.text
+    assert any(envio["id"] == envio_id for envio in lista.json())
+    detalle = client.get(f"/api/v1/envio/{envio_id}", headers=headers)
+    assert detalle.status_code == 200, detalle.text
+    assert "costo_flete" not in detalle.json(), "el chofer recibe el DTO redactado"
+    mis = client.get("/api/v1/envio/mis-asignaciones", headers=headers)
+    assert mis.status_code == 200, mis.text
+    assert any(envio["id"] == envio_id for envio in mis.json())
+    pendientes = client.get(f"/api/v1/envio/pendientes/{pedido['id']}", headers=headers)
+    assert pendientes.status_code == 403, pendientes.text
