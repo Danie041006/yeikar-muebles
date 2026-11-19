@@ -256,9 +256,13 @@ function KanbanCard({ stage, pedidoInfo, onClick, onStatusChange, onPassToArea, 
 export default function ProduccionKanban() {
   const toast = useToast();
   const { esAdmin, hasModulo } = useAuth();
-  // Producción permite operar el taller; el desglose y las tarifas de mano
-  // de obra requieren además acceso a Costos de Producción.
+  // Producción permite operar el taller; el desglose y los totales de costos
+  // requieren además acceso a Costos de Producción. La mano de obra es
+  // operativa: quien gestiona Producción puede registrarla y usar/crear el
+  // tarifario, sin ver la pestaña Costos.
   const puedeVerCostos = esAdmin || hasModulo('costos_produccion');
+  const puedeRegistrarManoObra = puedeVerCostos || hasModulo('produccion', true);
+  const puedeGestionarTarifas = puedeRegistrarManoObra;
   const [confirmFinalizarId, setConfirmFinalizarId] = useState<number | null>(null);
   const [areas, setAreas] = useState<Area[]>([]);
   const [stages, setStages] = useState<EtapaProduccion[]>([]);
@@ -909,6 +913,8 @@ export default function ProduccionKanban() {
           costosEnVivo={costosEnVivo}
           costosEnVivoLoading={costosEnVivoLoading}
           puedeVerCostos={puedeVerCostos}
+          puedeRegistrarManoObra={puedeRegistrarManoObra}
+          puedeGestionarTarifas={puedeGestionarTarifas}
           statusUpdating={statusUpdatingId === selectedStage.id}
           onClose={() => setSelectedStage(null)}
           onRefrescarEtapa={refrescarEtapa}

@@ -472,18 +472,15 @@ def eliminar_consumo(
 # ------------------------------------------------------------
 # Endpoints de Mano de Obra
 # ------------------------------------------------------------
-@router.get(
-    "/opciones-costo-produccion",
-    dependencies=[Depends(require_module('costos_produccion'))],
-)
+@router.get("/opciones-costo-produccion")
 def opciones_costo_produccion(
     area_id: Optional[int] = Query(None, description="Filtrar por área de la etapa"),
     db: Session = Depends(get_db),
     usuario_actual: Usuario = Depends(get_current_user)
 ):
     """Tarifario activo de costos de producción (id, descripción, precio) para
-    el formulario de mano de obra. Exige `costos_produccion`: el formulario de
-    MO se oculta a quien no puede ver costos."""
+    el formulario de mano de obra. Es operativo de Producción: quien registra
+    MO necesita ver las tarifas aunque no tenga el desglose de Costos."""
     from app.modules.costos_produccion.model import PrecioProduccion
     query = db.query(PrecioProduccion).filter(PrecioProduccion.activo.is_(True))
     if area_id is not None:
@@ -495,11 +492,7 @@ def opciones_costo_produccion(
     ]
 
 
-@router.post(
-    "/opciones-costo-produccion",
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_module('costos_produccion'))],
-)
+@router.post("/opciones-costo-produccion", status_code=status.HTTP_201_CREATED)
 def crear_opcion_costo_produccion(
     payload: dict = Body(...),
     db: Session = Depends(get_db),
@@ -508,8 +501,9 @@ def crear_opcion_costo_produccion(
     """Crea al vuelo un costo del tarifario (área + descripción + precio) desde
     el formulario de mano de obra.
 
-    Escribe el tarifario GLOBAL que alimenta la nómina: exige el mismo permiso
-    de escritura que el módulo costos_produccion (o Dueño/Administrador)."""
+    Escribe el tarifario GLOBAL que alimenta la nómina. Lo puede crear quien
+    gestione Producción (o tenga Costos de Producción / sea Dueño-Admin); el
+    desglose de costos sigue exigiendo `costos_produccion`."""
     from app.modules.costos_produccion import schemas as costos_schemas
     from app.modules.costos_produccion import service as costos_service
 

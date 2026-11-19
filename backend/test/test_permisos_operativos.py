@@ -17,7 +17,7 @@ from conftest import (
     registrar_inventario_de_material,
     registrar_venta_de_pedido,
 )
-from test_alcance_produccion import _crear_usuario_con_modulos, _pedido_con_orden
+from test_alcance_produccion import _crear_etapa, _crear_usuario_con_modulos, _pedido_con_orden
 from test_compra_inventario_multiple import _crear_segunda_cuenta_cop, _registrar_dependencias_compra
 
 
@@ -33,10 +33,8 @@ def headers_operativos(db, cleaner):
     ("GET", "/orden/999999999/costos-en-vivo"),
     ("GET", "/costo/999999999"),
     ("POST", "/costo/calcular/999999999"),
-    ("GET", "/opciones-costo-produccion"),
-    ("POST", "/opciones-costo-produccion"),
 ])
-def test_produccion_sin_costos_bloquea_endpoints_financieros(client, headers_operativos, metodo, ruta):
+def test_produccion_sin_costos_bloquea_el_desglose_financiero(client, headers_operativos, metodo, ruta):
     respuesta = client.request(metodo, f"/api/v1/produccion{ruta}", json={}, headers=headers_operativos)
     assert respuesta.status_code == 403, respuesta.text
 
@@ -51,18 +49,64 @@ def test_permiso_costos_conserva_lectura_y_controla_escritura(client, db, cleane
         ("produccion", True), ("costos_produccion", gestionar),
     ])
 
-    for ruta in (f"/orden/{orden['id']}/costos-en-vivo", f"/costo/{orden['id']}", "/opciones-costo-produccion"):
+    for ruta in (f"/orden/{orden['id']}/costos-en-vivo", f"/costo/{orden['id']}"):
         respuesta = client.get(f"/api/v1/produccion{ruta}", headers=headers)
         assert respuesta.status_code == 200, respuesta.text
 
     respuesta = client.post(f"/api/v1/produccion/costo/calcular/{orden['id']}", json={}, headers=headers)
     assert respuesta.status_code == (200 if gestionar else 403), respuesta.text
+
+
+def test_produccion_gestiona_mano_obra_y_tarifas_sin_ver_costos(client, db, cleaner):
+    """Paola: Producción con gestión registra MO y crea tarifas, pero no ve el
+    desglose de costos ni puede consultar el costo guardado de la orden."""
+    orden = _pedido_con_orden(client, cleaner)
+    headers = _crear_usuario_con_modulos(db, cleaner, _uniq("mo_sin_costos"), [("produccion", True)])
+    etapa = _crear_etapa(client, orden["id"], headers)
+    assert etapa.status_code == 201, etapa.text
+    etapa_id = etapa.json()["id"]
+    cleaner.registrar("etapa_produccion", etapa_id)
+    estado = client.put(
+        f"/api/v1/produccion/etapa/{etapa_id}/estado?estado=EN_PROCESO", headers=headers,
+    )
+    assert estado.status_code == 200, estado.text
+
+    tarifario = client.get("/api/v1/produccion/opciones-costo-produccion", headers=headers)
+    assert tarifario.status_code == 200, tarifario.text
     tarifa = client.post("/api/v1/produccion/opciones-costo-produccion", json={
-        "area_id": 1, "descripcion": _uniq("tarifa"), "precio": 1000,
+        "area_id": 1, "descripcion": _uniq("tarifa_mo"), "precio": 2500,
     }, headers=headers)
-    assert tarifa.status_code == (201 if gestionar else 403), tarifa.text
-    if gestionar:
-        cleaner.registrar("precio_produccion", tarifa.json()["id"])
+    assert tarifa.status_code == 201, tarifa.text
+    cleaner.registrar("precio_produccion", tarifa.json()["id"])
+
+    mano = client.post("/api/v1/produccion/mano-obra/", json={
+        "etapa_produccion_id": etapa_id,
+        "empleado_id": 3,
+        "monto": 2500,
+        "porcentaje_recargo": 0,
+        "precio_produccion_id": tarifa.json()["id"],
+        "observaciones": "MO registrada por Producción sin acceso a Costos",
+    }, headers=headers)
+    assert mano.status_code == 201, mano.text
+    cleaner.registrar("mano_obra", mano.json()["id"])
+
+    for ruta in (f"/orden/{orden['id']}/costos-en-vivo", f"/costo/{orden['id']}"):
+        respuesta = client.get(f"/api/v1/produccion{ruta}", headers=headers)
+        assert respuesta.status_code == 403, respuesta.text
+
+
+def test_produccion_lectura_ve_tarifario_pero_no_crea_mo_ni_tarifas(client, db, cleaner):
+    headers = _crear_usuario_con_modulos(db, cleaner, _uniq("prod_lectura"), [("produccion", False)])
+    tarifario = client.get("/api/v1/produccion/opciones-costo-produccion", headers=headers)
+    assert tarifario.status_code == 200, tarifario.text
+    tarifa = client.post("/api/v1/produccion/opciones-costo-produccion", json={
+        "area_id": 1, "descripcion": _uniq("tarifa_lectura"), "precio": 1000,
+    }, headers=headers)
+    assert tarifa.status_code == 403, tarifa.text
+    mano = client.post("/api/v1/produccion/mano-obra/", json={
+        "etapa_produccion_id": 1, "empleado_id": 3, "monto": 1000,
+    }, headers=headers)
+    assert mano.status_code == 403, mano.text
 
 
 def test_permiso_costos_no_sustituye_el_permiso_produccion(client, db, cleaner):

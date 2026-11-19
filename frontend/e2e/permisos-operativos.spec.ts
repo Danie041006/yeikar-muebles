@@ -57,6 +57,8 @@ async function preparar(page: Page, perfil: Perfil = 'operativo') {
       orden_id: 101, etapa_id: 401, producto_id: null, producto_nombre: 'Sofá QA',
       dimensiones: {}, materiales: [], piezas_mueble: [], cantidad: 1, area_nombre: 'Ebanistería',
     };
+    else if (camino.endsWith('/produccion/etapa/401')) respuesta = etapa;
+    else if (camino.endsWith('/empleado/')) respuesta = [{ id: 3, nombre: 'Ebanista QA', cargo: { id: 1, nombre: 'Ebanista' } }];
     else if (camino.endsWith('/produccion/opciones-costo-produccion')) respuesta = [{ id: 1, descripcion: 'Fabricación QA', precio: 12345 }];
     else if (camino.endsWith('/produccion/orden/101/costos-en-vivo')) respuesta = {
       orden_id: 101, estado: 'EN_PRODUCCION', secciones: [], total_produccion: 0,
@@ -86,13 +88,12 @@ async function abrirEtapa(page: Page) {
   return modal;
 }
 
-test('Operativo conserva el Kanban y la hoja, sin Costos, Mano de obra ni sus consultas', async ({ page }) => {
+test('Operativo conserva Kanban, Mano de obra y Hoja; no ve Costos ni el desglose', async ({ page }) => {
   const { consultas } = await preparar(page);
   const modal = await abrirEtapa(page);
   await expect(modal.getByRole('button', { name: 'Costos', exact: true })).toHaveCount(0);
-  await expect(modal.getByRole('button', { name: /Mano de obra/ })).toHaveCount(0);
+  await expect(modal.getByRole('button', { name: /Mano de obra/ })).toBeVisible();
   await expect(modal.getByText('Total etapa', { exact: true })).toHaveCount(0);
-  await expect(modal.getByText('Mano de obra', { exact: true })).toHaveCount(0);
   await expect(modal.getByRole('button', { name: 'Completar etapa', exact: true }).first()).toBeVisible();
   await modal.getByRole('button', { name: 'Materiales', exact: true }).click();
   await expect(modal.getByRole('heading', { name: 'Materiales — pedir y registrar' })).toBeVisible();
@@ -100,9 +101,36 @@ test('Operativo conserva el Kanban y la hoja, sin Costos, Mano de obra ni sus co
   await modal.getByRole('button', { name: 'Hoja de Trabajo', exact: true }).click();
   await expect(page.getByText('Hoja de Trabajo — Ebanistería', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Materiales e Insumos — Ebanistería' })).toBeVisible();
-  expect(consultas.filter((ruta) => /costos-en-vivo|opciones-costo-produccion/.test(ruta))).toEqual([]);
+  expect(consultas.filter((ruta) => ruta.endsWith('/costos-en-vivo'))).toEqual([]);
+  expect(consultas.some((ruta) => ruta.endsWith('/opciones-costo-produccion'))).toBe(true);
   await expect(page.getByRole('link', { name: 'Cuentas', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Ventas y cobros', exact: true })).toBeVisible();
+});
+
+test('Producción gestión registra mano de obra y crea tarifa sin ver Costos', async ({ page }) => {
+  const { consultas, escrituras } = await preparar(page);
+  const modal = await abrirEtapa(page);
+  await modal.getByRole('button', { name: /Mano de obra/ }).click();
+  await expect(modal.getByRole('heading', { name: 'Mano de obra — quién y cuánto' })).toBeVisible();
+  await expect(modal.getByRole('button', { name: 'Costos', exact: true })).toHaveCount(0);
+  await modal.getByRole('button', { name: 'Empleado…' }).click();
+  await modal.getByRole('option', { name: 'Ebanista QA', exact: true }).click();
+  await modal.getByRole('button', { name: /Sin tarifa/ }).click();
+  await modal.getByRole('option', { name: /Fabricación QA/ }).click();
+  await modal.getByPlaceholder('$', { exact: true }).fill('2500');
+  await modal.getByRole('button', { name: '+ Agregar mano de obra a la etapa' }).click();
+  await expect.poll(() => escrituras.some((e) => e.ruta.endsWith('/produccion/mano-obra/'))).toBe(true);
+  const mano = escrituras.find((e) => e.ruta.endsWith('/produccion/mano-obra/'))!.datos;
+  expect(mano).toMatchObject({ empleado_id: 3, monto: 2500 });
+
+  await modal.getByRole('button', { name: '+ Nuevo costo de producción' }).click();
+  await modal.getByPlaceholder('Tipo de costo (ej. HECHURA EXTRA)').fill('Tarifa QA');
+  await modal.getByPlaceholder('Precio ($)').fill('3000');
+  await modal.getByRole('button', { name: 'Crear', exact: true }).click();
+  await expect.poll(() =>
+    escrituras.some((e) => e.ruta.endsWith('/produccion/opciones-costo-produccion')),
+  ).toBe(true);
+  expect(consultas.filter((ruta) => ruta.endsWith('/costos-en-vivo'))).toEqual([]);
 });
 
 for (const perfil of ['costos-lectura', 'admin'] as const) {

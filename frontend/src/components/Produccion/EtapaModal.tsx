@@ -56,6 +56,8 @@ interface EtapaModalProps {
   costosEnVivo: CostosEnVivoOrden | null;
   costosEnVivoLoading: boolean;
   puedeVerCostos: boolean;
+  puedeRegistrarManoObra: boolean;
+  puedeGestionarTarifas: boolean;
   statusUpdating: boolean;
   onClose: () => void;
   onRefrescarEtapa: () => Promise<void>;
@@ -179,6 +181,8 @@ export default function EtapaModal({
   costosEnVivo,
   costosEnVivoLoading,
   puedeVerCostos,
+  puedeRegistrarManoObra,
+  puedeGestionarTarifas,
   statusUpdating,
   onClose,
   onRefrescarEtapa,
@@ -307,9 +311,10 @@ export default function EtapaModal({
     }
   }, [newConsumo.material_id, referenciaReceta]);
 
-  // Tarifario de costos de producción del área de la etapa (form de mano de obra)
+  // Tarifario de costos de producción del área de la etapa (form de mano de obra).
+  // Es operativo: quien registra MO puede verlo aunque no tenga el desglose de Costos.
   useEffect(() => {
-    if (!puedeVerCostos) {
+    if (!puedeRegistrarManoObra) {
       setOpcionesCosto([]);
       setTab((actual) => actual === 'costos' || actual === 'mano-obra' ? 'etapa' : actual);
       return;
@@ -320,7 +325,7 @@ export default function EtapaModal({
     }).then((r) => { if (activo) setOpcionesCosto(r.data); })
       .catch(() => { if (activo) setOpcionesCosto([]); });
     return () => { activo = false; };
-  }, [stage.id, stage.area_id, puedeVerCostos]);
+  }, [stage.id, stage.area_id, puedeRegistrarManoObra]);
 
   // ── Búsqueda async de materiales (autocomplete server-side) ──
   // El catálogo completo no se baja al cliente (con cientos de materiales solo
@@ -876,7 +881,12 @@ export default function EtapaModal({
               ['mano-obra', 'Mano de obra', manoObras.length],
               ['costos', 'Costos', null],
             ] as [TabActiva, string, number | null][])
-              .filter(([id]) => puedeVerCostos || id === 'etapa' || id === 'materiales')
+              .filter(([id]) =>
+                id === 'etapa'
+                || id === 'materiales'
+                || (id === 'mano-obra' && puedeRegistrarManoObra)
+                || (id === 'costos' && puedeVerCostos),
+              )
               .map(([id, label, count]) => (
               <button
                 key={id}
@@ -1915,7 +1925,7 @@ export default function EtapaModal({
             </>
           )}
 
-          {puedeVerCostos && tab === 'mano-obra' && (
+          {puedeRegistrarManoObra && tab === 'mano-obra' && (
             <>
               {/* ── MANO DE OBRA (form + registro en la misma tarjeta) ── */}
               <section className="bg-white border border-yeikar-secondary-light/10 rounded-2xl shadow-xs overflow-hidden">
@@ -1984,7 +1994,7 @@ export default function EtapaModal({
                     </div>
                   </div>
 
-                  {mostrarNuevoCosto && (
+                  {puedeGestionarTarifas && mostrarNuevoCosto && (
                     <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-white border border-dashed border-yeikar-primary/40 rounded-xl p-2 items-center">
                       <div className="sm:col-span-6">
                         <input
@@ -2045,13 +2055,15 @@ export default function EtapaModal({
                     className="w-full text-xs bg-white border border-yeikar-secondary-light/10 rounded-xl p-2.5 focus:outline-none focus:border-yeikar-primary"
                   />
 
-                  <button
-                    type="button"
-                    onClick={() => setMostrarNuevoCosto(v => !v)}
-                    className="text-[11px] font-bold text-yeikar-primary-dark hover:underline"
-                  >
-                    {mostrarNuevoCosto ? '× Cancelar nuevo costo' : '+ Nuevo costo de producción'}
-                  </button>
+                  {puedeGestionarTarifas && (
+                    <button
+                      type="button"
+                      onClick={() => setMostrarNuevoCosto(v => !v)}
+                      className="text-[11px] font-bold text-yeikar-primary-dark hover:underline"
+                    >
+                      {mostrarNuevoCosto ? '× Cancelar nuevo costo' : '+ Nuevo costo de producción'}
+                    </button>
+                  )}
                   <button
                     type="submit"
                     disabled={stage.estado !== 'EN_PROCESO'}
