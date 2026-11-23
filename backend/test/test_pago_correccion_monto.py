@@ -127,7 +127,7 @@ def test_corregir_monto_actualiza_pago_caja_saldo_e_historial(client, cleaner, d
 # ---------------------------------------------------------------------------
 # 2. Corregir hacia arriba, cerrar la venta y rechazar un exceso de saldo.
 # ---------------------------------------------------------------------------
-def test_corregir_monto_hacia_arriba_y_rechazar_exceso(client, cleaner, db):
+def test_corregir_monto_hacia_arriba_y_confirmar_excedente(client, cleaner, db):
     cliente = crear_cliente(client, cleaner)
     prod = crear_producto(client, cleaner)
     venta = _crear_venta_pendiente(client, cleaner, cliente["id"], prod["id"], precio=100000)
@@ -143,12 +143,13 @@ def test_corregir_monto_hacia_arriba_y_rechazar_exceso(client, cleaner, db):
     assert float(detalle["saldo_pendiente"]) == 40000.0
     assert detalle["estado"] == "ABONADA"
 
-    # El exceso se rechaza y NO deja rastro (rollback limpio).
+    # Corregir por encima del saldo pide confirmación y NO deja rastro.
     r = client.put(
         f"/api/v1/pago/{pago['id']}", json={"monto": 200000}, headers=ADMIN_HEADERS
     )
-    assert r.status_code == 400, f"exceso debe rechazarse → {r.status_code}: {r.text}"
-    assert "saldo" in r.text.lower()
+    assert r.status_code == 409, f"exceso debe pedir confirmación → {r.status_code}: {r.text}"
+    assert r.json()["detail"]["codigo"] == "CONFIRMAR_EXCEDENTE"
+    assert float(r.json()["detail"]["saldo_favor"]) == 100000.0
 
     pago_db = db.execute(text(
         "SELECT monto, monto_en_moneda_base FROM pago WHERE id = :pid"
@@ -158,13 +159,32 @@ def test_corregir_monto_hacia_arriba_y_rechazar_exceso(client, cleaner, db):
     historial = db.execute(text(
         "SELECT count(*) FROM pago_correccion WHERE pago_id = :pid"
     ), {"pid": pago["id"]}).scalar_one()
-    assert historial == 1, "el intento rechazado no debe crear historial"
+    assert historial == 1, "el intento sin confirmar no debe crear historial"
 
-    # Exactamente el saldo restante cierra la venta (PAGADA).
+    # Confirmado: el excedente queda a favor del cliente (caja sí registra el dinero real).
     r = client.put(
-        f"/api/v1/pago/{pago['id']}", json={"monto": 100000}, headers=ADMIN_HEADERS
+        f"/api/v1/pago/{pago['id']}",
+        json={
+            "monto": 200000, "confirmar_excedente": True,
+            "saldo_confirmado": 100000, "motivo_correccion": "El cliente dejó 100.000 a favor",
+        },
+        headers=ADMIN_HEADERS,
     )
-    assert r.status_code == 200, f"cerrar venta → {r.status_code}: {r.text}"
+    assert r.status_code == 200, f"confirmar exceso → {r.status_code}: {r.text}"
+    assert float(r.json()["saldo_favor_generado"]) == 100000.0
+    assert float(r.json()["monto_aplicado"]) == 100000.0
+    detalle = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
+    assert float(detalle["saldo_pendiente"]) == 0.0
+    assert detalle["estado"] == "PAGADA"
+
+    # Bajarlo de nuevo retira el saldo a favor (no queda huérfano).
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"monto": 100000, "motivo_correccion": "Se corrigió el excedente"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, f"bajar monto → {r.status_code}: {r.text}"
+    assert float(r.json()["saldo_favor_generado"]) == 0.0
     detalle = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
     assert float(detalle["saldo_pendiente"]) == 0.0
     assert detalle["estado"] == "PAGADA"
@@ -383,7 +403,7 @@ def test_corregir_tasa_en_misma_moneda_se_rechaza(client, cleaner):
     assert "moneda" in r.text.lower()
 
 
-def test_corregir_tasa_que_excede_el_saldo_se_rechaza(client, cleaner):
+def test_corregir_tasa_que_excede_el_saldo_pide_confirmacion(client, cleaner):
     """Subir la tasa no puede dejar el abono por encima de lo que vale la
     factura: el saldo se valida sin contar el propio cobro."""
     cliente = crear_cliente(client, cleaner)
@@ -399,13 +419,33 @@ def test_corregir_tasa_que_excede_el_saldo_se_rechaza(client, cleaner):
         json={"tasa_cambio": 4200},  # 25 × 4.200 = 105.000 > 100.000
         headers=ADMIN_HEADERS,
     )
-    assert r.status_code == 400, r.text
-    assert "saldo" in r.text.lower()
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["codigo"] == "CONFIRMAR_EXCEDENTE"
 
     detalle = client.get(f"/api/v1/venta/{venta['id']}", headers=ADMIN_HEADERS).json()
     pago_actual = next(p for p in detalle["pagos"] if p["id"] == pago["id"])
     assert float(pago_actual["tasa_cambio"]) == 4000.0
     assert float(pago_actual["monto_en_moneda_base"]) == 100000.0
+
+    # Confirmado: 24 USD cubren la factura y 1 USD queda a favor (moneda del pago).
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"tasa_cambio": 4200, "confirmar_excedente": True,
+              "saldo_confirmado": 100000, "motivo_correccion": "Tasa corregida"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    assert float(r.json()["monto_en_moneda_base"]) == 105000.0
+    assert float(r.json()["monto_aplicado"]) == 100000.0
+
+    # Volver a la tasa original retira el saldo a favor.
+    r = client.put(
+        f"/api/v1/pago/{pago['id']}",
+        json={"tasa_cambio": 4000, "motivo_correccion": "Se volvió a la tasa del cobro"},
+        headers=ADMIN_HEADERS,
+    )
+    assert r.status_code == 200, r.text
+    assert float(r.json()["saldo_favor_generado"]) == 0.0
 
 
 def test_eliminar_abono_revierte_caja_saldo_adjuntos_y_deja_auditoria(client, cleaner, db):

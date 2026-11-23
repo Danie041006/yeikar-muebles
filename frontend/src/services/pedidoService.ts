@@ -145,6 +145,8 @@ export interface ConvertQuoteBody {
   fecha_adelanto?: string;
   /** Abono inicial pagado de VARIAS maneras (reemplaza a `adelanto`). */
   adelantos?: AdelantoPagoBody[];
+  confirmar_excedente?: boolean;
+  total_confirmado?: number;
 }
 
 export const pedidoService = {

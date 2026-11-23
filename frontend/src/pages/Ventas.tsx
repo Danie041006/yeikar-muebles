@@ -28,6 +28,11 @@ import { subirAdjunto, TIPO_ADJUNTO } from '../services/adjuntosService';
 import { fmtFechaVE, fmtFechaHoraVE, hoyVE } from '../utils/fechas';
 import AdjuntoImagen from '../components/AdjuntoImagen';
 import { motion, AnimatePresence } from 'framer-motion';
+import { isAxiosError } from 'axios';
+import ConfirmarCobro from '../components/Ventas/ConfirmarCobro';
+import AplicarSaldoFavor from '../components/Ventas/AplicarSaldoFavor';
+import SaldosFavorClientes from '../components/Ventas/SaldosFavorClientes';
+import type { VistaPreviaCobro } from '../services/ventaService';
 
 // ─── Tipos locales ────────────────────────────────────────────────────────────
 // ─── Badges helpers ───────────────────────────────────────────────────────────
@@ -568,6 +573,9 @@ function ModalDetalle({
   const [observaciones, setObservaciones] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [errorPago, setErrorPago] = useState('');
+  const [cobroPendiente, setCobroPendiente] = useState<{ payload: PagoCreate; resumen: VistaPreviaCobro } | null>(null);
+  const guardandoCobro = useRef(false);
+  const intentoCobro = useRef<{ firma: string; id: string } | null>(null);
   const [reciboArchivo, setReciboArchivo] = useState<File | null>(null);
   const [reciboPreview, setReciboPreview] = useState<string | null>(null);
   const [reciboVer, setReciboVer] = useState<{ id: number; mime: string } | null>(null);
@@ -668,6 +676,48 @@ function ModalDetalle({
     if (descMonedaId === null && detalle) setDescMonedaId(detalle.moneda_id);
   };
 
+  const registrarCobro = async (payload: PagoCreate, revision: VistaPreviaCobro | null) => {
+    if (guardandoCobro.current) return;
+    guardandoCobro.current = true;
+    setSubmitting(true);
+    setErrorPago('');
+    try {
+      const pagoCreado = await pagoService.registrar(revision
+        ? { ...payload, confirmar_excedente: true, saldo_confirmado: Number(revision.saldo_confirmado) }
+        : payload);
+      // Recibo digital (opcional): comprobante del pago
+      if (reciboArchivo && pagoCreado) {
+        try {
+          await subirAdjunto(reciboArchivo, TIPO_ADJUNTO.PAGO, pagoCreado.id);
+        } catch (falloAdjunto: unknown) {
+          setErrorAccionPago(extractErrorMessage(falloAdjunto, 'El cobro se registró, pero faltó el comprobante. No repitas el cobro.'));
+        }
+      }
+      setCobroPendiente(null);
+      intentoCobro.current = null;
+      setMonto('');
+      setReferencia('');
+      setObservaciones('');
+      setTasaNaturalInput('');
+      setFechaPago(hoyVE());
+      setReciboArchivo(null);
+      if (reciboPreview) URL.revokeObjectURL(reciboPreview);
+      setReciboPreview(null);
+      setShowForm(false);
+      await cargar();
+      onPagoRegistrado();
+    } catch (err: unknown) {
+      setErrorPago(extractErrorMessage(err, 'Error al registrar el pago.'));
+      if (isAxiosError(err) && err.response?.status === 409) {
+        setCobroPendiente(null);
+        setErrorPago('El saldo cambió. Pulsa Confirmar cobro otra vez para revisar el nuevo desglose.');
+      }
+    } finally {
+      guardandoCobro.current = false;
+      setSubmitting(false);
+    }
+  };
+
   const handlePago = async () => {
     if (!detalle) return;
     setErrorPago('');
@@ -701,27 +751,24 @@ function ModalDetalle({
         observaciones: observaciones || undefined,
         ...(necesitaTRM ? { tasa_cambio: tasaAlmacenada } : {}),
       };
-      const pagoCreado = await pagoService.registrar(payload);
-      // Recibo digital (opcional): comprobante del pago
-      if (reciboArchivo && pagoCreado) {
-        await subirAdjunto(reciboArchivo, TIPO_ADJUNTO.PAGO, pagoCreado.id);
+      const firma = JSON.stringify(payload);
+      if (intentoCobro.current?.firma !== firma) intentoCobro.current = { firma, id: crypto.randomUUID() };
+      payload.operacion_id = intentoCobro.current.id;
+      const margen = monedaVenta?.codigo === 'COP' ? 1000 : 0.01;
+      if (montoEquivalente > saldoRestante + margen) {
+        setCobroPendiente({ payload, resumen: await pagoService.previsualizar(payload) });
+        return;
       }
-      setMonto('');
-      setReferencia('');
-      setObservaciones('');
-      setTasaNaturalInput('');
-      setFechaPago(hoyVE());
-      setReciboArchivo(null);
-      if (reciboPreview) URL.revokeObjectURL(reciboPreview);
-      setReciboPreview(null);
-      setShowForm(false);
-      await cargar();
-      onPagoRegistrado();
-    } catch (err: any) {
-      setErrorPago(extractErrorMessage(err, 'Error al registrar el pago.'));
+      await registrarCobro(payload, null);
+    } catch (err: unknown) {
+      setErrorPago(extractErrorMessage(err, 'No se pudo revisar el cobro.'));
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const confirmarCobro = async () => {
+    if (cobroPendiente) await registrarCobro(cobroPendiente.payload, cobroPendiente.resumen);
   };
 
   const abrirEdicionPago = (p: Pago) => {
@@ -793,7 +840,25 @@ function ModalDetalle({
         payload.monto = montoEditado;
       }
       if (editMotivo.trim()) payload.motivo_correccion = editMotivo.trim();
-      await pagoService.actualizar(pagoEditando.id, payload);
+      // Un cobro con excedente exige motivo si se toca el dinero; una aplicación
+      // de crédito lo exige siempre porque todo su importe es saldo a favor.
+      const tocaDinero = payload.monto !== undefined || payload.tasa_cambio !== undefined;
+      const exigeMotivo = pagoEditando.tipo === 'SALDO_FAVOR'
+        || (tocaDinero && Number(pagoEditando.saldo_favor_generado) > 0);
+      if (exigeMotivo && !editMotivo.trim()) {
+        setEditError('Indica el motivo de la corrección del saldo a favor.');
+        return;
+      }
+      try {
+        await pagoService.actualizar(pagoEditando.id, payload);
+      } catch (fallo: unknown) {
+        const detalleError = isAxiosError(fallo) ? fallo.response?.data?.detail : null;
+        if (!detalleError || detalleError.codigo !== 'CONFIRMAR_EXCEDENTE') throw fallo;
+        if (!window.confirm(`Esta corrección dejará ${detalleError.saldo_favor} ${pagoEditando.moneda?.codigo ?? ''} a favor del cliente. ¿Confirmas el monto y la tasa?`)) return;
+        await pagoService.actualizar(pagoEditando.id, {
+          ...payload, confirmar_excedente: true, saldo_confirmado: Number(detalleError.saldo_confirmado),
+        });
+      }
       setPagoEditando(null);
       await cargar();
       onPagoRegistrado();
@@ -807,7 +872,9 @@ function ModalDetalle({
   const handleEliminarPago = async (pago: Pago) => {
     const monto = `${pago.moneda?.simbolo ?? ''}${Number(pago.monto).toLocaleString('es-ES')} ${pago.moneda?.codigo ?? ''}`.trim();
     if (!window.confirm(
-      `¿Eliminar el abono de ${monto}?\n\nSe eliminará también su entrada de caja y el saldo pendiente de la factura aumentará. Esta acción no se puede deshacer.`,
+      pago.tipo === 'SALDO_FAVOR'
+        ? `¿Revertir la aplicación de ${monto}?\nEl crédito volverá al cliente y esta factura recuperará su saldo. No se modifica caja.`
+        : `¿Eliminar el abono de ${monto}?\n\nSe eliminará también su entrada de caja y su excedente a favor, si no se ha usado. El saldo pendiente de la factura aumentará.`,
     )) return;
 
     setErrorAccionPago('');
@@ -920,7 +987,7 @@ function ModalDetalle({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
-      onClick={onClose}
+      onClick={() => { if (!submitting) onClose(); }}
     >
       <motion.div
         initial={{ y: 28, opacity: 0, scale: 0.98 }}
@@ -960,7 +1027,7 @@ function ModalDetalle({
                 </button>
               )}
               <button
-                onClick={onClose}
+                onClick={() => { if (!submitting) onClose(); }}
                 className="text-yeikar-tertiary/50 hover:text-yeikar-tertiary transition-colors"
                 aria-label="Cerrar"
               >
@@ -1299,6 +1366,12 @@ function ModalDetalle({
                                   {conversion ?? `≈ ${fmtMoneda(Number(p.monto_en_moneda_base), ventaCodigo)}`}
                                 </span>
                               )}
+                              {(Number(p.saldo_favor_generado) > 0 || p.tipo === 'SALDO_FAVOR') && (
+                                <span className="mt-1 block text-xs font-bold text-emerald-800">
+                                  {p.tipo === 'SALDO_FAVOR' ? 'Crédito aplicado · sin entrada de caja' : `${fmtMoneda(Number(p.saldo_favor_generado), p.moneda?.codigo)} a favor`}
+                                  {' · Aplicado a esta venta: '}{fmtMoneda(Number(p.monto_aplicado ?? p.monto_en_moneda_base), ventaCodigo)}
+                                </span>
+                              )}
                             </span>
                             <span className="shrink-0 text-right">
                               <span className="block font-mono text-sm font-black text-yeikar-secondary">
@@ -1563,7 +1636,10 @@ function ModalDetalle({
               )}
 
               {/* Registrar cobro / descuento */}
-              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && !showForm && !showDescForm && tab === 'cobranza' && (
+              {tab === 'cobranza' && (
+                <AplicarSaldoFavor venta={detalle} onAplicado={async () => { await cargar(); onPagoRegistrado(); }} />
+              )}
+              {detalle.estado !== 'CANCELADA' && !showForm && !showDescForm && tab === 'cobranza' && (
                 <div className="sticky bottom-0 -mx-1 bg-gradient-to-t from-white via-white to-transparent px-1 pb-1 pt-4 space-y-2">
                   <button
                     onClick={() => { setTab('cobranza'); setFechaPago(hoyVE()); setPagoEditando(null); setShowForm(true); }}
@@ -1580,7 +1656,7 @@ function ModalDetalle({
                 </div>
               )}
 
-              {detalle.estado !== 'PAGADA' && detalle.estado !== 'CANCELADA' && showForm && (
+              {detalle.estado !== 'CANCELADA' && showForm && (
                   <div className="rounded-2xl border border-yeikar-primary/25 bg-white p-4 space-y-3 shadow-card">
                       <div className="flex items-center justify-between gap-2 border-b border-yeikar-secondary-light/10 pb-2.5">
                         <div className="flex items-center gap-1">
@@ -1701,7 +1777,7 @@ function ModalDetalle({
                           )}
                           {montoEquivalente > saldoRestante + (monedaVenta?.codigo === 'COP' ? 1000 : 0.01) && (
                             <p className="text-xs text-red-600 font-bold mt-1">
-                              El equivalente excede el saldo pendiente ({saldoRestante.toLocaleString('es-ES')} {nombreMoneda(monedaVenta?.codigo)})
+                              El excedente quedará a favor del cliente en la moneda recibida. Se revisará antes de confirmar.
                             </p>
                           )}
                         </div>
@@ -1990,6 +2066,10 @@ function ModalDetalle({
           </div>
         </div>
       )}
+      {cobroPendiente && <ConfirmarCobro
+        resumen={cobroPendiente.resumen} ocupado={submitting} error={errorPago}
+        onConfirmar={confirmarCobro} onCancelar={() => setCobroPendiente(null)}
+      />}
     </motion.div>
   );
 }
@@ -2404,6 +2484,7 @@ export default function Ventas() {
         )
       )}
 
+      <SaldosFavorClientes revision={detalleVentaId ?? 0} />
       {/* Pantalla de detalle + cobro */}
       <AnimatePresence>
         {detalleVentaId !== null && (

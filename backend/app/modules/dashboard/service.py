@@ -46,7 +46,7 @@ def obtener_metricas_dashboard(db: Session, usuario: Usuario) -> schemas.Dashboa
         db.query(Moneda.codigo, func.sum(Pago.monto).label("total"))
         .join(Pago, Pago.moneda_id == Moneda.id)
         .join(Venta, Venta.id == Pago.venta_id)
-        .filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt)
+        .filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt, Pago.tipo == "COBRO")
         .group_by(Moneda.codigo)
     )
     ingresos_query = filtrar_registros_propios(ingresos_query, Venta.creado_por_id, usuario).all()

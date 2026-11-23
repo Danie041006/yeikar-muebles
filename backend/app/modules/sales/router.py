@@ -7,6 +7,7 @@ from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
 from app.modules.users.deps import require_module
 from app.modules.sales import schemas, service
+from app.modules.sales.cobros import resumen_cobro
 
 router = APIRouter(dependencies=[Depends(require_module('ventas'))])
 pago_router = APIRouter(dependencies=[Depends(require_module('ventas'))])
@@ -62,12 +63,11 @@ def ver_factura_venta(
 
     # Calcular campos acumulados y rellenar las descripciones del detalle con
     # el texto tal cual se anotó (pedido/cotización) cuando falta.
-    total_pagado = sum(float(p.monto_en_moneda_base) for p in db_obj.pagos)
-    total_descontado = sum(float(d.monto_en_moneda_base) for d in db_obj.descuentos)
+    total_pagado, total_descontado, pendiente = resumen_cobro(db_obj)
     resp = schemas.VentaDetalleResponse.model_validate(db_obj)
     resp.total_pagado = total_pagado
     resp.total_descontado = total_descontado
-    resp.saldo_pendiente = float(db_obj.total) - total_pagado - total_descontado
+    resp.saldo_pendiente = pendiente
     resp.detalles = service.detalles_venta_mostrar(db, db_obj)
     # Un abono registrado tarde puede traer una fecha anterior: se ordena por
     # la fecha del pago para que caiga en su lugar cronológico, no al final.
@@ -93,6 +93,14 @@ def eliminar_factura_venta(
 # ------------------------------------------------------------
 # Endpoints de Pagos (Abonos)
 # ------------------------------------------------------------
+@pago_router.post("/previsualizar")
+def previsualizar_pago(esquema: schemas.PagoCreate, db: Session = Depends(get_db)):
+    try:
+        return service.previsualizar_pago(db, esquema)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @pago_router.post("/", response_model=schemas.PagoResponse, status_code=status.HTTP_201_CREATED)
 def registrar_pago(
     esquema: schemas.PagoCreate,

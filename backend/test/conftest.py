@@ -122,6 +122,8 @@ ORDEN_LIMPIEZA = [
     "promocion_obsequio",
     "devolucion_venta",
     "descuento_venta",
+    "aplicacion_saldo_favor",
+    "saldo_favor",
     "pago",
     "detalle_venta",
     "venta",

@@ -292,10 +292,10 @@ def test_caso2b_dos_reventas_sin_abono_factura_con_saldo(client, cleaner, db):
     assert factura["igtf_bs"] == pytest.approx(261.0)
     assert factura["total_bs"] == pytest.approx(8961.0)
 
-    # 3c. Pago que excede el saldo → 400.
+    # 3c. Pago que excede el saldo → 409: exige confirmar el saldo a favor.
     rpago, _ = pagar_venta(client, cleaner, venta["id"], 1, 500000.0, "EFECTIVO_COP")
-    assert rpago.status_code == 400, f"sobrepago → {rpago.status_code}: {rpago.text}"
-    assert "excede" in rpago.text.lower()
+    assert rpago.status_code == 409, f"sobrepago → {rpago.status_code}: {rpago.text}"
+    assert rpago.json()["detail"]["codigo"] == "CONFIRMAR_EXCEDENTE"
 
     # 3d. Pago con metodo_pago de moneda incorrecta (ZELLE con moneda COP) → 400.
     rpago, _ = pagar_venta(client, cleaner, venta["id"], 1, 100000.0, "ZELLE")

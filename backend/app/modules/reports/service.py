@@ -6,6 +6,7 @@ from datetime import datetime, date
 import calendar
 
 from app.modules.sales.model import Pago, Venta, DetalleVenta
+from app.modules.sales.cobros import monto_aplicado
 from app.modules.gastos.model import Gasto
 from app.modules.catalogos.model import Moneda, UnidadMedida, TipoGasto
 from app.modules.productos.model import Producto
@@ -42,7 +43,7 @@ def obtener_pnl(db: Session, mes: str) -> schemas.PnLResponse:
             func.sum(Pago.monto_en_moneda_base).label("total_cop"),
         )
         .join(Pago, Pago.moneda_id == Moneda.id)
-        .filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt)
+        .filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt, Pago.tipo == "COBRO")
         .group_by(Moneda.codigo)
         .all()
     )
@@ -523,7 +524,7 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     ingresos = Decimal("0.0")
     for venta in ventas_mes:
         for p in pagos_por_venta.get(venta.id, []):
-            if not (start_dt <= p.fecha <= end_dt):
+            if p.tipo == "SALDO_FAVOR" or not (start_dt <= p.fecha <= end_dt):
                 continue
             monto_base_venta = Decimal(str(p.monto_en_moneda_base or p.monto))
             ingresos += monto_base_venta * (
@@ -577,7 +578,7 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     ventas_por_moneda: Dict[str, Dict[str, Decimal]] = {}
     for venta in ventas_mes:
         pagos = pagos_por_venta.get(venta.id, [])
-        total_pagado = sum(Decimal(str(p.monto_en_moneda_base or p.monto)) for p in pagos)
+        total_pagado = sum(monto_aplicado(p) for p in pagos)
         total_venta = Decimal(str(venta.total))
         es_contado = len(pagos) == 1 and total_pagado >= total_venta
         if es_contado:
@@ -804,7 +805,7 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
                 continue
             total_base = _venta_en_cop(db, venta)
             pagado_base = sum(
-                Decimal(str(p.monto_en_moneda_base or p.monto))
+                monto_aplicado(p)
                 for p in pagos_por_venta_cierre.get(venta.id, [])
             )
             descontado_base = sum(
@@ -909,7 +910,7 @@ def obtener_informe_mensual(db: Session, mes: str) -> schemas.InformeMensualResp
     # Ingresos: TODO el dinero cobrado en el mes (pagos), en su moneda física.
     # Las devoluciones del mes son dinero que sale: restan.
     pagos_cobrados_mes = (
-        db.query(Pago).filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt).all()
+        db.query(Pago).filter(Pago.fecha >= start_dt, Pago.fecha <= end_dt, Pago.tipo == "COBRO").all()
     )
     for p in pagos_cobrados_mes:
         cod_p = monedas_catalogo.get(p.moneda_id, "COP")
@@ -2711,7 +2712,7 @@ def crear_devolucion(db: Session, esquema: schemas.DevolucionVentaCreate) -> mod
     if not venta:
         raise ValueError("La venta especificada no existe.")
     total_pagado = sum(
-        float(p.monto_en_moneda_base) for p in db.query(Pago).filter(Pago.venta_id == venta.id).all()
+        float(monto_aplicado(p)) for p in db.query(Pago).filter(Pago.venta_id == venta.id).all()
     )
     # Resta lo YA devuelto en devoluciones previas: sin esto se podía reembolsar
     # N veces la misma venta (cada devolución generaba una SALIDA de caja).

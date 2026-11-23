@@ -17,6 +17,7 @@ from app.modules.quotes.router import router as cotizaciones_router
 from app.modules.orders.router import router as pedidos_router
 from app.modules.production.router import router as produccion_router
 from app.modules.sales.router import router as sales_router, pago_router as pagos_router
+from app.modules.sales.saldos_router import router as saldos_favor_router
 from app.modules.facturacion.router import router as facturacion_router
 from app.modules.gastos.router import router as gastos_router
 from app.modules.cuentas_por_pagar.router import router as cuentas_por_pagar_router
@@ -115,6 +116,7 @@ app.include_router(cotizaciones_router, prefix="/api/v1/cotizacion", tags=["coti
 app.include_router(pedidos_router, prefix="/api/v1/pedido", tags=["pedidos"])
 app.include_router(produccion_router, prefix="/api/v1/produccion", tags=["produccion"])
 app.include_router(sales_router, prefix="/api/v1/venta", tags=["ventas"])
+app.include_router(saldos_favor_router, prefix="/api/v1")
 app.include_router(pagos_router, prefix="/api/v1/pago", tags=["pagos"])
 app.include_router(facturacion_router, prefix="/api/v1/factura", tags=["facturación"])
 app.include_router(gastos_router, prefix="/api/v1/gasto", tags=["gastos"])

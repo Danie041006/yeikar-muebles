@@ -22,6 +22,8 @@ from app.modules.productos import service as productos_service
 from app.modules.auditoria.service import record_event
 from app.modules.users.deps import filtrar_registros_propios
 from app.modules.users.model import Usuario
+from app.modules.sales.cobros import monto_aplicado, expresion_aplicado
+from app.modules.sales import saldos_service
 # ------------------------------------------------------------
 # Servicios para Ventas (Facturas)
 # ------------------------------------------------------------
@@ -305,7 +307,7 @@ def _totales_cobro(db: Session, venta_id: int) -> tuple[float, float]:
     """Devuelve (total_pagado_base, total_descontado_base) en la moneda de la venta."""
     pagos = db.query(Pago).filter(Pago.venta_id == venta_id).all()
     descuentos = db.query(DescuentoVenta).filter(DescuentoVenta.venta_id == venta_id).all()
-    total_pagado = sum(float(p.monto_en_moneda_base) for p in pagos)
+    total_pagado = sum(float(monto_aplicado(p)) for p in pagos)
     total_descontado = sum(float(d.monto_en_moneda_base) for d in descuentos)
     return total_pagado, total_descontado
 
@@ -453,7 +455,7 @@ def _registrar_movimiento_caja_pago(db: Session, db_pago: Pago, venta: Venta, us
     El movimiento se commitea con el pago (transacción atómica).
     `usuario_id` queda registrado como responsable del cobro (reporte diario).
     """
-    if not db_pago.metodo_pago:
+    if db_pago.tipo == "SALDO_FAVOR" or not db_pago.metodo_pago:
         return
     from fastapi import HTTPException
     from app.modules.reports.model import MetodoCaja, MovimientoCaja
@@ -531,6 +533,30 @@ def _resolver_cuenta_pago(db: Session, metodo_pago: str, moneda_id: int):
     return cuenta
 
 
+def previsualizar_pago(db: Session, esquema: PagoCreate) -> dict:
+    venta = obtener_venta(db, esquema.venta_id)
+    if not venta or venta.estado == "CANCELADA":
+        raise ValueError("La venta no existe o está cancelada.")
+    cuenta = _resolver_cuenta_pago(db, esquema.metodo_pago, esquema.moneda_id)
+    _normalizar_fecha_pago(esquema.fecha)
+    tasa, equivalente, _ = _convertir_a_moneda_venta(
+        db, esquema.moneda_id, esquema.monto, esquema.tasa_cambio, venta,
+    )
+    saldo = _saldo_pendiente(db, venta)
+    reparto = saldos_service.repartir_cobro(esquema.monto, tasa, equivalente, saldo)
+    moneda_pago = db.query(Moneda).filter(Moneda.id == esquema.moneda_id).first()
+    return {
+        "cliente_nombre": venta.cliente.nombre,
+        "cuenta_nombre": cuenta.nombre,
+        "monto": esquema.monto,
+        "moneda_pago": moneda_pago.codigo if moneda_pago else venta.moneda.codigo,
+        "moneda_venta": venta.moneda.codigo,
+        "monto_aplicado": reparto.aplicado,
+        "saldo_favor": reparto.excedente,
+        "saldo_confirmado": max(0, saldo),
+    }
+
+
 def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: Usuario | None = None):
     # 1. Obtener la venta con FOR UPDATE para serializar pagos concurrentes:
     #    dos abonos simultáneos no pueden validar el saldo al mismo tiempo.
@@ -539,12 +565,18 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
     venta = db.query(Venta).filter(Venta.id == esquema.venta_id).with_for_update().first()
     if not venta:
         raise ValueError("La venta especificada no existe.")
+    if esquema.operacion_id:
+        existente = db.query(Pago).filter(Pago.operacion_id == str(esquema.operacion_id)).first()
+        if existente:
+            if (existente.venta_id != venta.id or existente.moneda_id != esquema.moneda_id
+                    or saldos_service.dinero(existente.monto) != saldos_service.dinero(esquema.monto)
+                    or existente.metodo_pago != esquema.metodo_pago or existente.tipo != "COBRO"):
+                raise ValueError("La operación ya se registró con otros datos. Recarga el cobro.")
+            return existente
 
     # 2. Validar que la venta no este cancelada ni pagada
     if venta.estado == "CANCELADA":
         raise ValueError("No se pueden registrar pagos en una venta cancelada.")
-    if venta.estado == "PAGADA":
-        raise ValueError("La venta ya se encuentra totalmente pagada.")
 
     # 3. Determinar tasa de cambio y calcular monto en moneda base
     #    (misma regla para pagos y descuentos; el saldo resta ambos).
@@ -567,11 +599,12 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
     #    (el saldo resta pagos Y descuentos: lo perdonado ya no se puede cobrar).
     saldo_pendiente_base = _saldo_pendiente(db, venta)
 
-    if monto_en_moneda_base > saldo_pendiente_base + margen_saldo:
-        raise ValueError(
-            f"El monto del pago ({monto_en_moneda_base:,.2f} en moneda base) excede el saldo "
-            f"pendiente de la factura ({saldo_pendiente_base:,.2f}). Revisa el monto o la tasa de cambio."
-        )
+    reparto = saldos_service.repartir_cobro(
+        esquema.monto, tasa_cambio, monto_en_moneda_base, saldo_pendiente_base,
+    )
+    saldos_service.confirmar_reparto(
+        reparto, esquema.confirmar_excedente, esquema.saldo_confirmado, saldo_pendiente_base,
+    )
 
     # 6. Crear el pago
     fecha_pago = _normalizar_fecha_pago(esquema.fecha)
@@ -585,6 +618,9 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
         monto=esquema.monto,
         tasa_cambio=tasa_cambio,
         monto_en_moneda_base=monto_en_moneda_base,
+        monto_aplicado=reparto.aplicado,
+        tipo="COBRO",
+        operacion_id=str(esquema.operacion_id) if esquema.operacion_id else None,
         metodo_pago=esquema.metodo_pago,
         referencia=esquema.referencia,
         observaciones=esquema.observaciones,
@@ -596,6 +632,7 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
 
     # 6b. Registrar el cobro en la cuenta de caja del método de pago (mismo commit)
     _registrar_movimiento_caja_pago(db, db_pago, venta, usuario.id if usuario else None)
+    saldos_service.guardar_excedente(db, db_pago, reparto.excedente, usuario)
 
     # 7. Recalcular estado de la venta usando pagado + descontado
     _recalcular_estado_venta(db, venta, margen_saldo)
@@ -612,6 +649,8 @@ def crear_pago(db: Session, esquema: PagoCreate, commit: bool = True, usuario: U
             "venta_id": db_pago.venta_id,
             "fecha": db_pago.fecha.isoformat(),
             "monto": db_pago.monto,
+            "monto_aplicado": reparto.aplicado,
+            "saldo_favor": reparto.excedente,
             "metodo_pago": db_pago.metodo_pago,
         },
     )
@@ -629,23 +668,20 @@ def _base_monto_corregido(
     venta: Venta,
     nuevo_monto: float,
     nueva_tasa: float | None = None,
-) -> tuple[float, float, float]:
-    """Valida el nuevo monto y/o tasa y devuelve (base nueva, base anterior, tasa).
+) -> tuple[float, float, float, float]:
+    """Convierte el monto corregido y devuelve (base nueva, base anterior, tasa, saldo).
 
     El saldo disponible se calcula SIN este pago, para que corregir hacia
-    arriba o hacia abajo no choque con el propio cobro. Un exceso de saldo
-    lanza ValueError y la transacción no deja rastro.
+    arriba o hacia abajo no choque con el propio cobro.
     """
     monto_base_anterior = float(db_pago.monto_en_moneda_base)
     if nueva_tasa is not None:
-        tasa, monto_base_nuevo, margen_saldo = _convertir_a_moneda_venta(
+        tasa, monto_base_nuevo, _ = _convertir_a_moneda_venta(
             db, db_pago.moneda_id, nuevo_monto, nueva_tasa, venta
         )
     else:
         tasa = float(db_pago.tasa_cambio or 1.0)
-        monto_base_nuevo, margen_saldo = _monto_base_para_cobro(
-            venta, db_pago.moneda_id, nuevo_monto, tasa
-        )
+        monto_base_nuevo, _ = _monto_base_para_cobro(venta, db_pago.moneda_id, nuevo_monto, tasa)
     if round(monto_base_nuevo, 2) <= 0:
         raise ValueError(
             "El monto en moneda base queda en 0 con la tasa del pago. "
@@ -654,16 +690,10 @@ def _base_monto_corregido(
     total_pagado, total_descontado = _totales_cobro(db, venta.id)
     saldo_sin_actual = (
         float(venta.total)
-        - (total_pagado - monto_base_anterior)
+        - (total_pagado - float(monto_aplicado(db_pago)))
         - total_descontado
     )
-    if monto_base_nuevo > saldo_sin_actual + margen_saldo:
-        raise ValueError(
-            f"El monto corregido ({monto_base_nuevo:,.2f} en moneda base) "
-            f"excede el saldo disponible de la factura "
-            f"({saldo_sin_actual:,.2f}). Revisa el monto o la tasa."
-        )
-    return monto_base_nuevo, monto_base_anterior, tasa
+    return monto_base_nuevo, monto_base_anterior, tasa, saldo_sin_actual
 
 
 def _aplicar_correccion_monto(
@@ -674,6 +704,8 @@ def _aplicar_correccion_monto(
     motivo: str | None,
     usuario_id: int | None,
     nueva_tasa: float | None = None,
+    confirmar_excedente: bool = False,
+    saldo_confirmado: float | None = None,
 ) -> None:
     """Aplica el nuevo monto y/o tasa y deja la huella en `pago_correccion`.
 
@@ -690,12 +722,18 @@ def _aplicar_correccion_monto(
     tasa_cambio = nueva_tasa is not None and abs(nueva_tasa - tasa_anterior) > 1e-9
     if not monto_cambio and not tasa_cambio:
         return  # nada que corregir: no se ensucia la auditoría
-    monto_base_nuevo, monto_base_anterior, tasa_aplicada = _base_monto_corregido(
-        db, db_pago, venta, nuevo_monto, nueva_tasa
+    monto_base_nuevo, monto_base_anterior, tasa_aplicada, saldo_disponible = _base_monto_corregido(
+        db, db_pago, venta, nuevo_monto, nueva_tasa,
     )
+    reparto = saldos_service.repartir_cobro(nuevo_monto, tasa_aplicada, monto_base_nuevo, saldo_disponible)
+    saldos_service.confirmar_reparto(reparto, confirmar_excedente, saldo_confirmado, saldo_disponible)
+    if (db_pago.credito_generado or reparto.excedente) and not motivo:
+        raise ValueError("Indica el motivo de la corrección del cobro que genera saldo a favor.")
+    saldos_service.guardar_excedente(db, db_pago, reparto.excedente)
     db_pago.monto = nuevo_monto
     db_pago.tasa_cambio = tasa_aplicada
     db_pago.monto_en_moneda_base = monto_base_nuevo
+    db_pago.monto_aplicado = reparto.aplicado
     if monto_cambio:
         db.add(PagoCorreccion(
             pago_id=db_pago.id,
@@ -788,6 +826,8 @@ def actualizar_pago(
 
     datos = esquema.model_dump(exclude_unset=True)
     motivo_correccion = (datos.pop("motivo_correccion", None) or "").strip() or None
+    confirmar_excedente = datos.pop("confirmar_excedente", False)
+    saldo_confirmado = datos.pop("saldo_confirmado", None)
     # Un motivo sin ningún campo que corregir no hace nada (no ensucia la
     # auditoría con un evento vacío).
     if not datos:
@@ -795,6 +835,8 @@ def actualizar_pago(
 
     if venta.estado == "CANCELADA":
         raise ValueError("No se puede corregir un cobro de una venta cancelada.")
+    if db_pago.tipo == "SALDO_FAVOR":
+        return saldos_service.corregir_aplicacion(db, db_pago, venta, datos, motivo_correccion, usuario)
 
     antes = {
         "fecha": db_pago.fecha.isoformat() if db_pago.fecha else None,
@@ -829,6 +871,8 @@ def actualizar_pago(
             motivo_correccion,
             usuario.id if usuario is not None else None,
             nueva_tasa=float(tasa_solicitada) if tasa_solicitada is not None else None,
+            confirmar_excedente=confirmar_excedente,
+            saldo_confirmado=saldo_confirmado,
         )
 
     if datos.get("fecha") is not None:
@@ -963,6 +1007,7 @@ def _eliminar_pago_y_registros_relacionados(
         .filter(Adjunto.entidad_tipo == "PAGO", Adjunto.entidad_id == pago.id)
         .all()
     )
+    saldos_service.revertir_credito_pago(db, pago, usuario)
     record_event(
         db,
         actor=usuario,
@@ -1162,7 +1207,7 @@ def _cobros_base_por_venta(db: Session, venta_ids: list[int]) -> tuple[dict, dic
     if not venta_ids:
         return {}, {}
     pagos = dict(
-        db.query(Pago.venta_id, func.coalesce(func.sum(Pago.monto_en_moneda_base), 0))
+        db.query(Pago.venta_id, func.coalesce(func.sum(expresion_aplicado()), 0))
         .filter(Pago.venta_id.in_(venta_ids))
         .group_by(Pago.venta_id)
         .all()

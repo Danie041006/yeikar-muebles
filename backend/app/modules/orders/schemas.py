@@ -203,6 +203,8 @@ class ConvertirCotizacionBody(BaseModel):
     # (cuenta de caja + moneda + monto en esa moneda + tasa opcional + fecha
     # opcional que por defecto es HOY VE). Si viene, remplaza a `adelanto`.
     adelantos: Optional[List[AdelantoPagoIn]] = None
+    confirmar_excedente: bool = False
+    total_confirmado: Optional[float] = Field(None, ge=0)
 
 
 

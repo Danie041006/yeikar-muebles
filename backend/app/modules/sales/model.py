@@ -1,8 +1,11 @@
-from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String, Boolean
+from decimal import Decimal
+
+from sqlalchemy import Column, DateTime, Date, Text, BigInteger, Numeric, ForeignKey, String, Boolean, CheckConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.db.base import Base
+from app.core.hora_ve import ahora_ve
 from app.modules.clients.model import Client
 from app.modules.orders.model import Pedido
 from app.modules.catalogos.model import Moneda
@@ -145,6 +148,11 @@ class Pago(Base):
     monto_en_moneda_base = Column(Numeric(15, 2), nullable=False)
     # EFECTIVO_COP | EFECTIVO_USD | EFECTIVO_VES | BANCOLOMBIA | BANCARIBE | ZELLE | BINANCE
     metodo_pago = Column(String(50), nullable=False)
+    # Recibido y aplicado son distintos cuando el cliente deja un excedente.
+    # NULL conserva la lectura de los pagos históricos.
+    monto_aplicado = Column(Numeric(15, 2), nullable=True)
+    tipo = Column(String(20), nullable=False, server_default="COBRO", default="COBRO")
+    operacion_id = Column(String(36), nullable=True, unique=True)
     referencia = Column(String(150), nullable=True)
     observaciones = Column(Text, nullable=True)
     # Quién digitó el cobro. La fecha del pago (`fecha`) puede ser anterior;
@@ -163,6 +171,13 @@ class Pago(Base):
         cascade="all, delete-orphan",
         order_by="PagoCorreccion.id",
     )
+    credito_generado = relationship("SaldoFavor", back_populates="pago_origen", uselist=False)
+    aplicacion_credito = relationship("AplicacionSaldoFavor", back_populates="pago", uselist=False)
+
+    @property
+    def saldo_favor_generado(self):
+        credito = self.credito_generado
+        return float(credito.monto) if credito and not credito.anulado else 0.0
 
     @property
     def creador_nombre(self):
@@ -221,3 +236,58 @@ class PagoCorreccion(Base):
     @property
     def usuario_nombre(self):
         return (self.usuario.nombre or self.usuario.nombre_usuario) if self.usuario else None
+
+
+class SaldoFavor(Base):
+    """Lote de crédito en la moneda recibida. Su uso se registra por separado."""
+
+    __tablename__ = "saldo_favor"
+    __table_args__ = (CheckConstraint("monto >= 0", name="ck_saldo_favor_monto"),)
+
+    id = Column(BigInteger, primary_key=True)
+    cliente_id = Column(ForeignKey("cliente.id", ondelete="RESTRICT"), nullable=False, index=True)
+    moneda_id = Column(ForeignKey("moneda.id", ondelete="RESTRICT"), nullable=False)
+    pago_origen_id = Column(ForeignKey("pago.id", ondelete="SET NULL"), nullable=True, unique=True)
+    monto = Column(Numeric(15, 2), nullable=False)
+    origen = Column(String(30), nullable=False, default="EXCEDENTE_PAGO")
+    referencia = Column(String(150), nullable=False)
+    anulado = Column(Boolean, nullable=False, default=False, server_default="false")
+    creado_por_id = Column(ForeignKey("usuario.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=ahora_ve)
+
+    cliente = relationship("Client")
+    moneda = relationship("Moneda")
+    pago_origen = relationship("Pago", back_populates="credito_generado")
+    aplicaciones = relationship("AplicacionSaldoFavor", back_populates="credito")
+    creador = relationship("Usuario")
+
+    @property
+    def monto_usado(self):
+        return sum((a.monto for a in self.aplicaciones), Decimal("0"))
+
+    @property
+    def saldo(self):
+        return Decimal("0") if self.anulado else self.monto - self.monto_usado
+
+    @property
+    def cliente_nombre(self):
+        return self.cliente.nombre
+
+    @property
+    def creador_nombre(self):
+        return (self.creador.nombre or self.creador.nombre_usuario) if self.creador else None
+
+
+class AplicacionSaldoFavor(Base):
+    """Consumo de un lote; al revertirlo se devuelve exactamente esta moneda."""
+
+    __tablename__ = "aplicacion_saldo_favor"
+    __table_args__ = (CheckConstraint("monto > 0", name="ck_aplicacion_saldo_favor_monto"),)
+
+    id = Column(BigInteger, primary_key=True)
+    saldo_favor_id = Column(ForeignKey("saldo_favor.id", ondelete="RESTRICT"), nullable=False, index=True)
+    pago_id = Column(ForeignKey("pago.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    monto = Column(Numeric(15, 2), nullable=False)
+
+    credito = relationship("SaldoFavor", back_populates="aplicaciones")
+    pago = relationship("Pago", back_populates="aplicacion_credito")

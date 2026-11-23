@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import or_
 from app.modules.orders import model, schemas
@@ -432,6 +433,8 @@ def convertir_cotizacion_a_pedido(
     fecha_adelanto=None,
     usuario: Usuario | None = None,
     adelantos: list | None = None,  # abono inicial pagado de VARIAS maneras
+    confirmar_excedente: bool = False,
+    total_confirmado: float | None = None,
 ):
     # Buscar la cotización con FOR UPDATE: dos conversiones simultáneas quedan
     # serializadas; la segunda detecta el pedido ya creado en vez de lanzar 500.
@@ -759,6 +762,7 @@ def convertir_cotizacion_a_pedido(
     # maneras: cada entrada de `adelantos` genera su propio pago de factura,
     # con su cuenta, su moneda, su tasa y su fecha — esta última opcional,
     # por defecto HOY en hora Venezuela).
+    pagos_iniciales = []
     if adelantos:
         total_abonos = len(adelantos)
         for i, abono in enumerate(adelantos, start=1):
@@ -767,8 +771,7 @@ def convertir_cotizacion_a_pedido(
                 from datetime import datetime as _datetime
                 from datetime import time as _hora
                 fecha_abono = _datetime.combine(abono["fecha"], _hora(12, 0))
-            venta_service.crear_pago(
-                db,
+            pagos_iniciales.append(
                 PagoCreate(
                     venta_id=db_venta.id,
                     moneda_id=int(abono["moneda_id"]),
@@ -784,13 +787,10 @@ def convertir_cotizacion_a_pedido(
                         f"Adelanto conversión cotización #{id_cotizacion}"
                         + (f" · abono {i} de {total_abonos}" if total_abonos > 1 else "")
                     ),
-                ),
-                commit=False,  # la conversión commitea atómicamente al final
-                usuario=usuario,
+                )
             )
     elif adelanto_monto > 0:
-        venta_service.crear_pago(
-            db,
+        pagos_iniciales.append(
             PagoCreate(
                 venta_id=db_venta.id,
                 moneda_id=moneda_pago,
@@ -801,10 +801,17 @@ def convertir_cotizacion_a_pedido(
                 tasa_cambio=tasa_pago,
                 metodo_pago=metodo_pago,
                 referencia=f"Adelanto conversión cotización #{id_cotizacion}",
-            ),
-            commit=False,  # la conversión commitea atómicamente al final
-            usuario=usuario,
+            )
         )
+    from app.modules.sales.saldos_service import ConfirmacionConversion, confirmar_abonos_conversion
+    confirmar_abonos_conversion(db, db_venta, pagos_iniciales, ConfirmacionConversion(
+        confirmado=confirmar_excedente,
+        total=Decimal(str(total_confirmado)) if total_confirmado is not None else None,
+    ))
+    for pago_inicial in pagos_iniciales:
+        pago_inicial.confirmar_excedente = confirmar_excedente
+        pago_inicial.saldo_confirmado = max(0, venta_service._saldo_pendiente(db, db_venta))
+        venta_service.crear_pago(db, pago_inicial, commit=False, usuario=usuario)
 
     record_event(
         db,

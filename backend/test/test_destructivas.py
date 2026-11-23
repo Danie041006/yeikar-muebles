@@ -560,7 +560,9 @@ def test_sobrepago_rechazado(client, cleaner):
     r = client.post("/api/v1/pago/", json={**base, "monto": 30_000}, headers=ADMIN_HEADERS)
     assert r.status_code == 201, r.text
     r = client.post("/api/v1/pago/", json={**base, "monto": 30_000}, headers=ADMIN_HEADERS)
-    assert r.status_code == 400, f"sobrepago aceptado → BUG: {r.status_code} {r.text[:150]}"
+    # El excedente ya no se rechaza en silencio: exige confirmar el saldo a favor.
+    assert r.status_code == 409, f"sobrepago sin confirmar → {r.status_code} {r.text[:200]}"
+    assert r.json()["detail"]["codigo"] == "CONFIRMAR_EXCEDENTE"
 
 
 # helpers

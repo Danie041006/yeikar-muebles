@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
+from app.modules.sales.cobros import resumen_cobro
 from sqlalchemy import or_
 from datetime import date
 from typing import Dict, List, Optional
@@ -144,8 +145,7 @@ def pedidos_facturables(db: Session, usuario: Usuario | None = None):
     for pedido, venta in query.limit(500).all():
         if pedido.id in facturados:
             continue
-        total_pagado = sum(float(p.monto_en_moneda_base) for p in venta.pagos)
-        saldo_pendiente = max(0.0, float(venta.total) - total_pagado)
+        total_pagado, _, saldo_pendiente = resumen_cobro(venta)
 
         moneda_codigo = None
         if pedido.cotizacion and pedido.cotizacion.moneda:
@@ -210,8 +210,7 @@ def crear_factura_desde_pedido(db: Session, esquema: FacturaCreate, commit: bool
         raise ValueError(
             "El pedido no tiene una venta registrada. Debe gestionarse el cobro en 'Ventas y cobros' primero."
         )
-    total_pagado = sum(float(p.monto_en_moneda_base) for p in venta.pagos)
-    saldo_pendiente = max(0.0, float(venta.total) - total_pagado)
+    total_pagado, _, saldo_pendiente = resumen_cobro(venta)
     autorizada_con_saldo = False
     observaciones = esquema.observaciones
     if venta.estado != "PAGADA" and saldo_pendiente > 0.01:

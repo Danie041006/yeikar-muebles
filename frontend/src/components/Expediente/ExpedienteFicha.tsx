@@ -345,6 +345,13 @@ function PagoRow({ pago }: { pago: PagoExp }) {
           {pago.observaciones ? ` · ${pago.observaciones}` : ''}
         </p>
       )}
+      {(pago.tipo === 'SALDO_FAVOR' || Number(pago.saldo_favor_generado) > 0) && (
+        <p className="mt-1 text-xs font-bold text-emerald-800">
+          {pago.tipo === 'SALDO_FAVOR' ? 'Aplicación de crédito · sin entrada de caja'
+            : `${dinero(pago.saldo_favor_generado, pago.moneda)} a favor del cliente`}
+          {' · Aplicado: '}{Number(pago.monto_aplicado ?? pago.monto_en_moneda_base).toLocaleString('es-ES')} (moneda de la venta)
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2 mt-1.5">
         {pago.caja && (
           <span className="text-[10px] font-mono bg-yeikar-tertiary/40 text-yeikar-secondary rounded px-1.5 py-0.5">

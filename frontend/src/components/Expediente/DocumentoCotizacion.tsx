@@ -12,6 +12,9 @@ export interface PagoDocumento {
   monto: number;
   moneda?: { simbolo?: string | null; codigo?: string | null } | null;
   monto_en_moneda_base?: number | null;
+  monto_aplicado?: number | null;
+  saldo_favor_generado?: number;
+  tipo?: string;
   tasa_cambio?: number | null;
 }
 
@@ -99,7 +102,7 @@ function pagosConSaldo(pagos: PagoDocumento[], saldoInicial: number): PagoConSal
   return [...pagos]
     .sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.id ?? 0) - (b.id ?? 0))
     .map((pago) => {
-      const abono = Math.max(0, Number(pago.monto_en_moneda_base ?? pago.monto) || 0);
+      const abono = Math.max(0, Number(pago.monto_aplicado ?? pago.monto_en_moneda_base ?? pago.monto) || 0);
       saldo = Math.max(0, saldo - abono);
       return { pago, abono, saldo };
     });
@@ -112,11 +115,15 @@ function esAbonoInicial(pago: PagoDocumento): boolean {
 }
 
 function descripcionPagoInterno(pago: PagoDocumento): string {
+  if (pago.tipo === 'SALDO_FAVOR') return 'Saldo a favor aplicado (sin entrada de caja)';
   const metodo = METODOS_PAGO.find((m) => m.value === pago.metodo_pago)?.label ?? pago.metodo_pago;
   return [
     esAbonoInicial(pago) ? 'Abono inicial' : metodo,
     esAbonoInicial(pago) ? metodo : pago.referencia,
     pago.observaciones,
+    Number(pago.saldo_favor_generado) > 0
+      ? `${formatCurrency(Number(pago.monto), pago.moneda?.codigo ?? '')} recibido · ${formatCurrency(Number(pago.saldo_favor_generado), pago.moneda?.codigo ?? '')} a favor`
+      : null,
   ].filter(Boolean).join(' · ') || 'Abono registrado';
 }
 
@@ -467,7 +474,8 @@ export default function DocumentoCotizacion({
                   </thead>
                   <tbody className="divide-y divide-stone-200 font-mono">
                     {venta.pagos.map((p, idx) => {
-                      const metodoLabel = METODOS_PAGO.find((m) => m.value === p.metodo_pago)?.label ?? p.metodo_pago;
+                      const metodoLabel = p.tipo === 'SALDO_FAVOR' ? 'Saldo a favor (sin caja)'
+                        : METODOS_PAGO.find((m) => m.value === p.metodo_pago)?.label ?? p.metodo_pago;
                       const inicial = esAbonoInicial(p);
                       const simbolo = p.moneda?.simbolo ?? '';
                       const conversion = fmtConversionTasa(
@@ -483,12 +491,17 @@ export default function DocumentoCotizacion({
                           <td className="px-2 py-1 font-bold text-stone-900">
                             {inicial ? `Abono inicial · ${metodoLabel}` : metodoLabel}
                           </td>
-                          <td className="px-2 py-1 text-stone-600">{inicial ? '—' : p.referencia || '—'}</td>
+                          <td className="px-2 py-1 text-stone-600">
+                            {inicial ? '—' : p.referencia || '—'}
+                            {Number(p.saldo_favor_generado) > 0 && <span className="block text-emerald-800">
+                              {formatCurrency(Number(p.saldo_favor_generado), p.moneda?.codigo ?? '')} a favor
+                            </span>}
+                          </td>
                           <td className="px-2 py-1 text-right font-bold text-stone-800">
                             {simbolo}{Number(p.monto).toLocaleString('es-ES')}
                           </td>
                           <td className="px-2 py-1 text-right font-bold text-emerald-800">
-                            {formatCurrency(Number(p.monto_en_moneda_base || p.monto), moneda)}
+                            {formatCurrency(Number(p.monto_aplicado ?? p.monto_en_moneda_base ?? p.monto), moneda)}
                             {conversion && (
                               <span className="block text-[7px] text-stone-500 font-normal">{conversion}</span>
                             )}

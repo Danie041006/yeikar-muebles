@@ -159,6 +159,9 @@ export interface PagoExp {
   monto: number;
   tasa_cambio?: number | null;
   monto_en_moneda_base: number;
+  monto_aplicado?: number | null;
+  saldo_favor_generado?: number;
+  tipo?: 'COBRO' | 'SALDO_FAVOR';
   metodo_pago?: string | null;
   referencia?: string | null;
   observaciones?: string | null;

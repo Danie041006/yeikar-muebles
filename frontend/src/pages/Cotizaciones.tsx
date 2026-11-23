@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { isAxiosError } from 'axios';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { cotizacionService, Quote, QuoteCreate, Product, CalculationResult, QuoteDetail, Moneda } from '../services/cotizacionService';
 import { clienteService, Client } from '../services/clienteService';
@@ -2004,10 +2005,6 @@ export default function Cotizaciones() {
           );
           return;
         }
-        if (abonoExcedeTotal) {
-          setConvertError('El abono inicial no puede exceder el total del pedido.');
-          return;
-        }
       }
 
       let convertDetails;
@@ -2111,7 +2108,7 @@ export default function Cotizaciones() {
         setConvertError('Completa las cuentas extra del abono: cuenta, monto y tasa si su moneda no es la de la cotización.');
         return;
       }
-      await pedidoService.convertQuote(selectedQuoteForConvert.id, {
+      const conversion = {
         detalles: convertDetails,
         fecha_entrega_estimada: deliveryDate || undefined,
         ...(adelantos
@@ -2125,7 +2122,19 @@ export default function Cotizaciones() {
               // Fecha real del abono (pudo ser días antes); vacía → hoy (servidor).
               fecha_adelanto: abonoActivo && fechaAdelanto ? fechaAdelanto : undefined,
             }),
-      });
+      };
+      try {
+        await pedidoService.convertQuote(selectedQuoteForConvert.id, conversion);
+      } catch (fallo: unknown) {
+        const aviso = isAxiosError(fallo) ? fallo.response?.data?.detail : null;
+        if (!aviso || aviso.codigo !== 'CONFIRMAR_ABONOS') throw fallo;
+        const excedentes = (aviso.excedentes as { monto: string; moneda: string }[])
+          .map((e) => `${e.monto} ${e.moneda}`).join(' + ');
+        if (!window.confirm(`Los abonos dejarán ${excedentes} a favor del cliente.\nRevisa si hay un cero de más. ¿Confirmas el dinero recibido y la conversión a pedido?`)) return;
+        await pedidoService.convertQuote(selectedQuoteForConvert.id, {
+          ...conversion, confirmar_excedente: true, total_confirmado: Number(aviso.total_confirmado),
+        });
+      }
       setIsConvertOpen(false);
       const avisoAbono =
         abonoActivo && monedaAdelantoSel
@@ -3758,7 +3767,7 @@ export default function Cotizaciones() {
 
                 {abonoActivo && abonoExcedeTotal && (
                   <p className="mt-2 text-xs font-semibold text-red-600">
-                    El abono ({fmtAbonoEquivalente(abonoEnMonedaCotizacion, quoteMoneda?.codigo)}) excede el total del pedido ({formatCurrency(quoteTotal, quoteMoneda?.codigo ?? 'COP')}).
+                    El excedente quedará a favor del cliente en la moneda recibida. Se pedirá confirmación antes de guardar.
                   </p>
                 )}
 

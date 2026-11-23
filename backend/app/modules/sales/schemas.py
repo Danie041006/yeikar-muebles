@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, model_validator
 from datetime import date, datetime
+from uuid import UUID
 from typing import List, Optional
 from app.modules.clients.schemas import ClientResponse
 from app.modules.catalogos.schemas import MonedaResponse
@@ -71,7 +72,7 @@ class DetalleVentaResponse(DetalleVentaBase):
 # ------------------------------------------------------------
 class PagoBase(BaseModel):
     fecha: datetime
-    monto: float = Field(..., gt=0)
+    monto: float = Field(..., gt=0, allow_inf_nan=False)
     metodo_pago: str  
     referencia: Optional[str] = None
     observaciones: Optional[str] = None
@@ -87,6 +88,9 @@ class PagoCreate(PagoBase):
     # Ej: si la venta es en COP y el pago es en USD, tasa_cambio = TRM del día (ej: 4200.0)
     # Si las monedas coinciden, se puede omitir (se asume 1.0).
     tasa_cambio: Optional[float] = Field(None, gt=0, description="TRM/tasa de conversión. Requerido si moneda_id difiere de la moneda de la venta.")
+    confirmar_excedente: bool = False
+    saldo_confirmado: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
+    operacion_id: Optional[UUID] = None
 
 class PagoUpdate(BaseModel):
     """Corrección de un cobro ya registrado.
@@ -108,6 +112,8 @@ class PagoUpdate(BaseModel):
     motivo_correccion: Optional[str] = Field(None, max_length=500)
     referencia: Optional[str] = None
     observaciones: Optional[str] = None
+    confirmar_excedente: bool = False
+    saldo_confirmado: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
 
 
 class PagoCorreccionResponse(BaseModel):
@@ -133,6 +139,9 @@ class PagoResponse(PagoBase):
     moneda_id: int
     tasa_cambio: float
     monto_en_moneda_base: float
+    monto_aplicado: Optional[float] = None
+    tipo: str = "COBRO"
+    saldo_favor_generado: float = 0.0
     creado_por_id: Optional[int] = None
     creador_nombre: Optional[str] = None
     created_at: Optional[datetime] = None

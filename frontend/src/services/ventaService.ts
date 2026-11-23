@@ -70,6 +70,9 @@ export interface Pago {
   monto: number;
   tasa_cambio: number;
   monto_en_moneda_base: number;
+  monto_aplicado?: number | null;
+  tipo?: 'COBRO' | 'SALDO_FAVOR';
+  saldo_favor_generado?: number;
   metodo_pago: string;
   referencia?: string;
   observaciones?: string;
@@ -190,6 +193,9 @@ export interface PagoCreate {
   observaciones?: string;
   /** TRM / tasa de conversión. Requerido cuando moneda_id difiere de la moneda de la venta. */
   tasa_cambio?: number;
+  confirmar_excedente?: boolean;
+  saldo_confirmado?: number;
+  operacion_id?: string;
 }
 
 /** Corrección de un cobro ya registrado: monto, cuenta, tasa, fecha, referencia y observaciones. */
@@ -205,6 +211,19 @@ export interface PagoUpdate {
   motivo_correccion?: string | null;
   referencia?: string | null;
   observaciones?: string | null;
+  confirmar_excedente?: boolean;
+  saldo_confirmado?: number;
+}
+
+export interface VistaPreviaCobro {
+  cliente_nombre: string;
+  cuenta_nombre: string;
+  monto: number;
+  moneda_pago: string;
+  moneda_venta: string;
+  monto_aplicado: number;
+  saldo_favor: number;
+  saldo_confirmado: number;
 }
 
 // ─── Descuento de cobro ───────────────────────────────────────────────────────
@@ -273,6 +292,7 @@ export const cargarMetodosPago = async (): Promise<MetodoPagoOption[]> => {
 // Label de un método de pago (históricos): lista dinámica con fallback estático.
 export const labelMetodoPago = (metodos: MetodoPagoOption[] | undefined, valor: string | null | undefined): string => {
   if (!valor) return '—';
+  if (valor === 'SALDO_FAVOR') return 'Saldo a favor (sin caja)';
   return (
     metodos?.find((m) => m.value === valor)?.label ??
     METODOS_PAGO.find((m) => m.value === valor)?.label ??
@@ -320,6 +340,10 @@ export const ventaService = {
 };
 
 export const pagoService = {
+  previsualizar: async (payload: PagoCreate): Promise<VistaPreviaCobro> => {
+    const res = await api.post<VistaPreviaCobro>('/pago/previsualizar', payload);
+    return res.data;
+  },
   /** Registrar un abono/pago */
   registrar: async (data: PagoCreate): Promise<Pago> => {
     const res = await api.post<Pago>('/pago/', data);

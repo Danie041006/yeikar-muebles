@@ -33,7 +33,7 @@ from conftest import (
 # ---------------------------------------------------------------------------
 def _convertir(client, cleaner, id_cotizacion, *, producto_id, precio, cantidad=1,
                adelanto=None, moneda_adelanto_id=None, tasa_cambio_adelanto=None,
-               metodo_pago=None):
+               metodo_pago=None, confirmar_excedente=None, total_confirmado=None):
     """POST /api/v1/pedido/convertir/{id}. Registra el pedido en el cleaner si se creó."""
     body = {
         "detalles": [{
@@ -48,6 +48,9 @@ def _convertir(client, cleaner, id_cotizacion, *, producto_id, precio, cantidad=
         "tasa_cambio_adelanto": tasa_cambio_adelanto,
         "metodo_pago": metodo_pago,
     }
+    if confirmar_excedente is not None:
+        body["confirmar_excedente"] = confirmar_excedente
+        body["total_confirmado"] = total_confirmado
     r = client.post(f"/api/v1/pedido/convertir/{id_cotizacion}", json=body, headers=ADMIN_HEADERS)
     if r.status_code == 201:
         cleaner.registrar("pedido", r.json()["id"])
@@ -485,10 +488,11 @@ def test_cuentas_por_cobrar_consistente(client, cleaner, db):
 
 
 # ---------------------------------------------------------------------------
-# 14) Sobrepago rechazado sin dejar rastro
+# 14) Sobrepago: exige confirmación, deja saldo a favor y sin confirmar no deja rastro
 # ---------------------------------------------------------------------------
-def test_sobrepago_rechazado(client, cleaner, db):
-    """Adelanto 100001 sobre factura COP 100000 → 400 (excede saldo) y SIN pago registrado."""
+def test_sobrepago_pide_confirmacion_y_deja_saldo_a_favor(client, cleaner, db):
+    """Adelanto 100001 sobre factura COP 100000: sin confirmar no escribe nada;
+    confirmado, 100.000 pagan la factura y 1 COP queda a favor del cliente."""
     cliente = crear_cliente(client, cleaner)
     producto = crear_producto(client, cleaner)
     cot = crear_cotizacion(client, cleaner, cliente["id"], producto["id"], precio=100000)
@@ -496,15 +500,19 @@ def test_sobrepago_rechazado(client, cleaner, db):
     pedidos_antes = _contar_pedidos(client)
     r = _convertir(client, cleaner, cot["id"], producto_id=producto["id"], precio=100000,
                    adelanto=100001, moneda_adelanto_id=1, metodo_pago="EFECTIVO_COP")
-    assert r.status_code == 400, f"El sobrepago debe ser 400, fue {r.status_code}: {r.text}"
-    detail = (r.json().get("detail", "") if r.status_code == 400 else "").lower()
-    assert "excede" in detail, f"El mensaje debe indicar que excede el saldo, fue: {r.text}"
+    assert r.status_code == 409, f"El sobrepago debe pedir confirmación, fue {r.status_code}: {r.text}"
+    assert r.json()["detail"]["codigo"] == "CONFIRMAR_ABONOS"
+    assert r.json()["detail"]["excedentes"] == [{"monto": "1.00", "moneda": "COP"}]
 
-    pedidos_despues = _contar_pedidos(client)
-    assert pedidos_despues == pedidos_antes, \
-        f"El sobrepago rechazado no debe crear pedidos: antes={pedidos_antes} después={pedidos_despues}"
+    assert _contar_pedidos(client) == pedidos_antes, \
+        "El sobrepago sin confirmar no debe crear pedidos"
     assert _sin_pedido_ni_pago(db, cot["id"]), \
-        "No debe existir pedido ni pago de la conversión con sobrepago"
+        "No debe existir pedido ni pago de la conversión sin confirmar"
+
+    r = _convertir(client, cleaner, cot["id"], producto_id=producto["id"], precio=100000,
+                   adelanto=100001, moneda_adelanto_id=1, metodo_pago="EFECTIVO_COP",
+                   confirmar_excedente=True, total_confirmado=100000)
+    assert r.status_code == 201, f"sobrepago confirmado → {r.status_code}: {r.text}"
 
 
 # ---------------------------------------------------------------------------

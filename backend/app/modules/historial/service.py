@@ -12,6 +12,7 @@ from datetime import date, datetime
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
+from app.modules.sales.cobros import monto_aplicado
 
 from app.modules.adjuntos.service import adjuntos_info
 from app.modules.auditoria.model import AuditEvent
@@ -319,6 +320,9 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
             "monto": _f(p.monto),
             "tasa_cambio": _f(p.tasa_cambio),
             "monto_en_moneda_base": _f(p.monto_en_moneda_base),
+            "monto_aplicado": float(monto_aplicado(p)),
+            "tipo": p.tipo,
+            "saldo_favor_generado": p.saldo_favor_generado,
             "metodo_pago": p.metodo_pago,
             "referencia": p.referencia,
             "observaciones": p.observaciones,
@@ -326,7 +330,7 @@ def _venta_y_pagos(db: Session, pedido_id: int) -> dict | None:
             "caja": movimientos.get(p.id),
         })
 
-    total_pagado = sum(float(p.monto_en_moneda_base) for p in venta.pagos)
+    total_pagado = sum(float(monto_aplicado(p)) for p in venta.pagos)
     descuentos_db = (
         db.query(DescuentoVenta)
         .options(joinedload(DescuentoVenta.moneda), joinedload(DescuentoVenta.creador))
@@ -816,7 +820,7 @@ def expediente_cliente(
                     "estado": v.estado,
                     "moneda": v.moneda.codigo if v.moneda else None,
                     "total": _f(v.total),
-                    "total_pagado": sum(float(p.monto_en_moneda_base) for p in v.pagos),
+                    "total_pagado": sum(float(monto_aplicado(p)) for p in v.pagos),
                 }
                 for v in ventas
             ],
