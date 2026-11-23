@@ -96,6 +96,9 @@ class MovimientoInventario(Base):
     # Gasto del flete/llevada (si se pagó aparte). Se guarda el vínculo para
     # poder editar o anular la entrada sin adivinar cuál gasto es el flete.
     llevada_gasto_id = Column(BigInteger, ForeignKey("gasto.id", ondelete="SET NULL"), nullable=True)
+    # False conserva el contrato histórico: el flete tiene su propio cargo.
+    # True: los importes de cada pago YA cubren compra + flete.
+    pagos_incluyen_llevada = Column(Boolean, nullable=False, server_default="false", default=False)
     descuento_porcentaje = Column(Numeric(5, 2), nullable=True)
     fiar = Column(Boolean, nullable=False, server_default="false")
     fecha = Column(DateTime, server_default=func.now(), index=True)
@@ -146,6 +149,7 @@ class MovimientoProductoInventario(Base):
     costo_unitario = Column(Numeric(15, 2), nullable=True)  # costo del movimiento (entrada)
     # "La llevada": flete/aduana pagado además de la compra (opcional)
     llevada = Column(Numeric(15, 2), nullable=True)
+    pagos_incluyen_llevada = Column(Boolean, nullable=False, server_default="false", default=False)
     # Proveedor (dónde se compró) y cliente (comprado para un cliente específico) — opcionales, solo entradas
     proveedor_id = Column(BigInteger, ForeignKey("proveedor.id", ondelete="RESTRICT"), nullable=True)
     cliente_id = Column(Integer, ForeignKey("cliente.id", ondelete="RESTRICT"), nullable=True)

@@ -218,6 +218,14 @@ def _monto_en_moneda(monto: Decimal, cod_origen: str, cod_destino: str, tasa: De
     return monto
 
 
+def _tolerancia_pagos_cop(pagos: list[tuple[int, Decimal]]) -> Decimal:
+    """Medio centavo por pago convertido, para no exigir fracciones de divisa."""
+    return max(Decimal("1"), sum(
+        (Decimal("0.005") * tasa for moneda_id, tasa in pagos if moneda_id != MONEDA_BASE_ID),
+        Decimal("0"),
+    ))
+
+
 def _gasto_compra_contado(
     db: Session,
     *,
@@ -232,6 +240,7 @@ def _gasto_compra_contado(
     usuario=None,
     persona_entidad: Optional[str] = None,
     clasificacion: Optional[str] = None,
+    monto_pagado: Optional[Decimal] = None,
 ):
     """Compra de contado: registra el gasto + la SALIDA de caja correspondiente.
 
@@ -305,6 +314,12 @@ def _gasto_compra_contado(
             tasa = tasa_dec
         else:
             tasa = obtener_tasa_moneda_a_cop(db, pago)
+
+    # Un importe explícito es el dinero que realmente salió de la cuenta.
+    # No invertir su equivalente redondeado: p.ej. 10.101 COP → 2,53 USD
+    # → 10.120 COP cobraría 19 pesos que nadie digitó.
+    if monto_pagado is not None:
+        monto = monto_pagado
 
     tipo_gasto = db.query(TipoGasto).filter(TipoGasto.nombre == tipo_gasto_nombre).first()
     if not tipo_gasto:
@@ -482,6 +497,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     if cliente_id is not None and not db.query(Client).filter(Client.id == cliente_id).first():
         raise ValueError(f"El cliente #{cliente_id} no existe.")
 
+    incluye_llevada = movimiento.pagos_incluyen_llevada
     db_mov = model.MovimientoInventario(
         material_id=movimiento.material_id,
         ubicacion_id=movimiento.ubicacion_id,
@@ -489,6 +505,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         cantidad=movimiento.cantidad,
         costo_unitario=movimiento.costo_unitario,
         llevada=getattr(movimiento, "llevada", None),
+        pagos_incluyen_llevada=incluye_llevada,
         proveedor_id=proveedor_id,
         cliente_id=cliente_id,
         proveedor_nombre=proveedor_nombre,
@@ -528,18 +545,22 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
         if movimiento.costo_unitario is not None
         else Decimal("0.00")
     )
+    llevada = Decimal(str(movimiento.llevada or 0)).quantize(Decimal("0.01"))
+    total_a_pagar = total_compra + (llevada if incluye_llevada else Decimal("0"))
 
     # ── Pago de la compra: UNA cuenta (compatibilidad) o VARIAS ────────────
     # La compra puede pagarse de dos maneras (la mitad en efectivo COP y el
     # resto por Zelle, p. ej.). Cada pago genera su propio gasto + salida de
     # caja y queda en `entrada_compra_pago` para el desglose del libro.
     pagos = list(getattr(movimiento, "pagos", None) or [])
+    if movimiento.tipo == "ENTRADA" and total_a_pagar > 0:
+        material = db.query(Material).filter(Material.id == movimiento.material_id).one()
     if movimiento.tipo == "ENTRADA" and pagos and getattr(movimiento, "fiar", False):
         raise ValueError("Elige entre pagar (una o varias cuentas) o fiar, no ambos.")
-    if movimiento.tipo == "ENTRADA" and pagos and total_compra <= 0:
+    if movimiento.tipo == "ENTRADA" and pagos and total_a_pagar <= 0:
         raise ValueError("Para registrar pagos indica el costo unitario de la entrada.")
 
-    if movimiento.tipo == "ENTRADA" and pagos and total_compra > 0:
+    if movimiento.tipo == "ENTRADA" and pagos and total_a_pagar > 0:
         from app.modules.reports.model import MetodoCaja
         from app.modules.catalogos.model import Moneda
 
@@ -609,10 +630,12 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             acumulado += monto_cop
             resumen.append((pago, monto, tasa, monto_cop))
 
-        diferencia = (acumulado - total_compra).quantize(Decimal("0.01"))
-        if abs(diferencia) > Decimal("1.00"):
+        diferencia = (acumulado - total_a_pagar).quantize(Decimal("0.01"))
+        tolerancia = _tolerancia_pagos_cop([(pago.moneda_id, tasa) for pago, _, tasa, _ in resumen])
+        if abs(diferencia) > tolerancia:
             raise ValueError(
-                f"Los pagos suman ${acumulado:,.2f} COP y la compra ${total_compra:,.2f} COP: "
+                f"Los pagos suman ${acumulado:,.2f} COP y la compra "
+                f"{'(incluido flete) ' if incluye_llevada else ''}${total_a_pagar:,.2f} COP: "
                 f"{'faltan' if diferencia < 0 else 'sobran'} ${abs(diferencia):,.2f} COP. "
                 "Ajusta los montos para que cuadren con la compra."
             )
@@ -622,6 +645,8 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
             movimiento.cantidad,
             material.unidad_medida.nombre if material.unidad_medida else None,
         )
+        if incluye_llevada and llevada > 0:
+            descripcion_compra += f" · incluye flete/llevada de la entrada: {llevada:,.2f} COP"
         total_pagos = len(pagos)
         for indice, (pago, monto, tasa, monto_cop) in enumerate(resumen, start=1):
             cuenta = cuentas_pago[pago.metodo_caja_id]
@@ -637,6 +662,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
                 metodo_caja_id=pago.metodo_caja_id,
                 moneda_pago_id=pago.moneda_id,
                 tasa_pago=pago.tasa_pago,
+                monto_pagado=monto,
                 fecha=fecha_mov.date(),
                 usuario=usuario,
                 persona_entidad=persona_compra,
@@ -668,8 +694,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     elif (
         movimiento.tipo == "ENTRADA"
         and getattr(movimiento, "pagado_desde_metodo_caja_id", None)
-        and movimiento.costo_unitario is not None
-        and Decimal(str(movimiento.costo_unitario)) > 0
+        and total_a_pagar > 0
     ):
         gasto_compra = _gasto_compra_contado(
             db,
@@ -678,8 +703,9 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
                 material.nombre,
                 movimiento.cantidad,
                 material.unidad_medida.nombre if material.unidad_medida else None,
-            ),
-            total_ref=total_compra,
+            ) + (f" · incluye flete/llevada de la entrada: {llevada:,.2f} COP"
+                 if incluye_llevada and llevada > 0 else ""),
+            total_ref=total_a_pagar,
             ref_moneda_id=MONEDA_BASE_ID,
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
@@ -701,6 +727,7 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
     llevada = getattr(movimiento, "llevada", None)
     if (
         movimiento.tipo == "ENTRADA"
+        and not incluye_llevada
         and getattr(movimiento, "pagado_desde_metodo_caja_id", None)
         and llevada is not None
         and Decimal(str(llevada)) > 0
@@ -779,12 +806,10 @@ def registrar_movimiento(db: Session, movimiento: schemas.MovimientoCreate, usua
 # Reglas de seguridad:
 #  - Solo ENTRADAS manuales (referencia_tipo NULL). Compras/producción/cargas
 #    iniciales tienen su propio flujo y no se tocan desde el kardex.
-#  - No se editan entradas fiadas ni con flete/llevada (tienen gastos/deudas
-#    externos que requieren un tratamiento aparte).
+#  - Las deudas con abonos y los fletes históricos ambiguos se bloquean.
 #  - No se permite dejar el stock negativo.
-#  - La cuenta de pago solo se cambia si es de la misma moneda; los pagos
-#    mixtos conservan sus cuentas y se reescalan proporcionalmente.
-#  - La edición/anulación la puede hacer el autor del gasto o Dueño/Admin.
+#  - Los importes explícitos no se reparten; solo el contrato histórico sin
+#    importes conserva su reescalado. El router exige gestionar Inventario.
 
 
 def _snapshot_movimiento_inventario(m: model.MovimientoInventario) -> dict:
@@ -796,6 +821,7 @@ def _snapshot_movimiento_inventario(m: model.MovimientoInventario) -> dict:
         "cantidad": float(m.cantidad),
         "costo_unitario": float(m.costo_unitario) if m.costo_unitario is not None else None,
         "llevada": float(m.llevada) if m.llevada is not None else None,
+        "pagos_incluyen_llevada": m.pagos_incluyen_llevada,
         "proveedor_id": m.proveedor_id,
         "proveedor_nombre": m.proveedor_nombre,
         "cliente_id": m.cliente_id,
@@ -1204,7 +1230,7 @@ def _crear_cxp_entrada(
 def _gasto_llevada_de_entrada(db: Session, m: model.MovimientoInventario):
     from app.modules.gastos.model import Gasto
 
-    if m.llevada is None or Decimal(str(m.llevada)) <= 0:
+    if m.pagos_incluyen_llevada or m.llevada is None or Decimal(str(m.llevada)) <= 0:
         return None
     if m.llevada_gasto_id:
         return db.query(Gasto).filter(Gasto.id == m.llevada_gasto_id).first()
@@ -1313,7 +1339,8 @@ def _normalizar_pagos_edicion(db: Session, pagos, total_compra: Decimal):
         })
 
     diferencia = (acumulado - total_compra).quantize(Decimal("0.01"))
-    if abs(diferencia) > Decimal("1.00"):
+    tolerancia = _tolerancia_pagos_cop([(p["moneda_id"], p["tasa"]) for p in resumen])
+    if abs(diferencia) > tolerancia:
         raise ValueError(
             f"Los pagos suman ${acumulado:,.2f} COP y la compra ${total_compra:,.2f} COP: "
             f"{'faltan' if diferencia < 0 else 'sobran'} ${abs(diferencia):,.2f} COP. "
@@ -1334,6 +1361,7 @@ def _pagos_existentes_a_payload(db: Session, m: model.MovimientoInventario, pago
             metodo = fila.metodo_caja_id
             moneda = fila.moneda_id
             tasa = Decimal(str(fila.tasa_cambio or 1))
+            monto_original = Decimal(str(fila.monto))
         else:
             cop = Decimal(str(
                 caja.monto_en_moneda_base if caja is not None else gasto.monto_en_moneda_base
@@ -1341,10 +1369,11 @@ def _pagos_existentes_a_payload(db: Session, m: model.MovimientoInventario, pago
             metodo = m.pagado_desde_metodo_caja_id
             moneda = gasto.moneda_id or m.moneda_pago_id or MONEDA_BASE_ID
             tasa = Decimal(str(gasto.tasa_cambio or m.tasa_pago or 1))
+            monto_original = Decimal(str(caja.monto if caja is not None else gasto.monto))
         if metodo is None:
             raise ValueError("Uno de los pagos actuales no tiene cuenta de caja.")
         old_total += cop
-        filas.append((metodo, moneda, tasa, cop))
+        filas.append((metodo, moneda, tasa, cop, monto_original))
 
     if old_total <= 0:
         raise ValueError(
@@ -1353,12 +1382,15 @@ def _pagos_existentes_a_payload(db: Session, m: model.MovimientoInventario, pago
 
     resultado = []
     acumulado = Decimal("0")
-    for indice, (metodo, moneda, tasa, cop) in enumerate(filas):
+    for indice, (metodo, moneda, tasa, cop, monto_original) in enumerate(filas):
         nuevo_cop = (cop * nuevo_total / old_total).quantize(Decimal("0.01"))
         if indice == len(filas) - 1:
             nuevo_cop = nuevo_total - acumulado
         acumulado += nuevo_cop
-        monto = _monto_en_moneda_de_pago(nuevo_cop, moneda, tasa)
+        monto = (
+            _monto_en_moneda_de_pago(nuevo_cop, moneda, tasa)
+            if nuevo_total != old_total else monto_original
+        )
         if monto <= 0:
             raise ValueError("El nuevo total deja un pago en cero; revisa cantidad/precio.")
         resultado.append({
@@ -1452,6 +1484,7 @@ def _crear_pagos_entrada(
             metodo_caja_id=item["metodo_caja_id"],
             moneda_pago_id=item["moneda_id"],
             tasa_pago=item["tasa_pago"],
+            monto_pagado=item["monto"],
             fecha=fecha,
             usuario=usuario,
             persona_entidad=proveedor_nombre,
@@ -1579,6 +1612,10 @@ def actualizar_movimiento_inventario(
     if nueva_llevada < 0:
         raise ValueError("El flete/llevada no puede ser negativo.")
     nuevo_total = (nueva_cantidad * nuevo_costo).quantize(Decimal("0.01"))
+    incluye_llevada = datos.get("pagos_incluyen_llevada")
+    if incluye_llevada is None:
+        incluye_llevada = m.pagos_incluyen_llevada
+    total_a_pagar = nuevo_total + (nueva_llevada if incluye_llevada else Decimal("0"))
 
     # Proveedor / cliente.
     if "proveedor_nombre" in datos or "proveedor_id" in datos:
@@ -1663,7 +1700,7 @@ def actualizar_movimiento_inventario(
     resumen = []
     if not nuevo_fiar:
         if "pagos" in datos and datos["pagos"] is not None:
-            resumen = _normalizar_pagos_edicion(db, datos["pagos"], nuevo_total)
+            resumen = _normalizar_pagos_edicion(db, datos["pagos"], total_a_pagar)
         elif datos.get("pagado_desde_metodo_caja_id") is not None:
             moneda_id = int(datos.get("moneda_pago_id") or m.moneda_pago_id or MONEDA_BASE_ID)
             tasa_pago = datos.get("tasa_pago", m.tasa_pago)
@@ -1673,9 +1710,9 @@ def actualizar_movimiento_inventario(
                         "Para pagar en otra moneda indica la tasa de cambio "
                         "(1 moneda del pago = X COP)."
                     )
-                monto = _monto_en_moneda_de_pago(nuevo_total, moneda_id, tasa_pago)
+                monto = _monto_en_moneda_de_pago(total_a_pagar, moneda_id, tasa_pago)
             else:
-                monto = nuevo_total
+                monto = total_a_pagar
                 tasa_pago = None
             if monto <= 0:
                 raise ValueError("El pago no puede quedar en cero.")
@@ -1684,12 +1721,17 @@ def actualizar_movimiento_inventario(
                 "moneda_id": moneda_id,
                 "monto": monto,
                 "tasa_pago": tasa_pago,
-            }], nuevo_total)
+            }], total_a_pagar)
         elif pagos_existentes:
+            # Los pagos nuevos son importes explícitos, no porcentajes. Si
+            # cambia el total se exige volver a indicarlos; nunca repartirlos.
+            pagos_payload = (
+                [pago.model_dump() for pago in pagos_de_entrada_para_detalle(db, m)]
+                if incluye_llevada else
+                _pagos_existentes_a_payload(db, m, pagos_existentes, total_a_pagar)
+            )
             resumen = _normalizar_pagos_edicion(
-                db,
-                _pagos_existentes_a_payload(db, m, pagos_existentes, nuevo_total),
-                nuevo_total,
+                db, pagos_payload, total_a_pagar,
             )
         elif nuevo_costo > 0:
             raise ValueError(
@@ -1701,9 +1743,8 @@ def actualizar_movimiento_inventario(
                 "Indica la cuenta de pago (una o varias) o marca la entrada como fiada."
             )
 
-    # La llevada se paga desde la cuenta principal. Una entrada cuyo costo de
-    # material sea cero puede aun tener una llevada pagada, como permite el
-    # formulario original; en ese caso no hay pago de compra, solo de flete.
+    # Solo el contrato histórico paga la llevada aparte. Una entrada sin
+    # costo de material puede aun tener una llevada pagada.
     cuenta_flete_id = (
         datos.get("pagado_desde_metodo_caja_id")
         if "pagado_desde_metodo_caja_id" in datos
@@ -1755,6 +1796,7 @@ def actualizar_movimiento_inventario(
     if "descuento_porcentaje" in datos:
         m.descuento_porcentaje = datos["descuento_porcentaje"]
     m.fiar = nuevo_fiar
+    m.pagos_incluyen_llevada = incluye_llevada
     m.llevada = nueva_llevada if nueva_llevada > 0 else None
 
     if nuevo_fiar:
@@ -1801,6 +1843,8 @@ def actualizar_movimiento_inventario(
             nueva_cantidad,
             material.unidad_medida.nombre if material.unidad_medida else None,
         )
+        if incluye_llevada and nueva_llevada > 0:
+            descripcion_base += f" · incluye flete/llevada de la entrada: {nueva_llevada:,.2f} COP"
         if resumen:
             _crear_pagos_entrada(
                 db,
@@ -1820,8 +1864,10 @@ def actualizar_movimiento_inventario(
             m.moneda_pago_id = None
             m.tasa_pago = None
 
-        # Flete/llevada: se recrea con la cuenta principal (primera cuenta).
-        if nueva_llevada > 0 and cuenta_flete_id is not None:
+        # En el contrato nuevo el flete ya está en los importes de `resumen`.
+        if incluye_llevada:
+            m.llevada_gasto_id = None
+        elif nueva_llevada > 0 and cuenta_flete_id is not None:
             _aplicar_llevada_entrada(
                 db,
                 m,
@@ -2020,6 +2066,31 @@ def pagos_de_entrada_para_detalle(db: Session, m: model.MovimientoInventario):
                 monto_en_moneda_base=caja.monto_en_moneda_base,
             ))
     return salida
+
+
+def pago_llevada_para_detalle(
+    db: Session, m: model.MovimientoInventario,
+) -> Optional[schemas.PagoEntradaResponse]:
+    """Cargo histórico de flete para mostrar el total REAL de la primera cuenta."""
+    from app.modules.reports.model import MovimientoCaja
+
+    if m.fiar or not m.pagado_desde_metodo_caja_id:
+        return None
+    gasto = _gasto_llevada_de_entrada(db, m)
+    if gasto is None:
+        return None
+    caja = db.query(MovimientoCaja).filter(
+        MovimientoCaja.referencia == f"Gasto #{gasto.id}",
+    ).first()
+    if caja is None:
+        raise ValueError("El gasto del flete no tiene salida de caja; revisa la entrada.")
+    return schemas.PagoEntradaResponse(
+        metodo_caja_id=caja.metodo_caja_id,
+        moneda_id=caja.moneda_id,
+        monto=caja.monto,
+        tasa_pago=caja.tasa_cambio if caja.moneda_id != MONEDA_BASE_ID else None,
+        monto_en_moneda_base=caja.monto_en_moneda_base,
+    )
 
 
 def obtener_movimientos_por_material(
@@ -2287,6 +2358,7 @@ def registrar_movimiento_producto(
         cantidad=movimiento.cantidad,
         costo_unitario=movimiento.costo_unitario,
         llevada=getattr(movimiento, "llevada", None),
+        pagos_incluyen_llevada=movimiento.pagos_incluyen_llevada,
         proveedor_id=proveedor_id,
         cliente_id=cliente_id,
         proveedor_nombre=proveedor_nombre,
@@ -2318,16 +2390,18 @@ def registrar_movimiento_producto(
         if movimiento.costo_unitario is not None and Decimal(str(movimiento.costo_unitario)) > 0
         else Decimal("0.00")
     )
+    llevada = Decimal(str(movimiento.llevada or 0)).quantize(Decimal("0.01"))
+    total_a_pagar = costo_total + (llevada if movimiento.pagos_incluyen_llevada else Decimal("0"))
     pagos = list(getattr(movimiento, "pagos", None) or [])
     if (movimiento.tipo == "ENTRADA" and pagos and getattr(movimiento, "fiar", False)):
         raise ValueError("Elige entre pagar (una o varias cuentas) o fiar, no ambos.")
-    if (movimiento.tipo == "ENTRADA" and pagos and costo_total <= 0):
+    if (movimiento.tipo == "ENTRADA" and pagos and total_a_pagar <= 0):
         raise ValueError("Para registrar pagos indica el costo unitario de la entrada.")
 
     if (
         movimiento.tipo == "ENTRADA"
         and pagos
-        and costo_total > 0
+        and total_a_pagar > 0
         and producto.es_reventa
     ):
         from app.modules.reports.model import MetodoCaja
@@ -2386,12 +2460,20 @@ def registrar_movimiento_producto(
             acumulado += contribucion
             resumen.append((pago, monto, tasa, contribucion, moneda_pago_cod))
 
-        tolerancia = Decimal("1.00") if ref_moneda == MONEDA_BASE_ID else Decimal("0.05")
-        diferencia = (acumulado - costo_total).quantize(Decimal("0.01"))
+        tolerancia = (
+            _tolerancia_pagos_cop([(pago.moneda_id, tasa or Decimal("1")) for pago, _, tasa, _, _ in resumen])
+            if ref_moneda == MONEDA_BASE_ID else max(Decimal("0.05"), sum(
+                (_monto_en_moneda(Decimal("0.005"), cod_pago, cod_ref, tasa)
+                 for _, _, tasa, _, cod_pago in resumen if cod_pago != cod_ref),
+                Decimal("0"),
+            ))
+        )
+        diferencia = (acumulado - total_a_pagar).quantize(Decimal("0.01"))
         if abs(diferencia) > tolerancia:
             raise ValueError(
                 f"Los pagos suman {acumulado:,.2f} {cod_ref} y la compra "
-                f"{costo_total:,.2f} {cod_ref}: "
+                f"{'(incluido flete) ' if movimiento.pagos_incluyen_llevada else ''}"
+                f"{total_a_pagar:,.2f} {cod_ref}: "
                 f"{'faltan' if diferencia < 0 else 'sobran'} {abs(diferencia):,.2f} {cod_ref}. "
                 "Ajusta los montos para que cuadren con la compra."
             )
@@ -2400,6 +2482,8 @@ def registrar_movimiento_producto(
             f"Compra de producto: {_texto_cantidad(movimiento.cantidad)} "
             f"{_texto_unidad(None, movimiento.cantidad)} de {producto.nombre}"
         )
+        if movimiento.pagos_incluyen_llevada and llevada > 0:
+            descripcion_compra += f" · incluye flete/llevada de la entrada: {llevada:,.2f} {cod_ref}"
         total_pagos = len(pagos)
         primero = None
         for indice, (pago, monto, tasa, contribucion, moneda_pago_cod) in enumerate(resumen, start=1):
@@ -2416,6 +2500,7 @@ def registrar_movimiento_producto(
                 metodo_caja_id=pago.metodo_caja_id,
                 moneda_pago_id=pago.moneda_id,
                 tasa_pago=pago.tasa_pago,
+                monto_pagado=monto,
                 fecha=fecha_mov.date(),
                 usuario=usuario,
                 persona_entidad=_persona_compra(db, usuario, proveedor_id, proveedor_nombre),
@@ -2446,11 +2531,9 @@ def registrar_movimiento_producto(
     elif (
         movimiento.tipo == "ENTRADA"
         and movimiento.pagado_desde_metodo_caja_id
-        and movimiento.costo_unitario is not None
-        and Decimal(str(movimiento.costo_unitario)) > 0
+        and total_a_pagar > 0
         and producto.es_reventa
     ):
-        costo_total = (Decimal(str(movimiento.costo_unitario)) * movimiento.cantidad).quantize(Decimal("0.01"))
         _gasto_compra_contado(
             db,
             tipo_gasto_nombre="COMPRA INVENTARIO REVENTA",
@@ -2458,7 +2541,7 @@ def registrar_movimiento_producto(
                 f"Compra de producto: {_texto_cantidad(movimiento.cantidad)} "
                 f"{_texto_unidad(None, movimiento.cantidad)} de {producto.nombre}"
             ),
-            total_ref=costo_total,
+            total_ref=total_a_pagar,
             ref_moneda_id=producto.moneda_id or 1,
             metodo_caja_id=movimiento.pagado_desde_metodo_caja_id,
             moneda_pago_id=getattr(movimiento, "moneda_pago_id", None),
@@ -2473,6 +2556,7 @@ def registrar_movimiento_producto(
     llevada = getattr(movimiento, "llevada", None)
     if (
         movimiento.tipo == "ENTRADA"
+        and not movimiento.pagos_incluyen_llevada
         and movimiento.pagado_desde_metodo_caja_id
         and llevada is not None
         and Decimal(str(llevada)) > 0

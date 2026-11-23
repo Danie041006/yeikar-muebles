@@ -74,6 +74,8 @@ export interface MovimientoCreate {
   /** Compra pagada de VARIAS maneras: un pago por cuenta/moneda. La suma
    * debe cuadrar con la compra. Si viene, manda sobre el pago clásico. */
   pagos?: PagoEntradaCreate[];
+  /** Los montos cubren compra + flete, sin otro cargo a la cuenta principal. */
+  pagos_incluyen_llevada?: boolean;
   /** Proveedor (dónde se compró) — opcional, solo entradas. */
   proveedor_id?: number;
   /** Nombre libre del proveedor: si coincide con un registro se linkea; si no, queda como texto. */
@@ -111,6 +113,7 @@ export interface MovimientoResponse {
   moneda_pago_id?: number | null;
   tasa_pago?: number | null;
   gasto_id?: number | null;
+  pagos_incluyen_llevada?: boolean;
   fiar?: boolean;
   descuento_porcentaje?: number | null;
   proveedor_id?: number;
@@ -144,6 +147,7 @@ export interface MovimientoUpdate {
   llevada?: number | null;
   fiar?: boolean;
   pagos?: PagoEntradaCreate[] | null;
+  pagos_incluyen_llevada?: boolean;
   motivo_correccion?: string;
 }
 
@@ -157,6 +161,7 @@ export interface PagoEntradaResponse {
 
 export interface MovimientoDetalleResponse extends MovimientoResponse {
   pagos: PagoEntradaResponse[];
+  pago_llevada?: PagoEntradaResponse | null;
 }
 
 export interface ProductoInventarioItem {
@@ -200,6 +205,7 @@ export interface MovimientoProductoCreate {
   tasa_pago?: number;
   /** Compra pagada de VARIAS maneras (plásticos/reventa). */
   pagos?: PagoEntradaCreate[];
+  pagos_incluyen_llevada?: boolean;
   /** Proveedor (dónde se compró) — opcional, solo entradas. */
   proveedor_id?: number;
   /** Nombre libre del proveedor (se linkea si coincide con un registro). */

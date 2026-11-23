@@ -43,6 +43,18 @@ export function equivalenteTotal(filas: PagoMixtoRow[], cuentas: CuentaPagoOptio
   return filas.reduce((acc, f) => acc + equivalentePago(f, cuentas, destino), 0);
 }
 
+/** Medio centavo por pago convertido: no se pueden pagar fracciones de USD. */
+export function toleranciaPagos(
+  filas: Pick<PagoMixtoRow, 'key' | 'tasa'>[], cuentas: CuentaPagoOption[], destino: string,
+): number {
+  const redondeo = filas.reduce((suma, fila) => {
+    const cuenta = cuentas.find((c) => c.key === fila.key);
+    if (!cuenta || cuenta.codigo === destino) return suma;
+    return suma + convertirMonedaHumana(0.005, cuenta.codigo, destino, Number(fila.tasa));
+  }, 0);
+  return Math.max(destino === 'COP' ? 1 : 0.05, redondeo);
+}
+
 /** true cuando todas las filas están listas (cuenta, monto y tasa). */
 export function pagosCompletos(filas: PagoMixtoRow[], cuentas: CuentaPagoOption[], destino: string): boolean {
   if (filas.length === 0) return false;
@@ -65,6 +77,8 @@ interface Props {
   totalDestino?: number;
   /** Si true, marca faltante/sobrante para exigir el cuadre exacto. */
   exigirCuadre?: boolean;
+  /** Margen de redondeo en la moneda destino, incluidas divisas. */
+  tolerancia?: number;
   /** Equivalente ya pagado con la CUENTA PRINCIPAL (fila 0, fuera del editor). */
   equivalentePrincipal?: number;
   onChange: (filas: PagoMixtoRow[]) => void;
@@ -72,7 +86,7 @@ interface Props {
 }
 
 export default function PagosMixtosEditor({
-  filas, cuentas, codigoDestino, totalDestino, exigirCuadre, equivalentePrincipal, onChange,
+  filas, cuentas, codigoDestino, totalDestino, exigirCuadre, tolerancia = 1, equivalentePrincipal, onChange,
 }: Props) {
   const inputCls =
     'w-full bg-white border border-yeikar-secondary-light/20 rounded-lg px-2.5 py-1.5 text-sm text-yeikar-neutral focus:outline-none focus:ring-2 focus:ring-yeikar-primary font-mono';
@@ -85,7 +99,7 @@ export default function PagosMixtosEditor({
   const cuadreOk = faltante == null
     ? true
     : exigirCuadre
-      ? Math.abs(faltante) <= 1
+      ? Math.abs(faltante) <= tolerancia
       : faltante <= 0.01;
 
   return (
@@ -103,6 +117,7 @@ export default function PagosMixtosEditor({
             <div className="min-[480px]:col-span-5 space-y-1">
               <label className="text-[10px] font-bold text-yeikar-neutral/60">Cuenta extra {i + 1}</label>
               <select
+                aria-label={`Cuenta extra ${i + 1}`}
                 value={row.key}
                 onChange={(e) => {
                   const sel = cuentas.find((c) => c.key === e.target.value);
@@ -126,6 +141,7 @@ export default function PagosMixtosEditor({
                 </label>
                 <input
                   type="number" step="any" min="0"
+                  aria-label={`Tasa del pago extra ${i + 1}`}
                   value={row.tasa}
                   onChange={(e) => {
                     const next = [...filas];
@@ -141,6 +157,7 @@ export default function PagosMixtosEditor({
               <label className="text-[10px] font-bold text-yeikar-neutral/60">Monto ({pagCod})</label>
               <input
                 type="number" step="0.01" min="0"
+                aria-label={`Monto del pago extra ${i + 1} (${pagCod})`}
                 value={row.monto}
                 onChange={(e) => {
                   const next = [...filas];
@@ -195,7 +212,10 @@ export default function PagosMixtosEditor({
                 Pagado: <b className="font-mono">{equivTotal.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {codigoDestino}</b>
                 {' ·Compra: '}<b className="font-mono">{(totalDestino || 0).toLocaleString('es-CO')} {codigoDestino}</b>
               </p>
-              {Math.abs(faltante) > 1 && (
+              {cuadreOk && Math.abs(faltante) > 0.01 && (
+                <p>Diferencia admitida por redondeo: {Math.abs(faltante).toLocaleString('es-CO', { maximumFractionDigits: 2 })} {codigoDestino}. No se modificarán los importes.</p>
+              )}
+              {Math.abs(faltante) > tolerancia && (
                 <p>
                   {faltante > 0
                     ? `Faltan $${faltante.toLocaleString('es-CO')} ${codigoDestino} para cuadrar la compra`

@@ -68,6 +68,10 @@ def ver_movimiento(
         raise HTTPException(status_code=404, detail="Movimiento de inventario no encontrado")
     respuesta = schemas.MovimientoDetalleResponse.model_validate(mov)
     respuesta.pagos = service.pagos_de_entrada_para_detalle(db, mov)
+    try:
+        respuesta.pago_llevada = service.pago_llevada_para_detalle(db, mov)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return respuesta
 
 

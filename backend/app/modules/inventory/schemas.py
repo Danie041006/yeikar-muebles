@@ -96,6 +96,9 @@ class MovimientoCreate(BaseModel):
     # por cada uno y la suma de sus equivalentes en COP debe cuadrar con la
     # compra.
     pagos: Optional[List["PagoEntradaCreate"]] = None
+    # Contrato nuevo: los pagos cubren mercancía + flete, sin un cargo extra.
+    # False mantiene la compatibilidad con clientes/entradas anteriores.
+    pagos_incluyen_llevada: bool = False
 
     @field_validator("departamento")
     @classmethod
@@ -146,6 +149,7 @@ class MovimientoUpdate(BaseModel):
     llevada: Optional[Decimal] = Field(None, ge=0)
     fiar: Optional[bool] = None
     pagos: Optional[List["PagoEntradaCreate"]] = None
+    pagos_incluyen_llevada: Optional[bool] = None
     motivo_correccion: Optional[str] = Field(None, max_length=500)
 
     @field_validator("departamento")
@@ -182,6 +186,7 @@ class MovimientoResponse(BaseModel):
     tasa_pago: Optional[Decimal] = None
     gasto_id: Optional[int] = None
     llevada_gasto_id: Optional[int] = None
+    pagos_incluyen_llevada: bool = False
     proveedor_id: Optional[int] = None
     cliente_id: Optional[int] = None
     proveedor_nombre: Optional[str] = None
@@ -211,6 +216,8 @@ class PagoEntradaResponse(BaseModel):
 class MovimientoDetalleResponse(MovimientoResponse):
     """Entrada + desglose de pagos, para precargar el formulario de edición."""
     pagos: List[PagoEntradaResponse] = []
+    # Solo entradas antiguas: cargo real del flete, separado de `pagos`.
+    pago_llevada: Optional[PagoEntradaResponse] = None
 
 
 # clase para dar un aviso de que hay productos que tiene stock bajo
@@ -286,6 +293,7 @@ class MovimientoProductoCreate(BaseModel):
     # clásicos de arriba (un solo pago). Con N pagos se genera un gasto por
     # cada uno y la suma de lo pagado debe cuadrar con la compra.
     pagos: Optional[List[PagoEntradaCreate]] = None
+    pagos_incluyen_llevada: bool = False
 
 
 class MovimientoProductoResponse(BaseModel):
@@ -301,6 +309,7 @@ class MovimientoProductoResponse(BaseModel):
     referencia_id: Optional[int] = None
     observaciones: Optional[str] = None
     llevada: Optional[Decimal] = None
+    pagos_incluyen_llevada: bool = False
     pagado_desde_metodo_caja_id: Optional[int] = None
     moneda_pago_id: Optional[int] = None
     tasa_pago: Optional[Decimal] = None

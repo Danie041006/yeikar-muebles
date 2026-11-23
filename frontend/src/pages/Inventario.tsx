@@ -12,7 +12,7 @@ import { motion } from 'framer-motion';
 import { ReceiptText } from 'lucide-react';
 import { SearchSelect, ResponsiveDataTable, MontoInput, type DataColumn } from '../components/ui';
 import AdjuntoImagen from '../components/AdjuntoImagen';
-import PagosMixtosEditor, { equivalenteTotal, pagosCompletos, type PagoMixtoRow } from '../components/Inventario/PagosMixtosEditor';
+import PagosMixtosEditor, { equivalenteTotal, pagosCompletos, toleranciaPagos, type PagoMixtoRow } from '../components/Inventario/PagosMixtosEditor';
 import CompraMultipleModal from '../components/Inventario/CompraMultipleModal';
 import EntradasRegistradas from '../components/Inventario/EntradasRegistradas';
 import { resolverParMonedas, convertirMonedaHumana, extractErrorMessage, fmtNumero } from '../utils/format';
@@ -193,6 +193,7 @@ export default function Inventario() {
     costo_unitario: '',
     precio_moneda: '', // precio unitario en `moneda_precio_id` (ej. USD); calcula el COP
     moneda_precio_id: MONEDA_BASE_ID, // moneda en la que se digita el precio (1 = COP)
+    tasa_precio: '',
     descuento_porcentaje: '',
     observaciones: '',
     pago_key: '',   // "cuentaId:monedaId" — vacío = a crédito
@@ -906,7 +907,9 @@ export default function Inventario() {
           : { nombre: u.nombre, valor: String(f), invertida: true };
       }),
     );
-    setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
+    setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: mat.costo_base ? String(mat.costo_base) : '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, tasa_precio: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: mat.departamento ?? '', recibido_por: '' });
+    setPagosExtraMaterial([]);
+    setMontoPrincipalMaterial('');
     try {
       setLoadingKardex(true);
       const data = await inventarioService.getKardex(mat.id);
@@ -956,7 +959,21 @@ export default function Inventario() {
     setCargandoDetalleMov(true);
     try {
       const detalle = await inventarioService.getMovimientoDetalle(mov.id);
-      const pagos = detalle.pagos ?? [];
+      const pagos = (detalle.pagos ?? []).map((p) => ({ ...p }));
+      // Las entradas antiguas cobraban la llevada aparte. La corrección
+      // precarga lo que REALMENTE salió de cada cuenta (compra + ese flete).
+      if (detalle.pago_llevada) {
+        const flete = detalle.pago_llevada;
+        const mismoPago = pagos.find((p) =>
+          p.metodo_caja_id === flete.metodo_caja_id && p.moneda_id === flete.moneda_id
+          && Number(p.tasa_pago ?? 1) === Number(flete.tasa_pago ?? 1));
+        if (mismoPago) {
+          mismoPago.monto = Math.round((Number(mismoPago.monto) + Number(flete.monto)) * 100) / 100;
+          mismoPago.monto_en_moneda_base = Number(mismoPago.monto_en_moneda_base) + Number(flete.monto_en_moneda_base);
+        } else {
+          pagos.push({ ...flete });
+        }
+      }
       const primero = pagos[0];
       const extras: PagoMixtoRow[] = pagos.slice(1).map((p) => ({
         key: `${p.metodo_caja_id}:${p.moneda_id}`,
@@ -1037,10 +1054,11 @@ export default function Inventario() {
     const precioBrutoCop = formEditarMov.moneda_precio_id === MONEDA_BASE_ID
       ? precioDigitado
       : precioDigitado * tasaPrecio;
-    const costoNetoCop = Math.max(0, precioBrutoCop * (1 - descuento / 100));
+    const costoNetoCop = Math.round(Math.max(0, precioBrutoCop * (1 - descuento / 100)) * 100) / 100;
     const llevadaUnidad = Number(formEditarMov.llevada_unidad || '0') || 0;
     const totalCompra = Math.round(cantidad * costoNetoCop * 100) / 100;
     const llevadaTotal = Math.round(llevadaUnidad * cantidad * 100) / 100;
+    const totalConFlete = Math.round((totalCompra + llevadaTotal) * 100) / 100;
     const { cuentaId, monedaId } = parsePagoKey(formEditarMov.pago_key);
     const pagoCod = codMonedaDe(monedaId);
     const tasaPago = Number(formEditarMov.tasa_pago || '0') || 0;
@@ -1057,20 +1075,13 @@ export default function Inventario() {
       descuento_porcentaje: descuento > 0 ? descuento : null,
       llevada: llevadaTotal,
       motivo_correccion: formEditarMov.motivo_correccion.trim() || undefined,
+      pagos_incluyen_llevada: true,
     };
 
-    if (totalCompra <= 0) {
-      // Sin costo neto no hay pago de compra que registrar; mantiene la regla
-      // del formulario inicial, aunque la entrada tenga cantidad de stock.
+    if (totalConFlete <= 0) {
       payload.fiar = false;
       payload.pagos = [];
-      if (cuentaId && llevadaTotal > 0) {
-        payload.pagado_desde_metodo_caja_id = cuentaId;
-        payload.moneda_pago_id = monedaId ?? MONEDA_BASE_ID;
-        if (pagoCod !== 'COP') payload.tasa_pago = tasaPago;
-      } else if (!cuentaId) {
-        payload.pagado_desde_metodo_caja_id = null;
-      }
+      payload.pagado_desde_metodo_caja_id = null;
     } else if (!cuentaId) {
       // Sin cuenta: si hay costo, la regla del formulario es que queda fiada.
       payload.fiar = true;
@@ -1100,18 +1111,21 @@ export default function Inventario() {
         }
         const equivPrincipal = pagoCod === 'COP'
           ? montoPrincipal
-          : convertirMonedaHumana(montoPrincipal, 'COP', pagoCod, tasaPago);
+          : convertirMonedaHumana(montoPrincipal, pagoCod, 'COP', tasaPago);
         const equivExtras = equivalenteTotal(pagosEdicion, cuentasEditor, 'COP');
-        if (Math.abs(equivPrincipal + equivExtras - totalCompra) > 1.0) {
+        const tolerancia = toleranciaPagos([
+          { key: formEditarMov.pago_key, tasa: formEditarMov.tasa_pago }, ...pagosEdicion,
+        ], cuentasEditor, 'COP');
+        if (Math.abs(equivPrincipal + equivExtras - totalConFlete) > tolerancia) {
           toast.error(
-            `Los pagos suman $${(equivPrincipal + equivExtras).toLocaleString('es-CO')} COP y la compra es $${totalCompra.toLocaleString('es-CO')} COP. Ajusta los montos.`,
+            `Los pagos suman $${(equivPrincipal + equivExtras).toLocaleString('es-CO')} COP y la compra con flete es $${totalConFlete.toLocaleString('es-CO')} COP. Ajusta los montos.`,
           );
           return;
         }
       } else {
         montoPrincipal = pagoCod === 'COP'
-          ? totalCompra
-          : convertirMonedaHumana(totalCompra, 'COP', pagoCod, tasaPago);
+          ? totalConFlete
+          : convertirMonedaHumana(totalConFlete, 'COP', pagoCod, tasaPago);
       }
       if (!(montoPrincipal > 0) && totalCompra > 0) {
         toast.error('El monto de la cuenta principal no puede quedar en cero.');
@@ -1274,11 +1288,15 @@ export default function Inventario() {
       toast.error(`Indica la tasa de cambio: ${par.label}.`);
       return;
     }
-    // El precio puede venir digitado en la moneda de la cuenta (ej. USD):
-    // en ese caso el COP se calcula con la tasa y es el que se guarda.
+    // La moneda del precio no depende de qué cuenta(s) se usaron para pagar.
     const precioEnMoneda = esEntrada ? parseFloat(movMaterial.precio_moneda || '0') || 0 : 0;
-    const costoBruto = esEntrada && precioEnMoneda > 0 && tasaNum > 0
-      ? parseFloat((precioEnMoneda * tasaNum).toFixed(2))
+    const tasaPrecio = Number(movMaterial.tasa_precio) || 0;
+    if (esEntrada && movMaterial.moneda_precio_id !== MONEDA_BASE_ID && precioEnMoneda > 0 && !(tasaPrecio > 0)) {
+      toast.error(`Indica la tasa del precio: 1 ${codMonedaDe(movMaterial.moneda_precio_id)} = ? COP.`);
+      return;
+    }
+    const costoBruto = esEntrada && precioEnMoneda > 0 && tasaPrecio > 0
+      ? parseFloat((precioEnMoneda * tasaPrecio).toFixed(2))
       : (esEntrada && movMaterial.costo_unitario && parseFloat(movMaterial.costo_unitario) > 0 ? parseFloat(movMaterial.costo_unitario) : undefined);
     const pctDesc = esEntrada && movMaterial.descuento_porcentaje ? parseFloat(movMaterial.descuento_porcentaje) : 0;
     const costoNeto = costoBruto !== undefined && pctDesc > 0
@@ -1303,12 +1321,12 @@ export default function Inventario() {
       ? parseFloat((llevadaUnidad * cantMov).toFixed(2))
       : undefined;
 
-    // ── Pagos mixtos: la cuenta principal absorbe lo que sobra ───────────
+    // Pagos explícitos: cada cuenta cubre SOLO su importe; incluyen el flete.
     const cuentasEditor = cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }));
     const filasExtraMaterial = esEntrada && pago.cuentaId
-      ? pagosExtraMaterial.filter((r) => !!parsePagoKey(r.key).cuentaId)
+      ? pagosExtraMaterial
       : [];
-    const totalNetoMaterial = Math.round((costoNeto ?? 0) * cantMov * 100) / 100;
+    const totalMaterial = Math.round(((costoNeto ?? 0) * cantMov + (llevadaTotal ?? 0)) * 100) / 100;
     let pagosMaterial: { metodo_caja_id: number; moneda_id: number; monto: number; tasa_pago?: number }[] | undefined;
     if (filasExtraMaterial.length > 0) {
       if (!pagosCompletos(filasExtraMaterial, cuentasEditor, 'COP')) {
@@ -1324,17 +1342,20 @@ export default function Inventario() {
       }
       const equivPrincipal = (pago.monedaId ?? MONEDA_BASE_ID) === MONEDA_BASE_ID
         ? principalNum
-        : (tasaNum > 0 ? convertirMonedaHumana(principalNum, 'COP', pagoCod, tasaNum) : 0);
+        : (tasaNum > 0 ? convertirMonedaHumana(principalNum, pagoCod, 'COP', tasaNum) : 0);
       if (equivPrincipal <= 0) {
         toast.error('Falta la tasa de la cuenta principal para calcular su parte.');
         return;
       }
       const totalPagado = Math.round((equivPrincipal + equivExtra) * 100) / 100;
-      if (Math.abs(totalPagado - totalNetoMaterial) > 1) {
-        const dif = Math.round((totalNetoMaterial - totalPagado) * 100) / 100;
+      const tolerancia = toleranciaPagos([
+        { key: movMaterial.pago_key, tasa: movMaterial.tasa_pago }, ...filasExtraMaterial,
+      ], cuentasEditor, 'COP');
+      if (Math.abs(totalPagado - totalMaterial) > tolerancia) {
+        const dif = Math.round((totalMaterial - totalPagado) * 100) / 100;
         toast.error(dif > 0
-          ? `Faltan $${dif.toLocaleString('es-CO')} COP para cuadrar la compra (pagado ${totalPagado.toLocaleString('es-CO')} de ${totalNetoMaterial.toLocaleString('es-CO')}).`
-          : `Sobran $${Math.abs(dif).toLocaleString('es-CO')} COP: pagado ${totalPagado.toLocaleString('es-CO')} de ${totalNetoMaterial.toLocaleString('es-CO')}.`);
+          ? `Faltan $${dif.toLocaleString('es-CO')} COP para cuadrar la compra con flete (pagado ${totalPagado.toLocaleString('es-CO')} de ${totalMaterial.toLocaleString('es-CO')}).`
+          : `Sobran $${Math.abs(dif).toLocaleString('es-CO')} COP: pagado ${totalPagado.toLocaleString('es-CO')} de ${totalMaterial.toLocaleString('es-CO')}.`);
         return;
       }
       pagosMaterial = [
@@ -1371,6 +1392,7 @@ export default function Inventario() {
         tasa_pago: esEntrada && pago.cuentaId && pago.monedaId !== MONEDA_BASE_ID ? tasaNum : undefined,
         // Compra pagada de dos maneras: un gasto/salida por cuenta.
         pagos: pagosMaterial,
+        pagos_incluyen_llevada: true,
         // "La llevada": flete/aduana por unidad → se envía el total × cantidad
         llevada: llevadaTotal,
         descuento_porcentaje: pctDesc > 0 ? pctDesc : undefined,
@@ -1383,7 +1405,7 @@ export default function Inventario() {
         observaciones: [movMaterial.observaciones, notaDesc].filter(Boolean).join(' · ') || undefined,
       });
 
-      setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
+      setMovMaterial({ tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', precio_moneda: '', moneda_precio_id: MONEDA_BASE_ID, tasa_precio: '', descuento_porcentaje: '', observaciones: '', pago_key: '', tasa_pago: '', llevada: '', proveedor_nombre: '', cliente_nombre: '', departamento: '', recibido_por: '' });
       setPagosExtraMaterial([]);
       setMontoPrincipalMaterial('');
       fetchInsumos();
@@ -1426,6 +1448,8 @@ export default function Inventario() {
     // En exhibición, el movimiento típico es ENTRADA a la ubicación de exhibición.
     const ubiExh = tab === 'exhibicion' ? ubicaciones.find(u => esNombreExhibicion(u.nombre)) : undefined;
     setMovProducto({ ubicacion_id: ubiExh ? String(ubiExh.id) : '', tipo: 'ENTRADA', fecha: hoyVE(), cantidad: '', costo_unitario: '', descuento_porcentaje: '', pagado_desde_metodo_caja_id: '', moneda_pago_id: '', tasa_pago: '', observaciones: '', llevada: '', proveedor_nombre: '', cliente_nombre: '' });
+    setPagosExtraProducto([]);
+    setMontoPrincipalProducto('');
     refrescarKardexProducto(p.id);
   };
 
@@ -1500,15 +1524,14 @@ export default function Inventario() {
       ? `Descuento pronto pago/mayor: ${pctDesc}% (Lista: ${codMonedaDe(productoSeleccionado?.moneda_id)} ${costoBruto.toLocaleString('es-CO')} → Neto: ${costoNeto?.toLocaleString('es-CO')})`
       : '';
 
-    // ── Pagos mixtos (plásticos/reventa): todo se cuadra en la moneda del
-    // producto; la cuenta principal absorbe lo que no cubran las extra. ──
+    // Pagos explícitos, incluido flete, en la moneda del producto.
     const refCod = codMonedaDe(refMid);
     const cuentasEditor = cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }));
     const filasExtraProducto = esEntrada && pago.cuentaId
-      ? pagosExtraProducto.filter((r) => !!parsePagoKey(r.key).cuentaId)
+      ? pagosExtraProducto
       : [];
     const cantProd = parseFloat(movProducto.cantidad || '0') || 0;
-    const totalRefProd = Math.round((costoNeto ?? 0) * cantProd * 100) / 100;
+    const totalRefProd = Math.round(((costoNeto ?? 0) * cantProd + (Number(movProducto.llevada) || 0)) * 100) / 100;
     let pagosProducto: { metodo_caja_id: number; moneda_id: number; monto: number; tasa_pago?: number }[] | undefined;
     if (filasExtraProducto.length > 0) {
       if (!pagosCompletos(filasExtraProducto, cuentasEditor, refCod)) {
@@ -1530,7 +1553,10 @@ export default function Inventario() {
         return;
       }
       const totalPagado = Math.round((equivPrincipal + equivExtra) * 100) / 100;
-      if (Math.abs(totalPagado - totalRefProd) > 0.05) {
+      const tolerancia = toleranciaPagos([
+        { key: movProducto.pagado_desde_metodo_caja_id, tasa: movProducto.tasa_pago }, ...filasExtraProducto,
+      ], cuentasEditor, refCod);
+      if (Math.abs(totalPagado - totalRefProd) > tolerancia) {
         const dif = Math.round((totalRefProd - totalPagado) * 100) / 100;
         toast.error(dif > 0
           ? `Faltan ${dif.toLocaleString('es-CO')} ${refCod} para cuadrar la compra.`
@@ -1573,6 +1599,7 @@ export default function Inventario() {
           movProducto.tipo === 'ENTRADA' && pago.cuentaId && tasaNum > 0 ? tasaNum : undefined,
         // Compra pagada de dos maneras (plásticos/reventa).
         pagos: pagosProducto,
+        pagos_incluyen_llevada: true,
         // "La llevada": flete/aduana (solo en compras de contado)
         llevada: movProducto.tipo === 'ENTRADA' && movProducto.llevada ? parseFloat(movProducto.llevada) : undefined,
         descuento_porcentaje: pctDesc > 0 ? pctDesc : undefined,
@@ -2747,7 +2774,7 @@ export default function Inventario() {
               <div className="flex-1 overflow-y-auto p-6">
                   {/* ── TAB: Registrar movimiento ── */}
                   {detalleTab === 'movimiento' && (
-                    <form onSubmit={handleRegisterMovement} className="space-y-4">
+                    <form aria-label="Movimiento de insumo" onSubmit={handleRegisterMovement} className="space-y-4">
                       {/* Tipo de movimiento (botones) */}
                       <div>
                         <label className="text-xs font-bold text-yeikar-secondary mb-1.5 block">Tipo de movimiento</label>
@@ -2798,7 +2825,7 @@ export default function Inventario() {
                         <label className="text-xs font-bold text-yeikar-secondary">
                           Cantidad <span className="text-yeikar-neutral/40 font-normal">({materialSeleccionado.unidad_medida?.abreviatura || materialSeleccionado.unidad_medida?.nombre || ''})</span>
                         </label>
-                        <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial((p) => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
+                        <input aria-label="Cantidad" type="number" step="0.01" min="0.01" required placeholder="0.00" value={movMaterial.cantidad} onChange={(e) => setMovMaterial((p) => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
                       </div>
 
                       {/* Datos de la compra (entradas y devoluciones) */}
@@ -2812,6 +2839,7 @@ export default function Inventario() {
                               </label>
                               <div className="flex gap-2">
                                 <MontoInput
+                                  aria-label="Precio unitario"
                                   min="0"
                                   placeholder="0.00"
                                   value={movMaterial.moneda_precio_id === MONEDA_BASE_ID ? movMaterial.costo_unitario : movMaterial.precio_moneda}
@@ -2820,7 +2848,7 @@ export default function Inventario() {
                                       setMovMaterial((p) => ({ ...p, costo_unitario: v, precio_moneda: '' }));
                                     } else {
                                       const num = parseFloat(v) || 0;
-                                      const t = parseFloat(movMaterial.tasa_pago || '0') || 0;
+                                      const t = Number(movMaterial.tasa_precio) || 0;
                                       setMovMaterial((p) => ({
                                         ...p,
                                         precio_moneda: v,
@@ -2834,7 +2862,7 @@ export default function Inventario() {
                                   value={movMaterial.moneda_precio_id}
                                   onChange={(e) => {
                                     const mid = Number(e.target.value) || MONEDA_BASE_ID;
-                                    setMovMaterial((p) => ({ ...p, moneda_precio_id: mid, precio_moneda: '', costo_unitario: '' }));
+                                    setMovMaterial((p) => ({ ...p, moneda_precio_id: mid, precio_moneda: '', costo_unitario: '', tasa_precio: '' }));
                                   }}
                                   className="w-20 rounded-lg border border-yeikar-secondary-light/20 bg-white px-2 text-xs font-mono"
                                   title="Moneda en la que se digita el precio"
@@ -2848,18 +2876,20 @@ export default function Inventario() {
                                 <div className="flex items-center gap-2 pt-1">
                                   <input
                                     type="number"
+                                    aria-label="Tasa del precio"
                                     step="any"
                                     min="0"
                                     placeholder={`1 ${codMonedaDe(movMaterial.moneda_precio_id)} = ? COP`}
-                                    value={movMaterial.tasa_pago}
+                                    value={movMaterial.tasa_precio}
+                                    required={Number(movMaterial.precio_moneda) > 0}
                                     onChange={(e) => {
                                       const t = e.target.value;
                                       const tnum = parseFloat(t) || 0;
                                       const enMoneda = parseFloat(movMaterial.precio_moneda || '0') || 0;
                                       setMovMaterial((p) => ({
                                         ...p,
-                                        tasa_pago: t,
-                                        costo_unitario: enMoneda > 0 && tnum > 0 ? (enMoneda * tnum).toFixed(2) : p.costo_unitario,
+                                        tasa_precio: t,
+                                        costo_unitario: enMoneda > 0 && tnum > 0 ? (enMoneda * tnum).toFixed(2) : '',
                                       }));
                                     }}
                                     className={inputCls}
@@ -2874,7 +2904,7 @@ export default function Inventario() {
                               <label className="text-xs font-bold text-yeikar-secondary">
                                 La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete por unidad — genera gasto)</span>
                               </label>
-                              <MontoInput min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(v) => setMovMaterial((p) => ({ ...p, llevada: v }))} className={inputCls} />
+                              <MontoInput aria-label="Flete por unidad" min="0" placeholder="0.00" value={movMaterial.llevada} onChange={(v) => setMovMaterial((p) => ({ ...p, llevada: v }))} className={inputCls} />
                             </div>
                           </div>
 
@@ -2991,7 +3021,7 @@ export default function Inventario() {
                         const cant = parseFloat(movMaterial.cantidad || '0') || 0;
                         if (bruto <= 0 || cant <= 0) return null;
                         const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
-                        const netoUnit = descPct > 0 ? Math.max(0, bruto * (1 - descPct / 100)) : bruto;
+                        const netoUnit = Math.round(Math.max(0, bruto * (1 - descPct / 100)) * 100) / 100;
                         // "La llevada" es el flete POR UNIDAD: el total se multiplica por la cantidad.
                         const fleteUnidad = parseFloat(movMaterial.llevada || '0') || 0;
                         const llevadaTotal = fleteUnidad * cant;
@@ -3046,7 +3076,7 @@ export default function Inventario() {
                         const { cuentaId, monedaId } = parsePagoKey(movMaterial.pago_key);
                         const brutoRef = parseFloat(movMaterial.costo_unitario || '0') || 0;
                         const descPct = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
-                        const netoUnit = descPct > 0 ? Math.max(0, brutoRef * (1 - descPct / 100)) : brutoRef;
+                        const netoUnit = Math.round(Math.max(0, brutoRef * (1 - descPct / 100)) * 100) / 100;
                         const cantRef = parseFloat(movMaterial.cantidad || '0') || 0;
                         const totalRef = netoUnit * cantRef;
                         // "La llevada" es flete POR UNIDAD → el gasto/deuda usa el total
@@ -3057,7 +3087,9 @@ export default function Inventario() {
                         const par = resolverParMonedas('COP', pagoCod);
                         const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
                         const tasaValida = necesitaTasa && tasaNum > 0;
-                        const deduc = cuentaId ? (tasaValida ? convertirMonedaHumana(granTotalRef, 'COP', pagoCod, tasaNum) : granTotalRef) : 0;
+                        const deduc = !cuentaId ? 0 : pagosExtraMaterial.length > 0
+                          ? Number(montoPrincipalMaterial) || 0
+                          : convertirMonedaHumana(granTotalRef, 'COP', pagoCod, tasaNum);
                         return (
                           <div className="space-y-3">
                             <div className="space-y-1">
@@ -3066,7 +3098,15 @@ export default function Inventario() {
                               </label>
                               <SearchSelect
                                 value={movMaterial.pago_key}
-                                onChange={(v) => setMovMaterial((p) => ({ ...p, pago_key: String(v), tasa_pago: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.tasa_pago, precio_moneda: parsePagoKey(String(v)).monedaId === MONEDA_BASE_ID ? '' : p.precio_moneda }))}
+                                onChange={(v) => {
+                                  const key = String(v);
+                                  setMovMaterial((p) => ({
+                                    ...p, pago_key: key,
+                                    tasa_pago: parsePagoKey(key).monedaId === parsePagoKey(p.pago_key).monedaId ? p.tasa_pago : '',
+                                  }));
+                                  setMontoPrincipalMaterial('');
+                                  if (!parsePagoKey(key).cuentaId) setPagosExtraMaterial([]);
+                                }}
                                 options={[
                                   { value: '', label: 'No se pagó — quedó fiada al proveedor' },
                                   ...cuentasPago.map((c) => ({ value: c.key, label: `Sí, desde ${c.nombre} · ${c.codigo}` })),
@@ -3102,17 +3142,9 @@ export default function Inventario() {
                                 <label className="text-xs font-bold text-yeikar-secondary">
                                   Tasa de cambio * <span className="text-yeikar-neutral/40 font-normal">({par.label})</span>
                                 </label>
-                                <input type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) => {
-                                  const t = e.target.value;
-                                  const tnum = parseFloat(t) || 0;
-                                  const enMoneda = parseFloat(movMaterial.precio_moneda || '0') || 0;
-                                  setMovMaterial((p) => ({
-                                    ...p,
-                                    tasa_pago: t,
-                                    // Si el precio se digitó en USD, recalcula el COP.
-                                    costo_unitario: enMoneda > 0 && tnum > 0 ? (enMoneda * tnum).toFixed(2) : p.costo_unitario,
-                                  }));
-                                }} placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
+                                <input aria-label="Tasa del pago principal" type="number" step="any" min="0" required value={movMaterial.tasa_pago} onChange={(e) =>
+                                  setMovMaterial((p) => ({ ...p, tasa_pago: e.target.value }))
+                                } placeholder={`Ej: ${par.placeholder}`} className={inputCls} />
                               </div>
                             )}
                             {!!cuentaId && parseFloat(movMaterial.cantidad || '0') > 0 && (
@@ -3148,15 +3180,17 @@ export default function Inventario() {
                         if (!pagoPrincipal.cuentaId) return null;
                         const bruto = parseFloat(movMaterial.costo_unitario || '0') || 0;
                         const desc = parseFloat(movMaterial.descuento_porcentaje || '0') || 0;
-                        const netoUnit = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
+                        const netoUnit = Math.round(Math.max(0, bruto * (1 - desc / 100)) * 100) / 100;
                         const cant = parseFloat(movMaterial.cantidad || '0') || 0;
                         const totalNeto = Math.round(cant * netoUnit * 100) / 100;
+                        const fleteTotal = Math.round((Number(movMaterial.llevada) || 0) * cant * 100) / 100;
+                        const totalConFlete = Math.round((totalNeto + fleteTotal) * 100) / 100;
                         const pagoCod = codMonedaDe(pagoPrincipal.monedaId);
                         const tasaNum = parseFloat(movMaterial.tasa_pago || '0') || 0;
                         const principalNum = parseFloat(montoPrincipalMaterial || '0') || 0;
                         const equivPrincipal = pagoCod === 'COP'
                           ? principalNum
-                          : (tasaNum > 0 ? convertirMonedaHumana(principalNum, 'COP', pagoCod, tasaNum) : 0);
+                          : (tasaNum > 0 ? convertirMonedaHumana(principalNum, pagoCod, 'COP', tasaNum) : 0);
                         const cuentaPrincipal = cuentasPago.find((c) => c.key === movMaterial.pago_key);
                         return (
                           <div className="space-y-2">
@@ -3164,7 +3198,8 @@ export default function Inventario() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setMontoPrincipalMaterial(String(totalNeto));
+                                  const inicial = convertirMonedaHumana(totalConFlete, 'COP', pagoCod, tasaNum);
+                                  setMontoPrincipalMaterial(String(Math.round(inicial * 100) / 100));
                                   setPagosExtraMaterial([{ key: '', monto: '', tasa: '', fecha: '' }]);
                                 }}
                                 className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50/80 px-3 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 transition-colors"
@@ -3179,6 +3214,7 @@ export default function Inventario() {
                                   </label>
                                   <input
                                     type="number" step="0.01" min="0"
+                                    aria-label={`Monto de la cuenta principal (${pagoCod})`}
                                     value={montoPrincipalMaterial}
                                     onChange={(e) => setMontoPrincipalMaterial(e.target.value)}
                                     placeholder="0.00"
@@ -3195,7 +3231,10 @@ export default function Inventario() {
                                   filas={pagosExtraMaterial}
                                   cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
                                   codigoDestino="COP"
-                                  totalDestino={totalNeto}
+                                  totalDestino={totalConFlete}
+                                  tolerancia={toleranciaPagos([
+                                    { key: movMaterial.pago_key, tasa: movMaterial.tasa_pago }, ...pagosExtraMaterial,
+                                  ], cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo })), 'COP')}
                                   exigirCuadre
                                   equivalentePrincipal={equivPrincipal}
                                   onChange={setPagosExtraMaterial}
@@ -3734,7 +3773,7 @@ export default function Inventario() {
                   Las piezas de exhibición no llevan movimientos manuales: entran solas al producirse y salen con la venta (al agotarse se dan de baja solas). El historial abajo muestra esos movimientos.
                 </p>
               ) : (
-              <form onSubmit={handleRegisterMovementProducto} className="space-y-4">
+              <form aria-label="Movimiento de producto" onSubmit={handleRegisterMovementProducto} className="space-y-4">
                 {/* Tipo de movimiento (botones, igual que insumos) */}
                 <div>
                   <label className="text-xs font-bold text-yeikar-secondary mb-1.5 block">Tipo de movimiento</label>
@@ -3792,7 +3831,7 @@ export default function Inventario() {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
-                  <input type="number" step="0.01" min="0.01" required placeholder="0.00" value={movProducto.cantidad} onChange={(e) => setMovProducto(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
+                  <input aria-label="Cantidad" type="number" step="0.01" min="0.01" required placeholder="0.00" value={movProducto.cantidad} onChange={(e) => setMovProducto(p => ({ ...p, cantidad: e.target.value }))} className={inputCls} />
                 </div>
                 </div>
                 {(movProducto.tipo === 'ENTRADA' || movProducto.tipo === 'DEVOLUCION') && (
@@ -3805,7 +3844,7 @@ export default function Inventario() {
                           ? <>Precio Unitario (Lista) <span className="text-yeikar-neutral/40 font-normal">(en {productoSeleccionado?.moneda?.codigo ?? 'COP'} · actualiza el precio al instante)</span></>
                           : <>Costo Unitario <span className="text-yeikar-neutral/40 font-normal">(valoriza el stock; no toca el costo del catálogo)</span></>}
                       </label>
-                      <MontoInput min="0" placeholder="0.00" value={movProducto.costo_unitario} onChange={(v) => setMovProducto(p => ({ ...p, costo_unitario: v }))} className={inputCls} />
+                      <MontoInput aria-label="Precio unitario" min="0" placeholder="0.00" value={movProducto.costo_unitario} onChange={(v) => setMovProducto(p => ({ ...p, costo_unitario: v }))} className={inputCls} />
                     </div>
 
                     {/* "La llevada": flete/aduana */}
@@ -3813,7 +3852,7 @@ export default function Inventario() {
                       <label className="text-xs font-bold text-yeikar-secondary">
                         La Llevada <span className="text-yeikar-neutral/40 font-normal">(flete — genera gasto)</span>
                       </label>
-                      <MontoInput min="0" placeholder="0.00" value={movProducto.llevada} onChange={(v) => setMovProducto(p => ({ ...p, llevada: v }))} className={inputCls} />
+                      <MontoInput aria-label="Flete total" min="0" placeholder="0.00" value={movProducto.llevada} onChange={(v) => setMovProducto(p => ({ ...p, llevada: v }))} className={inputCls} />
                     </div>
                     </div>
 
@@ -3910,13 +3949,13 @@ export default function Inventario() {
                   const tasaNum = parseFloat(movProducto.tasa_pago || '0') || 0;
                   const bruto = parseFloat(movProducto.costo_unitario || '0') || 0;
                   const desc = parseFloat(movProducto.descuento_porcentaje || '0') || 0;
-                  const costoNetoUnit = desc > 0 ? Math.max(0, bruto * (1 - desc / 100)) : bruto;
+                  const costoNetoUnit = Math.round(Math.max(0, bruto * (1 - desc / 100)) * 100) / 100;
                   const cantProd = parseFloat(movProducto.cantidad || '0') || 0;
                   const totalRef = costoNetoUnit * cantProd;
-                  const totalCompra = totalRef + (parseFloat(movProducto.llevada || '0') || 0);
+                  const totalCompra = Math.round((totalRef + (Number(movProducto.llevada) || 0)) * 100) / 100;
                   const deduc = !cuentaId ? 0
-                    : pagoMid === refMid ? totalRef
-                    : convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum);
+                    : pagosExtraProducto.length > 0 ? Number(montoPrincipalProducto) || 0
+                    : convertirMonedaHumana(totalCompra, refCod, pagoCod, tasaNum);
                   return (
                     <>
                       <div className="space-y-1">
@@ -3977,8 +4016,8 @@ export default function Inventario() {
                               type="button"
                               onClick={() => {
                                 const inicial = pagoMid === refMid
-                                  ? totalRef
-                                  : (tasaNum > 0 ? convertirMonedaHumana(totalRef, refCod, pagoCod, tasaNum) : 0);
+                                  ? totalCompra
+                                  : (tasaNum > 0 ? convertirMonedaHumana(totalCompra, refCod, pagoCod, tasaNum) : 0);
                                 setMontoPrincipalProducto(String(Math.round(inicial * 100) / 100));
                                 setPagosExtraProducto([{ key: '', monto: '', tasa: '', fecha: '' }]);
                               }}
@@ -3999,6 +4038,7 @@ export default function Inventario() {
                                   </label>
                                   <input
                                     type="number" step="0.01" min="0"
+                                    aria-label={`Monto de la cuenta principal (${pagoCod})`}
                                     value={montoPrincipalProducto}
                                     onChange={(e) => setMontoPrincipalProducto(e.target.value)}
                                     placeholder="0.00"
@@ -4015,7 +4055,10 @@ export default function Inventario() {
                                   filas={pagosExtraProducto}
                                   cuentas={cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo }))}
                                   codigoDestino={refCod}
-                                  totalDestino={totalRef}
+                                  totalDestino={totalCompra}
+                                  tolerancia={toleranciaPagos([
+                                    { key: movProducto.pagado_desde_metodo_caja_id, tasa: movProducto.tasa_pago }, ...pagosExtraProducto,
+                                  ], cuentasPago.map((c) => ({ key: c.key, label: c.nombre, monedaId: c.monedaId ?? 1, codigo: c.codigo })), refCod)}
                                   exigirCuadre
                                   equivalentePrincipal={equivPrincipal}
                                   onChange={setPagosExtraProducto}
@@ -5272,7 +5315,7 @@ export default function Inventario() {
           ? precioDigitado
           : precioDigitado * tasaPrecio;
         const descuentoPct = Number(formEditarMov.descuento_porcentaje || '0') || 0;
-        const costoUnitario = Math.max(0, precioBrutoCop * (1 - descuentoPct / 100));
+        const costoUnitario = Math.round(Math.max(0, precioBrutoCop * (1 - descuentoPct / 100)) * 100) / 100;
         const totalCompra = Math.round(cantidad * costoUnitario * 100) / 100;
         const fleteUnidad = Number(formEditarMov.llevada_unidad || '0') || 0;
         const fleteTotal = Math.round(fleteUnidad * cantidad * 100) / 100;
@@ -5289,11 +5332,11 @@ export default function Inventario() {
         const montoPrincipalNum = Number(formEditarMov.monto_principal || '0') || 0;
         const equivPrincipal = pagoCod === 'COP'
           ? montoPrincipalNum
-          : (tasaPago > 0 ? convertirMonedaHumana(montoPrincipalNum, 'COP', pagoCod, tasaPago) : 0);
+          : (tasaPago > 0 ? convertirMonedaHumana(montoPrincipalNum, pagoCod, 'COP', tasaPago) : 0);
         const pagoPrincipalAuto = pagoCod === 'COP'
-          ? totalCompra
-          : (tasaPago > 0 ? convertirMonedaHumana(totalCompra, 'COP', pagoCod, tasaPago) : 0);
-        const totalCaja = pagoCod === 'COP'
+          ? totalConFlete
+          : (tasaPago > 0 ? convertirMonedaHumana(totalConFlete, 'COP', pagoCod, tasaPago) : 0);
+        const totalCaja = pagosEdicion.length > 0 ? montoPrincipalNum : pagoCod === 'COP'
           ? totalConFlete
           : (tasaPago > 0 ? convertirMonedaHumana(totalConFlete, 'COP', pagoCod, tasaPago) : 0);
         const cuentaPrincipalNombre =
@@ -5318,7 +5361,7 @@ export default function Inventario() {
                   Se ajustan stock, gasto, caja y deuda en una sola operación.
                 </p>
               </div>
-              <form onSubmit={guardarEdicionMovimiento} className="p-6 space-y-4 overflow-y-auto font-body">
+              <form aria-label="Corregir entrada de insumo" onSubmit={guardarEdicionMovimiento} className="p-6 space-y-4 overflow-y-auto font-body">
                 {cargandoDetalleMov ? (
                   <div className="flex flex-col items-center justify-center py-10 space-y-3">
                     <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
@@ -5329,9 +5372,10 @@ export default function Inventario() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1">
                         <label className="text-xs font-bold text-yeikar-secondary">Cantidad</label>
-                        <input
-                          type="number"
-                          min="0.0001"
+                                <input
+                                  aria-label="Cantidad"
+                                  type="number"
+                                  min="0.0001"
                           step="any"
                           value={formEditarMov.cantidad}
                           onChange={(e) => setFormEditarMov((f) => f ? { ...f, cantidad: e.target.value } : f)}
@@ -5476,6 +5520,7 @@ export default function Inventario() {
                           Flete / llevada <span className="text-yeikar-neutral/40 font-normal">(por unidad)</span>
                         </label>
                         <input
+                          aria-label="Flete por unidad"
                           type="number"
                           min="0"
                           step="any"
@@ -5574,7 +5619,7 @@ export default function Inventario() {
                         </div>
                       )}
 
-                      {!!cuentaPrincipal.cuentaId && pagosEdicion.length === 0 && (
+                      {!!cuentaPrincipal.cuentaId && (
                         <div className="text-[11px] text-emerald-900 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
                           Se descontarán ≈{' '}
                           <b>${totalCaja.toLocaleString('es-CO', { maximumFractionDigits: 2 })} {pagoCod}</b>{' '}
@@ -5613,6 +5658,7 @@ export default function Inventario() {
                                   type="number"
                                   step="0.01"
                                   min="0"
+                                  aria-label={`Monto de la cuenta principal (${pagoCod})`}
                                   value={formEditarMov.monto_principal}
                                   onChange={(e) => setFormEditarMov((f) => f ? { ...f, monto_principal: e.target.value } : f)}
                                   placeholder="0.00"
@@ -5629,7 +5675,10 @@ export default function Inventario() {
                                 filas={pagosEdicion}
                                 cuentas={cuentasEditor}
                                 codigoDestino="COP"
-                                totalDestino={totalCompra}
+                                totalDestino={totalConFlete}
+                                tolerancia={toleranciaPagos([
+                                  { key: formEditarMov.pago_key, tasa: formEditarMov.tasa_pago }, ...pagosEdicion,
+                                ], cuentasEditor, 'COP')}
                                 exigirCuadre
                                 equivalentePrincipal={equivPrincipal}
                                 onChange={setPagosEdicion}
@@ -5638,7 +5687,7 @@ export default function Inventario() {
                           )}
                           {fleteTotal > 0 && (
                             <p className="text-[10px] text-yeikar-neutral/50">
-                              El flete/llevada (${fleteTotal.toLocaleString('es-CO')} COP) se paga aparte desde la cuenta principal.
+                              El flete/llevada (${fleteTotal.toLocaleString('es-CO')} COP) ya está incluido en el total a cubrir entre las cuentas. No se descontará aparte.
                             </p>
                           )}
                         </div>

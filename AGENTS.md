@@ -130,6 +130,14 @@ Axios interceptor (`src/services/api.ts`) auto-attaches JWT, handles 401 → ref
 - **Nómina**: lee `mano_obra` directamente (no los consumos); el costo de producción suma esa misma fila `monto × (1+recargo/100)`.
 - **Sobrantes de lámina RETIRADOS** (decisión del dueño: ocultar y apagar, sin borrar datos): el inventario de retazos ya no se crea, ni se consume, ni se repone. Los endpoints `/inventario/sobrantes` NO existen; un `origen_sobrante_id` en un consumo se rechaza con 400 claro; la confirmación por cortes ya no registra el retazo. La tabla `sobrante_lamina`, las columnas `origen_sobrante_id` y el modelo quedan **congelados** (sin uso) para no romper el historial ni las FKs. Los cortes siguen funcionando con costo proporcional al área.
 
+### Pagos de entradas individuales (compra + flete)
+
+- El formulario envía `pagos_incluyen_llevada=true`: los importes de cada cuenta cubren **mercancía neta + flete total**. Un gasto/salida por pago; **no** se cobra la llevada otra vez a la principal. El flete sigue desglosado en `movimiento.llevada` y en la descripción del gasto.
+- Los montos digitados en `pagos` se cobran tal cual en la moneda de la cuenta; nunca reconvertir su equivalente redondeado para deducirlos. La moneda/tasa del **precio** es independiente de las cuentas/tasas de **pago**. El cuadre admite solo el margen monetario de redondeo (medio centavo de cada divisa convertida; mínimo 1 COP / 0,05 en otras monedas).
+- **Histórico/compatibilidad**: el flag ausente/false conserva el contrato anterior (mercancía y flete aparte). La migración aditiva `c0d1e2f3a4b5` no recalcula compras/caja existentes. El detalle devuelve `pago_llevada` para precargar lo realmente cobrado; al corregir desde la UI se incorpora al importe de su cuenta y se elimina el gasto de flete anterior en la misma transacción.
+- Las entradas nuevas no reescalan importes al editar: si cambia el total, hay que enviar los pagos corregidos. Las correcciones sin cambios de total conservan los importes. Anular elimina todos sus gastos/salidas y revierte stock.
+- Pruebas aisladas: `test/test_pagos_entrada_flete.py` (PostgreSQL de pruebas, **nunca** producción) y `frontend/e2e/pagos-entrada-flete.spec.ts` (API interceptada).
+
 ### Entradas agrupadas de inventario y corrección de cabecera
 
 - **Conviven dos flujos**: la entrada **individual** sigue con su formulario de siempre (`PagosMixtosEditor` + `GET/PUT/DELETE /inventario/movimiento/{id}`, edición y anulación con reversa). La entrada **agrupada** (`Entrada de inventario` en la barra de Inventario) registra una factura con varios artículos/pagos vía `POST /inventario/compra-multiple` y la tabla `compra_inventario_multiple`.
