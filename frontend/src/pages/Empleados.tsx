@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   getEmpleados, crearEmpleado, actualizarEmpleado, eliminarEmpleado, getCargos,
-  Empleado, Cargo,
+  crearCargo, Empleado, Cargo,
 } from '../services/empleadosService';
+import { useToast } from '../context/ToastContext';
+import { extractErrorMessage } from '../utils/format';
 import {
   Button, Card, Badge, Spinner, EmptyState, PageHeader,
   Field, Input, Modal, ConfirmDialog, SearchSelect, MontoInput,
@@ -12,6 +14,7 @@ import {
 const fmtCOP = (n: number) => `$ ${(Number(n) || 0).toLocaleString('es-CO')}`;
 
 export default function Empleados() {
+  const toast = useToast();
   const [empleados, setEmpleados] = useState<Empleado[]>([]);
   const [cargos, setCargos] = useState<Cargo[]>([]);
   const [buscar, setBuscar] = useState('');
@@ -19,10 +22,13 @@ export default function Empleados() {
   const [showModal, setShowModal] = useState(false);
   const [editando, setEditando] = useState<Empleado | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [nuevoCargo, setNuevoCargo] = useState('');
+  const [creandoCargo, setCreandoCargo] = useState(false);
 
   const [form, setForm] = useState({
     nombre: '',
     cargo_id: 0,
+    cargo_ids_extra: [] as number[],
     telefono: '',
     en_nomina: false,
     tipo_pago: 'DESTAJO',
@@ -55,9 +61,11 @@ export default function Empleados() {
 
   const abrirNuevo = () => {
     setEditando(null);
+    setNuevoCargo('');
     setForm({
       nombre: '',
       cargo_id: cargos[0]?.id || 0,
+      cargo_ids_extra: [],
       telefono: '',
       en_nomina: false,
       tipo_pago: 'DESTAJO',
@@ -69,9 +77,13 @@ export default function Empleados() {
 
   const abrirEdicion = (e: Empleado) => {
     setEditando(e);
+    setNuevoCargo('');
     setForm({
       nombre: e.nombre,
       cargo_id: e.cargo_id,
+      cargo_ids_extra: (e.cargos ?? [])
+        .filter((c) => c.id !== e.cargo_id)
+        .map((c) => c.id),
       telefono: e.telefono || '',
       en_nomina: e.en_nomina,
       tipo_pago: e.tipo_pago || 'DESTAJO',
@@ -81,11 +93,42 @@ export default function Empleados() {
     setShowModal(true);
   };
 
+  const crearCargoInline = async () => {
+    const nombre = nuevoCargo.trim();
+    if (!nombre) return;
+    setCreandoCargo(true);
+    try {
+      const cargo = await crearCargo(nombre);
+      setCargos((prev) => (
+        prev.some((c) => c.id === cargo.id)
+          ? prev
+          : [...prev, cargo].sort((a, b) => a.nombre.localeCompare(b.nombre))
+      ));
+      if (!form.cargo_id) {
+        setForm((f) => ({ ...f, cargo_id: cargo.id }));
+      } else if (cargo.id !== form.cargo_id) {
+        setForm((f) => ({
+          ...f,
+          cargo_ids_extra: f.cargo_ids_extra.includes(cargo.id)
+            ? f.cargo_ids_extra
+            : [...f.cargo_ids_extra, cargo.id],
+        }));
+      }
+      setNuevoCargo('');
+      toast.success(`Cargo "${cargo.nombre}" listo para asignar.`);
+    } catch (error) {
+      toast.error(extractErrorMessage(error, 'No se pudo crear el cargo.'));
+    } finally {
+      setCreandoCargo(false);
+    }
+  };
+
   const guardar = async () => {
     if (!form.nombre.trim() || !form.cargo_id) return;
     const data = {
       nombre: form.nombre.trim(),
       cargo_id: form.cargo_id,
+      cargo_ids: [form.cargo_id, ...form.cargo_ids_extra],
       telefono: form.telefono || undefined,
       en_nomina: form.en_nomina,
       tipo_pago: form.en_nomina ? form.tipo_pago : undefined,
@@ -132,7 +175,11 @@ export default function Empleados() {
     {
       key: 'cargo',
       header: 'Cargo',
-      render: (e) => <span className="text-yeikar-neutral/60">{e.cargo?.nombre || '-'}</span>,
+      render: (e) => {
+        const nombres = (e.cargos?.length ? e.cargos : e.cargo ? [e.cargo] : [])
+          .map((c) => c.nombre);
+        return <span className="text-yeikar-neutral/60">{nombres.join(' · ') || '-'}</span>;
+      },
       mobileSecondary: true,
     },
     {
@@ -268,13 +315,72 @@ export default function Empleados() {
           <Field label="Nombre" required>
             <Input type="text" value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="Ej: WILMER/EBANISTA" />
           </Field>
-          <Field label="Cargo" required>
+          <Field label="Cargo principal" required>
             <SearchSelect
               value={form.cargo_id}
-              onChange={(v) => setForm({ ...form, cargo_id: Number(v) })}
+              onChange={(v) => {
+                const cargoId = Number(v);
+                setForm({
+                  ...form,
+                  cargo_id: cargoId,
+                  cargo_ids_extra: form.cargo_ids_extra.filter((id) => id !== cargoId),
+                });
+              }}
               options={cargos.map((c) => ({ value: c.id, label: c.nombre }))}
               placeholder="Seleccione cargo..."
             />
+          </Field>
+          <Field label="También desempeña (opcional)">
+            <div className="flex flex-wrap gap-1.5">
+              {cargos.filter((c) => c.id !== form.cargo_id).map((c) => {
+                const activo = form.cargo_ids_extra.includes(c.id);
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    aria-pressed={activo}
+                    onClick={() => setForm((f) => ({
+                      ...f,
+                      cargo_ids_extra: activo
+                        ? f.cargo_ids_extra.filter((id) => id !== c.id)
+                        : [...f.cargo_ids_extra, c.id],
+                    }))}
+                    className={`rounded-full border px-3 py-1 text-[11px] font-bold transition-colors ${
+                      activo
+                        ? 'border-yeikar-primary bg-yeikar-primary text-yeikar-neutral'
+                        : 'border-yeikar-secondary-light/20 bg-white text-yeikar-neutral/60 hover:border-yeikar-primary/40'
+                    }`}
+                  >
+                    {activo ? '✓ ' : '+ '}{c.nombre}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-yeikar-neutral/45">
+              El principal manda en la nómina; los adicionales quedan registrados en su hoja.
+            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <Input
+                type="text"
+                value={nuevoCargo}
+                onChange={(e) => setNuevoCargo(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void crearCargoInline();
+                  }
+                }}
+                placeholder="Crear cargo nuevo…"
+              />
+              <Button
+                type="button"
+                size="sm"
+                disabled={creandoCargo || !nuevoCargo.trim()}
+                onClick={() => void crearCargoInline()}
+              >
+                {creandoCargo ? 'Creando…' : 'Crear cargo'}
+              </Button>
+            </div>
           </Field>
           <Field label="Teléfono">
             <Input type="text" value={form.telefono} onChange={(e) => setForm({ ...form, telefono: e.target.value })} />

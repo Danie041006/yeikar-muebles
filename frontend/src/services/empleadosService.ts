@@ -17,11 +17,13 @@ export interface Empleado {
   porcentaje_aguinaldo?: number | null;
   saldo_aguinaldo?: number | null;
   cargo?: Cargo | null;
+  cargos?: Cargo[];
 }
 
 export interface EmpleadoCreate {
   nombre: string;
   cargo_id: number;
+  cargo_ids?: number[];
   telefono?: string;
   activo?: boolean;
   en_nomina?: boolean;
@@ -33,6 +35,7 @@ export interface EmpleadoCreate {
 export interface EmpleadoUpdate {
   nombre?: string;
   cargo_id?: number;
+  cargo_ids?: number[];
   telefono?: string | null;
   activo?: boolean;
   en_nomina?: boolean;
@@ -62,5 +65,11 @@ export async function eliminarEmpleado(id: number): Promise<void> {
 
 export async function getCargos(): Promise<Cargo[]> {
   const res = await api.get('/catalogos/cargo/');
+  return res.data;
+}
+
+/** Crea un cargo desde la pantalla de Empleados (reutiliza si ya existe). */
+export async function crearCargo(nombre: string): Promise<Cargo> {
+  const res = await api.post('/empleado/cargo/', { nombre });
   return res.data;
 }

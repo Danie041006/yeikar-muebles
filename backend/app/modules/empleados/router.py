@@ -7,6 +7,7 @@ from app.modules.users.router import get_current_user
 from app.modules.users.model import Usuario
 from app.modules.users.deps import require_module
 from app.modules.empleados import schemas, service
+from app.modules.catalogos.schemas import CargoCreate, CargoResponse
 
 router = APIRouter(dependencies=[Depends(require_module('empleados'))])
 
@@ -30,6 +31,19 @@ def listar_empleados(
     items, total = service.obtener_empleados(db, salto=salto, limite=limite, buscar=buscar)
     response.headers["X-Total-Count"] = str(total)
     return items
+
+@router.post("/cargo/", response_model=CargoResponse, status_code=status.HTTP_201_CREATED)
+def crear_cargo_desde_empleado(
+    esquema: CargoCreate,
+    db: Session = Depends(get_db),
+    usuario_actual: Usuario = Depends(get_current_user),
+):
+    """Crea (o reutiliza) un cargo desde el formulario de empleado."""
+    try:
+        return service.crear_cargo_empleado(db, esquema.nombre)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.get("/{id_empleado}", response_model=schemas.EmpleadoResponse)
 def ver_empleado(

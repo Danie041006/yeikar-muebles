@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from decimal import Decimal
 from app.modules.catalogos.schemas import CargoResponse
 
@@ -20,11 +20,13 @@ class EmpleadoBase(BaseModel):
     porcentaje_aguinaldo: Optional[Decimal] = Field(None, ge=0, le=100)
 
 class EmpleadoCreate(EmpleadoBase):
-    pass
+    # Si se envía, el primero es el cargo principal y debe incluir cargo_id.
+    cargo_ids: Optional[List[int]] = None
 
 class EmpleadoUpdate(BaseModel):
     nombre: Optional[str] = None
     cargo_id: Optional[int] = None
+    cargo_ids: Optional[List[int]] = None
     telefono: Optional[str] = None
     activo: Optional[bool] = None
     en_nomina: Optional[bool] = None
@@ -38,6 +40,7 @@ class EmpleadoResponse(EmpleadoBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     cargo: Optional[CargoResponse] = None
+    cargos: List[CargoResponse] = []
 
     class Config:
         from_attributes = True
