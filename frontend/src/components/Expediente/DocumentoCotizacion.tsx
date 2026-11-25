@@ -379,9 +379,9 @@ export default function DocumentoCotizacion({
                       <tr key={idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-stone-50/60'}>
                         {sinAsociar ? (
                           <td colSpan={2} className="px-3 py-2 font-serif font-bold text-stone-950">
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex items-start gap-2.5">
                               <FotosRenglon urls={fotosDet} alt={textoItem} />
-                              <span className="min-w-0 flex-1 whitespace-nowrap text-[10px] leading-normal">
+                              <span className="min-w-0 flex-1 break-words text-[10px] leading-normal">
                                 <span className="font-mono font-extrabold mr-1.5">{cantTexto} ×</span>
                                 {textoItem}
                                 {notaItem && (
@@ -393,11 +393,12 @@ export default function DocumentoCotizacion({
                         ) : (
                           <>
                             <td className="px-2.5 py-2 font-serif font-bold text-stone-950">
-                              <div className="flex items-center gap-2.5">
+                              <div className="flex items-start gap-2.5">
                                 <FotosRenglon urls={fotosDet} alt={modelName} />
-                                {/* Una sola línea: el nombre manda; la descripción
-                                    (medidas/notas/piezas) va inline en menor tamaño. */}
-                                <span className="min-w-0 flex-1 whitespace-nowrap text-[10px] leading-normal">
+                                {/* El nombre manda y la descripción (notas/piezas)
+                                    va inline; si no cabe, corta dentro de la celda
+                                    sin invadir las columnas de precio. */}
+                                <span className="min-w-0 flex-1 break-words text-[10px] leading-normal">
                                   <span className="font-serif font-extrabold">{modelName}</span>
                                   {desc && (
                                     <span className="ml-2 text-[9px] font-medium italic text-stone-600">
