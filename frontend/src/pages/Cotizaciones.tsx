@@ -519,7 +519,7 @@ export default function Cotizaciones() {
   const [tiposProducto, setTiposProducto] = useState<{ id: number; nombre: string }[]>([]);
   const [npForm, setNpForm] = useState({ nombre: '', tipo_producto_id: '', precio: '', moneda_id: '1' });
   // Varias fotos a la vez: la PRIMERA que se elija es la portada (sale en la
-  // cotización; las demás como vistas adicionales en la Hoja de Trabajo).
+  // cotización; las demás como vistas adicionales en la orden de producción).
   const [fotosNp, setFotosNp] = useState<{ file: File; url: string }[]>([]);
   const [savingNp, setSavingNp] = useState(false);
   const npCameraRef = useRef<HTMLInputElement>(null);
@@ -4544,7 +4544,7 @@ producto_nombre: nombreItem,
                   <input ref={npGalleryRef} type="file" accept="image/*" multiple className="hidden" onChange={handleNpFoto} />
                 </div>
                 <p className="text-[10px] text-yeikar-neutral/40 mt-1">
-                  Puedes subir varias: la primera es la principal y sale en la cotización; las demás se ven como vistas adicionales en la Hoja de Trabajo.
+                  Puedes subir varias: la primera es la principal y sale en la cotización; las demás se ven como vistas adicionales en la orden de producción.
                 </p>
               </div>
               {errorForm && (

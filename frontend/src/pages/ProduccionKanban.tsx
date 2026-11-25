@@ -293,7 +293,7 @@ export default function ProduccionKanban() {
   const [referenciaReceta, setReferenciaReceta] = useState<ReferenciaReceta | null>(null);
   const [loadingReceta, setLoadingReceta] = useState(false);
 
-  // Hoja de Trabajo (documento imprimible por etapa)
+  // Orden de producción (documento imprimible por etapa)
   const [hojaAbierta, setHojaAbierta] = useState(false);
   const [hojaData, setHojaData] = useState<ReferenciaReceta | null>(null);
   const [hojaCargando, setHojaCargando] = useState(false);
@@ -471,7 +471,7 @@ export default function ProduccionKanban() {
     }
   }, [selectedStage]);
 
-  // ── Hoja de Trabajo: preview y descarga del documento por etapa ──
+  // ── Orden de producción: preview y descarga del documento por etapa ──
   const abrirHojaTrabajo = async () => {
     if (!selectedStage) return;
     setHojaAbierta(true);
@@ -493,15 +493,15 @@ export default function ProduccionKanban() {
     setGenerandoHoja(true);
     try {
       const { capturarElementoAPdf } = await import('../utils/pdfCaptura');
-      const nombreSeccion = (hojaData.seccion_actual || hojaData.area_nombre || 'Taller').replace(/\s+/g, '_');
+      const nombreSeccion = (hojaData.seccion_actual || hojaData.area_nombre || 'Produccion').replace(/\s+/g, '_');
       await capturarElementoAPdf(el, {
-        nombreArchivo: `Hoja_Trabajo_${nombreSeccion}_Orden_${String(hojaData.orden_id ?? 0).padStart(5, '0')}.pdf`,
+        nombreArchivo: `Orden_Produccion_${nombreSeccion}_${String(hojaData.orden_id ?? 0).padStart(5, '0')}.pdf`,
         scale: 5,
         margenMm: 8,
       });
-      toast.success('Hoja de trabajo descargada.');
+      toast.success('Orden de producción descargada.');
     } catch {
-      toast.error('No se pudo generar el PDF de la hoja de trabajo.');
+      toast.error('No se pudo generar el PDF de la orden de producción.');
     } finally {
       setGenerandoHoja(false);
     }
@@ -1141,7 +1141,7 @@ export default function ProduccionKanban() {
         onConfirm={ejecutarFinalizarOrden}
         onCancel={() => setConfirmFinalizarId(null)}
       />
-      {/* ── MODAL: Hoja de Trabajo (preview + descarga PDF) ── */}
+      {/* ── MODAL: Orden de producción (preview + descarga PDF) ── */}
       {hojaAbierta && (
         <div
           className="fixed inset-0 bg-yeikar-secondary/60 backdrop-blur-sm z-[70] flex items-center justify-center p-3 sm:p-6"
@@ -1154,10 +1154,10 @@ export default function ProduccionKanban() {
             <div className="flex items-center justify-between gap-3 px-5 py-3.5 border-b border-yeikar-secondary-light/10">
               <div className="min-w-0">
                 <span className="text-[10px] font-mono font-bold text-yeikar-neutral/40 uppercase tracking-wider">
-                  Hoja de Trabajo — {hojaData?.seccion_actual || hojaData?.area_nombre || 'Taller'}
+                  Orden de producción — {hojaData?.seccion_actual || hojaData?.area_nombre || 'Producción'}
                 </span>
                 <h3 className="font-headline font-black text-yeikar-secondary text-base truncate">
-                  {hojaData?.producto_nombre || 'Documento del taller'}
+                  {hojaData?.producto_nombre || 'Documento de producción'}
                 </h3>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -1186,14 +1186,14 @@ export default function ProduccionKanban() {
               {hojaCargando ? (
                 <div className="flex flex-col items-center justify-center py-16 space-y-3">
                   <div className="w-8 h-8 border-4 border-yeikar-primary border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs text-yeikar-neutral/50 font-mono">Preparando la hoja de trabajo…</p>
+                  <p className="text-xs text-yeikar-neutral/50 font-mono">Preparando la orden de producción…</p>
                 </div>
               ) : hojaData ? (
                 <DocumentoHojaTrabajo hoja={hojaData} containerId="hoja-trabajo-container" />
               ) : (
                 <div className="text-center py-16">
                   <p className="text-sm text-yeikar-neutral/50">
-                    Esta etapa no tiene producto con receta asociada (¿orden sin producto?). No se puede generar la hoja.
+                    No se pudo cargar la información de esta orden de producción.
                   </p>
                 </div>
               )}

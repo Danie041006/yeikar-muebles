@@ -16,20 +16,21 @@ const fmtFecha = (iso?: string | null) => {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' });
 };
 
-/**
- * Documento HOJA DE TRABAJO YEIKAR — Guía técnica imprimible para operarios de taller.
- *
- * Principios de UX y diseño:
- * - Identidad Yeikar 100%: Dorado (#D4AF37), Ébano artesanal (#2D1B10), Marfil (#F9F7F2) y Neutros carbón.
- * - Sin montos comerciales: exclusivo para fabricación y control de planta.
- * - Hero equilibrado: Especificaciones críticas (dimensiones en mono de gran legibilidad,
- *   color, acabado, cantidad) junto a la foto de referencia proporcionada para que todo
- *   el paquete principal quepa de manera armónica en 1 sola página tamaño carta.
- * - Observaciones críticas destacadas para evitar errores de corte y confección.
- * - Checklist de materiales de la sección con casillas para tilde manual y desglose de corte.
- * - Bloque de notas de taller y control de calidad con doble firma.
- * - Cortes de página inteligentes mediante data-pdf-item="true" (ver utils/pdfCaptura.ts).
- */
+function observacionesImprimibles(texto?: string | null): string {
+  return (texto ?? '')
+    .split('\n')
+    .filter((linea) => !/^\s*Creado manualmente desde Kanban[.!]?\s*$/i.test(linea))
+    .map((linea) => (
+      // El resumen automático arrastra medidas genéricas; no son instrucciones de fabricación.
+      /^\s*Productos:/i.test(linea)
+        ? linea.replace(/\s*\(\s*\d+(?:[.,]\d+)?\s*[x×]\s*\d+(?:[.,]\d+)?\s*m\s*\)/gi, '')
+        : linea
+    ))
+    .join('\n')
+    .trim();
+}
+
+/** Orden de producción imprimible: sin montos ni bloques de medidas técnicas. */
 export default function DocumentoHojaTrabajo({ hoja, containerId, className = '' }: Props) {
   const seccion = hoja.seccion_actual || hoja.area_nombre || null;
   const deSeccion = seccion ? hoja.materiales.filter((m) => m.seccion === seccion) : [];
@@ -43,13 +44,13 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
   const fotoReferencia = hoja.pieza_foto || fotos[0]?.url || null;
 
   const observaciones = [
-    { tipo: 'PEDIDO', etiqueta: 'Del pedido', texto: hoja.observaciones_pedido },
-    { tipo: 'MUEBLE', etiqueta: 'Del mueble / diseño', texto: hoja.descripcion_especifica || hoja.observaciones_detalle },
-    { tipo: 'ETAPA', etiqueta: `De esta etapa (${seccion || 'taller'})`, texto: hoja.etapa_observaciones },
-  ].filter((o) => o.texto && o.texto.trim());
+    { etiqueta: 'Del pedido', texto: hoja.observaciones_pedido },
+    { etiqueta: 'Del mueble / diseño', texto: hoja.descripcion_especifica || hoja.observaciones_detalle },
+    { etiqueta: 'De producción', texto: hoja.etapa_observaciones },
+  ]
+    .map((observacion) => ({ ...observacion, texto: observacionesImprimibles(observacion.texto) }))
+    .filter((observacion) => observacion.texto);
 
-  const ancho = hoja.dimensiones?.ancho;
-  const largo = hoja.dimensiones?.largo;
   const fechaHoy = new Date().toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
   const horaHoy = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
@@ -81,7 +82,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
                 Comercializadora Yeikar
               </div>
               <div className="text-[7.5px] text-[#A58421] font-mono font-bold uppercase tracking-wider">
-                Control de Producción · Hoja Técnica de Taller
+                Control de Producción · Uso Interno
               </div>
               <div className="text-[7px] text-stone-400 font-mono">
                 Documento técnico interno — prohibida su alteración o uso comercial
@@ -92,7 +93,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
           {/* Tarjeta de Orden y Control */}
           <div className="text-right border border-stone-300 rounded-xl px-3 py-2 bg-stone-50/90 shadow-xs min-w-[195px]">
             <div className="text-[7.5px] font-black text-stone-500 uppercase tracking-[0.2em]">
-              Hoja de Trabajo
+              Orden de producción
             </div>
             <div className="text-sm font-black text-[#8C6D1F] font-mono tracking-wider mt-0.5">
               ORDEN N° 00 – {String(hoja.orden_id ?? 0).padStart(5, '0')}
@@ -120,10 +121,10 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
             <div className="w-2 h-2 rounded-full bg-[#D4AF37] animate-pulse" />
             <div>
               <div className="text-[7px] uppercase tracking-[0.22em] text-[#D4AF37] font-mono font-bold">
-                Área / Sección de Trabajo
+                Área / Sección de Producción
               </div>
               <div className="text-base font-black font-headline tracking-wide uppercase text-white leading-tight">
-                {seccion || 'Taller General'}
+                {seccion || 'Producción General'}
               </div>
             </div>
             {hoja.etapa_id && (
@@ -163,30 +164,6 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
                   Juego completo: {hoja.juego_nombre}
                 </p>
               )}
-
-              {/* Dimensiones de Fabricación — Números grandes y nítidos para taller */}
-              <div className="bg-white border-2 border-stone-800 rounded-lg p-2.5 my-2.5 shadow-xs">
-                <div className="flex items-center justify-between text-[7px] font-mono font-black tracking-wider text-stone-500 uppercase mb-1">
-                  <span>Dimensiones de Fabricación (Ancho × Largo)</span>
-                  <span className="text-[#8C6D1F]">Corte Estructural</span>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  {ancho != null && largo != null ? (
-                    <>
-                      <span className="font-mono font-black text-stone-950 text-[17px] tracking-tight">
-                        {fmt(ancho)} × {fmt(largo)} m
-                      </span>
-                      <span className="font-mono font-bold text-[#8C6D1F] text-[10.5px] bg-[#D4AF37]/10 px-1.5 py-0.5 rounded border border-[#D4AF37]/30">
-                        {Math.round(ancho * 100)} × {Math.round(largo * 100)} cm
-                      </span>
-                    </>
-                  ) : (
-                    <span className="text-[10px] text-stone-500 italic font-medium">
-                      Dimensiones estándar según plano de catálogo
-                    </span>
-                  )}
-                </div>
-              </div>
             </div>
 
             {/* Grid de Especificaciones Auxiliares */}
@@ -214,7 +191,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
               </div>
               <div>
                 <span className="text-[7px] font-mono uppercase font-bold text-stone-400 block">Control de Calidad</span>
-                <span className="font-mono font-semibold text-stone-600 block">Verificar tolerancias ±2mm</span>
+                <span className="font-mono font-semibold text-stone-600 block">Revisión con supervisor</span>
               </div>
             </div>
           </div>
@@ -249,7 +226,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
                   Sin foto adjunta
                 </span>
                 <span className="text-[7.5px] text-stone-400 mt-0.5">
-                  Fabricar según dimensiones y receta técnica
+                  Consultar referencias del producto
                 </span>
               </div>
             )}
@@ -324,7 +301,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
               </span>
             </div>
             <span className="text-[7px] font-mono text-stone-400 italic">
-              Casilla [✓] para control de almacén y taller
+              Casilla [✓] para control de materiales
             </span>
           </div>
 
@@ -336,8 +313,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
                     <th className="px-2 py-1.5 text-center border-r border-stone-700 w-8">✓</th>
                     <th className="px-2 py-1.5 text-left border-r border-stone-700">Material / Insumo</th>
                     <th className="px-2 py-1.5 text-center border-r border-stone-700 w-12">Unid.</th>
-                    <th className="px-2 py-1.5 text-center border-r border-stone-700 w-24">Cant. Esperada</th>
-                    <th className="px-2 py-1.5 text-left">Detalle de Corte / Especificación</th>
+                    <th className="px-2 py-1.5 text-center w-24">Cant. Esperada</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -370,7 +346,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
                       </td>
 
                       {/* Cantidad esperada (total del lote = receta × piezas) */}
-                      <td className="px-2 py-1 text-center font-mono font-black text-stone-950 text-[10.5px] border-r border-stone-200">
+                      <td className="px-2 py-1 text-center font-mono font-black text-stone-950 text-[10.5px]">
                         {fmt(m.cantidad_total ?? m.cantidad_esperada)}
                         {(hoja.piezas ?? hoja.cantidad ?? 1) > 1 && (
                           <span className="block text-[6.5px] font-normal text-stone-500 font-mono leading-none">
@@ -381,27 +357,6 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
                           <span className="block text-[6.5px] font-normal text-stone-400 font-mono leading-none">
                             base {fmt(m.cantidad_base)}
                           </span>
-                        )}
-                      </td>
-
-                      {/* Detalle de corte o escala */}
-                      <td className="px-2 py-1 text-stone-700 text-[8.5px]">
-                        {m.es_corte ? (
-                          <span className="inline-flex items-center gap-1 font-mono font-semibold text-stone-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200/80">
-                            <span>✂</span>
-                            <span>
-                              {m.cortes_por_lamina ?? '—'} corte(s) de {fmt(m.ancho_corte_cm ?? 0)} × {fmt(m.largo_corte_cm ?? 0)} cm
-                            </span>
-                            <span className="text-stone-500 font-normal">
-                              ≈ {m.laminas_equivalentes ? fmt(m.laminas_equivalentes) : '—'} lám.
-                            </span>
-                          </span>
-                        ) : m.tipo_escala !== 'FIJO' ? (
-                          <span className="font-mono text-stone-600">
-                            Escala paramétrica {m.tipo_escala.toLowerCase()}
-                          </span>
-                        ) : (
-                          <span className="text-stone-400 font-mono text-[7.5px]">Consumo fijo estándar</span>
                         )}
                       </td>
                     </tr>
@@ -440,7 +395,7 @@ export default function DocumentoHojaTrabajo({ hoja, containerId, className = ''
         <div data-pdf-item="true" className="mt-1 pt-1">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[7.5px] font-mono font-black uppercase tracking-[0.16em] text-stone-500">
-              Anotaciones de Taller / Incidencias del Operario
+              Anotaciones de Producción / Incidencias del Operario
             </span>
             <span className="text-[6.5px] font-mono text-stone-400 uppercase">
               Registrar variaciones o ajustes realizados

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { ReferenciaReceta } from '../src/services/produccionService';
 
 test.describe.configure({ timeout: 30_000 });
 
@@ -37,7 +38,7 @@ const envio = {
 
 type Perfil = 'operativo' | 'costos-lectura' | 'admin';
 
-async function preparar(page: Page, perfil: Perfil = 'operativo') {
+async function preparar(page: Page, perfil: Perfil = 'operativo', referencia: Partial<ReferenciaReceta> = {}) {
   const consultas: string[] = [];
   const escrituras: { ruta: string; datos: Record<string, unknown> }[] = [];
   await page.addInitScript(() => {
@@ -65,6 +66,7 @@ async function preparar(page: Page, perfil: Perfil = 'operativo') {
     else if (camino.endsWith('/produccion/etapa/401/referencia-receta')) respuesta = {
       orden_id: 101, etapa_id: 401, producto_id: null, producto_nombre: 'Sofá QA',
       dimensiones: {}, materiales: [], piezas_mueble: [], cantidad: 1, area_nombre: 'Ebanistería',
+      ...referencia,
     };
     else if (camino.endsWith('/produccion/etapa/401')) respuesta = etapa;
     else if (camino.endsWith('/empleado/')) respuesta = [{ id: 3, nombre: 'Ebanista QA', cargo: { id: 1, nombre: 'Ebanista' } }];
@@ -101,7 +103,7 @@ async function abrirEtapa(page: Page) {
   return modal;
 }
 
-test('Operativo conserva Kanban, Mano de obra y Hoja; no ve Costos ni el desglose', async ({ page }) => {
+test('Operativo conserva Kanban, Mano de obra y Orden de producción; no ve Costos ni el desglose', async ({ page }) => {
   const { consultas } = await preparar(page);
   const modal = await abrirEtapa(page);
   await expect(modal.getByRole('button', { name: 'Costos', exact: true })).toHaveCount(0);
@@ -111,13 +113,61 @@ test('Operativo conserva Kanban, Mano de obra y Hoja; no ve Costos ni el desglos
   await modal.getByRole('button', { name: 'Materiales', exact: true }).click();
   await expect(modal.getByRole('heading', { name: 'Materiales — pedir y registrar' })).toBeVisible();
   await modal.getByRole('button', { name: 'La etapa', exact: true }).click();
-  await modal.getByRole('button', { name: 'Hoja de Trabajo', exact: true }).click();
-  await expect(page.getByText('Hoja de Trabajo — Ebanistería', { exact: true })).toBeVisible();
+  await modal.getByRole('button', { name: 'Orden de producción', exact: true }).click();
+  await expect(page.getByText('Orden de producción — Ebanistería', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Materiales e Insumos — Ebanistería' })).toBeVisible();
   expect(consultas.filter((ruta) => ruta.endsWith('/costos-en-vivo'))).toEqual([]);
   expect(consultas.some((ruta) => ruta.endsWith('/opciones-costo-produccion'))).toBe(true);
   await expect(page.getByRole('link', { name: 'Cuentas', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Ventas y cobros', exact: true })).toBeVisible();
+});
+
+test('Orden de producción omite medidas técnicas y notas automáticas, pero conserva el pedido', async ({ page }, testInfo) => {
+  test.setTimeout(60_000); // Incluye la generación del PDF, no solo la vista previa.
+  await preparar(page, 'operativo', {
+    producto_nombre: 'CAMA DE 2X2 MODELO NUBE',
+    dimensiones: { ancho: 1, largo: 1 },
+    observaciones_pedido: 'Productos: 1x CAMA DE 2X2 MODELO NUBE (1x1m)\nEntregar con la tela Cusco hielo.',
+    etapa_observaciones: 'Creado manualmente desde Kanban',
+    producto_fotos: [{ url: '/Logo-yeikar.png' }],
+    materiales: [{
+      material_id: 99, nombre: 'Lámina MDF', seccion: 'Ebanistería',
+      tipo_escala: 'CORTE', condicion_cumplida: true, cantidad_base: 2,
+      cantidad_esperada: 2, cantidad_total: 2, unidad: 'UND', costo_unitario: 500,
+      es_corte: true, ancho_corte_cm: 45, largo_corte_cm: 60,
+      cortes_por_lamina: 6, laminas_equivalentes: 0.33,
+    }],
+  });
+  const modal = await abrirEtapa(page);
+  await modal.getByRole('button', { name: 'Orden de producción', exact: true }).click();
+  const documento = page.locator('#hoja-trabajo-container');
+  await expect(documento.getByText('Orden de producción', { exact: true })).toBeVisible();
+  await expect(documento).not.toContainText(/Hoja de trabajo|taller|Kanban|De esta etapa|Corte estructural|Dimensiones|±2mm|1x1m|100 × 100 cm|45 × 60 cm/i);
+  await expect(documento).toContainText('Productos: 1x CAMA DE 2X2 MODELO NUBE');
+  await expect(documento).toContainText('Entregar con la tela Cusco hielo.');
+  await expect(documento).toContainText('Lámina MDF');
+  await expect(documento.getByRole('img', { name: 'CAMA DE 2X2 MODELO NUBE', exact: true })).toBeVisible();
+  await expect(documento.getByRole('cell', { name: '2', exact: true })).toBeVisible();
+  await documento.screenshot({ path: testInfo.outputPath('orden-produccion.png') });
+  const descarga = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Descargar PDF', exact: true }).click();
+  const pdf = await descarga;
+  expect(pdf.suggestedFilename()).toBe('Orden_Produccion_Ebanistería_00101.pdf');
+  await pdf.saveAs(testInfo.outputPath(pdf.suggestedFilename()));
+});
+
+test('Orden de producción conserva notas reales sin imprimir el origen automático', async ({ page }) => {
+  await preparar(page, 'operativo', {
+    dimensiones: { ancho: null, largo: null },
+    etapa_observaciones: '  creado manualmente desde kanban.  \nRevisar el acabado antes de tapizar.',
+    observaciones_detalle: 'Conservar el modelo elegido por el cliente.',
+  });
+  const modal = await abrirEtapa(page);
+  await modal.getByRole('button', { name: 'Orden de producción', exact: true }).click();
+  const documento = page.locator('#hoja-trabajo-container');
+  await expect(documento).toContainText('Revisar el acabado antes de tapizar.');
+  await expect(documento).toContainText('Conservar el modelo elegido por el cliente.');
+  await expect(documento).not.toContainText(/taller|kanban|de esta etapa|dimensiones estándar/i);
 });
 
 test('Producción gestión registra mano de obra y crea tarifa sin ver Costos', async ({ page }) => {

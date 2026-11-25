@@ -2011,7 +2011,7 @@ export default function Productos() {
                   </label>
                 </div>
                 <p className="text-[10px] text-yeikar-neutral/40 mt-1.5">
-                  Puedes subir varias fotos a la vez. La <b>primera</b> es la principal (sale en la cotización y la factura); las demás se ven como vistas adicionales en la Hoja de Trabajo. La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
+                  Puedes subir varias fotos a la vez. La <b>primera</b> es la principal (sale en la cotización y la factura); las demás se ven como vistas adicionales en la orden de producción. La imagen se optimiza al subirla (máx. 15 MB; se redimensiona y comprime para no ocupar espacio).
                 </p>
               </div>
 
